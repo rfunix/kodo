@@ -55,6 +55,31 @@ kodo_std         ← kodo_ast
 kodoc            ← all crates + clap + tracing + ariadne
 ```
 
+## Academic Foundations
+
+Kōdo's design is grounded in established compiler and PL theory. When making design decisions, consult the relevant references:
+
+| Decision Area | Consult | Key Concept |
+|---------------|---------|-------------|
+| Lexer design | **[CI]** Ch.4, **[EC]** Ch.2 | DFA scanning, maximal munch, token design |
+| Parser structure | **[CI]** Ch.6–8, **[EC]** Ch.3 | Recursive descent, LL(1), FIRST/FOLLOW |
+| AST node design | **[CI]** Ch.5, **[EC]** Ch.4–5 | Spans, visitor pattern, IR taxonomy |
+| Type safety | **[TAPL]** Ch.1–11 | Progress + preservation, no implicit conversions |
+| Generics / System F | **[TAPL]** Ch.22–26, **[PLP]** Ch.7–8 | Bounded quantification, parametric polymorphism |
+| Ownership (own/ref/mut) | **[ATAPL]** Ch.1 | Linear and affine type systems |
+| Contracts (requires/ensures) | **[SF]** Vol.1–2, **[CC]** Ch.1–6 | Hoare logic, decision procedures |
+| SMT verification | **[CC]** Ch.10–12 | Z3, satisfiability, automated proving |
+| MIR / optimization | **[Tiger]** Ch.7–8, **[EC]** Ch.8–10 | CFG, SSA, basic blocks, data-flow |
+| Code generation | **[Tiger]** Ch.9–11, **[EC]** Ch.11–13 | Instruction selection, register allocation |
+
+**Abbreviations:**
+- **[CI]** *Crafting Interpreters* (Nystrom) — **[EC]** *Engineering a Compiler* (Cooper & Torczon)
+- **[TAPL]** *Types and Programming Languages* (Pierce) — **[ATAPL]** *Advanced Topics in Types and PL* (Pierce, ed.)
+- **[SF]** *Software Foundations* (Pierce et al.) — **[CC]** *The Calculus of Computation* (Bradley & Manna)
+- **[Tiger]** *Modern Compiler Implementation in ML* (Appel) — **[PLP]** *Programming Language Pragmatics* (Scott)
+
+See `docs/REFERENCES.md` for the full bibliography with chapter-by-chapter mapping.
+
 ## Mandatory Rules
 
 ### Code Quality — NON-NEGOTIABLE
@@ -152,9 +177,11 @@ Examples:
 | `docs/grammar.ebnf` | Formal grammar (LL(1)) |
 | `docs/error_index.md` | Error code catalog |
 | `docs/intent_system.md` | Intent resolver documentation |
+| `docs/REFERENCES.md` | Academic references mapped to compiler phases |
 | `rustfmt.toml` | Formatting rules |
 | `clippy.toml` | Lint configuration |
 | `deny.toml` | Dependency audit rules |
+| `Makefile` | Build, test, and run shortcuts |
 
 ## Quick Language Reference
 

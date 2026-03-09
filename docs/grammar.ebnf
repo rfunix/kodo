@@ -2,6 +2,19 @@
 (* Version: 0.1.0 (initial subset) *)
 (* This grammar is LL(1)-parseable with zero ambiguity. *)
 
+(* ===== Academic References ===== *)
+(* This grammar follows LL(1) construction principles from:                    *)
+(*   [EC]  Engineering a Compiler, Ch. 3 — LL(1) condition, FIRST/FOLLOW sets  *)
+(*   [CI]  Crafting Interpreters, Ch. 6 — Recursive descent implementation     *)
+(*   [PLP] Programming Language Pragmatics, Ch. 2.3 — Top-down parsing        *)
+(* The contract clauses (requires/ensures) are novel syntax for embedding      *)
+(* Hoare-style pre/postconditions directly in function signatures:             *)
+(*   [SF]  Software Foundations, Vol. 1–2 — Hoare logic foundations            *)
+(*   [CC]  The Calculus of Computation, Ch. 1–6 — Logical contract language    *)
+(* The intent system (intent_decl) is a novel construct with no direct         *)
+(* precedent in the literature — it bridges AI agent goals and verified code.  *)
+(* See docs/REFERENCES.md for the full bibliography.                           *)
+
 (* ===== Top Level ===== *)
 
 module          = "module" IDENT "{" meta_block? declaration* "}" ;

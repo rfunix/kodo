@@ -19,6 +19,17 @@
 //! ## Current Status
 //!
 //! Stub implementation — intent declarations are parsed but not yet resolved.
+//!
+//! ## Academic References
+//!
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 10, 14–15 —
+//!   Metaprogramming and compile-time code generation; intent resolution
+//!   is a form of declarative metaprogramming where agents specify goals.
+//!
+//! Note: The intent system is a novel construct in Kōdo with no direct
+//! precedent in the literature.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

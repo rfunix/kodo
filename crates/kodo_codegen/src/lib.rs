@@ -14,6 +14,15 @@
 //!
 //! Stub implementation — the Cranelift infrastructure is set up but no
 //! actual code generation is implemented yet.
+//!
+//! ## Academic References
+//!
+//! - **\[Tiger\]** *Modern Compiler Implementation in ML* Ch. 9–11 — Instruction
+//!   selection via tree-pattern matching, register allocation via graph coloring.
+//! - **\[EC\]** *Engineering a Compiler* Ch. 11–13 — Instruction selection,
+//!   scheduling, and register allocation (delegated to Cranelift).
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

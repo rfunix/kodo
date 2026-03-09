@@ -15,6 +15,15 @@
 //! - [`Module`] — Top-level compilation unit
 //! - [`Meta`] — Module metadata block (author, version, intent)
 //! - [`Function`] — Function definition with optional contracts
+//!
+//! ## Academic References
+//!
+//! - **\[CI\]** *Crafting Interpreters* Ch. 5 — AST node design, expression/statement
+//!   hierarchy, and the visitor pattern that informs our enum-based AST.
+//! - **\[EC\]** *Engineering a Compiler* Ch. 4–5 — IR taxonomy (AST vs CST), symbol
+//!   tables, and the rationale for keeping spans on every node.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

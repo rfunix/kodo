@@ -11,6 +11,17 @@
 //!
 //! This is a stub implementation that can parse minimal module declarations.
 //! Full expression and statement parsing will be added incrementally.
+//!
+//! ## Academic References
+//!
+//! - **\[CI\]** *Crafting Interpreters* Ch. 6–8 — Recursive descent parsing,
+//!   Pratt parsing for expression precedence, and error recovery.
+//! - **\[EC\]** *Engineering a Compiler* Ch. 3 — LL(1) parsing theory, FIRST/FOLLOW
+//!   sets, and the formal basis for our grammar design.
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 2.3 — Top-down predictive
+//!   parsing and LL grammar construction.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

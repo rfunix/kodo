@@ -13,6 +13,15 @@
 //! - [`BasicBlock`] — A sequence of instructions with a terminator
 //! - [`Instruction`] — A single MIR operation
 //! - [`Terminator`] — How a basic block transfers control
+//!
+//! ## Academic References
+//!
+//! - **\[Tiger\]** *Modern Compiler Implementation in ML* Ch. 7–8 — IR trees,
+//!   canonical form, basic blocks, and traces for CFG construction.
+//! - **\[EC\]** *Engineering a Compiler* Ch. 5, 8–10 — IR design choices,
+//!   data-flow analysis, SSA form, and optimization frameworks.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

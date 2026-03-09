@@ -16,6 +16,17 @@
 //!
 //! Stub implementation defining the shape of the standard library.
 //! Actual implementations will be added as the compiler matures.
+//!
+//! ## Academic References
+//!
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 6 — Control flow and
+//!   iterator protocol design for collections.
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 9 — Subroutine calling
+//!   conventions and parameter passing modes (`own`/`ref`/`mut`).
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 13 — Structured
+//!   concurrency model: scoped tasks with ownership, no raw threads.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

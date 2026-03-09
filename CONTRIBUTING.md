@@ -20,6 +20,12 @@ cargo build --workspace
 ### Verify Everything Works
 
 ```bash
+make ci    # Runs fmt-check, clippy, test, and doc in sequence
+```
+
+Or individually:
+
+```bash
 cargo check --workspace        # Compilation
 cargo test --workspace         # All tests
 cargo clippy --workspace -- -D warnings  # Lints
@@ -27,7 +33,7 @@ cargo fmt --all -- --check     # Formatting
 cargo doc --workspace --no-deps          # Documentation
 ```
 
-All five commands must pass with zero errors and zero warnings.
+All commands must pass with zero errors and zero warnings. See the `Makefile` for more shortcuts.
 
 ## Making Changes
 
@@ -92,6 +98,10 @@ cargo bench -p kodo_lexer
 ```
 
 Benchmark results are saved in `target/criterion/`. Do not commit these.
+
+## Academic References
+
+Kōdo's design is grounded in established compiler and programming language theory. Before making architectural decisions, consult `docs/REFERENCES.md` for chapter-by-chapter mappings of academic literature to each compiler phase. The `CLAUDE.md` file also contains a quick-reference table under "Academic Foundations".
 
 ## Questions?
 

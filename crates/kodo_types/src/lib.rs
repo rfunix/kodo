@@ -13,6 +13,20 @@
 //! - [`Type`] — The core type representation
 //! - [`TypeEnv`] — Type environment for checking
 //! - [`TypeError`] — Structured type errors with source locations
+//!
+//! ## Academic References
+//!
+//! - **\[TAPL\]** *Types and Programming Languages* Ch. 1–11 — Type safety
+//!   (progress + preservation), simply typed lambda calculus, and the
+//!   theoretical basis for Kōdo's "no implicit conversions" rule.
+//! - **\[TAPL\]** *Types and Programming Languages* Ch. 22–26 — System F
+//!   and bounded quantification, informing Kōdo's generic type system.
+//! - **\[ATAPL\]** *Advanced Topics in Types and PL* Ch. 1 — Linear and affine
+//!   type systems, the foundation for `own`/`ref`/`mut` ownership semantics.
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 7–8 — Type checking
+//!   algorithms, type equivalence, and parametric polymorphism.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

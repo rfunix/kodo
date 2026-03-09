@@ -15,6 +15,17 @@
 //! let tokens = tokenize("let x: Int = 42");
 //! assert!(tokens.is_ok());
 //! ```
+//!
+//! ## Academic References
+//!
+//! - **\[CI\]** *Crafting Interpreters* Ch. 4 — Scanner architecture, token
+//!   representation, and error reporting strategy.
+//! - **\[EC\]** *Engineering a Compiler* Ch. 2 — DFA-based scanning, maximal munch
+//!   rule for multi-character operators (`->`, `==`, `!=`).
+//! - **\[PLP\]** *Programming Language Pragmatics* Ch. 2 — Regular expressions,
+//!   finite automata, and the classification of lexical elements.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

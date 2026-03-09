@@ -19,6 +19,17 @@
 //!
 //! Stub implementation — contract AST nodes are parsed but verification
 //! is not yet implemented. The `smt` feature flag gates Z3 integration.
+//!
+//! ## Academic References
+//!
+//! - **\[SF\]** *Software Foundations* Vol. 1–2 — Hoare logic foundations;
+//!   `requires`/`ensures` map directly to Hoare triples `{P} code {Q}`.
+//! - **\[CC\]** *The Calculus of Computation* Ch. 1–6 — Propositional and
+//!   first-order logic as the language of contract expressions.
+//! - **\[CC\]** *The Calculus of Computation* Ch. 10–12 — Decision procedures
+//!   and SMT solving; informs our Z3 integration for static verification.
+//!
+//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
