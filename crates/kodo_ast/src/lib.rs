@@ -216,10 +216,12 @@ pub struct Block {
 /// A statement.
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    /// A `let` binding: `let x: Int = 42`
+    /// A `let` binding: `let x: Int = 42` or `let mut y = expr`
     Let {
         /// Source span.
         span: Span,
+        /// Whether the binding is mutable (`let mut`).
+        mutable: bool,
         /// Variable name.
         name: String,
         /// Optional type annotation.
@@ -260,6 +262,15 @@ pub enum Expr {
         /// Source span.
         span: Span,
     },
+    /// Unary operation.
+    UnaryOp {
+        /// Operator.
+        op: UnaryOp,
+        /// Operand.
+        operand: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
     /// Function call.
     Call {
         /// The callee expression.
@@ -280,8 +291,26 @@ pub enum Expr {
         /// Source span.
         span: Span,
     },
+    /// Field access expression: `x.y`
+    FieldAccess {
+        /// The object being accessed.
+        object: Box<Expr>,
+        /// The field name.
+        field: String,
+        /// Source span.
+        span: Span,
+    },
     /// Block expression.
     Block(Block),
+}
+
+/// Unary operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// Logical negation `!`
+    Not,
+    /// Arithmetic negation `-`
+    Neg,
 }
 
 /// Binary operators.

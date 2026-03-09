@@ -7,10 +7,21 @@
 //! Kōdo's syntax is intentionally simple and unambiguous to make it easy
 //! for AI agents to generate correct programs and for humans to audit them.
 //!
-//! ## Current Status
+//! ## Expression Parsing
 //!
-//! This is a stub implementation that can parse minimal module declarations.
-//! Full expression and statement parsing will be added incrementally.
+//! Expressions are parsed using a recursive descent approach with one method
+//! per precedence level, following the grammar in `docs/grammar.ebnf`.
+//! Precedence levels (lowest to highest):
+//!
+//! 1. `||` (logical or)
+//! 2. `&&` (logical and)
+//! 3. `==`, `!=` (equality)
+//! 4. `<`, `>`, `<=`, `>=` (comparison)
+//! 5. `+`, `-` (additive)
+//! 6. `*`, `/`, `%` (multiplicative)
+//! 7. Unary: `!`, `-`
+//! 8. Postfix: function calls, field access
+//! 9. Primary: literals, identifiers, `if`/`else`, blocks, parenthesized
 //!
 //! ## Academic References
 //!
@@ -27,7 +38,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 
-use kodo_ast::{Block, Function, Meta, MetaEntry, Module, NodeIdGen, Param, Span, TypeExpr};
+use kodo_ast::{
+    BinOp, Block, Expr, Function, Meta, MetaEntry, Module, NodeIdGen, Param, Span, Stmt, TypeExpr,
+    UnaryOp,
+};
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
 
@@ -81,6 +95,11 @@ impl Parser {
         self.tokens.get(self.pos)
     }
 
+    /// Returns the kind of the current token, if any.
+    fn peek_kind(&self) -> Option<&TokenKind> {
+        self.peek().map(|t| &t.kind)
+    }
+
     /// Advances the parser and returns the consumed token.
     fn advance(&mut self) -> Option<&Token> {
         let token = self.tokens.get(self.pos);
@@ -109,6 +128,14 @@ impl Parser {
                 expected: format!("{expected:?}"),
             }),
         }
+    }
+
+    /// Returns the span of the most recently consumed token, or a zero-width
+    /// span at offset 0 if no tokens have been consumed yet.
+    fn prev_span(&self) -> Span {
+        self.tokens
+            .get(self.pos.saturating_sub(1))
+            .map_or(Span::new(0, 0), |t| t.span)
     }
 
     /// Parses a complete module from the token stream.
@@ -193,7 +220,7 @@ impl Parser {
         })
     }
 
-    /// Parses a function definition (stub — parses signature and empty body).
+    /// Parses a function definition including signature, contracts, and body.
     fn parse_function(&mut self) -> Result<Function> {
         let start = self.expect(&TokenKind::Fn)?.span;
         let name = self.parse_ident()?;
@@ -209,10 +236,7 @@ impl Parser {
             let param_name = self.parse_ident()?;
             self.expect(&TokenKind::Colon)?;
             let ty = self.parse_type()?;
-            let param_end = self
-                .tokens
-                .get(self.pos.saturating_sub(1))
-                .map_or(param_start, |t| t.span);
+            let param_end = self.prev_span();
             params.push(Param {
                 name: param_name,
                 ty,
@@ -229,32 +253,31 @@ impl Parser {
             TypeExpr::Unit
         };
 
-        // Parse body
-        self.expect(&TokenKind::LBrace)?;
-        let body_start = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
-            .map_or(Span::new(0, 0), |t| t.span);
-
-        // For now, skip everything until matching closing brace
-        let mut depth = 1u32;
-        while depth > 0 {
-            match self.advance() {
-                Some(t) if t.kind == TokenKind::LBrace => depth += 1,
-                Some(t) if t.kind == TokenKind::RBrace => depth -= 1,
-                Some(_) => {}
-                None => {
-                    return Err(ParseError::UnexpectedEof {
-                        expected: "}".to_string(),
-                    });
-                }
+        // Parse contract clauses (requires/ensures) before the body
+        let mut requires = Vec::new();
+        let mut ensures = Vec::new();
+        loop {
+            if self.check(&TokenKind::Requires) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                requires.push(expr);
+            } else if self.check(&TokenKind::Ensures) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                ensures.push(expr);
+            } else {
+                break;
             }
         }
 
-        let end = self
-            .tokens
-            .get(self.pos.saturating_sub(1))
-            .map_or(body_start, |t| t.span);
+        // Parse body block
+        let body = self.parse_block()?;
+
+        let end = self.prev_span();
 
         Ok(Function {
             id: self.id_gen.next_id(),
@@ -262,16 +285,453 @@ impl Parser {
             name,
             params,
             return_type,
-            requires: Vec::new(),
-            ensures: Vec::new(),
-            body: Block {
-                span: body_start.merge(end),
-                stmts: Vec::new(),
-            },
+            requires,
+            ensures,
+            body,
         })
     }
 
-    /// Parses a type expression (stub — only named types for now).
+    /// Parses a block: `{ statement* }`.
+    ///
+    /// A block is a sequence of statements enclosed in braces. It is used
+    /// for function bodies, if/else branches, and standalone block expressions.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] if the block is malformed (missing braces,
+    /// invalid statements, or unexpected end of input).
+    pub fn parse_block(&mut self) -> Result<Block> {
+        let start = self.expect(&TokenKind::LBrace)?.span;
+
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            if self.peek().is_none() {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "}".to_string(),
+                });
+            }
+            stmts.push(self.parse_stmt()?);
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+
+        Ok(Block {
+            span: start.merge(end),
+            stmts,
+        })
+    }
+
+    /// Parses a single statement.
+    ///
+    /// Statements are the building blocks of function bodies. The parser
+    /// distinguishes `let` bindings, `return` statements, and expression
+    /// statements by looking at the leading keyword.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] if the statement is malformed or contains
+    /// an invalid expression.
+    pub fn parse_stmt(&mut self) -> Result<Stmt> {
+        match self.peek_kind() {
+            Some(TokenKind::Let) => self.parse_let_stmt(),
+            Some(TokenKind::Return) => self.parse_return_stmt(),
+            _ => self.parse_expr_stmt(),
+        }
+    }
+
+    /// Parses a let binding: `let [mut] name [: type] = expr`.
+    fn parse_let_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Let)?.span;
+
+        // Optional `mut` keyword
+        let mutable = if self.check(&TokenKind::Mut) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        let name = self.parse_ident()?;
+
+        // Optional type annotation
+        let ty = if self.check(&TokenKind::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.expect(&TokenKind::Eq)?;
+        let value = self.parse_expr()?;
+        let end = Self::expr_span(&value);
+
+        Ok(Stmt::Let {
+            span: start.merge(end),
+            mutable,
+            name,
+            ty,
+            value,
+        })
+    }
+
+    /// Parses a return statement: `return [expr]`.
+    fn parse_return_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Return)?.span;
+
+        // Check if there's a value expression following `return`.
+        // If the next token could start an expression, parse it.
+        let value = if self.is_at_expr_start() {
+            let expr = self.parse_expr()?;
+            Some(expr)
+        } else {
+            None
+        };
+
+        let end = value.as_ref().map_or(start, Self::expr_span);
+
+        Ok(Stmt::Return {
+            span: start.merge(end),
+            value,
+        })
+    }
+
+    /// Parses an expression used as a statement.
+    fn parse_expr_stmt(&mut self) -> Result<Stmt> {
+        let expr = self.parse_expr()?;
+        Ok(Stmt::Expr(expr))
+    }
+
+    /// Returns `true` if the current token could start an expression.
+    fn is_at_expr_start(&self) -> bool {
+        matches!(
+            self.peek_kind(),
+            Some(
+                TokenKind::IntLit(_)
+                    | TokenKind::StringLit(_)
+                    | TokenKind::True
+                    | TokenKind::False
+                    | TokenKind::Ident(_)
+                    | TokenKind::If
+                    | TokenKind::LBrace
+                    | TokenKind::LParen
+                    | TokenKind::Bang
+                    | TokenKind::Minus
+            )
+        )
+    }
+
+    // ===== Expression Parsing =====
+    //
+    // Each precedence level has its own method, implementing the grammar
+    // from `docs/grammar.ebnf`. Left-associative binary operators are
+    // handled with a while loop at each level.
+
+    /// Parses an expression starting from the lowest precedence level.
+    ///
+    /// This is the top-level expression entry point. It dispatches to
+    /// `parse_or_expr`, which is the lowest-precedence binary operator.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] if the token stream does not form a valid
+    /// expression.
+    pub fn parse_expr(&mut self) -> Result<Expr> {
+        self.parse_or_expr()
+    }
+
+    /// Parses a logical-or expression: `and_expr ( "||" and_expr )*`.
+    fn parse_or_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_and_expr()?;
+
+        while self.check(&TokenKind::PipePipe) {
+            self.advance();
+            let right = self.parse_and_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinOp::Or,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses a logical-and expression: `equality_expr ( "&&" equality_expr )*`.
+    fn parse_and_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_equality_expr()?;
+
+        while self.check(&TokenKind::AmpAmp) {
+            self.advance();
+            let right = self.parse_equality_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinOp::And,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses an equality expression: `comparison_expr ( ("==" | "!=") comparison_expr )*`.
+    fn parse_equality_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_comparison_expr()?;
+
+        loop {
+            let op = match self.peek_kind() {
+                Some(TokenKind::EqEq) => BinOp::Eq,
+                Some(TokenKind::BangEq) => BinOp::Ne,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_comparison_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses a comparison expression: `additive_expr ( ("<" | ">" | "<=" | ">=") additive_expr )*`.
+    fn parse_comparison_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_additive_expr()?;
+
+        loop {
+            let op = match self.peek_kind() {
+                Some(TokenKind::Lt) => BinOp::Lt,
+                Some(TokenKind::Gt) => BinOp::Gt,
+                Some(TokenKind::LtEq) => BinOp::Le,
+                Some(TokenKind::GtEq) => BinOp::Ge,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_additive_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses an additive expression: `multiplicative_expr ( ("+" | "-") multiplicative_expr )*`.
+    fn parse_additive_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_multiplicative_expr()?;
+
+        loop {
+            let op = match self.peek_kind() {
+                Some(TokenKind::Plus) => BinOp::Add,
+                Some(TokenKind::Minus) => BinOp::Sub,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_multiplicative_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses a multiplicative expression: `unary_expr ( ("*" | "/" | "%") unary_expr )*`.
+    fn parse_multiplicative_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_unary_expr()?;
+
+        loop {
+            let op = match self.peek_kind() {
+                Some(TokenKind::Star) => BinOp::Mul,
+                Some(TokenKind::Slash) => BinOp::Div,
+                Some(TokenKind::Percent) => BinOp::Mod,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_unary_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses a unary expression: `("!" | "-") unary_expr | postfix_expr`.
+    fn parse_unary_expr(&mut self) -> Result<Expr> {
+        match self.peek_kind() {
+            Some(TokenKind::Bang) => {
+                let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                let operand = self.parse_unary_expr()?;
+                let span = start.merge(Self::expr_span(&operand));
+                Ok(Expr::UnaryOp {
+                    op: UnaryOp::Not,
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
+            Some(TokenKind::Minus) => {
+                let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                let operand = self.parse_unary_expr()?;
+                let span = start.merge(Self::expr_span(&operand));
+                Ok(Expr::UnaryOp {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
+            _ => self.parse_postfix_expr(),
+        }
+    }
+
+    /// Parses a postfix expression: `primary_expr ( call_suffix | field_suffix )*`.
+    ///
+    /// Call suffix: `(arg_list?)`, field suffix: `.IDENT`.
+    fn parse_postfix_expr(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_primary_expr()?;
+
+        loop {
+            if self.check(&TokenKind::LParen) {
+                // Function call: expr(args...)
+                self.advance();
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.check(&TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                let end = self.expect(&TokenKind::RParen)?.span;
+                let span = Self::expr_span(&expr).merge(end);
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                    span,
+                };
+            } else if self.check(&TokenKind::Dot) {
+                // Field access: expr.field
+                self.advance();
+                let field = self.parse_ident()?;
+                let end = self.prev_span();
+                let span = Self::expr_span(&expr).merge(end);
+                expr = Expr::FieldAccess {
+                    object: Box::new(expr),
+                    field,
+                    span,
+                };
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    /// Parses a primary expression (the highest precedence level).
+    ///
+    /// Primary expressions include literals, identifiers, `if` expressions,
+    /// block expressions, and parenthesized expressions.
+    fn parse_primary_expr(&mut self) -> Result<Expr> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::IntLit(n)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::IntLit(n, span))
+            }
+            Some(TokenKind::StringLit(s)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::StringLit(s, span))
+            }
+            Some(TokenKind::True) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::BoolLit(true, span))
+            }
+            Some(TokenKind::False) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::BoolLit(false, span))
+            }
+            Some(TokenKind::Ident(name)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::Ident(name, span))
+            }
+            Some(TokenKind::If) => self.parse_if_expr(),
+            Some(TokenKind::LBrace) => {
+                let block = self.parse_block()?;
+                Ok(Expr::Block(block))
+            }
+            Some(TokenKind::LParen) => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                Ok(expr)
+            }
+            Some(other) => {
+                let span = self.peek().map_or(Span::new(0, 0), |t| t.span);
+                Err(ParseError::UnexpectedToken {
+                    expected: "expression".to_string(),
+                    found: other,
+                    span,
+                })
+            }
+            None => Err(ParseError::UnexpectedEof {
+                expected: "expression".to_string(),
+            }),
+        }
+    }
+
+    /// Parses an if expression: `if expr block (else (if_expr | block))?`.
+    fn parse_if_expr(&mut self) -> Result<Expr> {
+        let start = self.expect(&TokenKind::If)?.span;
+        let condition = self.parse_expr()?;
+        let then_branch = self.parse_block()?;
+
+        let else_branch = if self.check(&TokenKind::Else) {
+            self.advance();
+            if self.check(&TokenKind::If) {
+                // else if — wrap in a block with a single if-expr statement
+                let if_expr = self.parse_if_expr()?;
+                let span = Self::expr_span(&if_expr);
+                Some(Block {
+                    span,
+                    stmts: vec![Stmt::Expr(if_expr)],
+                })
+            } else {
+                Some(self.parse_block()?)
+            }
+        } else {
+            None
+        };
+
+        let end = else_branch.as_ref().map_or(then_branch.span, |b| b.span);
+
+        Ok(Expr::If {
+            condition: Box::new(condition),
+            then_branch,
+            else_branch,
+            span: start.merge(end),
+        })
+    }
+
+    /// Parses a type expression (stub -- only named types for now).
     fn parse_type(&mut self) -> Result<TypeExpr> {
         let name = self.parse_ident()?;
         Ok(TypeExpr::Named(name))
@@ -299,6 +759,22 @@ impl Parser {
     fn check(&self, expected: &TokenKind) -> bool {
         self.peek()
             .is_some_and(|t| std::mem::discriminant(&t.kind) == std::mem::discriminant(expected))
+    }
+
+    /// Returns the span of an expression.
+    fn expr_span(expr: &Expr) -> Span {
+        match expr {
+            Expr::IntLit(_, span)
+            | Expr::StringLit(_, span)
+            | Expr::BoolLit(_, span)
+            | Expr::Ident(_, span)
+            | Expr::BinaryOp { span, .. }
+            | Expr::UnaryOp { span, .. }
+            | Expr::Call { span, .. }
+            | Expr::If { span, .. }
+            | Expr::FieldAccess { span, .. } => *span,
+            Expr::Block(block) => block.span,
+        }
     }
 }
 
@@ -371,5 +847,567 @@ mod tests {
     fn parse_missing_module_keyword_fails() {
         let result = parse("hello { }");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_let_binding_with_type() {
+        let source = r#"module test {
+            fn main() {
+                let x: Int = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let {
+                name,
+                ty,
+                mutable,
+                value,
+                ..
+            } => {
+                assert_eq!(name, "x");
+                assert!(!mutable);
+                assert_eq!(ty.as_ref(), Some(&TypeExpr::Named("Int".to_string())));
+                assert!(matches!(value, Expr::IntLit(42, _)));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_let_binding_mutable() {
+        let source = r#"module test {
+            fn main() {
+                let mut y: Int = 10
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { name, mutable, .. } => {
+                assert_eq!(name, "y");
+                assert!(mutable);
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_let_binding_without_type() {
+        let source = r#"module test {
+            fn main() {
+                let z = 99
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { name, ty, .. } => {
+                assert_eq!(name, "z");
+                assert!(ty.is_none());
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_return_with_value() {
+        let source = r#"module test {
+            fn answer() -> Int {
+                return 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Return { value, .. } => {
+                assert!(matches!(value, Some(Expr::IntLit(42, _))));
+            }
+            other => panic!("expected Return, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_return_without_value() {
+        let source = r#"module test {
+            fn nothing() {
+                return
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Return { value, .. } => {
+                assert!(value.is_none());
+            }
+            other => panic!("expected Return, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_binary_precedence() {
+        // a + b * c should parse as a + (b * c)
+        let source = r#"module test {
+            fn main() {
+                a + b * c
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::BinaryOp {
+                op: BinOp::Add,
+                left,
+                right,
+                ..
+            }) => {
+                assert!(matches!(left.as_ref(), Expr::Ident(ref n, _) if n == "a"));
+                match right.as_ref() {
+                    Expr::BinaryOp {
+                        op: BinOp::Mul,
+                        left: inner_left,
+                        right: inner_right,
+                        ..
+                    } => {
+                        assert!(matches!(inner_left.as_ref(), Expr::Ident(ref n, _) if n == "b"));
+                        assert!(matches!(inner_right.as_ref(), Expr::Ident(ref n, _) if n == "c"));
+                    }
+                    other => panic!("expected Mul, got {other:?}"),
+                }
+            }
+            other => panic!("expected Add at top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_if_else() {
+        let source = r#"module test {
+            fn check(x: Int) -> Int {
+                if x > 0 {
+                    return 1
+                } else if x < 0 {
+                    return -1
+                } else {
+                    return 0
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::If {
+                else_branch: Some(else_block),
+                ..
+            }) => {
+                // The else branch should contain another if expression
+                assert_eq!(else_block.stmts.len(), 1);
+                assert!(matches!(
+                    &else_block.stmts[0],
+                    Stmt::Expr(Expr::If {
+                        else_branch: Some(_),
+                        ..
+                    })
+                ));
+            }
+            other => panic!("expected If with else, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_function_call() {
+        let source = r#"module test {
+            fn main() {
+                foo(1, 2, 3)
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::Call { callee, args, .. }) => {
+                assert!(matches!(callee.as_ref(), Expr::Ident(ref n, _) if n == "foo"));
+                assert_eq!(args.len(), 3);
+                assert!(matches!(&args[0], Expr::IntLit(1, _)));
+                assert!(matches!(&args[1], Expr::IntLit(2, _)));
+                assert!(matches!(&args[2], Expr::IntLit(3, _)));
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_function_call_no_args() {
+        let source = r#"module test {
+            fn main() {
+                bar()
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::Call { callee, args, .. }) => {
+                assert!(matches!(callee.as_ref(), Expr::Ident(ref n, _) if n == "bar"));
+                assert!(args.is_empty());
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_requires_ensures() {
+        let source = r#"module test {
+            fn divide(a: Int, b: Int) -> Int
+                requires { b != 0 }
+                ensures { result >= 0 }
+            {
+                return a / b
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.requires.len(), 1);
+        assert_eq!(func.ensures.len(), 1);
+
+        // Check the requires clause is `b != 0`
+        match &func.requires[0] {
+            Expr::BinaryOp {
+                op: BinOp::Ne,
+                left,
+                right,
+                ..
+            } => {
+                assert!(matches!(left.as_ref(), Expr::Ident(ref n, _) if n == "b"));
+                assert!(matches!(right.as_ref(), Expr::IntLit(0, _)));
+            }
+            other => panic!("expected Ne, got {other:?}"),
+        }
+
+        // Check the ensures clause is `result >= 0`
+        match &func.ensures[0] {
+            Expr::BinaryOp {
+                op: BinOp::Ge,
+                left,
+                right,
+                ..
+            } => {
+                assert!(matches!(left.as_ref(), Expr::Ident(ref n, _) if n == "result"));
+                assert!(matches!(right.as_ref(), Expr::IntLit(0, _)));
+            }
+            other => panic!("expected Ge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_complex_expression() {
+        // a + b * c - d / e should parse as ((a + (b * c)) - (d / e))
+        let source = r#"module test {
+            fn main() {
+                a + b * c - d / e
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        // Top level should be Sub (left-assoc: (a + b*c) - (d/e))
+        match &stmts[0] {
+            Stmt::Expr(Expr::BinaryOp {
+                op: BinOp::Sub,
+                left,
+                right,
+                ..
+            }) => {
+                // Left should be Add
+                assert!(matches!(
+                    left.as_ref(),
+                    Expr::BinaryOp { op: BinOp::Add, .. }
+                ));
+                // Right should be Div
+                assert!(matches!(
+                    right.as_ref(),
+                    Expr::BinaryOp { op: BinOp::Div, .. }
+                ));
+            }
+            other => panic!("expected Sub at top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_operators() {
+        let source = r#"module test {
+            fn main() {
+                a && b || c
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        // Should parse as (a && b) || c since || has lower precedence
+        match &stmts[0] {
+            Stmt::Expr(Expr::BinaryOp {
+                op: BinOp::Or,
+                left,
+                ..
+            }) => {
+                assert!(matches!(
+                    left.as_ref(),
+                    Expr::BinaryOp { op: BinOp::And, .. }
+                ));
+            }
+            other => panic!("expected Or at top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_unary_negation() {
+        let source = r#"module test {
+            fn main() {
+                -42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::UnaryOp {
+                op: UnaryOp::Neg,
+                operand,
+                ..
+            }) => {
+                assert!(matches!(operand.as_ref(), Expr::IntLit(42, _)));
+            }
+            other => panic!("expected UnaryOp Neg, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_unary_not() {
+        let source = r#"module test {
+            fn main() {
+                !flag
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::UnaryOp {
+                op: UnaryOp::Not,
+                operand,
+                ..
+            }) => {
+                assert!(matches!(operand.as_ref(), Expr::Ident(ref n, _) if n == "flag"));
+            }
+            other => panic!("expected UnaryOp Not, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_field_access() {
+        let source = r#"module test {
+            fn main() {
+                x.y
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::FieldAccess { object, field, .. }) => {
+                assert!(matches!(object.as_ref(), Expr::Ident(ref n, _) if n == "x"));
+                assert_eq!(field, "y");
+            }
+            other => panic!("expected FieldAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_parenthesized_expr() {
+        let source = r#"module test {
+            fn main() {
+                (a + b) * c
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        // Top level should be Mul because parens override precedence
+        match &stmts[0] {
+            Stmt::Expr(Expr::BinaryOp {
+                op: BinOp::Mul,
+                left,
+                ..
+            }) => {
+                assert!(matches!(
+                    left.as_ref(),
+                    Expr::BinaryOp { op: BinOp::Add, .. }
+                ));
+            }
+            other => panic!("expected Mul at top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bool_literals() {
+        let source = r#"module test {
+            fn main() {
+                let a: Bool = true
+                let b: Bool = false
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::BoolLit(true, _)));
+            }
+            other => panic!("expected Let with true, got {other:?}"),
+        }
+        match &stmts[1] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::BoolLit(false, _)));
+            }
+            other => panic!("expected Let with false, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_string_literal_expr() {
+        let source = r#"module test {
+            fn main() {
+                let s: String = "hello"
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::StringLit(ref s, _) if s == "hello"));
+            }
+            other => panic!("expected Let with string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_if_without_else() {
+        let source = r#"module test {
+            fn main() {
+                if x > 0 {
+                    return 1
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Expr(Expr::If { else_branch, .. }) => {
+                assert!(else_branch.is_none());
+            }
+            other => panic!("expected If without else, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_statements() {
+        let source = r#"module test {
+            fn main() {
+                let x: Int = 1
+                let y: Int = 2
+                return x + y
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 3);
+        assert!(matches!(&stmts[0], Stmt::Let { .. }));
+        assert!(matches!(&stmts[1], Stmt::Let { .. }));
+        assert!(matches!(&stmts[2], Stmt::Return { .. }));
+    }
+
+    #[test]
+    fn parse_chained_method_calls() {
+        let source = r#"module test {
+            fn main() {
+                a.b.c(1)
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        // Should be Call(FieldAccess(FieldAccess(a, b), c), [1])
+        match &stmts[0] {
+            Stmt::Expr(Expr::Call { callee, args, .. }) => {
+                assert_eq!(args.len(), 1);
+                match callee.as_ref() {
+                    Expr::FieldAccess { object, field, .. } => {
+                        assert_eq!(field, "c");
+                        match object.as_ref() {
+                            Expr::FieldAccess {
+                                object: inner,
+                                field: inner_field,
+                                ..
+                            } => {
+                                assert!(
+                                    matches!(inner.as_ref(), Expr::Ident(ref n, _) if n == "a")
+                                );
+                                assert_eq!(inner_field, "b");
+                            }
+                            other => panic!("expected inner FieldAccess, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected FieldAccess callee, got {other:?}"),
+                }
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_contracts() {
+        let source = r#"module test {
+            fn safe_div(a: Int, b: Int) -> Int
+                requires { b != 0 }
+                requires { a >= 0 }
+                ensures { result >= 0 }
+            {
+                return a / b
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.requires.len(), 2);
+        assert_eq!(func.ensures.len(), 1);
     }
 }
