@@ -105,6 +105,9 @@ pub enum TokenKind {
     /// The `import` keyword.
     #[token("import")]
     Import,
+    /// The `while` keyword.
+    #[token("while")]
+    While,
 
     // --- Literals ---
     /// An integer literal.
@@ -205,6 +208,11 @@ pub enum TokenKind {
     /// `.`
     #[token(".")]
     Dot,
+
+    // --- Annotations ---
+    /// `@` — annotation prefix.
+    #[token("@")]
+    At,
 
     // --- Whitespace & Comments ---
     /// A newline character.
@@ -316,8 +324,16 @@ mod tests {
 
     #[test]
     fn tokenize_unexpected_char_returns_error() {
-        let result = tokenize("let x = @");
+        let result = tokenize("let x = ~");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tokenize_at_sign() {
+        let tokens = tokenize("@confidence").unwrap_or_default();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].kind, TokenKind::At);
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "confidence"));
     }
 
     #[test]
@@ -331,6 +347,13 @@ mod tests {
         let tokens = tokenize("1_000_000").unwrap_or_default();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].kind, TokenKind::IntLit(1_000_000));
+    }
+
+    #[test]
+    fn tokenize_while_keyword() {
+        let tokens = tokenize("while").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::While);
     }
 
     #[test]

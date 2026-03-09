@@ -293,3 +293,161 @@ fn cli_parse_valid_exits_zero() {
         "kodoc parse should exit 0 for valid file"
     );
 }
+
+// ========== JSON error output tests ==========
+
+#[test]
+fn json_errors_parse_error() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("tests/fixtures/invalid/syntax_error.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", fixture.to_str().unwrap(), "--json-errors"])
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        !output.status.success(),
+        "kodoc check --json-errors should exit non-zero for syntax error"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
+
+    assert_eq!(json["status"], "failed");
+    assert!(json["errors"].as_array().unwrap().len() > 0);
+    let first_error = &json["errors"][0];
+    assert!(first_error["code"].as_str().unwrap().starts_with("E01"));
+    assert!(first_error["message"].as_str().is_some());
+    assert_eq!(first_error["severity"], "error");
+}
+
+#[test]
+fn json_errors_type_error() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("tests/fixtures/invalid/type_error_return.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", fixture.to_str().unwrap(), "--json-errors"])
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        !output.status.success(),
+        "kodoc check --json-errors should exit non-zero for type error"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
+
+    assert_eq!(json["status"], "failed");
+    let first_error = &json["errors"][0];
+    assert!(first_error["code"].as_str().unwrap().starts_with("E02"));
+    assert!(first_error["span"].is_object());
+    assert!(first_error["span"]["line"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn json_errors_success() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("tests/fixtures/valid/hello.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", fixture.to_str().unwrap(), "--json-errors"])
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        output.status.success(),
+        "kodoc check --json-errors should exit 0 for valid file, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
+
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["errors"].as_array().unwrap().len(), 0);
+    assert_eq!(json["warnings"].as_array().unwrap().len(), 0);
+}
+
+// ========== Module meta validation tests ==========
+
+#[test]
+fn module_without_meta_is_error() {
+    let source = read_fixture("invalid/missing_meta.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("meta"), "expected meta error, got: {msg}");
+}
+
+#[test]
+fn module_with_empty_purpose_is_error() {
+    let source = read_fixture("invalid/empty_purpose.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("purpose"),
+        "expected purpose error, got: {msg}"
+    );
+}
+
+#[test]
+fn module_with_missing_purpose_is_error() {
+    let source = read_fixture("invalid/missing_purpose.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("purpose"),
+        "expected purpose error, got: {msg}"
+    );
+}
+
+// ========== Meta in JSON output tests ==========
+
+#[test]
+fn meta_included_in_json_output() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("tests/fixtures/valid/hello.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", fixture.to_str().unwrap(), "--json-errors"])
+        .output()
+        .expect("failed to run kodoc");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {stdout}"));
+
+    assert_eq!(json["status"], "ok");
+    assert!(
+        json["meta"].is_object(),
+        "expected meta object in JSON output"
+    );
+    assert_eq!(json["meta"]["module"], "hello");
+    assert!(json["meta"]["purpose"].as_str().is_some());
+}

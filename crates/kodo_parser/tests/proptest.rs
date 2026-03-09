@@ -15,7 +15,14 @@ proptest! {
     /// A well-formed module skeleton always parses successfully.
     #[test]
     fn valid_module_skeleton_parses(
-        name in "[a-z][a-z0-9_]{0,10}",
+        name in "[a-z][a-z0-9_]{0,10}".prop_filter(
+            "must not be a keyword",
+            |n| !matches!(n.as_str(),
+                "module" | "meta" | "fn" | "let" | "mut" | "if" | "else" |
+                "return" | "true" | "false" | "requires" | "ensures" |
+                "intent" | "struct" | "enum" | "match" | "import" | "while"
+            ),
+        ),
         purpose in "[a-zA-Z0-9 ]{1,30}",
         version in "[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{1,2}",
         author in "[a-zA-Z ]{1,20}"

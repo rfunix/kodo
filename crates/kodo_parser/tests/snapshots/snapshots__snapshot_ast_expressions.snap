@@ -1,6 +1,5 @@
 ---
 source: crates/kodo_parser/tests/snapshots.rs
-assertion_line: 37
 expression: module
 ---
 Module {
@@ -59,6 +58,7 @@ Module {
                 end: 350,
             },
             name: "arithmetic",
+            annotations: [],
             params: [],
             return_type: Named(
                 "Int",
@@ -214,6 +214,7 @@ Module {
                 end: 500,
             },
             name: "logic",
+            annotations: [],
             params: [
                 Param {
                     name: "x",
@@ -374,6 +375,7 @@ Module {
                 end: 590,
             },
             name: "nesting",
+            annotations: [],
             params: [],
             return_type: Named(
                 "Int",
@@ -482,6 +484,7 @@ Module {
                 end: 813,
             },
             name: "control_flow",
+            annotations: [],
             params: [
                 Param {
                     name: "n",

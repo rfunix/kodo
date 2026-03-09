@@ -1,0 +1,19 @@
+module while_loop {
+    meta {
+        purpose: "Demonstrates while loops with mutable variables",
+        version: "0.1.0"
+    }
+
+    fn countdown(n: Int) {
+        let mut i: Int = n
+        while i > 0 {
+            print_int(i)
+            i = i - 1
+        }
+        println("Liftoff!")
+    }
+
+    fn main() {
+        countdown(5)
+    }
+}

@@ -1,6 +1,5 @@
 ---
 source: crates/kodo_parser/tests/snapshots.rs
-assertion_line: 44
 expression: module
 ---
 Module {
@@ -59,6 +58,7 @@ Module {
                 end: 331,
             },
             name: "safe_divide",
+            annotations: [],
             params: [
                 Param {
                     name: "a",
@@ -177,6 +177,7 @@ Module {
                 end: 565,
             },
             name: "clamp",
+            annotations: [],
             params: [
                 Param {
                     name: "value",

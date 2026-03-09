@@ -112,4 +112,67 @@ mod tests {
         let println = println.unwrap_or_else(|| panic!("already checked"));
         assert_eq!(println.param_count, 1);
     }
+
+    #[test]
+    fn builtin_functions_count() {
+        let builtins = builtin_functions();
+        assert_eq!(builtins.len(), 5);
+    }
+
+    #[test]
+    fn all_builtins_have_descriptions() {
+        let builtins = builtin_functions();
+        for b in &builtins {
+            assert!(
+                !b.description.is_empty(),
+                "builtin {} has empty description",
+                b.name
+            );
+        }
+    }
+
+    #[test]
+    fn all_builtins_have_qualified_names() {
+        let builtins = builtin_functions();
+        for b in &builtins {
+            assert!(
+                b.name.starts_with("kodo::"),
+                "builtin {} should start with kodo::",
+                b.name
+            );
+        }
+    }
+
+    #[test]
+    fn readln_is_registered() {
+        let builtins = builtin_functions();
+        let readln = builtins.iter().find(|f| f.name == "kodo::io::readln");
+        assert!(readln.is_some());
+        let readln = readln.unwrap();
+        assert_eq!(readln.param_count, 0);
+    }
+
+    #[test]
+    fn math_builtins_registered() {
+        let builtins = builtin_functions();
+        let abs = builtins.iter().find(|f| f.name == "kodo::math::abs");
+        assert!(abs.is_some());
+        assert_eq!(abs.unwrap().param_count, 1);
+
+        let sqrt = builtins.iter().find(|f| f.name == "kodo::math::sqrt");
+        assert!(sqrt.is_some());
+        assert_eq!(sqrt.unwrap().param_count, 1);
+    }
+
+    #[test]
+    fn error_display_formats() {
+        let io_err = StdError::Io("disk full".to_string());
+        assert!(io_err.to_string().contains("disk full"));
+
+        let range_err = StdError::OutOfRange("index 5".to_string());
+        assert!(range_err.to_string().contains("index 5"));
+
+        let arg_err = StdError::InvalidArgument("negative".to_string());
+        assert!(arg_err.to_string().contains("negative"));
+    }
 }

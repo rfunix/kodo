@@ -157,4 +157,143 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result, Err(ResolverError::NoResolver { .. })));
     }
+
+    #[test]
+    fn resolver_new_creates_empty() {
+        let resolver = Resolver::new();
+        let intent = IntentDecl {
+            name: "test".to_string(),
+            config: vec![],
+            span: Span::new(0, 4),
+        };
+        // No strategies registered, so resolve should fail.
+        assert!(resolver.resolve(&intent).is_err());
+    }
+
+    #[test]
+    fn resolver_register_and_resolve() {
+        struct MockStrategy;
+        impl ResolverStrategy for MockStrategy {
+            fn handles(&self) -> &[&str] {
+                &["mock"]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec![],
+                })
+            }
+        }
+        let mut resolver = Resolver::new();
+        resolver.register(Box::new(MockStrategy));
+        let intent = IntentDecl {
+            name: "mock".to_string(),
+            config: vec![],
+            span: Span::new(0, 4),
+        };
+        assert!(resolver.resolve(&intent).is_ok());
+    }
+
+    #[test]
+    fn resolver_wrong_intent_returns_no_resolver() {
+        struct FooStrategy;
+        impl ResolverStrategy for FooStrategy {
+            fn handles(&self) -> &[&str] {
+                &["foo"]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec![],
+                })
+            }
+        }
+        let mut resolver = Resolver::new();
+        resolver.register(Box::new(FooStrategy));
+        let intent = IntentDecl {
+            name: "bar".to_string(),
+            config: vec![],
+            span: Span::new(0, 3),
+        };
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::NoResolver { .. })));
+    }
+
+    #[test]
+    fn resolver_first_matching_strategy_wins() {
+        struct StrategyA;
+        impl ResolverStrategy for StrategyA {
+            fn handles(&self) -> &[&str] {
+                &["shared"]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec!["from_a".to_string()],
+                })
+            }
+        }
+        struct StrategyB;
+        impl ResolverStrategy for StrategyB {
+            fn handles(&self) -> &[&str] {
+                &["shared"]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec!["from_b".to_string()],
+                })
+            }
+        }
+        let mut resolver = Resolver::new();
+        resolver.register(Box::new(StrategyA));
+        resolver.register(Box::new(StrategyB));
+        let intent = IntentDecl {
+            name: "shared".to_string(),
+            config: vec![],
+            span: Span::new(0, 6),
+        };
+        let result = resolver.resolve(&intent).unwrap();
+        assert_eq!(result.generated_types, vec!["from_a".to_string()]);
+    }
+
+    #[test]
+    fn intent_decl_with_config() {
+        let intent = IntentDecl {
+            name: "serve_http".to_string(),
+            config: vec![
+                ("port".to_string(), "8080".to_string()),
+                ("host".to_string(), "localhost".to_string()),
+            ],
+            span: Span::new(0, 50),
+        };
+        assert_eq!(intent.name, "serve_http");
+        assert_eq!(intent.config.len(), 2);
+        assert_eq!(intent.config[0].0, "port");
+        assert_eq!(intent.config[0].1, "8080");
+    }
+
+    #[test]
+    fn error_display_messages() {
+        let no_resolver = ResolverError::NoResolver {
+            intent: "test".to_string(),
+            span: Span::new(0, 4),
+        };
+        assert!(no_resolver.to_string().contains("no resolver found"));
+
+        let violation = ResolverError::ContractViolation {
+            intent: "test".to_string(),
+            reason: "bad impl".to_string(),
+        };
+        assert!(violation.to_string().contains("violates contracts"));
+
+        let unknown_cfg = ResolverError::UnknownConfig {
+            key: "baz".to_string(),
+            intent: "test".to_string(),
+            span: Span::new(5, 8),
+        };
+        assert!(unknown_cfg
+            .to_string()
+            .contains("unknown configuration key"));
+    }
 }

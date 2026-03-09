@@ -4,6 +4,9 @@
 //! Designed to be used both by AI agents (with `--emit json-errors`) and
 //! humans (with beautiful terminal error messages via ariadne).
 
+mod certificate;
+mod diagnostics;
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -75,13 +78,10 @@ fn main() {
         Command::Build {
             file,
             output,
-            json_errors: _,
+            json_errors,
             contracts: _,
-        } => run_build(&file, output.as_deref()),
-        Command::Check {
-            file,
-            json_errors: _,
-        } => run_check(&file),
+        } => run_build(&file, output.as_deref(), json_errors),
+        Command::Check { file, json_errors } => run_check(&file, json_errors),
         Command::Lex { file } => run_lex(&file),
         Command::Parse { file } => run_parse(&file),
     };
@@ -89,7 +89,7 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
+fn run_build(file: &PathBuf, output: Option<&std::path::Path>, json_errors: bool) -> i32 {
     tracing::info!("building {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -100,10 +100,16 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
         }
     };
 
+    let filename = file.display().to_string();
+
     let module = match kodo_parser::parse(&source) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("parse error: {e}");
+            if json_errors {
+                diagnostics::render_parse_error_json(&source, &filename, &e);
+            } else {
+                diagnostics::render_parse_error(&source, &filename, &e);
+            }
             return 1;
         }
     };
@@ -111,7 +117,11 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
     // Type check
     let mut checker = kodo_types::TypeChecker::new();
     if let Err(e) = checker.check_module(&module) {
-        eprintln!("type error: {e}");
+        if json_errors {
+            diagnostics::render_type_error_json(&source, &filename, &e);
+        } else {
+            diagnostics::render_type_error(&source, &filename, &e);
+        }
         return 1;
     }
 
@@ -135,15 +145,19 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
         }
     };
 
+    // Build module metadata for embedding in the binary.
+    let metadata_json = build_module_metadata(&module);
+
     // Code generation
     let options = kodo_codegen::CodegenOptions::default();
-    let object_bytes = match kodo_codegen::compile_module(&mir_functions, &options) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("codegen error: {e}");
-            return 1;
-        }
-    };
+    let object_bytes =
+        match kodo_codegen::compile_module(&mir_functions, &options, Some(&metadata_json)) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("codegen error: {e}");
+                return 1;
+            }
+        };
 
     // Determine output path
     let output_path = output
@@ -165,6 +179,33 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
 
     match link_result {
         Ok(()) => {
+            // Read the binary for hashing.
+            let binary_bytes = std::fs::read(&output_path).ok();
+
+            // Read previous certificate if it exists (for chaining).
+            let cert_path = output_path.with_extension("ko.cert.json");
+            let parent_cert = std::fs::read_to_string(&cert_path).ok().and_then(|json| {
+                serde_json::from_str::<certificate::CompilationCertificate>(&json).ok()
+            });
+
+            // Emit compilation certificate.
+            let cert = certificate::CompilationCertificate::from_module(
+                &module,
+                &source,
+                binary_bytes.as_deref(),
+                parent_cert.as_ref(),
+            );
+            match cert.to_json() {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(&cert_path, &json) {
+                        eprintln!("warning: could not write certificate: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("warning: {e}");
+                }
+            }
+
             println!(
                 "Successfully compiled `{}` → {}",
                 module.name,
@@ -244,7 +285,89 @@ fn find_runtime_lib() -> std::result::Result<PathBuf, String> {
     )
 }
 
-fn run_check(file: &PathBuf) -> i32 {
+/// Builds a JSON string with module metadata for embedding in the binary.
+fn build_module_metadata(module: &kodo_ast::Module) -> String {
+    let meta = module.meta.as_ref();
+    let purpose = meta
+        .and_then(|m| m.entries.iter().find(|e| e.key == "purpose"))
+        .map_or_else(String::new, |e| e.value.clone());
+    let version = meta
+        .and_then(|m| m.entries.iter().find(|e| e.key == "version"))
+        .map_or_else(String::new, |e| e.value.clone());
+
+    let mut functions = Vec::new();
+    let mut validators = Vec::new();
+    for func in &module.functions {
+        let params: Vec<serde_json::Value> = func
+            .params
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "type": format!("{:?}", p.ty),
+                })
+            })
+            .collect();
+
+        let requires: Vec<String> = func
+            .requires
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("requires clause {}", i + 1))
+            .collect();
+
+        let ensures: Vec<String> = func
+            .ensures
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("ensures clause {}", i + 1))
+            .collect();
+
+        let mut annotations = serde_json::Map::new();
+        for ann in &func.annotations {
+            let value = match ann.args.first() {
+                Some(kodo_ast::AnnotationArg::Positional(kodo_ast::Expr::IntLit(n, _))) => {
+                    serde_json::json!(n)
+                }
+                Some(kodo_ast::AnnotationArg::Positional(kodo_ast::Expr::StringLit(s, _))) => {
+                    serde_json::json!(s)
+                }
+                Some(kodo_ast::AnnotationArg::Named(_, kodo_ast::Expr::StringLit(s, _))) => {
+                    serde_json::json!(s)
+                }
+                _ => serde_json::json!(true),
+            };
+            annotations.insert(ann.name.clone(), value);
+        }
+
+        functions.push(serde_json::json!({
+            "name": func.name,
+            "params": params,
+            "return_type": format!("{:?}", func.return_type),
+            "requires": requires,
+            "ensures": ensures,
+            "annotations": annotations,
+        }));
+
+        if !func.requires.is_empty() {
+            validators.push(format!("validate_{}", func.name));
+        }
+    }
+
+    let metadata = serde_json::json!({
+        "module": module.name,
+        "purpose": purpose,
+        "version": version,
+        "compiler_version": env!("CARGO_PKG_VERSION"),
+        "functions": functions,
+        "validators": validators,
+    });
+
+    // This can only fail on non-UTF-8 data which we don't have.
+    serde_json::to_string_pretty(&metadata).unwrap_or_default()
+}
+
+fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
     tracing::info!("checking {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -255,10 +378,16 @@ fn run_check(file: &PathBuf) -> i32 {
         }
     };
 
+    let filename = file.display().to_string();
+
     let module = match kodo_parser::parse(&source) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("parse error: {e}");
+            if json_errors {
+                diagnostics::render_parse_error_json(&source, &filename, &e);
+            } else {
+                diagnostics::render_parse_error(&source, &filename, &e);
+            }
             return 1;
         }
     };
@@ -266,7 +395,11 @@ fn run_check(file: &PathBuf) -> i32 {
     // Type check
     let mut checker = kodo_types::TypeChecker::new();
     if let Err(e) = checker.check_module(&module) {
-        eprintln!("type error: {e}");
+        if json_errors {
+            diagnostics::render_type_error_json(&source, &filename, &e);
+        } else {
+            diagnostics::render_type_error(&source, &filename, &e);
+        }
         return 1;
     }
 
@@ -281,7 +414,11 @@ fn run_check(file: &PathBuf) -> i32 {
         }
     }
 
-    println!("Check passed for module `{}`", module.name);
+    if json_errors {
+        diagnostics::render_success_json(&module);
+    } else {
+        println!("Check passed for module `{}`", module.name);
+    }
     0
 }
 

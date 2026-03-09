@@ -102,12 +102,14 @@ let x: Int = 10
 
 ### Mutable Variables
 
-Use `let mut` to create a mutable variable:
+Use `let mut` to create a mutable variable. Mutable variables can be reassigned using `=`:
 
 ```
 let mut counter: Int = 0
 counter = counter + 1
 ```
+
+Reassignment requires the variable to have been declared with `mut`. The new value must match the variable's type. Only simple variable names can be reassigned — field assignment is not yet supported.
 
 ## Operators
 
@@ -164,6 +166,33 @@ if x > 100 {
     } else {
         println("non-positive")
     }
+}
+```
+
+### while
+
+Use `while` to repeat a block while a condition is true:
+
+```
+let mut i: Int = 5
+while i > 0 {
+    print_int(i)
+    i = i - 1
+}
+```
+
+The condition must be a `Bool` expression. The loop body executes repeatedly until the condition becomes `false`.
+
+Here's a complete example with a countdown function:
+
+```
+fn countdown(n: Int) {
+    let mut i: Int = n
+    while i > 0 {
+        print_int(i)
+        i = i - 1
+    }
+    println("Liftoff!")
 }
 ```
 

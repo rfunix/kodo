@@ -392,6 +392,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test_fn".to_string(),
+            annotations: vec![],
             params: vec![Param {
                 name: "x".to_string(),
                 ty: TypeExpr::Named("Int".to_string()),

@@ -88,9 +88,9 @@ Output: `5`
 
 To see a contract failure, change the call to `safe_divide(10, 0)` and recompile. The program will abort before the division happens.
 
-## `ensures` — Postconditions (Planned)
+## `ensures` — Postconditions
 
-Kōdo's syntax supports `ensures` blocks for postconditions:
+An `ensures` block specifies conditions that must hold when a function returns:
 
 ```
 fn abs(x: Int) -> Int
@@ -103,7 +103,32 @@ fn abs(x: Int) -> Int
 }
 ```
 
-The `ensures` clause is currently **parsed and type-checked** but does **not** inject runtime checks yet. It serves as documentation of intent until the runtime checks are implemented.
+Inside an `ensures` expression, the special name `result` refers to the function's return value. The compiler injects a runtime check **before every `return` statement** (and before the implicit return at the end of the function body).
+
+### How It Works
+
+1. The function body executes normally.
+2. Before returning, the `ensures` expression is evaluated with `result` bound to the return value.
+3. If the expression evaluates to `false`, the program aborts with:
+
+```
+Contract violation: ensures clause failed in function_name
+```
+
+### Combining `requires` and `ensures`
+
+You can use both contracts on the same function:
+
+```
+fn safe_divide(a: Int, b: Int) -> Int
+    requires { b != 0 }
+    ensures { result * b <= a }
+{
+    return a / b
+}
+```
+
+`requires` checks run at function entry; `ensures` checks run at function exit. Together, they form a complete contract: callers must satisfy preconditions, and the function guarantees postconditions.
 
 ## When to Use Contracts
 

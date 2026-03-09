@@ -1,0 +1,9 @@
+module missing_purpose {
+    meta {
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn main() {
+    }
+}

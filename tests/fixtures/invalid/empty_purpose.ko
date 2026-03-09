@@ -1,0 +1,9 @@
+module empty_purpose {
+    meta {
+        purpose: "",
+        version: "0.1.0"
+    }
+
+    fn main() {
+    }
+}

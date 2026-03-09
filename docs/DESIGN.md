@@ -340,13 +340,13 @@ kodo::ffi         — C FFI for interop
 ## Development Roadmap
 
 ### Phase 1 — Foundation (MVP)
-- [ ] Formal grammar in EBNF
-- [ ] Lexer with full token set
-- [ ] Parser producing AST
-- [ ] Basic type checker (primitives, structs, enums)
-- [ ] Simple code generation (Cranelift → native binary)
-- [ ] "Hello World" compiles and runs
-- [ ] Basic standard library (core, io, string)
+- [x] Formal grammar in EBNF
+- [x] Lexer with full token set
+- [x] Parser producing AST
+- [x] Basic type checker (primitives, structs, enums)
+- [x] Simple code generation (Cranelift → native binary)
+- [x] "Hello World" compiles and runs
+- [x] Basic standard library (core, io, string)
 
 ### Phase 2 — Type System & Ownership
 - [ ] Generics
@@ -356,11 +356,11 @@ kodo::ffi         — C FFI for interop
 - [ ] Error handling with Result/Option
 
 ### Phase 3 — Contracts
-- [ ] `requires`/`ensures` parsing and AST representation
-- [ ] Runtime contract checking
+- [x] `requires`/`ensures` parsing and AST representation
+- [x] Runtime contract checking (`requires` + `ensures` inject runtime checks)
 - [ ] SMT solver integration (Z3) for static verification
 - [ ] Module-level invariants
-- [ ] Contract-aware error messages
+- [x] Contract-aware error messages (ariadne source-span rendering)
 
 ### Phase 4 — Intent System
 - [ ] Intent declaration parsing

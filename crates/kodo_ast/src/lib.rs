@@ -183,6 +183,26 @@ pub struct Param {
     pub span: Span,
 }
 
+/// An annotation on a function, e.g. `@confidence(0.95)`.
+#[derive(Debug, Clone)]
+pub struct Annotation {
+    /// Annotation name (e.g., `confidence`, `authored_by`).
+    pub name: String,
+    /// Positional and named arguments.
+    pub args: Vec<AnnotationArg>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// An argument to an annotation.
+#[derive(Debug, Clone)]
+pub enum AnnotationArg {
+    /// Positional: `@confidence(0.95)` → `Positional(Expr)`.
+    Positional(Expr),
+    /// Named: `@authored_by(agent: "claude")` → `Named("agent", Expr)`.
+    Named(String, Expr),
+}
+
 /// A function definition.
 #[derive(Debug, Clone)]
 pub struct Function {
@@ -192,6 +212,8 @@ pub struct Function {
     pub span: Span,
     /// Function name.
     pub name: String,
+    /// Annotations (e.g. `@authored_by`, `@confidence`).
+    pub annotations: Vec<Annotation>,
     /// Parameters.
     pub params: Vec<Param>,
     /// Return type (defaults to unit).
@@ -237,6 +259,24 @@ pub enum Stmt {
         span: Span,
         /// Optional return value.
         value: Option<Expr>,
+    },
+    /// A `while` loop: `while <condition> { <body> }`
+    While {
+        /// Source span.
+        span: Span,
+        /// Loop condition (must be `Bool`).
+        condition: Expr,
+        /// Loop body.
+        body: Block,
+    },
+    /// An assignment to an existing variable: `name = value`
+    Assign {
+        /// Source span.
+        span: Span,
+        /// Variable name.
+        name: String,
+        /// New value.
+        value: Expr,
     },
 }
 

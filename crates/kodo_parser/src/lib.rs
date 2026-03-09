@@ -39,8 +39,8 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    BinOp, Block, Expr, Function, Meta, MetaEntry, Module, NodeIdGen, Param, Span, Stmt, TypeExpr,
-    UnaryOp,
+    Annotation, AnnotationArg, BinOp, Block, Expr, Function, Meta, MetaEntry, Module, NodeIdGen,
+    Param, Span, Stmt, TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -67,6 +67,27 @@ pub enum ParseError {
     /// A lexer error propagated up.
     #[error("lexer error: {0}")]
     LexError(#[from] kodo_lexer::LexError),
+}
+
+impl ParseError {
+    /// Returns the source span of this error, if available.
+    #[must_use]
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::UnexpectedToken { span, .. } => Some(*span),
+            Self::UnexpectedEof { .. } | Self::LexError(_) => None,
+        }
+    }
+
+    /// Returns the unique error code for this error variant.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnexpectedToken { .. } => "E0100",
+            Self::UnexpectedEof { .. } => "E0101",
+            Self::LexError(_) => "E0001",
+        }
+    }
 }
 
 /// Alias for results in this crate.
@@ -158,10 +179,10 @@ impl Parser {
             None
         };
 
-        // Parse functions
+        // Parse functions (with optional leading annotations)
         let mut functions = Vec::new();
-        while self.check(&TokenKind::Fn) {
-            functions.push(self.parse_function()?);
+        while self.check(&TokenKind::Fn) || self.check(&TokenKind::At) {
+            functions.push(self.parse_annotated_function()?);
         }
 
         let end_token = self.expect(&TokenKind::RBrace)?;
@@ -218,6 +239,67 @@ impl Parser {
             span: start.merge(end),
             entries,
         })
+    }
+
+    /// Parses annotations followed by a function definition.
+    fn parse_annotated_function(&mut self) -> Result<Function> {
+        let annotations = self.parse_annotations()?;
+        let mut func = self.parse_function()?;
+        func.annotations = annotations;
+        Ok(func)
+    }
+
+    /// Parses zero or more annotations: `@name` or `@name(args...)`.
+    fn parse_annotations(&mut self) -> Result<Vec<Annotation>> {
+        let mut annotations = Vec::new();
+        while self.check(&TokenKind::At) {
+            let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+            let name = self.parse_ident()?;
+            let (args, end) = if self.check(&TokenKind::LParen) {
+                self.advance();
+                let args = self.parse_annotation_args()?;
+                let end = self.expect(&TokenKind::RParen)?.span;
+                (args, end)
+            } else {
+                (vec![], self.prev_span())
+            };
+            annotations.push(Annotation {
+                name,
+                args,
+                span: start.merge(end),
+            });
+        }
+        Ok(annotations)
+    }
+
+    /// Parses annotation arguments (positional or named), comma-separated.
+    fn parse_annotation_args(&mut self) -> Result<Vec<AnnotationArg>> {
+        let mut args = Vec::new();
+        if self.check(&TokenKind::RParen) {
+            return Ok(args);
+        }
+        loop {
+            // Check for named arg: ident ':'
+            let is_named = matches!(self.peek_kind(), Some(TokenKind::Ident(_)))
+                && self
+                    .tokens
+                    .get(self.pos + 1)
+                    .is_some_and(|t| t.kind == TokenKind::Colon);
+            if is_named {
+                let name = self.parse_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let value = self.parse_expr()?;
+                args.push(AnnotationArg::Named(name, value));
+            } else {
+                let value = self.parse_expr()?;
+                args.push(AnnotationArg::Positional(value));
+            }
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance();
+        }
+        Ok(args)
     }
 
     /// Parses a function definition including signature, contracts, and body.
@@ -283,6 +365,7 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            annotations: vec![],
             params,
             return_type,
             requires,
@@ -335,7 +418,8 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Let) => self.parse_let_stmt(),
             Some(TokenKind::Return) => self.parse_return_stmt(),
-            _ => self.parse_expr_stmt(),
+            Some(TokenKind::While) => self.parse_while_stmt(),
+            _ => self.parse_expr_or_assign_stmt(),
         }
     }
 
@@ -395,10 +479,47 @@ impl Parser {
         })
     }
 
-    /// Parses an expression used as a statement.
-    fn parse_expr_stmt(&mut self) -> Result<Stmt> {
+    /// Parses an expression or assignment statement.
+    ///
+    /// If the expression is an identifier followed by `=`, it is treated as
+    /// an assignment to an existing variable. Otherwise it is an expression
+    /// statement.
+    fn parse_expr_or_assign_stmt(&mut self) -> Result<Stmt> {
+        // Look ahead: if it's `ident =` (but not `ident ==`), it's an assignment.
+        if let Some(TokenKind::Ident(_)) = self.peek_kind() {
+            if self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::Eq) {
+                return self.parse_assign_stmt();
+            }
+        }
         let expr = self.parse_expr()?;
         Ok(Stmt::Expr(expr))
+    }
+
+    /// Parses an assignment: `name = expr`.
+    fn parse_assign_stmt(&mut self) -> Result<Stmt> {
+        let start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::Eq)?;
+        let value = self.parse_expr()?;
+        let end = Self::expr_span(&value);
+        Ok(Stmt::Assign {
+            span: start.merge(end),
+            name,
+            value,
+        })
+    }
+
+    /// Parses a while loop: `while <condition> { <body> }`.
+    fn parse_while_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::While)?.span;
+        let condition = self.parse_expr()?;
+        let body = self.parse_block()?;
+        let end = body.span;
+        Ok(Stmt::While {
+            span: start.merge(end),
+            condition,
+            body,
+        })
     }
 
     /// Returns `true` if the current token could start an expression.
@@ -1409,5 +1530,146 @@ mod tests {
         let func = &module.functions[0];
         assert_eq!(func.requires.len(), 2);
         assert_eq!(func.ensures.len(), 1);
+    }
+
+    #[test]
+    fn parse_while_simple() {
+        let source = r#"module test {
+            fn main() {
+                let mut i: Int = 5
+                while i > 0 {
+                    i = i - 1
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        match &stmts[1] {
+            Stmt::While {
+                condition, body, ..
+            } => {
+                assert!(matches!(condition, Expr::BinaryOp { op: BinOp::Gt, .. }));
+                assert_eq!(body.stmts.len(), 1);
+            }
+            other => panic!("expected While, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_while_with_nested_if() {
+        let source = r#"module test {
+            fn main() {
+                let mut x: Int = 10
+                while x > 0 {
+                    if x == 5 {
+                        println("halfway")
+                    }
+                    x = x - 1
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(&stmts[1], Stmt::While { .. }));
+    }
+
+    #[test]
+    fn parse_while_missing_block() {
+        let source = r#"module test {
+            fn main() {
+                while true
+            }
+        }"#;
+
+        let result = parse(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_assignment() {
+        let source = r#"module test {
+            fn main() {
+                let mut x: Int = 1
+                x = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        match &stmts[1] {
+            Stmt::Assign { name, value, .. } => {
+                assert_eq!(name, "x");
+                assert!(matches!(value, Expr::IntLit(42, _)));
+            }
+            other => panic!("expected Assign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_annotation_simple() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            @confidence(95)
+            fn foo() { }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions[0].annotations.len(), 1);
+        assert_eq!(module.functions[0].annotations[0].name, "confidence");
+    }
+
+    #[test]
+    fn parse_annotation_named_args() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            @authored_by(agent: "claude")
+            fn foo() { }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions[0].annotations.len(), 1);
+        assert_eq!(module.functions[0].annotations[0].name, "authored_by");
+        assert!(
+            module.functions[0].annotations[0]
+                .args
+                .iter()
+                .any(|a| matches!(a, kodo_ast::AnnotationArg::Named(name, _) if name == "agent")),
+            "expected a named arg 'agent'"
+        );
+    }
+
+    #[test]
+    fn parse_multiple_annotations() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            @authored_by(agent: "claude")
+            @confidence(95)
+            fn foo() { }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(
+            module.functions[0].annotations.len(),
+            2,
+            "expected 2 annotations, got {}",
+            module.functions[0].annotations.len()
+        );
+    }
+
+    #[test]
+    fn parse_error_span() {
+        let error = ParseError::UnexpectedToken {
+            expected: "expression".to_string(),
+            found: TokenKind::RBrace,
+            span: Span::new(10, 11),
+        };
+        assert_eq!(error.span(), Some(Span::new(10, 11)));
+
+        let eof_error = ParseError::UnexpectedEof {
+            expected: "expression".to_string(),
+        };
+        assert_eq!(eof_error.span(), None);
     }
 }

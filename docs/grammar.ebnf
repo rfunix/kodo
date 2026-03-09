@@ -78,10 +78,14 @@ intent_config   = IDENT ":" expr ;
 block           = "{" statement* "}" ;
 
 statement       = let_stmt
+                | assign_stmt
+                | while_stmt
                 | return_stmt
                 | expr_stmt ;
 
 let_stmt        = "let" "mut"? IDENT (":" type_expr)? "=" expr ;
+assign_stmt     = IDENT "=" expr ;
+while_stmt      = "while" expr block ;
 return_stmt     = "return" expr? ;
 expr_stmt       = expr ;
 

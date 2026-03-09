@@ -1,6 +1,5 @@
 ---
 source: crates/kodo_parser/tests/snapshots.rs
-assertion_line: 30
 expression: module
 ---
 Module {
@@ -59,6 +58,7 @@ Module {
                 end: 146,
             },
             name: "noop",
+            annotations: [],
             params: [],
             return_type: Unit,
             requires: [],

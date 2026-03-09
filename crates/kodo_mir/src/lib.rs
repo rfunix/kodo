@@ -142,7 +142,7 @@ pub enum Instruction {
 }
 
 /// A value in MIR — either a constant, a local reference, or a binary operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     /// An integer constant.
     IntConst(i64),

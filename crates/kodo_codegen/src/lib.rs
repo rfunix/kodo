@@ -102,10 +102,17 @@ fn is_unit(ty: &Type) -> bool {
 /// The `main` function in the MIR is renamed to `kodo_main` so that the
 /// runtime's `main` wrapper can call it.
 ///
+/// If `metadata_json` is provided, it is embedded as exported data symbols
+/// (`kodo_meta` and `kodo_meta_len`) so the runtime can respond to `--describe`.
+///
 /// # Errors
 ///
 /// Returns [`CodegenError`] if code generation fails.
-pub fn compile_module(mir_functions: &[MirFunction], _options: &CodegenOptions) -> Result<Vec<u8>> {
+pub fn compile_module(
+    mir_functions: &[MirFunction],
+    _options: &CodegenOptions,
+    metadata_json: Option<&str>,
+) -> Result<Vec<u8>> {
     let mut flag_builder = settings::builder();
     flag_builder
         .set("is_pic", "true")
@@ -175,6 +182,11 @@ pub fn compile_module(mir_functions: &[MirFunction], _options: &CodegenOptions) 
             .map_err(|e| CodegenError::ModuleError(format!("{export_name}: {e}")))?;
     }
 
+    // Embed module metadata if provided.
+    if let Some(json) = metadata_json {
+        embed_module_metadata(&mut object_module, json)?;
+    }
+
     let product = object_module
         .finish()
         .emit()
@@ -189,7 +201,7 @@ pub fn compile_module(mir_functions: &[MirFunction], _options: &CodegenOptions) 
 ///
 /// Returns [`CodegenError`] if code generation fails.
 pub fn compile_function(function: &MirFunction, options: &CodegenOptions) -> Result<Vec<u8>> {
-    compile_module(std::slice::from_ref(function), options)
+    compile_module(std::slice::from_ref(function), options, None)
 }
 
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
@@ -317,7 +329,6 @@ fn translate_function(
     let param_count = mir_fn.param_count();
     builder.append_block_params_for_function_params(entry_block);
     builder.switch_to_block(entry_block);
-    builder.seal_block(entry_block);
 
     for i in 0..param_count {
         let param_val = builder.block_params(entry_block)[i];
@@ -335,12 +346,14 @@ fn translate_function(
     }
 
     // Translate each basic block.
+    // We defer sealing to after all blocks are translated, because loops
+    // create back-edges that mean a block's predecessors are not all known
+    // when it is first visited.
     for (idx, bb) in mir_fn.blocks.iter().enumerate() {
         let cl_block = block_map[&bb.id];
 
         if idx > 0 {
             builder.switch_to_block(cl_block);
-            builder.seal_block(cl_block);
         }
 
         for instr in &bb.instructions {
@@ -357,6 +370,12 @@ fn translate_function(
             mir_fn,
             &var_map,
         )?;
+    }
+
+    // Seal all blocks now that all predecessors are known.
+    for bb in &mir_fn.blocks {
+        let cl_block = block_map[&bb.id];
+        builder.seal_block(cl_block);
     }
 
     Ok(())
@@ -570,6 +589,17 @@ fn translate_terminator(
                 builder.ins().return_(&[]);
             } else {
                 let val = translate_value(value, builder, module, func_ids, builtins, var_map)?;
+                let expected = cranelift_type(&mir_fn.return_type);
+                let actual = builder.func.dfg.value_type(val);
+                let val = if actual != expected && actual.is_int() && expected.is_int() {
+                    if actual.bits() > expected.bits() {
+                        builder.ins().ireduce(expected, val)
+                    } else {
+                        builder.ins().uextend(expected, val)
+                    }
+                } else {
+                    val
+                };
                 builder.ins().return_(&[val]);
             }
         }
@@ -602,10 +632,41 @@ fn translate_terminator(
     Ok(())
 }
 
+/// Embeds module metadata JSON as exported data symbols in the object file.
+///
+/// Creates two symbols:
+/// - `kodo_meta`: the raw JSON bytes
+/// - `kodo_meta_len`: the length as a little-endian u64
+fn embed_module_metadata(module: &mut ObjectModule, metadata_json: &str) -> Result<()> {
+    let data_id = module
+        .declare_data("kodo_meta", Linkage::Export, false, false)
+        .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+    let mut desc = DataDescription::new();
+    desc.define(metadata_json.as_bytes().to_vec().into_boxed_slice());
+    module
+        .define_data(data_id, &desc)
+        .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+
+    let len_id = module
+        .declare_data("kodo_meta_len", Linkage::Export, false, false)
+        .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+    let mut len_desc = DataDescription::new();
+    #[allow(clippy::cast_possible_truncation)]
+    let len_bytes = (metadata_json.len() as u64).to_le_bytes();
+    len_desc.define(len_bytes.to_vec().into_boxed_slice());
+    module
+        .define_data(len_id, &len_desc)
+        .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kodo_mir::{BasicBlock, BlockId, Local, MirFunction, Terminator, Value};
+    use kodo_mir::{
+        BasicBlock, BlockId, Instruction, Local, LocalId, MirFunction, Terminator, Value,
+    };
     use kodo_types::Type;
 
     #[test]
@@ -642,7 +703,7 @@ mod tests {
             }],
             entry: BlockId(0),
         };
-        let result = compile_module(&[func], &CodegenOptions::default());
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
         assert!(result.is_ok());
         let bytes = result.ok().unwrap_or_default();
         assert!(!bytes.is_empty());
@@ -682,7 +743,7 @@ mod tests {
             ],
             entry: BlockId(0),
         };
-        let result = compile_module(&[func], &CodegenOptions::default());
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
         assert!(result.is_ok());
     }
 
@@ -691,5 +752,294 @@ mod tests {
         let opts = CodegenOptions::default();
         assert!(!opts.optimize);
         assert!(opts.debug_info);
+    }
+
+    #[test]
+    fn compile_arithmetic_operations() {
+        let func = MirFunction {
+            name: "arith".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Add,
+                    Box::new(Value::IntConst(1)),
+                    Box::new(Value::BinOp(
+                        kodo_ast::BinOp::Mul,
+                        Box::new(Value::IntConst(2)),
+                        Box::new(Value::IntConst(3)),
+                    )),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_function_with_params() {
+        let func = MirFunction {
+            name: "add".to_string(),
+            return_type: Type::Int,
+            param_count: 2,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Add,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::Local(LocalId(1))),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_function_call_between_functions() {
+        let callee = MirFunction {
+            name: "double".to_string(),
+            return_type: Type::Int,
+            param_count: 1,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Mul,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::IntConst(2)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let caller = MirFunction {
+            name: "use_double".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "double".to_string(),
+                    args: vec![Value::IntConst(21)],
+                }],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[callee, caller], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_with_contract_check() {
+        let func = MirFunction {
+            name: "checked".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Unit,
+                mutable: false,
+            }],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::BoolConst(true),
+                        true_block: BlockId(2),
+                        false_block: BlockId(1),
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![Instruction::Call {
+                        dest: LocalId(0),
+                        callee: "kodo_contract_fail".to_string(),
+                        args: vec![Value::StringConst("contract failed".to_string())],
+                    }],
+                    terminator: Terminator::Unreachable,
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::Unit),
+                },
+            ],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_string_constant() {
+        let func = MirFunction {
+            name: "greet".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Unit,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "println".to_string(),
+                    args: vec![Value::StringConst("hello".to_string())],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_boolean_operations() {
+        let func = MirFunction {
+            name: "bools".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Eq,
+                    Box::new(Value::IntConst(1)),
+                    Box::new(Value::IntConst(1)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_unary_operations() {
+        let func = MirFunction {
+            name: "unary".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Neg(Box::new(Value::IntConst(42)))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_with_metadata_produces_object() {
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(
+            &[func],
+            &CodegenOptions::default(),
+            Some("{\"test\": true}"),
+        );
+        let bytes = result.unwrap_or_else(|e| panic!("compile_module failed: {e}"));
+        assert!(
+            !bytes.is_empty(),
+            "object file with metadata should not be empty"
+        );
+    }
+
+    #[test]
+    fn compile_if_else_cfg() {
+        let func = MirFunction {
+            name: "ifelse".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::BoolConst(true),
+                        true_block: BlockId(1),
+                        false_block: BlockId(2),
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![Instruction::Assign(LocalId(0), Value::IntConst(10))],
+                    terminator: Terminator::Goto(BlockId(3)),
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![Instruction::Assign(LocalId(1), Value::IntConst(20))],
+                    terminator: Terminator::Goto(BlockId(3)),
+                },
+                BasicBlock {
+                    id: BlockId(3),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::Local(LocalId(0))),
+                },
+            ],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok());
     }
 }

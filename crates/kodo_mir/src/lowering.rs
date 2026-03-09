@@ -46,6 +46,10 @@ pub struct MirBuilder {
     next_block: u32,
     /// Maps variable names to their [`LocalId`].
     name_map: HashMap<String, LocalId>,
+    /// Ensures expressions to inject before each return.
+    ensures: Vec<kodo_ast::Expr>,
+    /// The name of the function being built (for error messages).
+    fn_name: String,
 }
 
 impl MirBuilder {
@@ -59,6 +63,8 @@ impl MirBuilder {
             next_local: 0,
             next_block: 1, // 0 is the entry block
             name_map: HashMap::new(),
+            ensures: Vec::new(),
+            fn_name: String::new(),
         }
     }
 
@@ -152,6 +158,8 @@ impl MirBuilder {
                     Some(expr) => self.lower_expr(expr)?,
                     None => Value::Unit,
                 };
+                // Inject ensures checks before returning.
+                self.inject_ensures_checks(&ret_val)?;
                 // Seal the current block with a Return terminator and
                 // create an unreachable continuation block.
                 let continuation = self.new_block();
@@ -159,7 +167,100 @@ impl MirBuilder {
                 Ok(Value::Unit)
             }
             Stmt::Expr(expr) => self.lower_expr(expr),
+            Stmt::While {
+                condition, body, ..
+            } => {
+                let loop_header = self.new_block();
+                let loop_body = self.new_block();
+                let loop_exit = self.new_block();
+
+                // Jump from current block to the loop header.
+                self.seal_block(Terminator::Goto(loop_header), loop_header);
+
+                // In the header: evaluate condition and branch.
+                let cond = self.lower_expr(condition)?;
+                self.seal_block(
+                    Terminator::Branch {
+                        condition: cond,
+                        true_block: loop_body,
+                        false_block: loop_exit,
+                    },
+                    loop_body,
+                );
+
+                // In the body: lower statements and jump back to header.
+                self.lower_block(body)?;
+                self.seal_block(Terminator::Goto(loop_header), loop_exit);
+
+                Ok(Value::Unit)
+            }
+            Stmt::Assign { name, value, .. } => {
+                let local_id = self
+                    .name_map
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| MirError::UndefinedVariable(name.clone()))?;
+                let val = self.lower_expr(value)?;
+                self.emit(Instruction::Assign(local_id, val));
+                Ok(Value::Unit)
+            }
         }
+    }
+
+    /// Injects ensures contract checks for the given return value.
+    ///
+    /// For each ensures expression, registers the return value as `"result"`
+    /// in the name map (so the ensures expression can reference it), evaluates
+    /// the condition, and generates a branch to a fail block if the condition
+    /// is false.
+    fn inject_ensures_checks(&mut self, ret_val: &Value) -> Result<()> {
+        if self.ensures.is_empty() {
+            return Ok(());
+        }
+
+        // Clone ensures to avoid borrow issues.
+        let ensures_exprs = self.ensures.clone();
+
+        // Store the return value in a local so ensures expressions can reference it.
+        let result_local = self.alloc_local(Type::Unknown, false);
+        self.emit(Instruction::Assign(result_local, ret_val.clone()));
+        let prev_result = self.name_map.insert("result".to_string(), result_local);
+
+        for (i, ens_expr) in ensures_exprs.iter().enumerate() {
+            let cond = self.lower_expr(ens_expr)?;
+            let fail_block = self.new_block();
+            let continue_block = self.new_block();
+            self.seal_block(
+                Terminator::Branch {
+                    condition: cond,
+                    true_block: continue_block,
+                    false_block: fail_block,
+                },
+                fail_block,
+            );
+            // In the fail block, call kodo_contract_fail with the message.
+            let msg = format!(
+                "ensures clause {} failed in function `{}`",
+                i + 1,
+                self.fn_name
+            );
+            let dest = self.alloc_local(Type::Unit, false);
+            self.emit(Instruction::Call {
+                dest,
+                callee: "kodo_contract_fail".to_string(),
+                args: vec![Value::StringConst(msg)],
+            });
+            self.seal_block(Terminator::Unreachable, continue_block);
+        }
+
+        // Restore previous "result" binding.
+        if let Some(prev) = prev_result {
+            self.name_map.insert("result".to_string(), prev);
+        } else {
+            self.name_map.remove("result");
+        }
+
+        Ok(())
     }
 
     /// Lowers an expression to a [`Value`].
@@ -274,6 +375,8 @@ impl MirBuilder {
 /// resolved, or a non-identifier callee is encountered in a call.
 pub fn lower_function(function: &Function) -> Result<MirFunction> {
     let mut builder = MirBuilder::new();
+    builder.ensures.clone_from(&function.ensures);
+    builder.fn_name.clone_from(&function.name);
 
     // Allocate locals for parameters and populate the name map.
     for param in &function.params {
@@ -315,6 +418,9 @@ pub fn lower_function(function: &Function) -> Result<MirFunction> {
     // Lower the function body.
     builder.lower_block(&function.body)?;
 
+    // Inject ensures checks before the implicit Return(Unit).
+    builder.inject_ensures_checks(&Value::Unit)?;
+
     // If the current block still has no terminator (i.e. it was not
     // sealed by a Return statement), seal it with Return(Unit).
     builder.seal_block_final(Terminator::Return(Value::Unit));
@@ -333,13 +439,75 @@ pub fn lower_function(function: &Function) -> Result<MirFunction> {
     })
 }
 
+/// Generates a validator function for a function with `requires` contracts.
+///
+/// The validator has the same parameters as the original function but returns
+/// `Bool`. It evaluates all preconditions combined with `&&` and returns
+/// the result — no abort, no side effects.
+fn generate_validator(function: &Function) -> Result<MirFunction> {
+    let validator_name = format!("validate_{}", function.name);
+    let mut builder = MirBuilder::new();
+    builder.fn_name.clone_from(&validator_name);
+
+    // Allocate locals for parameters (same as original function).
+    for param in &function.params {
+        let ty = resolve_type(&param.ty, param.span)
+            .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        let local_id = builder.alloc_local(ty, false);
+        builder.name_map.insert(param.name.clone(), local_id);
+    }
+    let param_count = function.params.len();
+
+    // Evaluate all requires expressions and combine with &&.
+    let mut combined: Option<Value> = None;
+    for req_expr in &function.requires {
+        let cond = builder.lower_expr(req_expr)?;
+        combined = Some(match combined {
+            Some(prev) => Value::BinOp(kodo_ast::BinOp::And, Box::new(prev), Box::new(cond)),
+            None => cond,
+        });
+    }
+
+    // Return the combined result (or true if somehow empty — shouldn't happen).
+    let result = combined.unwrap_or(Value::BoolConst(true));
+    builder.seal_block_final(Terminator::Return(result));
+
+    Ok(MirFunction {
+        name: validator_name,
+        return_type: Type::Bool,
+        param_count,
+        locals: builder.locals,
+        blocks: builder.blocks,
+        entry: BlockId(0),
+    })
+}
+
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`].
+///
+/// For each function with `requires` contracts, an additional validator
+/// function (`validate_{name}`) is generated that evaluates the preconditions
+/// without side effects and returns `Bool`.
 ///
 /// # Errors
 ///
 /// Returns the first [`MirError`] encountered during lowering.
 pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
-    module.functions.iter().map(lower_function).collect()
+    let mut mir_functions: Vec<MirFunction> = module
+        .functions
+        .iter()
+        .map(lower_function)
+        .collect::<Result<Vec<_>>>()?;
+
+    // Generate validator functions for contracts.
+    for func in &module.functions {
+        if func.requires.is_empty() {
+            continue;
+        }
+        let validator = generate_validator(func)?;
+        mir_functions.push(validator);
+    }
+
+    Ok(mir_functions)
 }
 
 #[cfg(test)]
@@ -358,6 +526,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: name.to_string(),
+            annotations: vec![],
             params,
             return_type: ret,
             requires: vec![],
@@ -683,5 +852,378 @@ mod tests {
             mir.blocks[0].terminator,
             Terminator::Return(Value::Local(LocalId(0)))
         ));
+    }
+
+    #[test]
+    fn lower_while_creates_loop_cfg() {
+        // fn counter() { let mut i: Int = 3; while i > 0 { i = i - 1 } }
+        let func = make_fn(
+            "counter",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        mutable: true,
+                        name: "i".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(3, span()),
+                    },
+                    Stmt::While {
+                        span: span(),
+                        condition: Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("i".to_string(), span())),
+                            op: BinOp::Gt,
+                            right: Box::new(Expr::IntLit(0, span())),
+                            span: span(),
+                        },
+                        body: Block {
+                            span: span(),
+                            stmts: vec![Stmt::Assign {
+                                span: span(),
+                                name: "i".to_string(),
+                                value: Expr::BinaryOp {
+                                    left: Box::new(Expr::Ident("i".to_string(), span())),
+                                    op: BinOp::Sub,
+                                    right: Box::new(Expr::IntLit(1, span())),
+                                    span: span(),
+                                },
+                            }],
+                        },
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have: entry, loop_header, loop_body, loop_exit + final
+        assert!(
+            mir.blocks.len() >= 4,
+            "expected at least 4 blocks for while loop, got {}",
+            mir.blocks.len()
+        );
+        // First block should have a Goto to the header
+        assert!(
+            matches!(mir.blocks[0].terminator, Terminator::Goto(_)),
+            "entry should goto loop header"
+        );
+    }
+
+    #[test]
+    fn lower_while_false_exits_immediately() {
+        // fn skip() { while false { } }
+        let func = make_fn(
+            "skip",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::While {
+                    span: span(),
+                    condition: Expr::BoolLit(false, span()),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // The loop header should have a Branch with false condition
+        // leading to exit.
+        let header = &mir.blocks[1]; // block after entry's Goto
+        assert!(
+            matches!(header.terminator, Terminator::Branch { .. }),
+            "loop header should have Branch terminator"
+        );
+    }
+
+    #[test]
+    fn lower_assignment() {
+        // fn reassign() { let mut x: Int = 1; x = 42 }
+        let func = make_fn(
+            "reassign",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        mutable: true,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(1, span()),
+                    },
+                    Stmt::Assign {
+                        span: span(),
+                        name: "x".to_string(),
+                        value: Expr::IntLit(42, span()),
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have 2 Assign instructions in the entry block
+        assert_eq!(mir.blocks[0].instructions.len(), 2);
+    }
+
+    #[test]
+    fn lower_function_with_ensures_injects_check() {
+        // fn positive() -> Int ensures { result > 0 } { return 42 }
+        let func = Function {
+            id: NodeId(0),
+            span: span(),
+            name: "positive".to_string(),
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![Expr::BinaryOp {
+                left: Box::new(Expr::Ident("result".to_string(), span())),
+                op: BinOp::Gt,
+                right: Box::new(Expr::IntLit(0, span())),
+                span: span(),
+            }],
+            body: Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::IntLit(42, span())),
+                }],
+            },
+        };
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have more blocks due to ensures checks
+        assert!(
+            mir.blocks.len() >= 3,
+            "expected at least 3 blocks with ensures, got {}",
+            mir.blocks.len()
+        );
+    }
+
+    #[test]
+    fn lower_function_with_ensures_result_reference() {
+        // ensures { result == 0 } with implicit return
+        let func = Function {
+            id: NodeId(0),
+            span: span(),
+            name: "zero".to_string(),
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![Expr::BinaryOp {
+                left: Box::new(Expr::Ident("result".to_string(), span())),
+                op: BinOp::Eq,
+                right: Box::new(Expr::IntLit(0, span())),
+                span: span(),
+            }],
+            body: Block {
+                span: span(),
+                stmts: vec![],
+            },
+        };
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have blocks for ensures check even on implicit return
+        assert!(mir.blocks.len() >= 3);
+    }
+
+    #[test]
+    fn validator_generated_for_function_with_requires() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "test_mod".to_string(),
+            meta: None,
+            functions: vec![Function {
+                id: NodeId(0),
+                span: span(),
+                name: "checked".to_string(),
+                annotations: vec![],
+                params: vec![Param {
+                    name: "x".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                }],
+                return_type: TypeExpr::Named("Int".to_string()),
+                requires: vec![Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string(), span())),
+                    op: BinOp::Gt,
+                    right: Box::new(Expr::IntLit(0, span())),
+                    span: span(),
+                }],
+                ensures: vec![],
+                body: Block {
+                    span: span(),
+                    stmts: vec![],
+                },
+            }],
+        };
+        let fns = lower_module(&module).unwrap_or_else(|e| panic!("lower_module failed: {e}"));
+        assert_eq!(
+            fns.len(),
+            2,
+            "expected original + validator, got {}",
+            fns.len()
+        );
+        assert_eq!(fns[0].name, "checked");
+        assert_eq!(fns[1].name, "validate_checked");
+    }
+
+    #[test]
+    fn validator_not_generated_without_requires() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "test_mod".to_string(),
+            meta: None,
+            functions: vec![make_fn(
+                "plain",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![],
+                },
+                TypeExpr::Unit,
+            )],
+        };
+        let fns = lower_module(&module).unwrap_or_else(|e| panic!("lower_module failed: {e}"));
+        assert_eq!(fns.len(), 1, "expected only original, got {}", fns.len());
+    }
+
+    #[test]
+    fn validator_has_same_params() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "test_mod".to_string(),
+            meta: None,
+            functions: vec![Function {
+                id: NodeId(0),
+                span: span(),
+                name: "checked".to_string(),
+                annotations: vec![],
+                params: vec![
+                    Param {
+                        name: "x".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                    Param {
+                        name: "y".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                ],
+                return_type: TypeExpr::Named("Int".to_string()),
+                requires: vec![Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string(), span())),
+                    op: BinOp::Gt,
+                    right: Box::new(Expr::IntLit(0, span())),
+                    span: span(),
+                }],
+                ensures: vec![],
+                body: Block {
+                    span: span(),
+                    stmts: vec![],
+                },
+            }],
+        };
+        let fns = lower_module(&module).unwrap_or_else(|e| panic!("lower_module failed: {e}"));
+        let original = &fns[0];
+        let validator = &fns[1];
+        assert_eq!(
+            original.param_count, validator.param_count,
+            "validator should have same param count as original"
+        );
+    }
+
+    #[test]
+    fn validator_returns_bool() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "test_mod".to_string(),
+            meta: None,
+            functions: vec![Function {
+                id: NodeId(0),
+                span: span(),
+                name: "checked".to_string(),
+                annotations: vec![],
+                params: vec![Param {
+                    name: "x".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                }],
+                return_type: TypeExpr::Named("Int".to_string()),
+                requires: vec![Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("x".to_string(), span())),
+                    op: BinOp::Gt,
+                    right: Box::new(Expr::IntLit(0, span())),
+                    span: span(),
+                }],
+                ensures: vec![],
+                body: Block {
+                    span: span(),
+                    stmts: vec![],
+                },
+            }],
+        };
+        let fns = lower_module(&module).unwrap_or_else(|e| panic!("lower_module failed: {e}"));
+        let validator = &fns[1];
+        assert_eq!(
+            validator.return_type,
+            Type::Bool,
+            "validator should return Bool"
+        );
+    }
+
+    #[test]
+    fn lower_function_multiple_ensures() {
+        let func = Function {
+            id: NodeId(0),
+            span: span(),
+            name: "multi".to_string(),
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![
+                Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("result".to_string(), span())),
+                    op: BinOp::Gt,
+                    right: Box::new(Expr::IntLit(0, span())),
+                    span: span(),
+                },
+                Expr::BinaryOp {
+                    left: Box::new(Expr::Ident("result".to_string(), span())),
+                    op: BinOp::Lt,
+                    right: Box::new(Expr::IntLit(100, span())),
+                    span: span(),
+                },
+            ],
+            body: Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::IntLit(42, span())),
+                }],
+            },
+        };
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // With 2 ensures, we should have even more blocks
+        assert!(
+            mir.blocks.len() >= 5,
+            "expected at least 5 blocks with 2 ensures, got {}",
+            mir.blocks.len()
+        );
     }
 }

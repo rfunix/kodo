@@ -33,7 +33,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 
-use kodo_ast::{BinOp, Block, Expr, Function, Module, Span, Stmt, UnaryOp};
+use kodo_ast::{
+    Annotation, AnnotationArg, BinOp, Block, Expr, Function, Module, Span, Stmt, UnaryOp,
+};
 use thiserror::Error;
 
 /// Errors produced by the type checker.
@@ -75,6 +77,61 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// Module is missing a required `meta` block.
+    #[error("module is missing a required `meta` block")]
+    MissingMeta,
+    /// The `purpose` field in the meta block is empty.
+    #[error("meta block has empty `purpose` field at {span:?}")]
+    EmptyPurpose {
+        /// Source location.
+        span: Span,
+    },
+    /// The `purpose` field is missing from the meta block.
+    #[error("meta block is missing required `purpose` field at {span:?}")]
+    MissingPurpose {
+        /// Source location of the meta block.
+        span: Span,
+    },
+    /// A trust policy violation was detected.
+    #[error("{message} at {span:?}")]
+    PolicyViolation {
+        /// Description of the violation.
+        message: String,
+        /// Source location of the offending function.
+        span: Span,
+    },
+}
+
+impl TypeError {
+    /// Returns the source span of this error, if available.
+    #[must_use]
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::Mismatch { span, .. }
+            | Self::Undefined { span, .. }
+            | Self::ArityMismatch { span, .. }
+            | Self::NotCallable { span, .. }
+            | Self::EmptyPurpose { span, .. }
+            | Self::MissingPurpose { span, .. }
+            | Self::PolicyViolation { span, .. } => Some(*span),
+            Self::MissingMeta => None,
+        }
+    }
+
+    /// Returns the unique error code for this error variant.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Mismatch { .. } => "E0200",
+            Self::Undefined { .. } => "E0201",
+            Self::ArityMismatch { .. } => "E0202",
+            Self::NotCallable { .. } => "E0203",
+            Self::MissingMeta => "E0210",
+            Self::EmptyPurpose { .. } => "E0211",
+            Self::MissingPurpose { .. } => "E0212",
+            Self::PolicyViolation { .. } => "E0350",
+        }
+    }
 }
 
 /// Alias for results in this crate.
@@ -319,6 +376,13 @@ fn expr_span(expr: &Expr) -> Span {
     }
 }
 
+/// Extracts the expression from an annotation argument.
+fn annotation_arg_expr(arg: &AnnotationArg) -> &Expr {
+    match arg {
+        AnnotationArg::Positional(e) | AnnotationArg::Named(_, e) => e,
+    }
+}
+
 /// The type checker walks an AST and verifies that all expressions and
 /// statements are well-typed according to Kōdo's type system.
 ///
@@ -379,6 +443,21 @@ impl TypeChecker {
     ///
     /// Returns a [`TypeError`] if any type inconsistency is found.
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
+        // Validate mandatory meta block.
+        match &module.meta {
+            None => return Err(TypeError::MissingMeta),
+            Some(meta) => {
+                let purpose = meta.entries.iter().find(|e| e.key == "purpose");
+                match purpose {
+                    None => return Err(TypeError::MissingPurpose { span: meta.span }),
+                    Some(entry) if entry.value.trim().is_empty() => {
+                        return Err(TypeError::EmptyPurpose { span: entry.span });
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+
         // First pass: register all function signatures so they can call each other.
         for func in &module.functions {
             let param_types: std::result::Result<Vec<_>, _> = func
@@ -399,7 +478,105 @@ impl TypeChecker {
             self.check_function(func)?;
         }
 
+        // Third pass: validate trust policies based on annotations.
+        let trust_policy = module
+            .meta
+            .as_ref()
+            .and_then(|m| m.entries.iter().find(|e| e.key == "trust_policy"))
+            .map(|e| e.value.clone());
+
+        if let Some(policy) = trust_policy {
+            if policy == "high_security" {
+                for func in &module.functions {
+                    Self::validate_trust_policy(func)?;
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Validates trust policy constraints on a function's annotations.
+    ///
+    /// In `high_security` mode, every function must have `@authored_by` and
+    /// `@confidence`. If confidence is below 0.85, `@reviewed_by` with a
+    /// `"human:..."` argument is required.
+    fn validate_trust_policy(func: &Function) -> Result<()> {
+        let has_authored_by = func.annotations.iter().any(|a| a.name == "authored_by");
+        if !has_authored_by {
+            return Err(TypeError::PolicyViolation {
+                message: format!(
+                    "function `{}` is missing `@authored_by` annotation (required by trust_policy)",
+                    func.name
+                ),
+                span: func.span,
+            });
+        }
+
+        let confidence_ann = func.annotations.iter().find(|a| a.name == "confidence");
+        let Some(confidence_ann) = confidence_ann else {
+            return Err(TypeError::PolicyViolation {
+                message: format!(
+                    "function `{}` is missing `@confidence` annotation (required by trust_policy)",
+                    func.name
+                ),
+                span: func.span,
+            });
+        };
+
+        // Extract confidence value from the first positional arg.
+        let confidence_value = Self::extract_confidence_value(confidence_ann);
+
+        if let Some(value) = confidence_value {
+            if value < 0.85 {
+                let has_human_review = Self::has_human_review(func);
+                if !has_human_review {
+                    return Err(TypeError::PolicyViolation {
+                        message: format!(
+                            "function `{}` has @confidence({value}) below 0.85 threshold \
+                             and is missing `@reviewed_by` with human reviewer",
+                            func.name
+                        ),
+                        span: func.span,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Extracts a numeric confidence value from an annotation.
+    ///
+    /// Handles patterns like `@confidence(0.95)` where the value is encoded
+    /// as an integer literal (representing hundredths, e.g. 95 for 0.95) or
+    /// a string literal like `"0.95"`.
+    #[allow(clippy::cast_precision_loss)]
+    fn extract_confidence_value(ann: &Annotation) -> Option<f64> {
+        for arg in &ann.args {
+            let expr = annotation_arg_expr(arg);
+            match expr {
+                // If written as @confidence(95) — treat as percentage
+                Expr::IntLit(n, _) => return Some(*n as f64 / 100.0),
+                // If written as @confidence("0.95")
+                Expr::StringLit(s, _) => return s.parse::<f64>().ok(),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Checks if a function has a `@reviewed_by` annotation with a human reviewer.
+    fn has_human_review(func: &Function) -> bool {
+        func.annotations
+            .iter()
+            .filter(|a| a.name == "reviewed_by")
+            .any(|a| {
+                a.args.iter().any(|arg| {
+                    let expr = annotation_arg_expr(arg);
+                    matches!(expr, Expr::StringLit(s, _) if s.starts_with("human:"))
+                })
+            })
     }
 
     /// Type-checks a single function definition.
@@ -489,6 +666,29 @@ impl TypeChecker {
                 self.infer_expr(expr)?;
                 Ok(())
             }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                let cond_ty = self.infer_expr(condition)?;
+                TypeEnv::check_eq(&Type::Bool, &cond_ty, expr_span(condition))?;
+                self.check_block(body)?;
+                Ok(())
+            }
+            Stmt::Assign {
+                span, name, value, ..
+            } => {
+                let value_ty = self.infer_expr(value)?;
+                let existing_ty =
+                    self.env
+                        .lookup(name)
+                        .cloned()
+                        .ok_or_else(|| TypeError::Undefined {
+                            name: name.clone(),
+                            span: *span,
+                        })?;
+                TypeEnv::check_eq(&existing_ty, &value_ty, *span)?;
+                Ok(())
+            }
         }
     }
 
@@ -564,7 +764,7 @@ impl TypeChecker {
                 Stmt::Expr(expr) => {
                     last_ty = self.infer_expr(expr)?;
                 }
-                Stmt::Let { value, .. } => {
+                Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
                     self.infer_expr(value)?;
                     last_ty = Type::Unit;
                 }
@@ -572,6 +772,13 @@ impl TypeChecker {
                     if let Some(expr) = value {
                         self.infer_expr(expr)?;
                     }
+                    last_ty = Type::Unit;
+                }
+                Stmt::While {
+                    condition, body, ..
+                } => {
+                    self.infer_expr(condition)?;
+                    self.infer_block(body)?;
                     last_ty = Type::Unit;
                 }
             }
@@ -712,7 +919,7 @@ impl Default for TypeChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kodo_ast::{NodeId, Param, TypeExpr};
+    use kodo_ast::{Meta, MetaEntry, NodeId, Param, TypeExpr};
 
     #[test]
     fn type_display() {
@@ -774,7 +981,15 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
-            meta: None,
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "unit test module".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
             functions,
         }
     }
@@ -790,6 +1005,7 @@ mod tests {
             id: NodeId(1),
             span: Span::new(0, 100),
             name: name.to_string(),
+            annotations: vec![],
             params,
             return_type,
             requires: vec![],
@@ -1310,5 +1526,316 @@ mod tests {
         let module = make_module(vec![func]);
         let mut checker = TypeChecker::new();
         assert!(checker.check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn while_condition_must_be_bool() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::While {
+                span: Span::new(0, 20),
+                condition: Expr::IntLit(1, Span::new(6, 7)),
+                body: Block {
+                    span: Span::new(8, 20),
+                    stmts: vec![],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("type mismatch"));
+    }
+
+    #[test]
+    fn while_body_is_typechecked() {
+        // while loop body with a type error inside
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::While {
+                span: Span::new(0, 30),
+                condition: Expr::BoolLit(true, Span::new(6, 10)),
+                body: Block {
+                    span: Span::new(11, 30),
+                    stmts: vec![Stmt::Expr(Expr::BinaryOp {
+                        left: Box::new(Expr::IntLit(1, Span::new(12, 13))),
+                        op: BinOp::Add,
+                        right: Box::new(Expr::BoolLit(true, Span::new(16, 20))),
+                        span: Span::new(12, 20),
+                    })],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_err());
+    }
+
+    #[test]
+    fn while_valid_passes() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::While {
+                span: Span::new(0, 20),
+                condition: Expr::BoolLit(true, Span::new(6, 10)),
+                body: Block {
+                    span: Span::new(11, 20),
+                    stmts: vec![],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn assign_to_existing_variable_passes() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![
+                Stmt::Let {
+                    span: Span::new(0, 15),
+                    mutable: true,
+                    name: "x".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::IntLit(1, Span::new(14, 15)),
+                },
+                Stmt::Assign {
+                    span: Span::new(16, 22),
+                    name: "x".to_string(),
+                    value: Expr::IntLit(42, Span::new(20, 22)),
+                },
+            ],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn assign_to_undefined_variable_fails() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::Assign {
+                span: Span::new(0, 10),
+                name: "x".to_string(),
+                value: Expr::IntLit(42, Span::new(4, 6)),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_err());
+    }
+
+    #[test]
+    fn assign_type_mismatch_fails() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![
+                Stmt::Let {
+                    span: Span::new(0, 15),
+                    mutable: true,
+                    name: "x".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::IntLit(1, Span::new(14, 15)),
+                },
+                Stmt::Assign {
+                    span: Span::new(16, 30),
+                    name: "x".to_string(),
+                    value: Expr::BoolLit(true, Span::new(20, 24)),
+                },
+            ],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_err());
+    }
+
+    /// Helper to build a module with a specific trust policy.
+    fn make_module_with_policy(functions: Vec<Function>, policy: Option<&str>) -> Module {
+        let mut entries = vec![MetaEntry {
+            key: "purpose".to_string(),
+            value: "test".to_string(),
+            span: Span::new(10, 40),
+        }];
+        if let Some(p) = policy {
+            entries.push(MetaEntry {
+                key: "trust_policy".to_string(),
+                value: p.to_string(),
+                span: Span::new(10, 40),
+            });
+        }
+        Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries,
+            }),
+            functions,
+        }
+    }
+
+    /// Helper to build a function with annotations.
+    fn make_function_with_annotations(name: &str, annotations: Vec<Annotation>) -> Function {
+        Function {
+            id: NodeId(1),
+            span: Span::new(0, 100),
+            name: name.to_string(),
+            annotations,
+            params: vec![],
+            return_type: TypeExpr::Unit,
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span: Span::new(0, 100),
+                stmts: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn trust_policy_rejects_missing_authored_by() {
+        let func = make_function_with_annotations("foo", vec![]);
+        let module = make_module_with_policy(vec![func], Some("high_security"));
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err(), "should reject missing @authored_by");
+    }
+
+    #[test]
+    fn trust_policy_rejects_missing_confidence() {
+        let func = make_function_with_annotations(
+            "foo",
+            vec![Annotation {
+                name: "authored_by".to_string(),
+                args: vec![AnnotationArg::Named(
+                    "agent".to_string(),
+                    Expr::StringLit("claude".to_string(), Span::new(0, 10)),
+                )],
+                span: Span::new(0, 20),
+            }],
+        );
+        let module = make_module_with_policy(vec![func], Some("high_security"));
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err(), "should reject missing @confidence");
+    }
+
+    #[test]
+    fn trust_policy_rejects_low_confidence() {
+        let func = make_function_with_annotations(
+            "foo",
+            vec![
+                Annotation {
+                    name: "authored_by".to_string(),
+                    args: vec![AnnotationArg::Named(
+                        "agent".to_string(),
+                        Expr::StringLit("claude".to_string(), Span::new(0, 10)),
+                    )],
+                    span: Span::new(0, 20),
+                },
+                Annotation {
+                    name: "confidence".to_string(),
+                    args: vec![AnnotationArg::Positional(Expr::IntLit(
+                        50,
+                        Span::new(0, 10),
+                    ))],
+                    span: Span::new(0, 20),
+                },
+            ],
+        );
+        let module = make_module_with_policy(vec![func], Some("high_security"));
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_err(),
+            "should reject low confidence without @reviewed_by"
+        );
+    }
+
+    #[test]
+    fn trust_policy_accepts_reviewed() {
+        let func = make_function_with_annotations(
+            "foo",
+            vec![
+                Annotation {
+                    name: "authored_by".to_string(),
+                    args: vec![AnnotationArg::Named(
+                        "agent".to_string(),
+                        Expr::StringLit("claude".to_string(), Span::new(0, 10)),
+                    )],
+                    span: Span::new(0, 20),
+                },
+                Annotation {
+                    name: "confidence".to_string(),
+                    args: vec![AnnotationArg::Positional(Expr::IntLit(
+                        50,
+                        Span::new(0, 10),
+                    ))],
+                    span: Span::new(0, 20),
+                },
+                Annotation {
+                    name: "reviewed_by".to_string(),
+                    args: vec![AnnotationArg::Positional(Expr::StringLit(
+                        "human:alice".to_string(),
+                        Span::new(0, 10),
+                    ))],
+                    span: Span::new(0, 20),
+                },
+            ],
+        );
+        let module = make_module_with_policy(vec![func], Some("high_security"));
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "should accept low confidence with @reviewed_by human: {result:?}"
+        );
+    }
+
+    #[test]
+    fn no_policy_no_enforcement() {
+        let func = make_function_with_annotations("foo", vec![]);
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "without trust_policy, no annotation enforcement: {result:?}"
+        );
+    }
+
+    #[test]
+    fn type_error_span_method() {
+        let err = TypeError::Mismatch {
+            expected: "Int".to_string(),
+            found: "Bool".to_string(),
+            span: Span::new(5, 10),
+        };
+        assert_eq!(err.span(), Some(Span::new(5, 10)));
+
+        let err = TypeError::Undefined {
+            name: "x".to_string(),
+            span: Span::new(3, 4),
+        };
+        assert_eq!(err.span(), Some(Span::new(3, 4)));
     }
 }
