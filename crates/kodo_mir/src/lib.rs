@@ -158,6 +158,42 @@ pub enum Value {
     Not(Box<Value>),
     /// Arithmetic negation of a value.
     Neg(Box<Value>),
+    /// A struct literal value.
+    StructLit {
+        /// The struct type name.
+        name: String,
+        /// Field values in declaration order.
+        fields: Vec<(String, Value)>,
+    },
+    /// A field access on a struct value.
+    FieldGet {
+        /// The struct value being accessed.
+        object: Box<Value>,
+        /// The field name.
+        field: String,
+        /// The struct type name (needed for layout in codegen).
+        struct_name: String,
+    },
+    /// An enum variant construction: discriminant + payload values.
+    EnumVariant {
+        /// The enum type name.
+        enum_name: String,
+        /// The variant name.
+        variant: String,
+        /// The discriminant index.
+        discriminant: u8,
+        /// Payload values for this variant.
+        args: Vec<Value>,
+    },
+    /// Extract the discriminant from an enum value.
+    EnumDiscriminant(Box<Value>),
+    /// Extract a payload field from an enum value by variant and index.
+    EnumPayload {
+        /// The enum value.
+        value: Box<Value>,
+        /// The field index within the variant payload.
+        field_index: u32,
+    },
     /// The unit value.
     Unit,
 }

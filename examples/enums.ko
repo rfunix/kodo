@@ -1,0 +1,29 @@
+// Enums — tagged union types with pattern matching.
+//
+// Enums define a type with multiple variants, each optionally
+// carrying data. Match expressions destructure them.
+//
+// Compile and run:
+//   kodoc build examples/enums.ko -o enums
+//   ./enums
+
+module enums {
+    meta {
+        purpose: "Demonstrate enum types and match expressions",
+        version: "0.1.0"
+    }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int)
+    }
+
+    fn main() {
+        let c: Shape = Shape::Circle(42)
+        let result: Int = match c {
+            Shape::Circle(r) => r,
+            Shape::Rectangle(w, h) => w
+        }
+        print_int(result)
+    }
+}

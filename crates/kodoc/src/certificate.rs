@@ -309,6 +309,8 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: func_names
                 .iter()
                 .map(|name| Function {

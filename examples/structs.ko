@@ -1,0 +1,26 @@
+// Structs — user-defined aggregate types.
+//
+// Structs group related data into named fields.
+// Fields are accessed with dot notation.
+//
+// Compile and run:
+//   kodoc build examples/structs.ko -o structs
+//   ./structs
+
+module structs {
+    meta {
+        purpose: "Demonstrate struct types and field access",
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10, y: 20 }
+        print_int(p.x)
+        print_int(p.y)
+    }
+}

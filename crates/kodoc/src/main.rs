@@ -148,16 +148,54 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>, json_errors: bool
     // Build module metadata for embedding in the binary.
     let metadata_json = build_module_metadata(&module);
 
+    // Build struct definitions for codegen
+    let mut struct_defs = std::collections::HashMap::new();
+    for type_decl in &module.type_decls {
+        let fields: Vec<(String, kodo_types::Type)> = type_decl
+            .fields
+            .iter()
+            .filter_map(|f| {
+                kodo_types::resolve_type(&f.ty, f.span)
+                    .ok()
+                    .map(|t| (f.name.clone(), t))
+            })
+            .collect();
+        struct_defs.insert(type_decl.name.clone(), fields);
+    }
+
+    // Build enum definitions for codegen
+    let mut enum_defs = std::collections::HashMap::new();
+    for enum_decl in &module.enum_decls {
+        let variants: Vec<(String, Vec<kodo_types::Type>)> = enum_decl
+            .variants
+            .iter()
+            .map(|v| {
+                let field_types: Vec<kodo_types::Type> = v
+                    .fields
+                    .iter()
+                    .filter_map(|f| kodo_types::resolve_type(f, v.span).ok())
+                    .collect();
+                (v.name.clone(), field_types)
+            })
+            .collect();
+        enum_defs.insert(enum_decl.name.clone(), variants);
+    }
+
     // Code generation
     let options = kodo_codegen::CodegenOptions::default();
-    let object_bytes =
-        match kodo_codegen::compile_module(&mir_functions, &options, Some(&metadata_json)) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                eprintln!("codegen error: {e}");
-                return 1;
-            }
-        };
+    let object_bytes = match kodo_codegen::compile_module_with_types(
+        &mir_functions,
+        &struct_defs,
+        &enum_defs,
+        &options,
+        Some(&metadata_json),
+    ) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("codegen error: {e}");
+            return 1;
+        }
+    };
 
     // Determine output path
     let output_path = output

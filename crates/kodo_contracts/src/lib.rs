@@ -152,7 +152,10 @@ pub fn expr_span(expr: &Expr) -> Span {
         | Expr::UnaryOp { span, .. }
         | Expr::Call { span, .. }
         | Expr::If { span, .. }
-        | Expr::FieldAccess { span, .. } => *span,
+        | Expr::FieldAccess { span, .. }
+        | Expr::StructLit { span, .. }
+        | Expr::EnumVariantExpr { span, .. }
+        | Expr::Match { span, .. } => *span,
         Expr::Block(block) => block.span,
     }
 }
@@ -239,6 +242,24 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
         Expr::Block(block) => Err(ContractError::InvalidExpression {
             message: "block expressions are not allowed in contract expressions".to_string(),
             span: block.span,
+        }),
+
+        // Struct literals are not valid in contracts.
+        Expr::StructLit { span, .. } => Err(ContractError::InvalidExpression {
+            message: "struct literals are not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Enum variants are not valid in contracts.
+        Expr::EnumVariantExpr { span, .. } => Err(ContractError::InvalidExpression {
+            message: "enum variants are not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Match expressions are not valid in contracts.
+        Expr::Match { span, .. } => Err(ContractError::InvalidExpression {
+            message: "match expressions are not allowed in contract expressions".to_string(),
+            span: *span,
         }),
     }
 }

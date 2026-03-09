@@ -100,6 +100,82 @@ pub enum TypeError {
         /// Source location of the offending function.
         span: Span,
     },
+    /// A struct type was referenced but not defined.
+    #[error("unknown struct `{name}` at {span:?}")]
+    UnknownStruct {
+        /// The struct name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A required field is missing from a struct literal.
+    #[error("missing field `{field}` in struct `{struct_name}` at {span:?}")]
+    MissingStructField {
+        /// The missing field name.
+        field: String,
+        /// The struct type name.
+        struct_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// An extra field was provided in a struct literal.
+    #[error("unknown field `{field}` in struct `{struct_name}` at {span:?}")]
+    ExtraStructField {
+        /// The extra field name.
+        field: String,
+        /// The struct type name.
+        struct_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A field was specified more than once in a struct literal.
+    #[error("duplicate field `{field}` in struct `{struct_name}` at {span:?}")]
+    DuplicateStructField {
+        /// The duplicate field name.
+        field: String,
+        /// The struct type name.
+        struct_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A field access was attempted on a non-existent field.
+    #[error("no field `{field}` on type `{type_name}` at {span:?}")]
+    NoSuchField {
+        /// The field name.
+        field: String,
+        /// The type name.
+        type_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// An enum type was referenced but not defined.
+    #[error("unknown enum `{name}` at {span:?}")]
+    UnknownEnum {
+        /// The enum name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A variant was referenced that does not exist in the enum.
+    #[error("unknown variant `{variant}` in enum `{enum_name}` at {span:?}")]
+    UnknownVariant {
+        /// The variant name.
+        variant: String,
+        /// The enum type name.
+        enum_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A match expression does not cover all variants of an enum.
+    #[error("non-exhaustive match on `{enum_name}`: missing variants {missing:?} at {span:?}")]
+    NonExhaustiveMatch {
+        /// The enum type name.
+        enum_name: String,
+        /// The variants not covered by any arm.
+        missing: Vec<String>,
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -113,7 +189,15 @@ impl TypeError {
             | Self::NotCallable { span, .. }
             | Self::EmptyPurpose { span, .. }
             | Self::MissingPurpose { span, .. }
-            | Self::PolicyViolation { span, .. } => Some(*span),
+            | Self::PolicyViolation { span, .. }
+            | Self::UnknownStruct { span, .. }
+            | Self::MissingStructField { span, .. }
+            | Self::ExtraStructField { span, .. }
+            | Self::DuplicateStructField { span, .. }
+            | Self::NoSuchField { span, .. }
+            | Self::UnknownEnum { span, .. }
+            | Self::UnknownVariant { span, .. }
+            | Self::NonExhaustiveMatch { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -129,6 +213,14 @@ impl TypeError {
             Self::MissingMeta => "E0210",
             Self::EmptyPurpose { .. } => "E0211",
             Self::MissingPurpose { .. } => "E0212",
+            Self::UnknownStruct { .. } => "E0213",
+            Self::MissingStructField { .. } => "E0214",
+            Self::ExtraStructField { .. } => "E0215",
+            Self::DuplicateStructField { .. } => "E0216",
+            Self::NoSuchField { .. } => "E0217",
+            Self::UnknownEnum { .. } => "E0218",
+            Self::UnknownVariant { .. } => "E0219",
+            Self::NonExhaustiveMatch { .. } => "E0220",
             Self::PolicyViolation { .. } => "E0350",
         }
     }
@@ -321,11 +413,28 @@ impl TypeEnv {
 
 /// Resolves an AST type expression to a concrete [`Type`].
 ///
+/// This is a convenience wrapper around [`resolve_type_with_enums`] that
+/// treats all unknown named types as structs.
+///
 /// # Errors
 ///
 /// Returns [`TypeError::Undefined`] if the type name is not recognized.
-#[allow(clippy::only_used_in_recursion)]
 pub fn resolve_type(type_expr: &kodo_ast::TypeExpr, span: Span) -> Result<Type> {
+    resolve_type_with_enums(type_expr, span, &std::collections::HashSet::new())
+}
+
+/// Resolves an AST type expression to a concrete [`Type`], distinguishing
+/// enum types from struct types using the provided set of known enum names.
+///
+/// # Errors
+///
+/// Returns [`TypeError::Undefined`] if the type name is not recognized.
+#[allow(clippy::only_used_in_recursion, clippy::implicit_hasher)]
+pub fn resolve_type_with_enums(
+    type_expr: &kodo_ast::TypeExpr,
+    span: Span,
+    enum_names: &std::collections::HashSet<std::string::String>,
+) -> Result<Type> {
     match type_expr {
         kodo_ast::TypeExpr::Named(name) => match name.as_str() {
             "Int" => Ok(Type::Int),
@@ -343,18 +452,28 @@ pub fn resolve_type(type_expr: &kodo_ast::TypeExpr, span: Span) -> Result<Type> 
             "Bool" => Ok(Type::Bool),
             "String" => Ok(Type::String),
             "Byte" => Ok(Type::Byte),
-            _ => Ok(Type::Struct(name.clone())),
+            _ => {
+                if enum_names.contains(name) {
+                    Ok(Type::Enum(name.clone()))
+                } else {
+                    Ok(Type::Struct(name.clone()))
+                }
+            }
         },
         kodo_ast::TypeExpr::Unit => Ok(Type::Unit),
         kodo_ast::TypeExpr::Generic(name, args) => {
-            let resolved: std::result::Result<Vec<_>, _> =
-                args.iter().map(|a| resolve_type(a, span)).collect();
+            let resolved: std::result::Result<Vec<_>, _> = args
+                .iter()
+                .map(|a| resolve_type_with_enums(a, span, enum_names))
+                .collect();
             Ok(Type::Generic(name.clone(), resolved?))
         }
         kodo_ast::TypeExpr::Function(params, ret) => {
-            let resolved_params: std::result::Result<Vec<_>, _> =
-                params.iter().map(|p| resolve_type(p, span)).collect();
-            let resolved_ret = resolve_type(ret, span)?;
+            let resolved_params: std::result::Result<Vec<_>, _> = params
+                .iter()
+                .map(|p| resolve_type_with_enums(p, span, enum_names))
+                .collect();
+            let resolved_ret = resolve_type_with_enums(ret, span, enum_names)?;
             Ok(Type::Function(resolved_params?, Box::new(resolved_ret)))
         }
     }
@@ -371,7 +490,10 @@ fn expr_span(expr: &Expr) -> Span {
         | Expr::UnaryOp { span, .. }
         | Expr::Call { span, .. }
         | Expr::If { span, .. }
-        | Expr::FieldAccess { span, .. } => *span,
+        | Expr::FieldAccess { span, .. }
+        | Expr::StructLit { span, .. }
+        | Expr::EnumVariantExpr { span, .. }
+        | Expr::Match { span, .. } => *span,
         Expr::Block(block) => block.span,
     }
 }
@@ -396,6 +518,15 @@ pub struct TypeChecker {
     env: TypeEnv,
     /// The expected return type of the current function being checked.
     current_return_type: Type,
+    /// Registry of struct types: name to list of (field name, field type) pairs.
+    struct_registry:
+        std::collections::HashMap<std::string::String, Vec<(std::string::String, Type)>>,
+    /// Registry of enum types: name to list of (variant name, field types) pairs.
+    enum_registry:
+        std::collections::HashMap<std::string::String, Vec<(std::string::String, Vec<Type>)>>,
+    /// Set of known enum type names, used to distinguish enums from structs
+    /// during type resolution.
+    enum_names: std::collections::HashSet<std::string::String>,
 }
 
 impl TypeChecker {
@@ -407,6 +538,9 @@ impl TypeChecker {
         let mut checker = Self {
             env: TypeEnv::new(),
             current_return_type: Type::Unit,
+            struct_registry: std::collections::HashMap::new(),
+            enum_registry: std::collections::HashMap::new(),
+            enum_names: std::collections::HashSet::new(),
         };
         checker.register_builtins();
         checker
@@ -458,15 +592,40 @@ impl TypeChecker {
             }
         }
 
+        // Register struct types.
+        for type_decl in &module.type_decls {
+            let mut fields = Vec::new();
+            for field in &type_decl.fields {
+                let ty = resolve_type(&field.ty, field.span)?;
+                fields.push((field.name.clone(), ty));
+            }
+            self.struct_registry.insert(type_decl.name.clone(), fields);
+        }
+
+        // Register enum types.
+        for enum_decl in &module.enum_decls {
+            self.enum_names.insert(enum_decl.name.clone());
+            let mut variants = Vec::new();
+            for variant in &enum_decl.variants {
+                let field_types: std::result::Result<Vec<_>, _> = variant
+                    .fields
+                    .iter()
+                    .map(|f| resolve_type(f, variant.span))
+                    .collect();
+                variants.push((variant.name.clone(), field_types?));
+            }
+            self.enum_registry.insert(enum_decl.name.clone(), variants);
+        }
+
         // First pass: register all function signatures so they can call each other.
         for func in &module.functions {
             let param_types: std::result::Result<Vec<_>, _> = func
                 .params
                 .iter()
-                .map(|p| resolve_type(&p.ty, p.span))
+                .map(|p| resolve_type_with_enums(&p.ty, p.span, &self.enum_names))
                 .collect();
             let param_types = param_types?;
-            let ret_type = resolve_type(&func.return_type, func.span)?;
+            let ret_type = resolve_type_with_enums(&func.return_type, func.span, &self.enum_names)?;
             self.env.insert(
                 func.name.clone(),
                 Type::Function(param_types, Box::new(ret_type)),
@@ -592,13 +751,13 @@ impl TypeChecker {
     /// declared return type.
     pub fn check_function(&mut self, func: &Function) -> Result<()> {
         let scope = self.env.scope_level();
-        let ret_type = resolve_type(&func.return_type, func.span)?;
+        let ret_type = resolve_type_with_enums(&func.return_type, func.span, &self.enum_names)?;
         let prev_return_type = self.current_return_type.clone();
         self.current_return_type = ret_type.clone();
 
         // Bind parameters in the function scope.
         for param in &func.params {
-            let ty = resolve_type(&param.ty, param.span)?;
+            let ty = resolve_type_with_enums(&param.ty, param.span, &self.enum_names)?;
             self.env.insert(param.name.clone(), ty);
         }
 
@@ -647,7 +806,7 @@ impl TypeChecker {
             } => {
                 let value_ty = self.infer_expr(value)?;
                 if let Some(annotation) = ty {
-                    let expected = resolve_type(annotation, *span)?;
+                    let expected = resolve_type_with_enums(annotation, *span, &self.enum_names)?;
                     TypeEnv::check_eq(&expected, &value_ty, *span)?;
                     self.env.insert(name.clone(), expected);
                 } else {
@@ -708,7 +867,8 @@ impl TypeChecker {
     /// # Errors
     ///
     /// Returns a [`TypeError`] if the expression is ill-typed.
-    pub fn infer_expr(&self, expr: &Expr) -> Result<Type> {
+    #[allow(clippy::too_many_lines)]
+    pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
         match expr {
             Expr::IntLit(_, _) => Ok(Type::Int),
             Expr::StringLit(_, _) => Ok(Type::String),
@@ -742,11 +902,220 @@ impl TypeChecker {
                 span,
             } => self.check_if(condition, then_branch, else_branch.as_ref(), *span),
 
-            Expr::FieldAccess { object, .. } => {
-                // Check the object expression for errors, but return Unknown
-                // since struct field resolution is deferred to a later phase.
-                self.infer_expr(object)?;
-                Ok(Type::Unknown)
+            Expr::FieldAccess {
+                object,
+                field,
+                span,
+            } => {
+                let obj_ty = self.infer_expr(object)?;
+                match &obj_ty {
+                    Type::Struct(name) => {
+                        let fields = self.struct_registry.get(name).ok_or_else(|| {
+                            TypeError::UnknownStruct {
+                                name: name.clone(),
+                                span: *span,
+                            }
+                        })?;
+                        let field_ty = fields
+                            .iter()
+                            .find(|(n, _)| n == field)
+                            .map(|(_, t)| t.clone());
+                        field_ty.ok_or_else(|| TypeError::NoSuchField {
+                            field: field.clone(),
+                            type_name: name.clone(),
+                            span: *span,
+                        })
+                    }
+                    _ => {
+                        // Non-struct field access — return Unknown for forward compat.
+                        Ok(Type::Unknown)
+                    }
+                }
+            }
+
+            Expr::StructLit { name, fields, span } => {
+                let expected_fields = self.struct_registry.get(name).cloned().ok_or_else(|| {
+                    TypeError::UnknownStruct {
+                        name: name.clone(),
+                        span: *span,
+                    }
+                })?;
+
+                // Check for duplicate fields.
+                let mut seen = std::collections::HashSet::new();
+                for field in fields {
+                    if !seen.insert(field.name.clone()) {
+                        return Err(TypeError::DuplicateStructField {
+                            field: field.name.clone(),
+                            struct_name: name.clone(),
+                            span: field.span,
+                        });
+                    }
+                }
+
+                // Check for extra fields.
+                for field in fields {
+                    if !expected_fields.iter().any(|(n, _)| n == &field.name) {
+                        return Err(TypeError::ExtraStructField {
+                            field: field.name.clone(),
+                            struct_name: name.clone(),
+                            span: field.span,
+                        });
+                    }
+                }
+
+                // Check for missing fields.
+                for (expected_name, _) in &expected_fields {
+                    if !fields.iter().any(|f| &f.name == expected_name) {
+                        return Err(TypeError::MissingStructField {
+                            field: expected_name.clone(),
+                            struct_name: name.clone(),
+                            span: *span,
+                        });
+                    }
+                }
+
+                // Check field types.
+                for field in fields {
+                    let value_ty = self.infer_expr(&field.value)?;
+                    let expected_ty = expected_fields
+                        .iter()
+                        .find(|(n, _)| n == &field.name)
+                        .map(|(_, t)| t);
+                    if let Some(expected) = expected_ty {
+                        TypeEnv::check_eq(expected, &value_ty, field.span)?;
+                    }
+                }
+
+                Ok(Type::Struct(name.clone()))
+            }
+
+            Expr::EnumVariantExpr {
+                enum_name,
+                variant,
+                args,
+                span,
+            } => {
+                let variants =
+                    self.enum_registry
+                        .get(enum_name)
+                        .ok_or_else(|| TypeError::UnknownEnum {
+                            name: enum_name.clone(),
+                            span: *span,
+                        })?;
+                let variant_def = variants.iter().find(|(n, _)| n == variant).ok_or_else(|| {
+                    TypeError::UnknownVariant {
+                        variant: variant.clone(),
+                        enum_name: enum_name.clone(),
+                        span: *span,
+                    }
+                })?;
+                let expected_field_types = variant_def.1.clone();
+                if args.len() != expected_field_types.len() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: expected_field_types.len(),
+                        found: args.len(),
+                        span: *span,
+                    });
+                }
+                for (arg, expected_ty) in args.iter().zip(&expected_field_types) {
+                    let arg_ty = self.infer_expr(arg)?;
+                    TypeEnv::check_eq(expected_ty, &arg_ty, expr_span(arg))?;
+                }
+                Ok(Type::Enum(enum_name.clone()))
+            }
+
+            Expr::Match { expr, arms, span } => {
+                let matched_ty = self.infer_expr(expr)?;
+
+                if arms.is_empty() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: 1,
+                        found: 0,
+                        span: *span,
+                    });
+                }
+
+                let mut result_ty = None;
+                let mut has_wildcard = false;
+                let mut covered_variants: Vec<std::string::String> = Vec::new();
+
+                for arm in arms {
+                    let scope = self.env.scope_level();
+
+                    match &arm.pattern {
+                        kodo_ast::Pattern::Variant {
+                            enum_name,
+                            variant,
+                            bindings,
+                            ..
+                        } => {
+                            // Resolve the enum name from the pattern, or infer
+                            // from the matched expression's type.
+                            let resolved_enum =
+                                enum_name
+                                    .as_ref()
+                                    .or(if let Type::Enum(name) = &matched_ty {
+                                        Some(name)
+                                    } else {
+                                        None
+                                    });
+                            // Clone field types out of the registry to release the
+                            // immutable borrow before we mutate `self.env`.
+                            let field_types_opt = resolved_enum.and_then(|ename| {
+                                self.enum_registry.get(ename).and_then(|variants| {
+                                    variants
+                                        .iter()
+                                        .find(|(n, _)| n == variant)
+                                        .map(|(_, ft)| ft.clone())
+                                })
+                            });
+                            if let Some(field_types) = field_types_opt {
+                                for (binding, ty) in bindings.iter().zip(&field_types) {
+                                    self.env.insert(binding.clone(), ty.clone());
+                                }
+                                covered_variants.push(variant.clone());
+                            }
+                        }
+                        kodo_ast::Pattern::Wildcard(_) => {
+                            has_wildcard = true;
+                        }
+                        kodo_ast::Pattern::Literal(lit_expr) => {
+                            self.infer_expr(lit_expr)?;
+                        }
+                    }
+
+                    let arm_ty = self.infer_expr(&arm.body)?;
+                    self.env.truncate(scope);
+
+                    if let Some(ref expected) = result_ty {
+                        TypeEnv::check_eq(expected, &arm_ty, arm.span)?;
+                    } else {
+                        result_ty = Some(arm_ty);
+                    }
+                }
+
+                // Exhaustiveness check for enum types.
+                if let Type::Enum(enum_name) = &matched_ty {
+                    if !has_wildcard {
+                        if let Some(all_variants) = self.enum_registry.get(enum_name) {
+                            let missing: Vec<std::string::String> = all_variants
+                                .iter()
+                                .filter(|(name, _)| !covered_variants.contains(name))
+                                .map(|(name, _)| name.clone())
+                                .collect();
+                            if !missing.is_empty() {
+                                return Err(TypeError::NonExhaustiveMatch {
+                                    enum_name: enum_name.clone(),
+                                    missing,
+                                    span: *span,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                Ok(result_ty.unwrap_or(Type::Unit))
             }
 
             Expr::Block(block) => self.infer_block(block),
@@ -757,7 +1126,7 @@ impl TypeChecker {
     ///
     /// The type is determined by the last statement: if it is an `Expr`
     /// statement, its type is the block's type; otherwise the block is `Unit`.
-    fn infer_block(&self, block: &Block) -> Result<Type> {
+    fn infer_block(&mut self, block: &Block) -> Result<Type> {
         let mut last_ty = Type::Unit;
         for stmt in &block.stmts {
             match stmt {
@@ -793,7 +1162,13 @@ impl TypeChecker {
     /// (`==`, `!=`, `<`, `>`, `<=`, `>=`) require matching numeric operands
     /// and return `Bool`. Logical operators (`&&`, `||`) require `Bool`
     /// operands and return `Bool`.
-    fn check_binary_op(&self, left: &Expr, op: BinOp, right: &Expr, span: Span) -> Result<Type> {
+    fn check_binary_op(
+        &mut self,
+        left: &Expr,
+        op: BinOp,
+        right: &Expr,
+        span: Span,
+    ) -> Result<Type> {
         let left_ty = self.infer_expr(left)?;
         let right_ty = self.infer_expr(right)?;
 
@@ -835,7 +1210,7 @@ impl TypeChecker {
     /// Checks a unary operation and returns the result type.
     ///
     /// `Neg` requires a numeric operand; `Not` requires `Bool`.
-    fn check_unary_op(&self, op: UnaryOp, operand: &Expr, span: Span) -> Result<Type> {
+    fn check_unary_op(&mut self, op: UnaryOp, operand: &Expr, span: Span) -> Result<Type> {
         let operand_ty = self.infer_expr(operand)?;
         match op {
             UnaryOp::Neg => {
@@ -859,7 +1234,7 @@ impl TypeChecker {
     ///
     /// Verifies the callee is a function type, the argument count matches,
     /// and each argument type matches the corresponding parameter type.
-    fn check_call(&self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
+    fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
         let callee_ty = self.infer_expr(callee)?;
         match callee_ty {
             Type::Function(param_types, ret_type) => {
@@ -889,7 +1264,7 @@ impl TypeChecker {
     /// must have the same type (which becomes the type of the if-expression).
     /// Without an else branch, the then-branch is checked and the result is `Unit`.
     fn check_if(
-        &self,
+        &mut self,
         condition: &Expr,
         then_branch: &Block,
         else_branch: Option<&Block>,
@@ -990,6 +1365,8 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_decls: vec![],
+            enum_decls: vec![],
             functions,
         }
     }
@@ -1689,6 +2066,8 @@ mod tests {
                 span: Span::new(0, 50),
                 entries,
             }),
+            type_decls: vec![],
+            enum_decls: vec![],
             functions,
         }
     }

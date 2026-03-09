@@ -174,6 +174,12 @@ pub enum TokenKind {
     /// `->`
     #[token("->")]
     Arrow,
+    /// `::`
+    #[token("::")]
+    ColonColon,
+    /// `=>`
+    #[token("=>")]
+    FatArrow,
 
     // --- Delimiters ---
     /// `(`

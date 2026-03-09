@@ -130,8 +130,102 @@ pub struct Module {
     pub name: String,
     /// Module metadata block.
     pub meta: Option<Meta>,
+    /// User-defined struct type declarations.
+    pub type_decls: Vec<TypeDecl>,
+    /// User-defined enum type declarations.
+    pub enum_decls: Vec<EnumDecl>,
     /// Functions defined in this module.
     pub functions: Vec<Function>,
+}
+
+/// A user-defined struct type declaration: `struct Name { field: Type, ... }`
+#[derive(Debug, Clone)]
+pub struct TypeDecl {
+    /// Unique identifier for this node.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// The struct name.
+    pub name: String,
+    /// Fields of the struct.
+    pub fields: Vec<FieldDef>,
+}
+
+/// A field definition within a struct declaration.
+#[derive(Debug, Clone)]
+pub struct FieldDef {
+    /// The field name.
+    pub name: String,
+    /// The field type annotation.
+    pub ty: TypeExpr,
+    /// Source span.
+    pub span: Span,
+}
+
+/// A field initializer in a struct literal: `name: value`.
+#[derive(Debug, Clone)]
+pub struct FieldInit {
+    /// The field name.
+    pub name: String,
+    /// The value expression.
+    pub value: Expr,
+    /// Source span.
+    pub span: Span,
+}
+
+/// A user-defined enum type declaration: `enum Name { Variant1, Variant2(Type) }`
+#[derive(Debug, Clone)]
+pub struct EnumDecl {
+    /// Unique identifier for this node.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// The enum name.
+    pub name: String,
+    /// Variants of the enum.
+    pub variants: Vec<EnumVariant>,
+}
+
+/// A variant within an enum declaration.
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    /// The variant name.
+    pub name: String,
+    /// Positional field types (empty for unit variants).
+    pub fields: Vec<TypeExpr>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// A match arm: `pattern => body`.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// The pattern to match against.
+    pub pattern: Pattern,
+    /// The body expression.
+    pub body: Expr,
+    /// Source span.
+    pub span: Span,
+}
+
+/// A pattern in a match expression.
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// A variant pattern: `EnumName::Variant(a, b)`.
+    Variant {
+        /// The enum type name (optional, may be inferred).
+        enum_name: Option<String>,
+        /// The variant name.
+        variant: String,
+        /// Bound variable names.
+        bindings: Vec<String>,
+        /// Source span.
+        span: Span,
+    },
+    /// A wildcard pattern: `_`.
+    Wildcard(Span),
+    /// A literal pattern.
+    Literal(Expr),
 }
 
 /// Metadata block declared with the `meta` keyword.
@@ -337,6 +431,35 @@ pub enum Expr {
         object: Box<Expr>,
         /// The field name.
         field: String,
+        /// Source span.
+        span: Span,
+    },
+    /// Struct literal: `Point { x: 1, y: 2 }`
+    StructLit {
+        /// The struct type name.
+        name: String,
+        /// Field initializers.
+        fields: Vec<FieldInit>,
+        /// Source span.
+        span: Span,
+    },
+    /// Enum variant construction: `Color::Red` or `Option::Some(42)`
+    EnumVariantExpr {
+        /// The enum type name.
+        enum_name: String,
+        /// The variant name.
+        variant: String,
+        /// Arguments (empty for unit variants).
+        args: Vec<Expr>,
+        /// Source span.
+        span: Span,
+    },
+    /// Match expression: `match expr { arms }`
+    Match {
+        /// The expression being matched.
+        expr: Box<Expr>,
+        /// The match arms.
+        arms: Vec<MatchArm>,
         /// Source span.
         span: Span,
     },

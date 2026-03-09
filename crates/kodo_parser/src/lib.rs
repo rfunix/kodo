@@ -39,8 +39,9 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    Annotation, AnnotationArg, BinOp, Block, Expr, Function, Meta, MetaEntry, Module, NodeIdGen,
-    Param, Span, Stmt, TypeExpr, UnaryOp,
+    Annotation, AnnotationArg, BinOp, Block, EnumDecl, EnumVariant, Expr, FieldDef, FieldInit,
+    Function, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Param, Pattern, Span, Stmt, TypeDecl,
+    TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -179,10 +180,22 @@ impl Parser {
             None
         };
 
-        // Parse functions (with optional leading annotations)
+        // Parse type declarations and functions (with optional leading annotations)
+        let mut type_decls = Vec::new();
+        let mut enum_decls = Vec::new();
         let mut functions = Vec::new();
-        while self.check(&TokenKind::Fn) || self.check(&TokenKind::At) {
-            functions.push(self.parse_annotated_function()?);
+        while self.check(&TokenKind::Fn)
+            || self.check(&TokenKind::At)
+            || self.check(&TokenKind::Struct)
+            || self.check(&TokenKind::Enum)
+        {
+            if self.check(&TokenKind::Struct) {
+                type_decls.push(self.parse_struct_decl()?);
+            } else if self.check(&TokenKind::Enum) {
+                enum_decls.push(self.parse_enum_decl()?);
+            } else {
+                functions.push(self.parse_annotated_function()?);
+            }
         }
 
         let end_token = self.expect(&TokenKind::RBrace)?;
@@ -193,6 +206,8 @@ impl Parser {
             span,
             name,
             meta,
+            type_decls,
+            enum_decls,
             functions,
         })
     }
@@ -372,6 +387,232 @@ impl Parser {
             ensures,
             body,
         })
+    }
+
+    /// Parses a struct declaration: `struct Name { field: Type, ... }`
+    fn parse_struct_decl(&mut self) -> Result<TypeDecl> {
+        let start = self.expect(&TokenKind::Struct)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let field_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let field_name = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let ty = self.parse_type()?;
+            let field_end = self.prev_span();
+            fields.push(FieldDef {
+                name: field_name,
+                ty,
+                span: field_start.merge(field_end),
+            });
+
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+
+        Ok(TypeDecl {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            fields,
+        })
+    }
+
+    /// Parses an enum declaration: `enum Name { Variant1, Variant2(Type, ...) }`
+    fn parse_enum_decl(&mut self) -> Result<EnumDecl> {
+        let start = self.expect(&TokenKind::Enum)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut variants = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let var_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let var_name = self.parse_ident()?;
+
+            // Optional positional fields: Variant(Type, Type)
+            let fields = if self.check(&TokenKind::LParen) {
+                self.advance();
+                let mut field_types = Vec::new();
+                while !self.check(&TokenKind::RParen) {
+                    if !field_types.is_empty() {
+                        self.expect(&TokenKind::Comma)?;
+                    }
+                    field_types.push(self.parse_type()?);
+                }
+                self.expect(&TokenKind::RParen)?;
+                field_types
+            } else {
+                vec![]
+            };
+
+            let var_end = self.prev_span();
+            variants.push(EnumVariant {
+                name: var_name,
+                fields,
+                span: var_start.merge(var_end),
+            });
+
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+
+        Ok(EnumDecl {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            variants,
+        })
+    }
+
+    /// Parses a struct literal after the name has been consumed:
+    /// `{ field: expr, ... }`
+    fn parse_struct_literal(&mut self, name: String, start_span: Span) -> Result<Expr> {
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let field_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let field_name = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let value = self.parse_expr()?;
+            let field_end = Self::expr_span(&value);
+            fields.push(FieldInit {
+                name: field_name,
+                value,
+                span: field_start.merge(field_end),
+            });
+
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+
+        Ok(Expr::StructLit {
+            name,
+            fields,
+            span: start_span.merge(end),
+        })
+    }
+
+    /// Parses a match expression: `match expr { pattern => expr, ... }`
+    fn parse_match_expr(&mut self) -> Result<Expr> {
+        let start = self.expect(&TokenKind::Match)?.span;
+        let matched_expr = self.parse_expr()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let arm_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let pattern = self.parse_pattern()?;
+            self.expect(&TokenKind::FatArrow)?;
+            let body = self.parse_expr()?;
+            let arm_end = Self::expr_span(&body);
+            arms.push(MatchArm {
+                pattern,
+                body,
+                span: arm_start.merge(arm_end),
+            });
+
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+
+        Ok(Expr::Match {
+            expr: Box::new(matched_expr),
+            arms,
+            span: start.merge(end),
+        })
+    }
+
+    /// Parses a pattern in a match arm.
+    fn parse_pattern(&mut self) -> Result<Pattern> {
+        // Wildcard: `_`
+        if let Some(TokenKind::Ident(name)) = self.peek_kind().cloned() {
+            if name == "_" {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                return Ok(Pattern::Wildcard(span));
+            }
+        }
+
+        // Literal patterns
+        if let Some(
+            TokenKind::IntLit(_) | TokenKind::StringLit(_) | TokenKind::True | TokenKind::False,
+        ) = self.peek_kind().cloned()
+        {
+            let expr = self.parse_primary_expr()?;
+            return Ok(Pattern::Literal(expr));
+        }
+
+        // Variant pattern: Name::Variant(bindings) or just Name
+        let start_span = self.peek().map_or(Span::new(0, 0), |t| t.span);
+        let first_name = self.parse_ident()?;
+
+        if self.check(&TokenKind::ColonColon) {
+            self.advance();
+            let variant = self.parse_ident()?;
+            let mut bindings = Vec::new();
+            if self.check(&TokenKind::LParen) {
+                self.advance();
+                while !self.check(&TokenKind::RParen) {
+                    if !bindings.is_empty() {
+                        self.expect(&TokenKind::Comma)?;
+                    }
+                    bindings.push(self.parse_ident()?);
+                }
+                self.expect(&TokenKind::RParen)?;
+            }
+            let end = self.prev_span();
+            Ok(Pattern::Variant {
+                enum_name: Some(first_name),
+                variant,
+                bindings,
+                span: start_span.merge(end),
+            })
+        } else {
+            // Could be a unit variant without enum prefix
+            let end = self.prev_span();
+            Ok(Pattern::Variant {
+                enum_name: None,
+                variant: first_name,
+                bindings: vec![],
+                span: start_span.merge(end),
+            })
+        }
+    }
+
+    /// Checks if the current position looks like a struct literal start:
+    /// `{ Ident : ...` (as opposed to a block `{ stmt; ... }`)
+    fn is_struct_literal_start(&self) -> bool {
+        // Current token should be `{`, look at pos+1 for Ident and pos+2 for `:`
+        if !self.check(&TokenKind::LBrace) {
+            return false;
+        }
+        let has_ident = self
+            .tokens
+            .get(self.pos + 1)
+            .is_some_and(|t| matches!(&t.kind, TokenKind::Ident(_)));
+        let has_colon = self
+            .tokens
+            .get(self.pos + 2)
+            .is_some_and(|t| t.kind == TokenKind::Colon);
+        has_ident && has_colon
     }
 
     /// Parses a block: `{ statement* }`.
@@ -792,9 +1033,37 @@ impl Parser {
             }
             Some(TokenKind::Ident(name)) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                // Check for enum variant: Name::Variant(args)
+                if self.check(&TokenKind::ColonColon) {
+                    self.advance();
+                    let variant = self.parse_ident()?;
+                    let mut args = Vec::new();
+                    if self.check(&TokenKind::LParen) {
+                        self.advance();
+                        while !self.check(&TokenKind::RParen) {
+                            if !args.is_empty() {
+                                self.expect(&TokenKind::Comma)?;
+                            }
+                            args.push(self.parse_expr()?);
+                        }
+                        self.expect(&TokenKind::RParen)?;
+                    }
+                    let end = self.prev_span();
+                    return Ok(Expr::EnumVariantExpr {
+                        enum_name: name,
+                        variant,
+                        args,
+                        span: span.merge(end),
+                    });
+                }
+                // Check for struct literal: Name { field: expr, ... }
+                if self.is_struct_literal_start() {
+                    return self.parse_struct_literal(name, span);
+                }
                 Ok(Expr::Ident(name, span))
             }
             Some(TokenKind::If) => self.parse_if_expr(),
+            Some(TokenKind::Match) => self.parse_match_expr(),
             Some(TokenKind::LBrace) => {
                 let block = self.parse_block()?;
                 Ok(Expr::Block(block))
@@ -893,7 +1162,10 @@ impl Parser {
             | Expr::UnaryOp { span, .. }
             | Expr::Call { span, .. }
             | Expr::If { span, .. }
-            | Expr::FieldAccess { span, .. } => *span,
+            | Expr::FieldAccess { span, .. }
+            | Expr::StructLit { span, .. }
+            | Expr::EnumVariantExpr { span, .. }
+            | Expr::Match { span, .. } => *span,
             Expr::Block(block) => block.span,
         }
     }

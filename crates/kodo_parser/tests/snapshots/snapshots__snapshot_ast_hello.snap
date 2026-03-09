@@ -48,6 +48,8 @@ Module {
             ],
         },
     ),
+    type_decls: [],
+    enum_decls: [],
     functions: [
         Function {
             id: NodeId(

@@ -46,6 +46,12 @@ pub struct MirBuilder {
     next_block: u32,
     /// Maps variable names to their [`LocalId`].
     name_map: HashMap<String, LocalId>,
+    /// Maps local IDs to their types (for struct field access resolution).
+    local_types: HashMap<LocalId, kodo_types::Type>,
+    /// Registry of struct types: name to field list in declaration order.
+    struct_registry: HashMap<String, Vec<(String, kodo_types::Type)>>,
+    /// Registry of enum types: name to variant definitions.
+    enum_registry: HashMap<String, Vec<(String, Vec<kodo_types::Type>)>>,
     /// Ensures expressions to inject before each return.
     ensures: Vec<kodo_ast::Expr>,
     /// The name of the function being built (for error messages).
@@ -63,6 +69,9 @@ impl MirBuilder {
             next_local: 0,
             next_block: 1, // 0 is the entry block
             name_map: HashMap::new(),
+            local_types: HashMap::new(),
+            struct_registry: HashMap::new(),
+            enum_registry: HashMap::new(),
             ensures: Vec::new(),
             fn_name: String::new(),
         }
@@ -72,6 +81,7 @@ impl MirBuilder {
     fn alloc_local(&mut self, ty: Type, mutable: bool) -> LocalId {
         let id = LocalId(self.next_local);
         self.next_local += 1;
+        self.local_types.insert(id, ty.clone());
         self.locals.push(Local { id, ty, mutable });
         id
     }
@@ -267,6 +277,7 @@ impl MirBuilder {
     ///
     /// Compound expressions (calls, if/else) may emit instructions and
     /// create new basic blocks as a side effect.
+    #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expr: &Expr) -> Result<Value> {
         match expr {
             Expr::IntLit(n, _) => Ok(Value::IntConst(*n)),
@@ -355,9 +366,202 @@ impl MirBuilder {
                 Ok(Value::Local(then_result))
             }
             Expr::Block(block) => self.lower_block(block),
-            Expr::FieldAccess { .. } => {
-                // Stub: field access is not yet implemented.
-                Ok(Value::Unit)
+            Expr::FieldAccess { object, field, .. } => {
+                let obj_val = self.lower_expr(object)?;
+                // Resolve struct name from the object's type.
+                let struct_name = match object.as_ref() {
+                    Expr::Ident(name, _) => {
+                        let local_id = self
+                            .name_map
+                            .get(name)
+                            .copied()
+                            .ok_or_else(|| MirError::UndefinedVariable(name.clone()))?;
+                        match self.local_types.get(&local_id) {
+                            Some(Type::Struct(s)) => s.clone(),
+                            _ => return Ok(Value::Unit),
+                        }
+                    }
+                    _ => return Ok(Value::Unit),
+                };
+                let local_id = self.alloc_local(Type::Unknown, false);
+                self.emit(Instruction::Assign(
+                    local_id,
+                    Value::FieldGet {
+                        object: Box::new(obj_val),
+                        field: field.clone(),
+                        struct_name,
+                    },
+                ));
+                Ok(Value::Local(local_id))
+            }
+            Expr::StructLit { name, fields, .. } => {
+                // Reorder fields to match declaration order.
+                let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
+                let mut ordered_fields = Vec::with_capacity(fields.len());
+                for (decl_name, _) in &decl_fields {
+                    if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
+                        let val = self.lower_expr(&init.value)?;
+                        ordered_fields.push((decl_name.clone(), val));
+                    }
+                }
+                let local_id = self.alloc_local(Type::Struct(name.clone()), false);
+                self.emit(Instruction::Assign(
+                    local_id,
+                    Value::StructLit {
+                        name: name.clone(),
+                        fields: ordered_fields,
+                    },
+                ));
+                Ok(Value::Local(local_id))
+            }
+            Expr::EnumVariantExpr {
+                enum_name,
+                variant,
+                args,
+                ..
+            } => {
+                // Find discriminant index for this variant.
+                let variants = self
+                    .enum_registry
+                    .get(enum_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let discriminant = variants.iter().position(|(n, _)| n == variant).unwrap_or(0);
+                let mut arg_values = Vec::with_capacity(args.len());
+                for arg in args {
+                    arg_values.push(self.lower_expr(arg)?);
+                }
+                let local_id = self.alloc_local(Type::Enum(enum_name.clone()), false);
+                #[allow(clippy::cast_possible_truncation)]
+                let disc_u8 = discriminant as u8;
+                self.emit(Instruction::Assign(
+                    local_id,
+                    Value::EnumVariant {
+                        enum_name: enum_name.clone(),
+                        variant: variant.clone(),
+                        discriminant: disc_u8,
+                        args: arg_values,
+                    },
+                ));
+                Ok(Value::Local(local_id))
+            }
+            Expr::Match { expr, arms, .. } => {
+                // Lower the matched expression.
+                let matched_val = self.lower_expr(expr)?;
+                let matched_local = self.alloc_local(Type::Unknown, false);
+                self.emit(Instruction::Assign(matched_local, matched_val));
+
+                let merge_block = self.new_block();
+                let result_local = self.alloc_local(Type::Unknown, true);
+
+                // Generate a chain of branches testing discriminant.
+                for (i, arm) in arms.iter().enumerate() {
+                    let is_last = i + 1 == arms.len();
+                    match &arm.pattern {
+                        kodo_ast::Pattern::Variant {
+                            enum_name,
+                            variant,
+                            bindings,
+                            ..
+                        } => {
+                            // Resolve discriminant for this variant.
+                            let enum_name_resolved = enum_name
+                                .as_ref()
+                                .and_then(|en| self.enum_registry.get(en))
+                                .or_else(|| {
+                                    if let Some(Type::Enum(en)) =
+                                        self.local_types.get(&matched_local)
+                                    {
+                                        self.enum_registry.get(en)
+                                    } else {
+                                        None
+                                    }
+                                });
+                            let disc_idx = enum_name_resolved
+                                .and_then(|vs| vs.iter().position(|(n, _)| n == variant))
+                                .unwrap_or(0);
+
+                            // Branch: compare discriminant.
+                            let arm_block = self.new_block();
+                            let next_block = if is_last {
+                                merge_block
+                            } else {
+                                self.new_block()
+                            };
+
+                            #[allow(clippy::cast_possible_wrap)]
+                            let cond = Value::BinOp(
+                                kodo_ast::BinOp::Eq,
+                                Box::new(Value::EnumDiscriminant(Box::new(Value::Local(
+                                    matched_local,
+                                )))),
+                                Box::new(Value::IntConst(disc_idx as i64)),
+                            );
+                            self.seal_block(
+                                Terminator::Branch {
+                                    condition: cond,
+                                    true_block: arm_block,
+                                    false_block: next_block,
+                                },
+                                arm_block,
+                            );
+
+                            // Bind pattern variables to payload fields.
+                            for (idx, binding) in bindings.iter().enumerate() {
+                                let bind_local = self.alloc_local(Type::Unknown, false);
+                                self.name_map.insert(binding.clone(), bind_local);
+                                #[allow(clippy::cast_possible_truncation)]
+                                let field_idx = idx as u32;
+                                self.emit(Instruction::Assign(
+                                    bind_local,
+                                    Value::EnumPayload {
+                                        value: Box::new(Value::Local(matched_local)),
+                                        field_index: field_idx,
+                                    },
+                                ));
+                            }
+
+                            // Lower arm body.
+                            let arm_val = self.lower_expr(&arm.body)?;
+                            self.emit(Instruction::Assign(result_local, arm_val));
+                            self.seal_block(Terminator::Goto(merge_block), next_block);
+                        }
+                        kodo_ast::Pattern::Wildcard(_) => {
+                            // Wildcard catches everything remaining.
+                            let arm_val = self.lower_expr(&arm.body)?;
+                            self.emit(Instruction::Assign(result_local, arm_val));
+                            self.seal_block(Terminator::Goto(merge_block), merge_block);
+                        }
+                        kodo_ast::Pattern::Literal(lit_expr) => {
+                            // Compare matched value against literal.
+                            let lit_val = self.lower_expr(lit_expr)?;
+                            let arm_block = self.new_block();
+                            let next_block = if is_last {
+                                merge_block
+                            } else {
+                                self.new_block()
+                            };
+                            let cond = Value::BinOp(
+                                kodo_ast::BinOp::Eq,
+                                Box::new(Value::Local(matched_local)),
+                                Box::new(lit_val),
+                            );
+                            self.seal_block(
+                                Terminator::Branch {
+                                    condition: cond,
+                                    true_block: arm_block,
+                                    false_block: next_block,
+                                },
+                                arm_block,
+                            );
+                            let arm_val = self.lower_expr(&arm.body)?;
+                            self.emit(Instruction::Assign(result_local, arm_val));
+                            self.seal_block(Terminator::Goto(merge_block), next_block);
+                        }
+                    }
+                }
+
+                Ok(Value::Local(result_local))
             }
         }
     }
@@ -374,7 +578,18 @@ impl MirBuilder {
 /// Returns [`MirError`] if a variable is undefined, a type cannot be
 /// resolved, or a non-identifier callee is encountered in a call.
 pub fn lower_function(function: &Function) -> Result<MirFunction> {
+    lower_function_with_registries(function, &HashMap::new(), &HashMap::new())
+}
+
+/// Lowers a single AST [`Function`] into a [`MirFunction`] with type registries.
+fn lower_function_with_registries(
+    function: &Function,
+    struct_registry: &HashMap<String, Vec<(String, Type)>>,
+    enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>>,
+) -> Result<MirFunction> {
     let mut builder = MirBuilder::new();
+    builder.struct_registry.clone_from(struct_registry);
+    builder.enum_registry.clone_from(enum_registry);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
@@ -492,10 +707,40 @@ fn generate_validator(function: &Function) -> Result<MirFunction> {
 ///
 /// Returns the first [`MirError`] encountered during lowering.
 pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
+    // Build struct registry from type declarations.
+    let mut struct_registry: HashMap<String, Vec<(String, Type)>> = HashMap::new();
+    for type_decl in &module.type_decls {
+        let mut fields = Vec::new();
+        for field in &type_decl.fields {
+            let ty = resolve_type(&field.ty, field.span)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            fields.push((field.name.clone(), ty));
+        }
+        struct_registry.insert(type_decl.name.clone(), fields);
+    }
+
+    // Build enum registry from enum declarations.
+    let mut enum_registry: HashMap<String, Vec<(String, Vec<Type>)>> = HashMap::new();
+    for enum_decl in &module.enum_decls {
+        let mut variants = Vec::new();
+        for variant in &enum_decl.variants {
+            let field_types: std::result::Result<Vec<_>, _> = variant
+                .fields
+                .iter()
+                .map(|f| {
+                    resolve_type(f, variant.span)
+                        .map_err(|e| MirError::TypeResolution(e.to_string()))
+                })
+                .collect();
+            variants.push((variant.name.clone(), field_types?));
+        }
+        enum_registry.insert(enum_decl.name.clone(), variants);
+    }
+
     let mut mir_functions: Vec<MirFunction> = module
         .functions
         .iter()
-        .map(lower_function)
+        .map(|f| lower_function_with_registries(f, &struct_registry, &enum_registry))
         .collect::<Result<Vec<_>>>()?;
 
     // Generate validator functions for contracts.
@@ -715,6 +960,8 @@ mod tests {
             span: span(),
             name: "test_module".to_string(),
             meta: None,
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: vec![
                 make_fn(
                     "first",
@@ -1042,6 +1289,8 @@ mod tests {
             span: span(),
             name: "test_mod".to_string(),
             meta: None,
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
@@ -1084,6 +1333,8 @@ mod tests {
             span: span(),
             name: "test_mod".to_string(),
             meta: None,
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: vec![make_fn(
                 "plain",
                 vec![],
@@ -1105,6 +1356,8 @@ mod tests {
             span: span(),
             name: "test_mod".to_string(),
             meta: None,
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
@@ -1152,6 +1405,8 @@ mod tests {
             span: span(),
             name: "test_mod".to_string(),
             meta: None,
+            type_decls: vec![],
+            enum_decls: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
