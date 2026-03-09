@@ -1,0 +1,123 @@
+# CLI Reference
+
+`kodoc` is the Kōdo compiler. It compiles `.ko` source files to native executables and provides tools for inspecting the compilation pipeline.
+
+## Commands
+
+### `kodoc build`
+
+Compile a Kōdo source file to a native executable.
+
+```bash
+kodoc build <file> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<file>` | Path to the `.ko` source file |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-o, --output <path>` | Output file path | Input filename without `.ko` extension |
+| `--json-errors` | Emit errors as JSON (for AI agent consumption) | `false` |
+| `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `none` | `runtime` |
+
+**Examples:**
+
+```bash
+# Compile hello.ko to ./hello
+kodoc build hello.ko -o hello
+
+# Compile with default output name (produces ./hello from hello.ko)
+kodoc build hello.ko
+
+# Compile with JSON error output
+kodoc build hello.ko --json-errors
+```
+
+### `kodoc check`
+
+Type-check and verify contracts without generating a binary. Useful for fast feedback during development.
+
+```bash
+kodoc check <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json-errors` | Emit errors as JSON | `false` |
+
+**Example:**
+
+```bash
+kodoc check my_program.ko
+# Output: Check passed for module `my_program`
+```
+
+### `kodoc lex`
+
+Tokenize a source file and print the token stream. Useful for debugging the lexer.
+
+```bash
+kodoc lex <file>
+```
+
+**Example:**
+
+```bash
+kodoc lex hello.ko
+# Output:
+# Module @ 0..6
+# Identifier @ 7..12
+# LeftBrace @ 13..14
+# ...
+# 42 token(s)
+```
+
+### `kodoc parse`
+
+Parse a source file and print the AST (Abstract Syntax Tree). Useful for debugging the parser.
+
+```bash
+kodoc parse <file>
+```
+
+**Example:**
+
+```bash
+kodoc parse hello.ko
+# Output: Debug representation of the AST
+```
+
+## Running via Cargo
+
+If you haven't installed `kodoc` to your PATH, run it through Cargo:
+
+```bash
+cargo run -p kodoc -- build hello.ko -o hello
+cargo run -p kodoc -- check hello.ko
+cargo run -p kodoc -- lex hello.ko
+cargo run -p kodoc -- parse hello.ko
+```
+
+The `--` separates Cargo's arguments from `kodoc`'s arguments.
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `KODO_RUNTIME_LIB` | Path to `libkodo_runtime.a`. If not set, `kodoc` searches relative to its own binary and common `target/` directories. |
+| `RUST_LOG` | Controls tracing output (e.g., `RUST_LOG=info kodoc build hello.ko`) |
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Compilation error (parse, type, contract, codegen, or link error) |

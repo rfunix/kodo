@@ -1,5 +1,17 @@
-// Fibonacci sequence with contracts demonstrating
-// Kōdo's correctness-by-construction approach.
+// Fibonacci — demonstrates recursion and typed functions in Kōdo.
+//
+// This program computes the 10th Fibonacci number using a recursive
+// function. It shows:
+//   - Function parameters with type annotations (n: Int)
+//   - Return types (-> Int)
+//   - Recursive function calls
+//   - if/else control flow
+//   - The print_int builtin for integer output
+//
+// Compile and run:
+//   kodoc build examples/fibonacci.ko -o fibonacci
+//   ./fibonacci
+// Output: 55
 
 module fibonacci {
     meta {
@@ -8,6 +20,7 @@ module fibonacci {
         author: "Kōdo Team"
     }
 
+    // Recursive Fibonacci: fib(0) = 0, fib(1) = 1, fib(n) = fib(n-1) + fib(n-2)
     fn fib(n: Int) -> Int {
         if n <= 1 {
             return n

@@ -1,0 +1,58 @@
+// Demonstrates Kōdo's runtime contracts in action.
+//
+// Contracts are preconditions declared with `requires` that are checked
+// at runtime before the function body executes. If a contract is violated,
+// the program aborts immediately with an error message.
+//
+// Compile and run:
+//   kodoc build examples/contracts_demo.ko -o contracts_demo
+//   ./contracts_demo
+//
+// To see a contract failure, change safe_divide(10, 2) to safe_divide(10, 0)
+// and recompile — the program will abort before the division happens.
+
+module contracts_demo {
+    meta {
+        purpose: "Demonstrate runtime contract checking",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // safe_divide prevents division by zero through a contract.
+    // The `requires { b != 0 }` clause is checked at runtime before
+    // the function body executes.
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    // clamp ensures min <= max, preventing invalid range arguments.
+    fn clamp(value: Int, min: Int, max: Int) -> Int
+        requires { min <= max }
+    {
+        if value < min {
+            return min
+        }
+        if value > max {
+            return max
+        }
+        return value
+    }
+
+    fn main() {
+        // Contract passes: b is 2, which is not zero
+        let result: Int = safe_divide(10, 2)
+        println("10 / 2 =")
+        print_int(result)
+
+        // Contract passes: min (0) <= max (100)
+        let clamped: Int = clamp(150, 0, 100)
+        println("clamp(150, 0, 100) =")
+        print_int(clamped)
+
+        let in_range: Int = clamp(42, 0, 100)
+        println("clamp(42, 0, 100) =")
+        print_int(in_range)
+    }
+}
