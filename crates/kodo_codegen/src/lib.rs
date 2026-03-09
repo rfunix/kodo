@@ -343,17 +343,38 @@ pub fn compile_function(function: &MirFunction, options: &CodegenOptions) -> Res
     compile_module(std::slice::from_ref(function), options, None)
 }
 
+/// Returns `true` if the type is a struct or enum (composite types passed by pointer).
+fn is_composite(ty: &Type) -> bool {
+    matches!(ty, Type::Struct(_) | Type::Enum(_))
+}
+
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
+///
+/// Composite types (structs/enums) are passed by pointer:
+/// - Params: `AbiParam::new(I64)` (pointer to caller's stack slot)
+/// - Return: implicit `sret` pointer as first param (caller allocates buffer)
 fn build_signature(mir_fn: &MirFunction, call_conv: CallConv) -> Signature {
     let mut sig = Signature::new(call_conv);
+
+    // If the return type is composite, add an implicit sret pointer as first param.
+    let has_sret = is_composite(&mir_fn.return_type);
+    if has_sret {
+        sig.params.push(AbiParam::new(types::I64)); // sret pointer
+    }
 
     let param_count = mir_fn.param_count();
 
     for local in mir_fn.locals.iter().take(param_count) {
-        sig.params.push(AbiParam::new(cranelift_type(&local.ty)));
+        // Composite types are passed as pointers (I64).
+        if is_composite(&local.ty) {
+            sig.params.push(AbiParam::new(types::I64));
+        } else {
+            sig.params.push(AbiParam::new(cranelift_type(&local.ty)));
+        }
     }
 
-    if !is_unit(&mir_fn.return_type) {
+    // Only add a scalar return if the return type is not composite and not unit.
+    if !has_sret && !is_unit(&mir_fn.return_type) {
         sig.returns
             .push(AbiParam::new(cranelift_type(&mir_fn.return_type)));
     }
@@ -445,7 +466,7 @@ impl VarMap {
 }
 
 /// Translates a single MIR function into Cranelift IR using the given builder.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn translate_function(
     mir_fn: &MirFunction,
     builder: &mut FunctionBuilder,
@@ -463,6 +484,16 @@ fn translate_function(
     }
 
     let entry_block = block_map[&mir_fn.entry];
+
+    // Determine if this function uses sret (composite return type).
+    let has_sret = is_composite(&mir_fn.return_type);
+    // Declare a variable to hold the sret pointer.
+    let sret_var = if has_sret {
+        let var = builder.declare_var(types::I64);
+        Some(var)
+    } else {
+        None
+    };
 
     // Declare Cranelift variables for each MIR local.
     let mut var_map = VarMap::new();
@@ -508,11 +539,51 @@ fn translate_function(
     builder.append_block_params_for_function_params(entry_block);
     builder.switch_to_block(entry_block);
 
+    // If sret, the first block param is the sret pointer.
+    let sret_offset: usize = usize::from(has_sret);
+
+    if let Some(sret_v) = sret_var {
+        let sret_param = builder.block_params(entry_block)[0];
+        builder.def_var(sret_v, sret_param);
+    }
+
     for i in 0..param_count {
-        let param_val = builder.block_params(entry_block)[i];
+        let param_val = builder.block_params(entry_block)[i + sret_offset];
         #[allow(clippy::cast_possible_truncation)]
-        let var = var_map.get(LocalId(i as u32))?;
-        builder.def_var(var, param_val);
+        let local_id = LocalId(i as u32);
+        let local_ty = &mir_fn.locals[i].ty;
+
+        if is_composite(local_ty) {
+            // Composite param: the value is a pointer to the caller's data.
+            // Copy it into our local stack slot so mutations don't affect caller.
+            if let Some((slot, _)) = var_map.stack_slots.get(&local_id) {
+                let slot_size = match local_ty {
+                    Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
+                    Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
+                    _ => 8,
+                };
+                let num_words = slot_size.div_ceil(8);
+                let dest_addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                for w in 0..num_words {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let off = (w * 8) as i32;
+                    let src_field = builder.ins().iadd_imm(param_val, i64::from(off));
+                    let val = builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), src_field, 0);
+                    let dest_field = builder.ins().iadd_imm(dest_addr, i64::from(off));
+                    builder.ins().store(MemFlags::new(), val, dest_field, 0);
+                }
+                let var = var_map.get(local_id)?;
+                builder.def_var(var, dest_addr);
+            } else {
+                let var = var_map.get(local_id)?;
+                builder.def_var(var, param_val);
+            }
+        } else {
+            let var = var_map.get(local_id)?;
+            builder.def_var(var, param_val);
+        }
     }
 
     // Initialize non-param variables to zero to avoid "variable not defined" errors.
@@ -564,6 +635,8 @@ fn translate_function(
             mir_fn,
             &var_map,
             struct_layouts,
+            enum_layouts,
+            sret_var,
         )?;
     }
 
@@ -848,8 +921,31 @@ fn translate_instruction(
                 }
             }
 
-            let mut arg_vals = Vec::with_capacity(args.len());
-            for arg in args {
+            // Check if the dest has a composite type (sret return from callee).
+            let dest_is_composite = var_map.stack_slots.contains_key(dest);
+
+            let mut arg_vals = Vec::with_capacity(args.len() + 1);
+
+            // If the callee returns a composite type, pass sret pointer as first arg.
+            if dest_is_composite {
+                if let Some((slot, _)) = var_map.stack_slots.get(dest) {
+                    let sret_addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                    arg_vals.push(sret_addr);
+                }
+            }
+
+            for (arg_idx, arg) in args.iter().enumerate() {
+                // Check if this arg is a composite type (struct/enum) — pass its address.
+                if let Value::Local(arg_local_id) = arg {
+                    if var_map.stack_slots.contains_key(arg_local_id) {
+                        // Pass the stack slot address as a pointer.
+                        let var = var_map.get(*arg_local_id)?;
+                        let addr = builder.use_var(var);
+                        arg_vals.push(addr);
+                        continue;
+                    }
+                }
+                let _ = arg_idx;
                 arg_vals.push(translate_value(
                     arg,
                     builder,
@@ -865,23 +961,39 @@ fn translate_instruction(
                 let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
                 let call = builder.ins().call(func_ref, &arg_vals);
                 let var = var_map.get(*dest)?;
-                let results = builder.inst_results(call);
-                if results.is_empty() {
-                    let zero = builder.ins().iconst(types::I64, 0);
-                    builder.def_var(var, zero);
+                if dest_is_composite {
+                    // The result was written into the stack slot via sret; set var to addr.
+                    if let Some((slot, _)) = var_map.stack_slots.get(dest) {
+                        let addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                        builder.def_var(var, addr);
+                    }
                 } else {
-                    builder.def_var(var, results[0]);
+                    let results = builder.inst_results(call);
+                    if results.is_empty() {
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        builder.def_var(var, zero);
+                    } else {
+                        builder.def_var(var, results[0]);
+                    }
                 }
             } else if let Some(&user_func_id) = func_ids.get(callee.as_str()) {
                 let func_ref = module.declare_func_in_func(user_func_id, builder.func);
                 let call = builder.ins().call(func_ref, &arg_vals);
                 let var = var_map.get(*dest)?;
-                let results = builder.inst_results(call);
-                if results.is_empty() {
-                    let zero = builder.ins().iconst(types::I64, 0);
-                    builder.def_var(var, zero);
+                if dest_is_composite {
+                    // The result was written into the stack slot via sret.
+                    if let Some((slot, _)) = var_map.stack_slots.get(dest) {
+                        let addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                        builder.def_var(var, addr);
+                    }
                 } else {
-                    builder.def_var(var, results[0]);
+                    let results = builder.inst_results(call);
+                    if results.is_empty() {
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        builder.def_var(var, zero);
+                    } else {
+                        builder.def_var(var, results[0]);
+                    }
                 }
             } else {
                 return Err(CodegenError::Unsupported(format!(
@@ -1096,7 +1208,7 @@ fn translate_binop(
 }
 
 /// Translates a MIR terminator.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn translate_terminator(
     term: &Terminator,
     builder: &mut FunctionBuilder,
@@ -1107,10 +1219,44 @@ fn translate_terminator(
     mir_fn: &MirFunction,
     var_map: &VarMap,
     struct_layouts: &HashMap<String, StructLayout>,
+    enum_layouts: &HashMap<String, EnumLayout>,
+    sret_var: Option<Variable>,
 ) -> Result<()> {
     match term {
         Terminator::Return(value) => {
-            if is_unit(&mir_fn.return_type) {
+            if is_composite(&mir_fn.return_type) {
+                // sret: copy local struct/enum data to the sret pointer, then return void.
+                if let Some(sret_v) = sret_var {
+                    let sret_ptr = builder.use_var(sret_v);
+                    // Get the source address (the local's stack slot).
+                    let src_addr = translate_value(
+                        value,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?;
+                    let slot_size = match &mir_fn.return_type {
+                        Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
+                        Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
+                        _ => 8,
+                    };
+                    let num_words = slot_size.div_ceil(8);
+                    for w in 0..num_words {
+                        #[allow(clippy::cast_possible_wrap)]
+                        let off = (w * 8) as i32;
+                        let src_field = builder.ins().iadd_imm(src_addr, i64::from(off));
+                        let val = builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), src_field, 0);
+                        let dest_field = builder.ins().iadd_imm(sret_ptr, i64::from(off));
+                        builder.ins().store(MemFlags::new(), val, dest_field, 0);
+                    }
+                }
+                builder.ins().return_(&[]);
+            } else if is_unit(&mir_fn.return_type) {
                 let _ = translate_value(
                     value,
                     builder,
@@ -1591,5 +1737,115 @@ mod tests {
         };
         let result = compile_module(&[func], &CodegenOptions::default(), None);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compile_struct_param_function() {
+        // fn get_x(p: Point) -> Int { return p.x }
+        let struct_defs = HashMap::from([(
+            "Point".to_string(),
+            vec![("x".to_string(), Type::Int), ("y".to_string(), Type::Int)],
+        )]);
+        let get_x = MirFunction {
+            name: "get_x".to_string(),
+            return_type: Type::Int,
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Struct("Point".to_string()),
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Unknown,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(1),
+                    Value::FieldGet {
+                        object: Box::new(Value::Local(LocalId(0))),
+                        field: "x".to_string(),
+                        struct_name: "Point".to_string(),
+                    },
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[get_x],
+            &struct_defs,
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(result.is_ok(), "failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_struct_return_function() {
+        // fn make_point(x: Int, y: Int) -> Point { ... }
+        let struct_defs = HashMap::from([(
+            "Point".to_string(),
+            vec![("x".to_string(), Type::Int), ("y".to_string(), Type::Int)],
+        )]);
+        let make_point = MirFunction {
+            name: "make_point".to_string(),
+            return_type: Type::Struct("Point".to_string()),
+            param_count: 2,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::Struct("Point".to_string()),
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(2),
+                    Value::StructLit {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Value::Local(LocalId(0))),
+                            ("y".to_string(), Value::Local(LocalId(1))),
+                        ],
+                    },
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(2))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[make_point],
+            &struct_defs,
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(result.is_ok(), "failed: {result:?}");
+    }
+
+    #[test]
+    fn is_composite_correctly_identifies_types() {
+        assert!(is_composite(&Type::Struct("Foo".to_string())));
+        assert!(is_composite(&Type::Enum("Bar".to_string())));
+        assert!(!is_composite(&Type::Int));
+        assert!(!is_composite(&Type::Bool));
+        assert!(!is_composite(&Type::Unit));
     }
 }

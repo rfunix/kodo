@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use kodo_ast::{Block, Expr, Function, Module, Stmt, UnaryOp};
-use kodo_types::{resolve_type, Type};
+use kodo_types::{resolve_type, resolve_type_with_enums, Type};
 
 use crate::{
     BasicBlock, BlockId, Instruction, Local, LocalId, MirError, MirFunction, Result, Terminator,
@@ -52,6 +52,8 @@ pub struct MirBuilder {
     struct_registry: HashMap<String, Vec<(String, kodo_types::Type)>>,
     /// Registry of enum types: name to variant definitions.
     enum_registry: HashMap<String, Vec<(String, Vec<kodo_types::Type>)>>,
+    /// Registry of function return types: name to return type.
+    fn_return_types: HashMap<String, kodo_types::Type>,
     /// Ensures expressions to inject before each return.
     ensures: Vec<kodo_ast::Expr>,
     /// The name of the function being built (for error messages).
@@ -72,6 +74,7 @@ impl MirBuilder {
             local_types: HashMap::new(),
             struct_registry: HashMap::new(),
             enum_registry: HashMap::new(),
+            fn_return_types: HashMap::new(),
             ensures: Vec::new(),
             fn_name: String::new(),
         }
@@ -314,10 +317,29 @@ impl MirBuilder {
                 for arg in args {
                     arg_values.push(self.lower_expr(arg)?);
                 }
-                let dest = self.alloc_local(Type::Unknown, false);
+                // Resolve generic function calls: if callee_name is not in
+                // fn_return_types, try to find a monomorphized version.
+                let resolved_callee = if self.fn_return_types.contains_key(&callee_name) {
+                    callee_name
+                } else {
+                    let prefix = format!("{callee_name}__");
+                    self.fn_return_types
+                        .keys()
+                        .find(|k| k.starts_with(&prefix))
+                        .cloned()
+                        .unwrap_or(callee_name)
+                };
+                // Look up return type from fn_return_types so composite types
+                // get proper stack slot allocation in codegen.
+                let ret_ty = self
+                    .fn_return_types
+                    .get(&resolved_callee)
+                    .cloned()
+                    .unwrap_or(Type::Unknown);
+                let dest = self.alloc_local(ret_ty, false);
                 self.emit(Instruction::Call {
                     dest,
-                    callee: callee_name,
+                    callee: resolved_callee,
                     args: arg_values,
                 });
                 Ok(Value::Local(dest))
@@ -420,10 +442,30 @@ impl MirBuilder {
                 args,
                 ..
             } => {
+                // Resolve the actual enum name — for generic enums, look up a
+                // monomorphized instance (e.g. "Option" → "Option__Int").
+                let resolved_name = if self.enum_registry.contains_key(enum_name) {
+                    enum_name.clone()
+                } else {
+                    // Find a monomorphized instance with matching prefix and variant.
+                    let prefix = format!("{enum_name}__");
+                    self.enum_registry
+                        .keys()
+                        .find(|k| {
+                            k.starts_with(&prefix)
+                                && self
+                                    .enum_registry
+                                    .get(*k)
+                                    .is_some_and(|vs| vs.iter().any(|(n, _)| n == variant))
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| enum_name.clone())
+                };
+
                 // Find discriminant index for this variant.
                 let variants = self
                     .enum_registry
-                    .get(enum_name)
+                    .get(&resolved_name)
                     .cloned()
                     .unwrap_or_default();
                 let discriminant = variants.iter().position(|(n, _)| n == variant).unwrap_or(0);
@@ -431,13 +473,13 @@ impl MirBuilder {
                 for arg in args {
                     arg_values.push(self.lower_expr(arg)?);
                 }
-                let local_id = self.alloc_local(Type::Enum(enum_name.clone()), false);
+                let local_id = self.alloc_local(Type::Enum(resolved_name.clone()), false);
                 #[allow(clippy::cast_possible_truncation)]
                 let disc_u8 = discriminant as u8;
                 self.emit(Instruction::Assign(
                     local_id,
                     Value::EnumVariant {
-                        enum_name: enum_name.clone(),
+                        enum_name: resolved_name,
                         variant: variant.clone(),
                         discriminant: disc_u8,
                         args: arg_values,
@@ -465,9 +507,20 @@ impl MirBuilder {
                             ..
                         } => {
                             // Resolve discriminant for this variant.
+                            // For generic enums, fall back to the matched local's
+                            // type which already carries the monomorphized name.
                             let enum_name_resolved = enum_name
                                 .as_ref()
-                                .and_then(|en| self.enum_registry.get(en))
+                                .and_then(|en| {
+                                    self.enum_registry.get(en).or_else(|| {
+                                        // Try monomorphized prefix match.
+                                        let prefix = format!("{en}__");
+                                        self.enum_registry
+                                            .keys()
+                                            .find(|k| k.starts_with(&prefix))
+                                            .and_then(|k| self.enum_registry.get(k))
+                                    })
+                                })
                                 .or_else(|| {
                                     if let Some(Type::Enum(en)) =
                                         self.local_types.get(&matched_local)
@@ -578,7 +631,7 @@ impl MirBuilder {
 /// Returns [`MirError`] if a variable is undefined, a type cannot be
 /// resolved, or a non-identifier callee is encountered in a call.
 pub fn lower_function(function: &Function) -> Result<MirFunction> {
-    lower_function_with_registries(function, &HashMap::new(), &HashMap::new())
+    lower_function_with_registries(function, &HashMap::new(), &HashMap::new(), &HashMap::new())
 }
 
 /// Lowers a single AST [`Function`] into a [`MirFunction`] with type registries.
@@ -586,16 +639,21 @@ fn lower_function_with_registries(
     function: &Function,
     struct_registry: &HashMap<String, Vec<(String, Type)>>,
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    fn_return_types: &HashMap<String, Type>,
 ) -> Result<MirFunction> {
     let mut builder = MirBuilder::new();
     builder.struct_registry.clone_from(struct_registry);
     builder.enum_registry.clone_from(enum_registry);
+    builder.fn_return_types.clone_from(fn_return_types);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
+    // Build enum names set for type resolution.
+    let enum_names: std::collections::HashSet<String> = enum_registry.keys().cloned().collect();
+
     // Allocate locals for parameters and populate the name map.
     for param in &function.params {
-        let ty = resolve_type(&param.ty, param.span)
+        let ty = resolve_type_with_enums(&param.ty, param.span, &enum_names)
             .map_err(|e| MirError::TypeResolution(e.to_string()))?;
         let local_id = builder.alloc_local(ty, false);
         builder.name_map.insert(param.name.clone(), local_id);
@@ -641,7 +699,7 @@ fn lower_function_with_registries(
     builder.seal_block_final(Terminator::Return(Value::Unit));
 
     // Resolve the return type.
-    let return_type = resolve_type(&function.return_type, function.span)
+    let return_type = resolve_type_with_enums(&function.return_type, function.span, &enum_names)
         .map_err(|e| MirError::TypeResolution(e.to_string()))?;
 
     Ok(MirFunction {
@@ -697,6 +755,59 @@ fn generate_validator(function: &Function) -> Result<MirFunction> {
     })
 }
 
+/// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
+/// using pre-built registries from the type checker (including monomorphized generics).
+///
+/// # Errors
+///
+/// Returns the first [`MirError`] encountered during lowering.
+pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
+    module: &Module,
+    struct_registry: &HashMap<String, Vec<(String, Type)>, S>,
+    enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>, S>,
+    enum_names: &std::collections::HashSet<String, S>,
+) -> Result<Vec<MirFunction>> {
+    // Copy to standard HashMaps for internal use.
+    let struct_reg: HashMap<String, Vec<(String, Type)>> = struct_registry
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let enum_reg: HashMap<String, Vec<(String, Vec<Type>)>> = enum_registry
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let enum_ns: std::collections::HashSet<String> = enum_names.iter().cloned().collect();
+
+    // Build function return type registry.
+    let mut fn_return_types: HashMap<String, Type> = HashMap::new();
+    for func in &module.functions {
+        if !func.generic_params.is_empty() {
+            continue;
+        }
+        let ret_ty = resolve_type_with_enums(&func.return_type, func.span, &enum_ns)
+            .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        fn_return_types.insert(func.name.clone(), ret_ty);
+    }
+
+    let mut mir_functions: Vec<MirFunction> = module
+        .functions
+        .iter()
+        .filter(|f| f.generic_params.is_empty())
+        .map(|f| lower_function_with_registries(f, &struct_reg, &enum_reg, &fn_return_types))
+        .collect::<Result<Vec<_>>>()?;
+
+    // Generate validator functions for contracts.
+    for func in &module.functions {
+        if func.requires.is_empty() || !func.generic_params.is_empty() {
+            continue;
+        }
+        let validator = generate_validator(func)?;
+        mir_functions.push(validator);
+    }
+
+    Ok(mir_functions)
+}
+
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`].
 ///
 /// For each function with `requires` contracts, an additional validator
@@ -737,15 +848,30 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         enum_registry.insert(enum_decl.name.clone(), variants);
     }
 
+    // Build function return type registry.
+    let enum_names: std::collections::HashSet<String> = enum_registry.keys().cloned().collect();
+    let mut fn_return_types: HashMap<String, Type> = HashMap::new();
+    for func in &module.functions {
+        if !func.generic_params.is_empty() {
+            continue;
+        }
+        let ret_ty = resolve_type_with_enums(&func.return_type, func.span, &enum_names)
+            .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        fn_return_types.insert(func.name.clone(), ret_ty);
+    }
+
     let mut mir_functions: Vec<MirFunction> = module
         .functions
         .iter()
-        .map(|f| lower_function_with_registries(f, &struct_registry, &enum_registry))
+        .filter(|f| f.generic_params.is_empty())
+        .map(|f| {
+            lower_function_with_registries(f, &struct_registry, &enum_registry, &fn_return_types)
+        })
         .collect::<Result<Vec<_>>>()?;
 
     // Generate validator functions for contracts.
     for func in &module.functions {
-        if func.requires.is_empty() {
+        if func.requires.is_empty() || !func.generic_params.is_empty() {
             continue;
         }
         let validator = generate_validator(func)?;
@@ -771,6 +897,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: name.to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params,
             return_type: ret,
@@ -959,6 +1086,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "test_module".to_string(),
+            imports: vec![],
             meta: None,
             type_decls: vec![],
             enum_decls: vec![],
@@ -1226,6 +1354,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "positive".to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params: vec![],
             return_type: TypeExpr::Named("Int".to_string()),
@@ -1261,6 +1390,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "zero".to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params: vec![],
             return_type: TypeExpr::Named("Int".to_string()),
@@ -1288,6 +1418,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
+            imports: vec![],
             meta: None,
             type_decls: vec![],
             enum_decls: vec![],
@@ -1295,6 +1426,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                generic_params: vec![],
                 annotations: vec![],
                 params: vec![Param {
                     name: "x".to_string(),
@@ -1332,6 +1464,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
+            imports: vec![],
             meta: None,
             type_decls: vec![],
             enum_decls: vec![],
@@ -1355,6 +1488,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
+            imports: vec![],
             meta: None,
             type_decls: vec![],
             enum_decls: vec![],
@@ -1362,6 +1496,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                generic_params: vec![],
                 annotations: vec![],
                 params: vec![
                     Param {
@@ -1404,6 +1539,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
+            imports: vec![],
             meta: None,
             type_decls: vec![],
             enum_decls: vec![],
@@ -1411,6 +1547,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                generic_params: vec![],
                 annotations: vec![],
                 params: vec![Param {
                     name: "x".to_string(),
@@ -1446,6 +1583,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "multi".to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params: vec![],
             return_type: TypeExpr::Named("Int".to_string()),

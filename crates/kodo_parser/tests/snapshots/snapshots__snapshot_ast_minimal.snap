@@ -11,6 +11,7 @@ Module {
         end: 148,
     },
     name: "minimal",
+    imports: [],
     meta: Some(
         Meta {
             id: NodeId(
@@ -60,6 +61,7 @@ Module {
                 end: 146,
             },
             name: "noop",
+            generic_params: [],
             annotations: [],
             params: [],
             return_type: Unit,

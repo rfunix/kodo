@@ -40,8 +40,8 @@
 
 use kodo_ast::{
     Annotation, AnnotationArg, BinOp, Block, EnumDecl, EnumVariant, Expr, FieldDef, FieldInit,
-    Function, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Param, Pattern, Span, Stmt, TypeDecl,
-    TypeExpr, UnaryOp,
+    Function, ImportDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Param, Pattern, Span, Stmt,
+    TypeDecl, TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -173,6 +173,12 @@ impl Parser {
         let name = self.parse_ident()?;
         self.expect(&TokenKind::LBrace)?;
 
+        // Parse import declarations
+        let mut imports = Vec::new();
+        while self.check(&TokenKind::Import) {
+            imports.push(self.parse_import()?);
+        }
+
         // Parse optional meta block
         let meta = if self.check(&TokenKind::Meta) {
             Some(self.parse_meta()?)
@@ -205,11 +211,24 @@ impl Parser {
             id: self.id_gen.next_id(),
             span,
             name,
+            imports,
             meta,
             type_decls,
             enum_decls,
             functions,
         })
+    }
+
+    /// Parses an import declaration: `import ident(.ident)*`
+    fn parse_import(&mut self) -> Result<ImportDecl> {
+        let start = self.expect(&TokenKind::Import)?.span;
+        let mut path = vec![self.parse_ident()?];
+        while self.check(&TokenKind::Dot) {
+            self.advance();
+            path.push(self.parse_ident()?);
+        }
+        let span = start.merge(self.prev_span());
+        Ok(ImportDecl { path, span })
     }
 
     /// Parses a meta block: `meta { key: "value", ... }`
@@ -322,6 +341,9 @@ impl Parser {
         let start = self.expect(&TokenKind::Fn)?.span;
         let name = self.parse_ident()?;
 
+        // Parse optional generic parameters: <T, U, ...>
+        let generic_params = self.parse_optional_generic_params()?;
+
         // Parse parameters
         self.expect(&TokenKind::LParen)?;
         let mut params = Vec::new();
@@ -380,6 +402,7 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            generic_params,
             annotations: vec![],
             params,
             return_type,
@@ -389,10 +412,14 @@ impl Parser {
         })
     }
 
-    /// Parses a struct declaration: `struct Name { field: Type, ... }`
+    /// Parses a struct declaration: `struct Name<T> { field: Type, ... }`
     fn parse_struct_decl(&mut self) -> Result<TypeDecl> {
         let start = self.expect(&TokenKind::Struct)?.span;
         let name = self.parse_ident()?;
+
+        // Parse optional generic parameters: <T, U, ...>
+        let generic_params = self.parse_optional_generic_params()?;
+
         self.expect(&TokenKind::LBrace)?;
 
         let mut fields = Vec::new();
@@ -420,14 +447,19 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            generic_params,
             fields,
         })
     }
 
-    /// Parses an enum declaration: `enum Name { Variant1, Variant2(Type, ...) }`
+    /// Parses an enum declaration: `enum Name<T> { Variant1, Variant2(Type, ...) }`
     fn parse_enum_decl(&mut self) -> Result<EnumDecl> {
         let start = self.expect(&TokenKind::Enum)?.span;
         let name = self.parse_ident()?;
+
+        // Parse optional generic parameters: <T, U, ...>
+        let generic_params = self.parse_optional_generic_params()?;
+
         self.expect(&TokenKind::LBrace)?;
 
         let mut variants = Vec::new();
@@ -470,6 +502,7 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            generic_params,
             variants,
         })
     }
@@ -1121,9 +1154,37 @@ impl Parser {
         })
     }
 
-    /// Parses a type expression (stub -- only named types for now).
+    /// Parses optional generic type parameters: `<T, U, ...>`.
+    ///
+    /// Returns an empty vec if no `<` follows the name.
+    fn parse_optional_generic_params(&mut self) -> Result<Vec<String>> {
+        if !self.check(&TokenKind::Lt) {
+            return Ok(vec![]);
+        }
+        self.advance(); // consume '<'
+        let mut params = vec![self.parse_ident()?];
+        while self.check(&TokenKind::Comma) {
+            self.advance();
+            params.push(self.parse_ident()?);
+        }
+        self.expect(&TokenKind::Gt)?;
+        Ok(params)
+    }
+
+    /// Parses a type expression: named types and generic types like `Option<Int>`.
     fn parse_type(&mut self) -> Result<TypeExpr> {
         let name = self.parse_ident()?;
+        // Check for generic type arguments: Name<Type, Type, ...>
+        if self.check(&TokenKind::Lt) {
+            self.advance(); // consume '<'
+            let mut args = vec![self.parse_type()?];
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                args.push(self.parse_type()?);
+            }
+            self.expect(&TokenKind::Gt)?;
+            return Ok(TypeExpr::Generic(name, args));
+        }
         Ok(TypeExpr::Named(name))
     }
 
@@ -1943,5 +2004,266 @@ mod tests {
             expected: "expression".to_string(),
         };
         assert_eq!(eof_error.span(), None);
+    }
+
+    // ===== Generics (Phase 2) Tests =====
+
+    #[test]
+    fn parse_type_generic_single_arg() {
+        let source = r#"module test {
+            fn main() {
+                let x: Option<Int> = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { ty, .. } => {
+                assert_eq!(
+                    ty.as_ref(),
+                    Some(&TypeExpr::Generic(
+                        "Option".to_string(),
+                        vec![TypeExpr::Named("Int".to_string())]
+                    ))
+                );
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_generic_multiple_args() {
+        let source = r#"module test {
+            fn main() {
+                let p: Pair<Int, Bool> = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { ty, .. } => {
+                assert_eq!(
+                    ty.as_ref(),
+                    Some(&TypeExpr::Generic(
+                        "Pair".to_string(),
+                        vec![
+                            TypeExpr::Named("Int".to_string()),
+                            TypeExpr::Named("Bool".to_string()),
+                        ]
+                    ))
+                );
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_generic_nested() {
+        let source = r#"module test {
+            fn main() {
+                let x: Option<List<Int>> = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        match &stmts[0] {
+            Stmt::Let { ty, .. } => {
+                assert_eq!(
+                    ty.as_ref(),
+                    Some(&TypeExpr::Generic(
+                        "Option".to_string(),
+                        vec![TypeExpr::Generic(
+                            "List".to_string(),
+                            vec![TypeExpr::Named("Int".to_string())]
+                        )]
+                    ))
+                );
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_non_generic_remains_named() {
+        let source = r#"module test {
+            fn main() {
+                let x: Int = 42
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        match &stmts[0] {
+            Stmt::Let { ty, .. } => {
+                assert_eq!(ty.as_ref(), Some(&TypeExpr::Named("Int".to_string())));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_decl_with_generic_params() {
+        let source = r#"module test {
+            struct Pair<T, U> {
+                first: T,
+                second: U,
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.type_decls.len(), 1);
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.name, "Pair");
+        assert_eq!(decl.generic_params, vec!["T", "U"]);
+        assert_eq!(decl.fields.len(), 2);
+        assert_eq!(decl.fields[0].name, "first");
+        assert_eq!(decl.fields[0].ty, TypeExpr::Named("T".to_string()));
+        assert_eq!(decl.fields[1].name, "second");
+        assert_eq!(decl.fields[1].ty, TypeExpr::Named("U".to_string()));
+    }
+
+    #[test]
+    fn parse_struct_decl_without_generic_params() {
+        let source = r#"module test {
+            struct Point {
+                x: Int,
+                y: Int,
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.type_decls.len(), 1);
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.name, "Point");
+        assert!(decl.generic_params.is_empty());
+    }
+
+    #[test]
+    fn parse_enum_decl_with_generic_params() {
+        let source = r#"module test {
+            enum Option<T> {
+                Some(T),
+                None,
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.enum_decls.len(), 1);
+        let decl = &module.enum_decls[0];
+        assert_eq!(decl.name, "Option");
+        assert_eq!(decl.generic_params, vec!["T"]);
+        assert_eq!(decl.variants.len(), 2);
+        assert_eq!(decl.variants[0].name, "Some");
+        assert_eq!(
+            decl.variants[0].fields,
+            vec![TypeExpr::Named("T".to_string())]
+        );
+        assert_eq!(decl.variants[1].name, "None");
+        assert!(decl.variants[1].fields.is_empty());
+    }
+
+    #[test]
+    fn parse_enum_decl_without_generic_params() {
+        let source = r#"module test {
+            enum Color {
+                Red,
+                Green,
+                Blue,
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.enum_decls.len(), 1);
+        let decl = &module.enum_decls[0];
+        assert_eq!(decl.name, "Color");
+        assert!(decl.generic_params.is_empty());
+        assert_eq!(decl.variants.len(), 3);
+    }
+
+    #[test]
+    fn parse_enum_decl_with_multiple_generic_params() {
+        let source = r#"module test {
+            enum Result<T, E> {
+                Ok(T),
+                Err(E),
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.enum_decls[0];
+        assert_eq!(decl.name, "Result");
+        assert_eq!(decl.generic_params, vec!["T", "E"]);
+        assert_eq!(decl.variants.len(), 2);
+        assert_eq!(decl.variants[0].name, "Ok");
+        assert_eq!(
+            decl.variants[0].fields,
+            vec![TypeExpr::Named("T".to_string())]
+        );
+        assert_eq!(decl.variants[1].name, "Err");
+        assert_eq!(
+            decl.variants[1].fields,
+            vec![TypeExpr::Named("E".to_string())]
+        );
+    }
+
+    #[test]
+    fn parse_function_param_with_generic_type() {
+        let source = r#"module test {
+            fn process(val: Option<Int>) -> Int {
+                return 0
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(
+            func.params[0].ty,
+            TypeExpr::Generic(
+                "Option".to_string(),
+                vec![TypeExpr::Named("Int".to_string())]
+            )
+        );
+    }
+
+    #[test]
+    fn parse_function_return_type_generic() {
+        let source = r#"module test {
+            fn wrap(x: Int) -> Option<Int> {
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(
+            func.return_type,
+            TypeExpr::Generic(
+                "Option".to_string(),
+                vec![TypeExpr::Named("Int".to_string())]
+            )
+        );
+    }
+
+    #[test]
+    fn parse_struct_field_with_generic_type() {
+        let source = r#"module test {
+            struct Container<T> {
+                value: Option<T>,
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.generic_params, vec!["T"]);
+        assert_eq!(
+            decl.fields[0].ty,
+            TypeExpr::Generic("Option".to_string(), vec![TypeExpr::Named("T".to_string())])
+        );
     }
 }

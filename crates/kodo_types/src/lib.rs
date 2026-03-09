@@ -176,6 +176,34 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A generic type was instantiated with the wrong number of type arguments.
+    #[error("expected {expected} type argument(s) for `{name}`, found {found} at {span:?}")]
+    WrongTypeArgCount {
+        /// The generic type name.
+        name: String,
+        /// Expected number of type arguments.
+        expected: usize,
+        /// Actual number of type arguments.
+        found: usize,
+        /// Source location.
+        span: Span,
+    },
+    /// A type parameter was referenced but not defined.
+    #[error("undefined type parameter `{name}` at {span:?}")]
+    UndefinedTypeParam {
+        /// The type parameter name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A generic type was used without type arguments.
+    #[error("generic type `{name}` requires type arguments at {span:?}")]
+    MissingTypeArgs {
+        /// The generic type name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -197,7 +225,10 @@ impl TypeError {
             | Self::NoSuchField { span, .. }
             | Self::UnknownEnum { span, .. }
             | Self::UnknownVariant { span, .. }
-            | Self::NonExhaustiveMatch { span, .. } => Some(*span),
+            | Self::NonExhaustiveMatch { span, .. }
+            | Self::WrongTypeArgCount { span, .. }
+            | Self::UndefinedTypeParam { span, .. }
+            | Self::MissingTypeArgs { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -221,6 +252,9 @@ impl TypeError {
             Self::UnknownEnum { .. } => "E0218",
             Self::UnknownVariant { .. } => "E0219",
             Self::NonExhaustiveMatch { .. } => "E0220",
+            Self::WrongTypeArgCount { .. } => "E0221",
+            Self::UndefinedTypeParam { .. } => "E0222",
+            Self::MissingTypeArgs { .. } => "E0223",
             Self::PolicyViolation { .. } => "E0350",
         }
     }
@@ -513,6 +547,37 @@ fn annotation_arg_expr(arg: &AnnotationArg) -> &Expr {
 /// a [`TypeEnv`] with scope-based binding management: the environment length
 /// is saved before entering a scope and restored upon exit, ensuring
 /// correct variable shadowing and lexical scoping.
+/// Definition of a generic struct (before monomorphization).
+#[derive(Clone)]
+struct GenericStructDef {
+    /// Generic parameter names (e.g. `["T", "U"]`).
+    params: Vec<std::string::String>,
+    /// Fields with types that may reference generic params.
+    fields: Vec<(std::string::String, kodo_ast::TypeExpr)>,
+}
+
+/// Definition of a generic function (before monomorphization).
+#[derive(Clone)]
+struct GenericFunctionDef {
+    /// Generic parameter names (e.g. `["T"]`).
+    params: Vec<std::string::String>,
+    /// Parameter type expressions (may reference generic params).
+    param_types: Vec<kodo_ast::TypeExpr>,
+    /// Return type expression.
+    return_type: kodo_ast::TypeExpr,
+}
+
+/// Definition of a generic enum (before monomorphization).
+#[derive(Clone)]
+struct GenericEnumDef {
+    /// Generic parameter names.
+    params: Vec<std::string::String>,
+    /// Variants with field type expressions.
+    variants: Vec<(std::string::String, Vec<kodo_ast::TypeExpr>)>,
+}
+
+/// The type checker walks an AST and verifies that all expressions and
+/// statements are well-typed according to Kōdo's type system.
 pub struct TypeChecker {
     /// The type environment for variable and function bindings.
     env: TypeEnv,
@@ -527,6 +592,16 @@ pub struct TypeChecker {
     /// Set of known enum type names, used to distinguish enums from structs
     /// during type resolution.
     enum_names: std::collections::HashSet<std::string::String>,
+    /// Generic struct definitions (for monomorphization).
+    generic_structs: std::collections::HashMap<std::string::String, GenericStructDef>,
+    /// Generic enum definitions (for monomorphization).
+    generic_enums: std::collections::HashMap<std::string::String, GenericEnumDef>,
+    /// Generic function definitions (for monomorphization).
+    generic_functions: std::collections::HashMap<std::string::String, GenericFunctionDef>,
+    /// Monomorphized function instances: `(base_name, type_args, mono_name)`.
+    fn_instances: Vec<(std::string::String, Vec<Type>, std::string::String)>,
+    /// Cache of already-monomorphized type names.
+    mono_cache: std::collections::HashSet<std::string::String>,
 }
 
 impl TypeChecker {
@@ -541,6 +616,11 @@ impl TypeChecker {
             struct_registry: std::collections::HashMap::new(),
             enum_registry: std::collections::HashMap::new(),
             enum_names: std::collections::HashSet::new(),
+            generic_structs: std::collections::HashMap::new(),
+            generic_enums: std::collections::HashMap::new(),
+            generic_functions: std::collections::HashMap::new(),
+            fn_instances: Vec::new(),
+            mono_cache: std::collections::HashSet::new(),
         };
         checker.register_builtins();
         checker
@@ -576,6 +656,7 @@ impl TypeChecker {
     /// # Errors
     ///
     /// Returns a [`TypeError`] if any type inconsistency is found.
+    #[allow(clippy::too_many_lines)]
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
         // Validate mandatory meta block.
         match &module.meta {
@@ -594,47 +675,93 @@ impl TypeChecker {
 
         // Register struct types.
         for type_decl in &module.type_decls {
-            let mut fields = Vec::new();
-            for field in &type_decl.fields {
-                let ty = resolve_type(&field.ty, field.span)?;
-                fields.push((field.name.clone(), ty));
+            if type_decl.generic_params.is_empty() {
+                // Concrete struct — register directly.
+                let mut fields = Vec::new();
+                for field in &type_decl.fields {
+                    let ty = resolve_type(&field.ty, field.span)?;
+                    fields.push((field.name.clone(), ty));
+                }
+                self.struct_registry.insert(type_decl.name.clone(), fields);
+            } else {
+                // Generic struct — store definition for monomorphization.
+                self.generic_structs.insert(
+                    type_decl.name.clone(),
+                    GenericStructDef {
+                        params: type_decl.generic_params.clone(),
+                        fields: type_decl
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.clone(), f.ty.clone()))
+                            .collect(),
+                    },
+                );
             }
-            self.struct_registry.insert(type_decl.name.clone(), fields);
         }
 
         // Register enum types.
         for enum_decl in &module.enum_decls {
             self.enum_names.insert(enum_decl.name.clone());
-            let mut variants = Vec::new();
-            for variant in &enum_decl.variants {
-                let field_types: std::result::Result<Vec<_>, _> = variant
-                    .fields
-                    .iter()
-                    .map(|f| resolve_type(f, variant.span))
-                    .collect();
-                variants.push((variant.name.clone(), field_types?));
+            if enum_decl.generic_params.is_empty() {
+                // Concrete enum — register directly.
+                let mut variants = Vec::new();
+                for variant in &enum_decl.variants {
+                    let field_types: std::result::Result<Vec<_>, _> = variant
+                        .fields
+                        .iter()
+                        .map(|f| resolve_type(f, variant.span))
+                        .collect();
+                    variants.push((variant.name.clone(), field_types?));
+                }
+                self.enum_registry.insert(enum_decl.name.clone(), variants);
+            } else {
+                // Generic enum — store definition for monomorphization.
+                self.generic_enums.insert(
+                    enum_decl.name.clone(),
+                    GenericEnumDef {
+                        params: enum_decl.generic_params.clone(),
+                        variants: enum_decl
+                            .variants
+                            .iter()
+                            .map(|v| (v.name.clone(), v.fields.clone()))
+                            .collect(),
+                    },
+                );
             }
-            self.enum_registry.insert(enum_decl.name.clone(), variants);
         }
 
         // First pass: register all function signatures so they can call each other.
         for func in &module.functions {
+            if !func.generic_params.is_empty() {
+                // Generic function — store definition for monomorphization at call sites.
+                self.generic_functions.insert(
+                    func.name.clone(),
+                    GenericFunctionDef {
+                        params: func.generic_params.clone(),
+                        param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
+                        return_type: func.return_type.clone(),
+                    },
+                );
+                continue;
+            }
             let param_types: std::result::Result<Vec<_>, _> = func
                 .params
                 .iter()
-                .map(|p| resolve_type_with_enums(&p.ty, p.span, &self.enum_names))
+                .map(|p| self.resolve_type_mono(&p.ty, p.span))
                 .collect();
             let param_types = param_types?;
-            let ret_type = resolve_type_with_enums(&func.return_type, func.span, &self.enum_names)?;
+            let ret_type = self.resolve_type_mono(&func.return_type, func.span)?;
             self.env.insert(
                 func.name.clone(),
                 Type::Function(param_types, Box::new(ret_type)),
             );
         }
 
-        // Second pass: check each function body.
+        // Second pass: check each function body (skip generic functions).
         for func in &module.functions {
-            self.check_function(func)?;
+            if func.generic_params.is_empty() {
+                self.check_function(func)?;
+            }
         }
 
         // Third pass: validate trust policies based on annotations.
@@ -738,6 +865,37 @@ impl TypeChecker {
             })
     }
 
+    /// Returns the struct registry (including monomorphized instances).
+    #[must_use]
+    pub fn struct_registry(
+        &self,
+    ) -> &std::collections::HashMap<std::string::String, Vec<(std::string::String, Type)>> {
+        &self.struct_registry
+    }
+
+    /// Returns the enum registry (including monomorphized instances).
+    #[must_use]
+    pub fn enum_registry(
+        &self,
+    ) -> &std::collections::HashMap<std::string::String, Vec<(std::string::String, Vec<Type>)>>
+    {
+        &self.enum_registry
+    }
+
+    /// Returns the set of known enum type names.
+    #[must_use]
+    pub fn enum_names(&self) -> &std::collections::HashSet<std::string::String> {
+        &self.enum_names
+    }
+
+    /// Returns the list of monomorphized function instances.
+    ///
+    /// Each entry is `(base_name, type_args, mono_name)`.
+    #[must_use]
+    pub fn fn_instances(&self) -> &[(std::string::String, Vec<Type>, std::string::String)] {
+        &self.fn_instances
+    }
+
     /// Type-checks a single function definition.
     ///
     /// Opens a new scope for the function parameters, checks the body,
@@ -751,13 +909,13 @@ impl TypeChecker {
     /// declared return type.
     pub fn check_function(&mut self, func: &Function) -> Result<()> {
         let scope = self.env.scope_level();
-        let ret_type = resolve_type_with_enums(&func.return_type, func.span, &self.enum_names)?;
+        let ret_type = self.resolve_type_mono(&func.return_type, func.span)?;
         let prev_return_type = self.current_return_type.clone();
         self.current_return_type = ret_type.clone();
 
         // Bind parameters in the function scope.
         for param in &func.params {
-            let ty = resolve_type_with_enums(&param.ty, param.span, &self.enum_names)?;
+            let ty = self.resolve_type_mono(&param.ty, param.span)?;
             self.env.insert(param.name.clone(), ty);
         }
 
@@ -806,8 +964,13 @@ impl TypeChecker {
             } => {
                 let value_ty = self.infer_expr(value)?;
                 if let Some(annotation) = ty {
-                    let expected = resolve_type_with_enums(annotation, *span, &self.enum_names)?;
-                    TypeEnv::check_eq(&expected, &value_ty, *span)?;
+                    let expected = self.resolve_type_mono(annotation, *span)?;
+                    // For generic enums with unresolved type params (e.g. Option::None
+                    // inferred as Option__?), accept if the expected type is a valid
+                    // monomorphization of the same base enum.
+                    if !Self::compatible_enum_types(&expected, &value_ty) {
+                        TypeEnv::check_eq(&expected, &value_ty, *span)?;
+                    }
                     self.env.insert(name.clone(), expected);
                 } else {
                     self.env.insert(name.clone(), value_ty);
@@ -996,33 +1159,92 @@ impl TypeChecker {
                 args,
                 span,
             } => {
-                let variants =
-                    self.enum_registry
-                        .get(enum_name)
-                        .ok_or_else(|| TypeError::UnknownEnum {
-                            name: enum_name.clone(),
-                            span: *span,
+                // Check if this is a concrete enum.
+                if let Some(variants) = self.enum_registry.get(enum_name).cloned() {
+                    let variant_def =
+                        variants.iter().find(|(n, _)| n == variant).ok_or_else(|| {
+                            TypeError::UnknownVariant {
+                                variant: variant.clone(),
+                                enum_name: enum_name.clone(),
+                                span: *span,
+                            }
                         })?;
-                let variant_def = variants.iter().find(|(n, _)| n == variant).ok_or_else(|| {
-                    TypeError::UnknownVariant {
-                        variant: variant.clone(),
-                        enum_name: enum_name.clone(),
-                        span: *span,
+                    let expected_field_types = variant_def.1.clone();
+                    if args.len() != expected_field_types.len() {
+                        return Err(TypeError::ArityMismatch {
+                            expected: expected_field_types.len(),
+                            found: args.len(),
+                            span: *span,
+                        });
                     }
-                })?;
-                let expected_field_types = variant_def.1.clone();
-                if args.len() != expected_field_types.len() {
-                    return Err(TypeError::ArityMismatch {
-                        expected: expected_field_types.len(),
-                        found: args.len(),
-                        span: *span,
-                    });
+                    for (arg, expected_ty) in args.iter().zip(&expected_field_types) {
+                        let arg_ty = self.infer_expr(arg)?;
+                        TypeEnv::check_eq(expected_ty, &arg_ty, expr_span(arg))?;
+                    }
+                    return Ok(Type::Enum(enum_name.clone()));
                 }
-                for (arg, expected_ty) in args.iter().zip(&expected_field_types) {
-                    let arg_ty = self.infer_expr(arg)?;
-                    TypeEnv::check_eq(expected_ty, &arg_ty, expr_span(arg))?;
+
+                // Check if this is a generic enum — infer type args from arguments.
+                if let Some(def) = self.generic_enums.get(enum_name).cloned() {
+                    let variant_def =
+                        def.variants
+                            .iter()
+                            .find(|(n, _)| n == variant)
+                            .ok_or_else(|| TypeError::UnknownVariant {
+                                variant: variant.clone(),
+                                enum_name: enum_name.clone(),
+                                span: *span,
+                            })?;
+                    if args.len() != variant_def.1.len() {
+                        return Err(TypeError::ArityMismatch {
+                            expected: variant_def.1.len(),
+                            found: args.len(),
+                            span: *span,
+                        });
+                    }
+
+                    // Infer type args: for each arg, if the corresponding field type
+                    // is a type param (Named("T")), map T → inferred type.
+                    let mut inferred: std::collections::HashMap<std::string::String, Type> =
+                        std::collections::HashMap::new();
+                    let mut arg_types = Vec::new();
+                    for (arg, field_type_expr) in args.iter().zip(&variant_def.1) {
+                        let arg_ty = self.infer_expr(arg)?;
+                        arg_types.push(arg_ty.clone());
+                        if let kodo_ast::TypeExpr::Named(param_name) = field_type_expr {
+                            if def.params.contains(param_name) {
+                                inferred.insert(param_name.clone(), arg_ty);
+                            }
+                        }
+                    }
+
+                    // Build type args in param order.
+                    let type_args: Vec<Type> = def
+                        .params
+                        .iter()
+                        .map(|p| inferred.get(p).cloned().unwrap_or(Type::Unknown))
+                        .collect();
+
+                    let mono_name = Self::mono_name(enum_name, &type_args);
+                    self.monomorphize_enum(&mono_name, &def, &type_args, *span)?;
+
+                    // Verify arg types against monomorphized variant.
+                    if let Some(mono_variants) = self.enum_registry.get(&mono_name).cloned() {
+                        if let Some(mono_variant) = mono_variants.iter().find(|(n, _)| n == variant)
+                        {
+                            for (arg_ty, expected_ty) in arg_types.iter().zip(&mono_variant.1) {
+                                TypeEnv::check_eq(expected_ty, arg_ty, *span)?;
+                            }
+                        }
+                    }
+
+                    return Ok(Type::Enum(mono_name));
                 }
-                Ok(Type::Enum(enum_name.clone()))
+
+                Err(TypeError::UnknownEnum {
+                    name: enum_name.clone(),
+                    span: *span,
+                })
             }
 
             Expr::Match { expr, arms, span } => {
@@ -1052,14 +1274,21 @@ impl TypeChecker {
                         } => {
                             // Resolve the enum name from the pattern, or infer
                             // from the matched expression's type.
-                            let resolved_enum =
-                                enum_name
-                                    .as_ref()
-                                    .or(if let Type::Enum(name) = &matched_ty {
-                                        Some(name)
-                                    } else {
-                                        None
-                                    });
+                            // For generic enums, the pattern may use the base name
+                            // (e.g. "Option") while the registry has the monomorphized
+                            // name (e.g. "Option__Int"). Prefer the matched type's name.
+                            let matched_enum_name = if let Type::Enum(name) = &matched_ty {
+                                Some(name.as_str())
+                            } else {
+                                None
+                            };
+                            let pattern_name = enum_name.as_deref();
+                            let resolved_enum = matched_enum_name
+                                .filter(|n| self.enum_registry.contains_key(*n))
+                                .or_else(|| {
+                                    pattern_name.filter(|n| self.enum_registry.contains_key(*n))
+                                })
+                                .or(matched_enum_name);
                             // Clone field types out of the registry to release the
                             // immutable borrow before we mutate `self.env`.
                             let field_types_opt = resolved_enum.and_then(|ename| {
@@ -1235,6 +1464,13 @@ impl TypeChecker {
     /// Verifies the callee is a function type, the argument count matches,
     /// and each argument type matches the corresponding parameter type.
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
+        // Check for generic function call.
+        if let Expr::Ident(name, _) = callee {
+            if let Some(def) = self.generic_functions.get(name).cloned() {
+                return self.check_generic_call(name, &def, args, span);
+            }
+        }
+
         let callee_ty = self.infer_expr(callee)?;
         match callee_ty {
             Type::Function(param_types, ret_type) => {
@@ -1256,6 +1492,290 @@ impl TypeChecker {
                 span,
             }),
         }
+    }
+
+    /// Type-checks a call to a generic function, inferring type arguments from
+    /// the actual arguments.
+    fn check_generic_call(
+        &mut self,
+        name: &str,
+        def: &GenericFunctionDef,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Type> {
+        if def.param_types.len() != args.len() {
+            return Err(TypeError::ArityMismatch {
+                expected: def.param_types.len(),
+                found: args.len(),
+                span,
+            });
+        }
+
+        // Infer type arguments from actual argument types.
+        let mut inferred: std::collections::HashMap<std::string::String, Type> =
+            std::collections::HashMap::new();
+        let mut arg_types = Vec::new();
+        for (arg, param_type_expr) in args.iter().zip(&def.param_types) {
+            let arg_ty = self.infer_expr(arg)?;
+            arg_types.push(arg_ty.clone());
+            Self::infer_type_param(param_type_expr, &arg_ty, &def.params, &mut inferred);
+        }
+
+        // Build resolved type args in param order.
+        let type_args: Vec<Type> = def
+            .params
+            .iter()
+            .map(|p| inferred.get(p).cloned().unwrap_or(Type::Unknown))
+            .collect();
+
+        // Resolve return type with substitution.
+        let subst: std::collections::HashMap<std::string::String, Type> = def
+            .params
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect();
+        let ret_type =
+            Self::substitute_type_expr(&def.return_type, &subst, span, &self.enum_names)?;
+
+        // Resolve each param type with substitution and verify.
+        for (arg_ty, param_type_expr) in arg_types.iter().zip(&def.param_types) {
+            let expected =
+                Self::substitute_type_expr(param_type_expr, &subst, span, &self.enum_names)?;
+            TypeEnv::check_eq(&expected, arg_ty, span)?;
+        }
+
+        // Record the monomorphized instance for codegen.
+        let mono_name = Self::mono_name(name, &type_args);
+        self.fn_instances
+            .push((name.to_string(), type_args, mono_name));
+
+        Ok(ret_type)
+    }
+
+    /// Infers type parameter bindings from a type expression and an actual type.
+    fn infer_type_param(
+        type_expr: &kodo_ast::TypeExpr,
+        actual: &Type,
+        params: &[std::string::String],
+        inferred: &mut std::collections::HashMap<std::string::String, Type>,
+    ) {
+        match type_expr {
+            kodo_ast::TypeExpr::Named(name) if params.contains(name) => {
+                inferred
+                    .entry(name.clone())
+                    .or_insert_with(|| actual.clone());
+            }
+            kodo_ast::TypeExpr::Generic(_name, args) => {
+                // For generic type args, try to match inner types.
+                if let Type::Enum(mono_name) | Type::Struct(mono_name) = actual {
+                    // Extract type args from monomorphized name.
+                    if let Some(suffix) = mono_name.split("__").nth(1) {
+                        let actual_args: Vec<&str> = suffix.split('_').collect();
+                        for (arg_expr, actual_arg) in args.iter().zip(&actual_args) {
+                            if let kodo_ast::TypeExpr::Named(param_name) = arg_expr {
+                                if params.contains(param_name) {
+                                    // Map the actual arg name back to a Type.
+                                    let ty = match *actual_arg {
+                                        "Int" => Type::Int,
+                                        "Bool" => Type::Bool,
+                                        "String" => Type::String,
+                                        _ => Type::Struct((*actual_arg).to_string()),
+                                    };
+                                    inferred.entry(param_name.clone()).or_insert(ty);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Resolves a type expression, triggering monomorphization for generic types.
+    ///
+    /// When encountering `Generic("Option", [Int])`, checks if `Option` is a
+    /// generic enum or struct and monomorphizes it into a concrete type like
+    /// `Option__Int`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError`] if the generic type is undefined, has wrong arity,
+    /// or contains undefined type parameters.
+    fn resolve_type_mono(&mut self, type_expr: &kodo_ast::TypeExpr, span: Span) -> Result<Type> {
+        match type_expr {
+            kodo_ast::TypeExpr::Generic(name, args) => {
+                // Resolve all type arguments first.
+                let resolved_args: std::result::Result<Vec<_>, _> = args
+                    .iter()
+                    .map(|a| self.resolve_type_mono(a, span))
+                    .collect();
+                let resolved_args = resolved_args?;
+
+                // Try monomorphizing as enum first, then struct.
+                if let Some(def) = self.generic_enums.get(name).cloned() {
+                    if def.params.len() != resolved_args.len() {
+                        return Err(TypeError::WrongTypeArgCount {
+                            name: name.clone(),
+                            expected: def.params.len(),
+                            found: resolved_args.len(),
+                            span,
+                        });
+                    }
+                    let mono_name = Self::mono_name(name, &resolved_args);
+                    self.monomorphize_enum(&mono_name, &def, &resolved_args, span)?;
+                    Ok(Type::Enum(mono_name))
+                } else if let Some(def) = self.generic_structs.get(name).cloned() {
+                    if def.params.len() != resolved_args.len() {
+                        return Err(TypeError::WrongTypeArgCount {
+                            name: name.clone(),
+                            expected: def.params.len(),
+                            found: resolved_args.len(),
+                            span,
+                        });
+                    }
+                    let mono_name = Self::mono_name(name, &resolved_args);
+                    self.monomorphize_struct(&mono_name, &def, &resolved_args, span)?;
+                    Ok(Type::Struct(mono_name))
+                } else {
+                    // Not a known generic — fall through to standard resolution.
+                    Ok(Type::Generic(name.clone(), resolved_args))
+                }
+            }
+            kodo_ast::TypeExpr::Named(name) => {
+                // Check if this name refers to a generic type used without args.
+                if self.generic_enums.contains_key(name) || self.generic_structs.contains_key(name)
+                {
+                    return Err(TypeError::MissingTypeArgs {
+                        name: name.clone(),
+                        span,
+                    });
+                }
+                resolve_type_with_enums(type_expr, span, &self.enum_names)
+            }
+            _ => resolve_type_with_enums(type_expr, span, &self.enum_names),
+        }
+    }
+
+    /// Checks if two enum types are compatible, considering generic enums
+    /// with partially-inferred type params (e.g. `Option__Int` vs `Option__?`).
+    fn compatible_enum_types(expected: &Type, found: &Type) -> bool {
+        if let (Type::Enum(e), Type::Enum(f)) = (expected, found) {
+            if e == f {
+                return true;
+            }
+            // Check if both are monomorphizations of the same base enum,
+            // where the found type has unresolved params (contains "?").
+            if let (Some(e_base), Some(f_base)) = (e.split("__").next(), f.split("__").next()) {
+                return e_base == f_base && f.contains('?');
+            }
+        }
+        false
+    }
+
+    /// Generates a monomorphized name like `Option__Int` or `Pair__Int_Bool`.
+    fn mono_name(base: &str, args: &[Type]) -> std::string::String {
+        let arg_strs: Vec<std::string::String> =
+            args.iter().map(std::string::ToString::to_string).collect();
+        format!("{base}__{}", arg_strs.join("_"))
+    }
+
+    /// Substitutes type parameters in a type expression.
+    fn substitute_type_expr(
+        type_expr: &kodo_ast::TypeExpr,
+        subst: &std::collections::HashMap<std::string::String, Type>,
+        span: Span,
+        enum_names: &std::collections::HashSet<std::string::String>,
+    ) -> Result<Type> {
+        match type_expr {
+            kodo_ast::TypeExpr::Named(name) => {
+                if let Some(ty) = subst.get(name) {
+                    Ok(ty.clone())
+                } else {
+                    resolve_type_with_enums(type_expr, span, enum_names)
+                }
+            }
+            kodo_ast::TypeExpr::Generic(name, args) => {
+                let resolved: std::result::Result<Vec<_>, _> = args
+                    .iter()
+                    .map(|a| Self::substitute_type_expr(a, subst, span, enum_names))
+                    .collect();
+                Ok(Type::Generic(name.clone(), resolved?))
+            }
+            kodo_ast::TypeExpr::Unit => Ok(Type::Unit),
+            kodo_ast::TypeExpr::Function(params, ret) => {
+                let p: std::result::Result<Vec<_>, _> = params
+                    .iter()
+                    .map(|p| Self::substitute_type_expr(p, subst, span, enum_names))
+                    .collect();
+                let r = Self::substitute_type_expr(ret, subst, span, enum_names)?;
+                Ok(Type::Function(p?, Box::new(r)))
+            }
+        }
+    }
+
+    /// Monomorphizes a generic enum definition with concrete type arguments.
+    fn monomorphize_enum(
+        &mut self,
+        mono_name: &str,
+        def: &GenericEnumDef,
+        args: &[Type],
+        span: Span,
+    ) -> Result<()> {
+        if self.mono_cache.contains(mono_name) {
+            return Ok(());
+        }
+        self.mono_cache.insert(mono_name.to_string());
+
+        // Build substitution map: T → Int, E → String, etc.
+        let subst: std::collections::HashMap<std::string::String, Type> = def
+            .params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+
+        let mut variants = Vec::new();
+        for (vname, field_exprs) in &def.variants {
+            let field_types: std::result::Result<Vec<_>, _> = field_exprs
+                .iter()
+                .map(|fe| Self::substitute_type_expr(fe, &subst, span, &self.enum_names))
+                .collect();
+            variants.push((vname.clone(), field_types?));
+        }
+        self.enum_registry.insert(mono_name.to_string(), variants);
+        self.enum_names.insert(mono_name.to_string());
+        Ok(())
+    }
+
+    /// Monomorphizes a generic struct definition with concrete type arguments.
+    fn monomorphize_struct(
+        &mut self,
+        mono_name: &str,
+        def: &GenericStructDef,
+        args: &[Type],
+        span: Span,
+    ) -> Result<()> {
+        if self.mono_cache.contains(mono_name) {
+            return Ok(());
+        }
+        self.mono_cache.insert(mono_name.to_string());
+
+        let subst: std::collections::HashMap<std::string::String, Type> = def
+            .params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+
+        let mut fields = Vec::new();
+        for (fname, ftype_expr) in &def.fields {
+            let ty = Self::substitute_type_expr(ftype_expr, &subst, span, &self.enum_names)?;
+            fields.push((fname.clone(), ty));
+        }
+        self.struct_registry.insert(mono_name.to_string(), fields);
+        Ok(())
     }
 
     /// Checks an if-expression.
@@ -1356,6 +1876,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
+            imports: vec![],
             meta: Some(Meta {
                 id: NodeId(99),
                 span: Span::new(0, 50),
@@ -1382,6 +1903,7 @@ mod tests {
             id: NodeId(1),
             span: Span::new(0, 100),
             name: name.to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params,
             return_type,
@@ -2061,6 +2583,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
+            imports: vec![],
             meta: Some(Meta {
                 id: NodeId(99),
                 span: Span::new(0, 50),
@@ -2078,6 +2601,7 @@ mod tests {
             id: NodeId(1),
             span: Span::new(0, 100),
             name: name.to_string(),
+            generic_params: vec![],
             annotations,
             params: vec![],
             return_type: TypeExpr::Unit,
@@ -2216,5 +2740,456 @@ mod tests {
             span: Span::new(3, 4),
         };
         assert_eq!(err.span(), Some(Span::new(3, 4)));
+    }
+
+    // ===== Generics (Phase 2) Tests =====
+
+    /// Helper to build a module with type and enum declarations.
+    fn make_module_with_decls(
+        type_decls: Vec<kodo_ast::TypeDecl>,
+        enum_decls: Vec<kodo_ast::EnumDecl>,
+        functions: Vec<Function>,
+    ) -> Module {
+        Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "unit test module".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_decls,
+            enum_decls,
+            functions,
+        }
+    }
+
+    #[test]
+    fn mono_name_single_arg() {
+        let name = TypeChecker::mono_name("Option", &[Type::Int]);
+        assert_eq!(name, "Option__Int");
+    }
+
+    #[test]
+    fn mono_name_multiple_args() {
+        let name = TypeChecker::mono_name("Pair", &[Type::Int, Type::Bool]);
+        assert_eq!(name, "Pair__Int_Bool");
+    }
+
+    #[test]
+    fn mono_name_string_arg() {
+        let name = TypeChecker::mono_name("Box", &[Type::String]);
+        assert_eq!(name, "Box__String");
+    }
+
+    #[test]
+    fn compatible_enum_types_same_name() {
+        assert!(TypeChecker::compatible_enum_types(
+            &Type::Enum("Option__Int".to_string()),
+            &Type::Enum("Option__Int".to_string()),
+        ));
+    }
+
+    #[test]
+    fn compatible_enum_types_unresolved_param() {
+        // Option__Int should be compatible with Option__? (unresolved)
+        assert!(TypeChecker::compatible_enum_types(
+            &Type::Enum("Option__Int".to_string()),
+            &Type::Enum("Option__?".to_string()),
+        ));
+    }
+
+    #[test]
+    fn compatible_enum_types_different_base() {
+        assert!(!TypeChecker::compatible_enum_types(
+            &Type::Enum("Option__Int".to_string()),
+            &Type::Enum("Result__Int".to_string()),
+        ));
+    }
+
+    #[test]
+    fn compatible_enum_types_non_enum() {
+        assert!(!TypeChecker::compatible_enum_types(
+            &Type::Int,
+            &Type::Enum("Option__Int".to_string()),
+        ));
+    }
+
+    #[test]
+    fn monomorphize_option_int_registers_in_enum_registry() {
+        let enum_decl = kodo_ast::EnumDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Option".to_string(),
+            generic_params: vec!["T".to_string()],
+            variants: vec![
+                kodo_ast::EnumVariant {
+                    name: "Some".to_string(),
+                    fields: vec![TypeExpr::Named("T".to_string())],
+                    span: Span::new(0, 20),
+                },
+                kodo_ast::EnumVariant {
+                    name: "None".to_string(),
+                    fields: vec![],
+                    span: Span::new(21, 30),
+                },
+            ],
+        };
+
+        // Use a function that references Option<Int> so monomorphization triggers.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::Let {
+                span: Span::new(0, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Generic(
+                    "Option".to_string(),
+                    vec![TypeExpr::Named("Int".to_string())],
+                )),
+                value: Expr::EnumVariantExpr {
+                    enum_name: "Option".to_string(),
+                    variant: "Some".to_string(),
+                    args: vec![Expr::IntLit(42, Span::new(25, 27))],
+                    span: Span::new(15, 28),
+                },
+            }],
+        );
+
+        let module = make_module_with_decls(vec![], vec![enum_decl], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_ok(), "check_module failed: {result:?}");
+
+        // Verify Option__Int was registered in the enum registry.
+        assert!(
+            checker.enum_registry().contains_key("Option__Int"),
+            "Option__Int should be in enum_registry, got keys: {:?}",
+            checker.enum_registry().keys().collect::<Vec<_>>()
+        );
+
+        // Verify the monomorphized variants have the correct types.
+        let variants = checker.enum_registry().get("Option__Int").unwrap();
+        let some_variant = variants.iter().find(|(n, _)| n == "Some").unwrap();
+        assert_eq!(some_variant.1, vec![Type::Int]);
+        let none_variant = variants.iter().find(|(n, _)| n == "None").unwrap();
+        assert!(none_variant.1.is_empty());
+    }
+
+    #[test]
+    fn wrong_type_arg_count_error_e0221() {
+        let enum_decl = kodo_ast::EnumDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Option".to_string(),
+            generic_params: vec!["T".to_string()],
+            variants: vec![
+                kodo_ast::EnumVariant {
+                    name: "Some".to_string(),
+                    fields: vec![TypeExpr::Named("T".to_string())],
+                    span: Span::new(0, 20),
+                },
+                kodo_ast::EnumVariant {
+                    name: "None".to_string(),
+                    fields: vec![],
+                    span: Span::new(21, 30),
+                },
+            ],
+        };
+
+        // Option expects 1 type arg, but we give 2.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::Let {
+                span: Span::new(0, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Generic(
+                    "Option".to_string(),
+                    vec![
+                        TypeExpr::Named("Int".to_string()),
+                        TypeExpr::Named("Bool".to_string()),
+                    ],
+                )),
+                value: Expr::IntLit(0, Span::new(25, 26)),
+            }],
+        );
+
+        let module = make_module_with_decls(vec![], vec![enum_decl], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0221");
+        assert!(
+            err.to_string().contains("type argument"),
+            "error should mention type arguments: {err}"
+        );
+    }
+
+    #[test]
+    fn missing_type_args_error_e0223() {
+        let enum_decl = kodo_ast::EnumDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Option".to_string(),
+            generic_params: vec!["T".to_string()],
+            variants: vec![
+                kodo_ast::EnumVariant {
+                    name: "Some".to_string(),
+                    fields: vec![TypeExpr::Named("T".to_string())],
+                    span: Span::new(0, 20),
+                },
+                kodo_ast::EnumVariant {
+                    name: "None".to_string(),
+                    fields: vec![],
+                    span: Span::new(21, 30),
+                },
+            ],
+        };
+
+        // Use generic name "Option" without type arguments.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::Let {
+                span: Span::new(0, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("Option".to_string())),
+                value: Expr::IntLit(0, Span::new(25, 26)),
+            }],
+        );
+
+        let module = make_module_with_decls(vec![], vec![enum_decl], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0223");
+        assert!(
+            err.to_string().contains("requires type arguments"),
+            "error should mention requires type arguments: {err}"
+        );
+    }
+
+    #[test]
+    fn generic_enum_some_and_none_typecheck() {
+        let enum_decl = kodo_ast::EnumDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Option".to_string(),
+            generic_params: vec!["T".to_string()],
+            variants: vec![
+                kodo_ast::EnumVariant {
+                    name: "Some".to_string(),
+                    fields: vec![TypeExpr::Named("T".to_string())],
+                    span: Span::new(0, 20),
+                },
+                kodo_ast::EnumVariant {
+                    name: "None".to_string(),
+                    fields: vec![],
+                    span: Span::new(21, 30),
+                },
+            ],
+        };
+
+        // Use both Option::Some(42) and Option::None in the same function.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![
+                Stmt::Let {
+                    span: Span::new(0, 30),
+                    mutable: false,
+                    name: "a".to_string(),
+                    ty: Some(TypeExpr::Generic(
+                        "Option".to_string(),
+                        vec![TypeExpr::Named("Int".to_string())],
+                    )),
+                    value: Expr::EnumVariantExpr {
+                        enum_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        args: vec![Expr::IntLit(42, Span::new(25, 27))],
+                        span: Span::new(15, 28),
+                    },
+                },
+                Stmt::Let {
+                    span: Span::new(31, 60),
+                    mutable: false,
+                    name: "b".to_string(),
+                    ty: Some(TypeExpr::Generic(
+                        "Option".to_string(),
+                        vec![TypeExpr::Named("Int".to_string())],
+                    )),
+                    value: Expr::EnumVariantExpr {
+                        enum_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        args: vec![],
+                        span: Span::new(45, 58),
+                    },
+                },
+            ],
+        );
+
+        let module = make_module_with_decls(vec![], vec![enum_decl], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "should typecheck Option::Some(42) and Option::None: {result:?}"
+        );
+    }
+
+    #[test]
+    fn generic_enum_type_mismatch_in_some_fails() {
+        let enum_decl = kodo_ast::EnumDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Option".to_string(),
+            generic_params: vec!["T".to_string()],
+            variants: vec![
+                kodo_ast::EnumVariant {
+                    name: "Some".to_string(),
+                    fields: vec![TypeExpr::Named("T".to_string())],
+                    span: Span::new(0, 20),
+                },
+                kodo_ast::EnumVariant {
+                    name: "None".to_string(),
+                    fields: vec![],
+                    span: Span::new(21, 30),
+                },
+            ],
+        };
+
+        // Declare Option<Int> but pass a Bool to Some.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::Let {
+                span: Span::new(0, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Generic(
+                    "Option".to_string(),
+                    vec![TypeExpr::Named("Int".to_string())],
+                )),
+                value: Expr::EnumVariantExpr {
+                    enum_name: "Option".to_string(),
+                    variant: "Some".to_string(),
+                    args: vec![Expr::BoolLit(true, Span::new(25, 29))],
+                    span: Span::new(15, 30),
+                },
+            }],
+        );
+
+        let module = make_module_with_decls(vec![], vec![enum_decl], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err(), "should reject Bool in Option<Int>::Some");
+    }
+
+    #[test]
+    fn generic_struct_monomorphizes_correctly() {
+        let struct_decl = kodo_ast::TypeDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Wrapper".to_string(),
+            generic_params: vec!["T".to_string()],
+            fields: vec![kodo_ast::FieldDef {
+                name: "value".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            }],
+        };
+
+        // Reference Wrapper<Int> in a function param type.
+        let func = make_function(
+            "main",
+            vec![Param {
+                name: "w".to_string(),
+                ty: TypeExpr::Generic(
+                    "Wrapper".to_string(),
+                    vec![TypeExpr::Named("Int".to_string())],
+                ),
+                span: Span::new(0, 20),
+            }],
+            TypeExpr::Unit,
+            vec![],
+        );
+
+        let module = make_module_with_decls(vec![struct_decl], vec![], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_ok(), "check_module failed: {result:?}");
+
+        // Verify Wrapper__Int was registered.
+        assert!(checker.struct_registry().contains_key("Wrapper__Int"));
+        let fields = checker.struct_registry().get("Wrapper__Int").unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].0, "value");
+        assert_eq!(fields[0].1, Type::Int);
+    }
+
+    #[test]
+    fn wrong_type_arg_count_for_generic_struct() {
+        let struct_decl = kodo_ast::TypeDecl {
+            id: NodeId(10),
+            span: Span::new(0, 50),
+            name: "Wrapper".to_string(),
+            generic_params: vec!["T".to_string()],
+            fields: vec![kodo_ast::FieldDef {
+                name: "value".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            }],
+        };
+
+        // Wrapper expects 1 type arg, but we give 2.
+        let func = make_function(
+            "main",
+            vec![Param {
+                name: "w".to_string(),
+                ty: TypeExpr::Generic(
+                    "Wrapper".to_string(),
+                    vec![
+                        TypeExpr::Named("Int".to_string()),
+                        TypeExpr::Named("Bool".to_string()),
+                    ],
+                ),
+                span: Span::new(0, 20),
+            }],
+            TypeExpr::Unit,
+            vec![],
+        );
+
+        let module = make_module_with_decls(vec![struct_decl], vec![], vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0221");
+    }
+
+    #[test]
+    fn type_display_generic() {
+        let ty = Type::Generic("Option".to_string(), vec![Type::Int]);
+        assert_eq!(ty.to_string(), "Option<Int>");
+
+        let ty = Type::Generic("Pair".to_string(), vec![Type::Int, Type::Bool]);
+        assert_eq!(ty.to_string(), "Pair<Int, Bool>");
     }
 }

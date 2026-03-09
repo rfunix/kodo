@@ -51,6 +51,42 @@ pub enum StdError {
 /// Alias for results in this crate.
 pub type Result<T> = std::result::Result<T, StdError>;
 
+/// Source code for the stdlib `Option<T>` module.
+pub const OPTION_SOURCE: &str = r#"module option {
+    meta {
+        purpose: "Optional value type"
+        version: "0.1.0"
+    }
+
+    enum Option<T> {
+        Some(T),
+        None
+    }
+}
+"#;
+
+/// Source code for the stdlib `Result<T, E>` module.
+pub const RESULT_SOURCE: &str = r#"module result {
+    meta {
+        purpose: "Error handling type"
+        version: "0.1.0"
+    }
+
+    enum Result<T, E> {
+        Ok(T),
+        Err(E)
+    }
+}
+"#;
+
+/// Returns the source code for all prelude modules.
+///
+/// These modules are implicitly available in every Kōdo program.
+#[must_use]
+pub fn prelude_sources() -> Vec<(&'static str, &'static str)> {
+    vec![("std/option", OPTION_SOURCE), ("std/result", RESULT_SOURCE)]
+}
+
 /// Describes a builtin function available in the standard library.
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {

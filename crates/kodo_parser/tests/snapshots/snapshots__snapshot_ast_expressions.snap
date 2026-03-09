@@ -11,6 +11,7 @@ Module {
         end: 815,
     },
     name: "expressions",
+    imports: [],
     meta: Some(
         Meta {
             id: NodeId(
@@ -60,6 +61,7 @@ Module {
                 end: 350,
             },
             name: "arithmetic",
+            generic_params: [],
             annotations: [],
             params: [],
             return_type: Named(
@@ -216,6 +218,7 @@ Module {
                 end: 500,
             },
             name: "logic",
+            generic_params: [],
             annotations: [],
             params: [
                 Param {
@@ -377,6 +380,7 @@ Module {
                 end: 590,
             },
             name: "nesting",
+            generic_params: [],
             annotations: [],
             params: [],
             return_type: Named(
@@ -486,6 +490,7 @@ Module {
                 end: 813,
             },
             name: "control_flow",
+            generic_params: [],
             annotations: [],
             params: [
                 Param {

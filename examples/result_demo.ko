@@ -1,0 +1,26 @@
+module result_demo {
+    meta {
+        purpose: "Demonstrate stdlib Result type"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ok_val: Result<Int, Int> = Result::Ok(100)
+        let err_val: Result<Int, Int> = Result::Err(42)
+
+        let x: Int = match ok_val {
+            Result::Ok(v) => v,
+            Result::Err(e) => e
+        }
+
+        let y: Int = match err_val {
+            Result::Ok(v) => v,
+            Result::Err(e) => e
+        }
+
+        print_int(x)
+        print_int(y)
+
+        return 0
+    }
+}

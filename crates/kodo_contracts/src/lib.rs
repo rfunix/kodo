@@ -413,6 +413,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test_fn".to_string(),
+            generic_params: vec![],
             annotations: vec![],
             params: vec![Param {
                 name: "x".to_string(),

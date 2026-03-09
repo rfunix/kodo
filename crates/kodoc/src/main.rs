@@ -114,8 +114,48 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>, json_errors: bool
         }
     };
 
-    // Type check
+    // Process imports — compile imported modules and collect their types/functions.
+    let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut imported_object_files: Vec<std::path::PathBuf> = Vec::new();
+    let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
+
+    for import in &module.imports {
+        let import_path = resolve_import_path(base_dir, &import.path);
+        match compile_imported_module(&import_path, &mut imported_object_files) {
+            Ok(imported_module) => imported_modules.push(imported_module),
+            Err(msg) => {
+                eprintln!("{msg}");
+                return 1;
+            }
+        }
+    }
+
+    // Load stdlib prelude modules (Option, Result).
+    let mut prelude_modules = Vec::new();
+    for (_name, source) in kodo_std::prelude_sources() {
+        match kodo_parser::parse(source) {
+            Ok(m) => prelude_modules.push(m),
+            Err(e) => {
+                eprintln!("stdlib parse error: {e}");
+                return 1;
+            }
+        }
+    }
+
+    // Type check — register prelude, imports, then user module.
     let mut checker = kodo_types::TypeChecker::new();
+    for prelude in &prelude_modules {
+        if let Err(e) = checker.check_module(prelude) {
+            eprintln!("stdlib type error: {e}");
+            return 1;
+        }
+    }
+    for imported in &imported_modules {
+        if let Err(e) = checker.check_module(imported) {
+            eprintln!("type error in imported module `{}`: {e}", imported.name);
+            return 1;
+        }
+    }
     if let Err(e) = checker.check_module(&module) {
         if json_errors {
             diagnostics::render_type_error_json(&source, &filename, &e);
@@ -136,55 +176,84 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>, json_errors: bool
         }
     }
 
-    // MIR lowering
-    let mir_functions = match kodo_mir::lowering::lower_module(&module) {
+    // Generate monomorphized function instances from generic functions.
+    let mut module = module;
+    let mut generated_fns: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (base_name, type_args, mono_name) in checker.fn_instances() {
+        if generated_fns.contains(mono_name) {
+            continue;
+        }
+        generated_fns.insert(mono_name.clone());
+        if let Some(generic_fn) = module
+            .functions
+            .iter()
+            .find(|f| f.name == *base_name)
+            .cloned()
+        {
+            let subst: std::collections::HashMap<String, kodo_ast::TypeExpr> = generic_fn
+                .generic_params
+                .iter()
+                .zip(type_args)
+                .map(|(param, ty)| (param.clone(), type_to_type_expr(ty)))
+                .collect();
+            let mut mono_fn = generic_fn;
+            mono_fn.name = mono_name.clone();
+            mono_fn.generic_params = vec![];
+            for param in &mut mono_fn.params {
+                param.ty = substitute_type_expr_ast(&param.ty, &subst);
+            }
+            mono_fn.return_type = substitute_type_expr_ast(&mono_fn.return_type, &subst);
+            module.functions.push(mono_fn);
+        }
+    }
+
+    // MIR lowering — combine all modules' functions.
+    let mut all_mir_functions = Vec::new();
+
+    // Lower imported modules first.
+    for imported in &imported_modules {
+        match kodo_mir::lowering::lower_module_with_type_info(
+            imported,
+            checker.struct_registry(),
+            checker.enum_registry(),
+            checker.enum_names(),
+        ) {
+            Ok(fns) => all_mir_functions.extend(fns),
+            Err(e) => {
+                eprintln!("MIR lowering error in imported module: {e}");
+                return 1;
+            }
+        }
+    }
+
+    // Lower the main module.
+    let mir_functions = match kodo_mir::lowering::lower_module_with_type_info(
+        &module,
+        checker.struct_registry(),
+        checker.enum_registry(),
+        checker.enum_names(),
+    ) {
         Ok(fns) => fns,
         Err(e) => {
             eprintln!("MIR lowering error: {e}");
             return 1;
         }
     };
+    all_mir_functions.extend(mir_functions);
 
     // Build module metadata for embedding in the binary.
     let metadata_json = build_module_metadata(&module);
 
-    // Build struct definitions for codegen
-    let mut struct_defs = std::collections::HashMap::new();
-    for type_decl in &module.type_decls {
-        let fields: Vec<(String, kodo_types::Type)> = type_decl
-            .fields
-            .iter()
-            .filter_map(|f| {
-                kodo_types::resolve_type(&f.ty, f.span)
-                    .ok()
-                    .map(|t| (f.name.clone(), t))
-            })
-            .collect();
-        struct_defs.insert(type_decl.name.clone(), fields);
-    }
-
-    // Build enum definitions for codegen
-    let mut enum_defs = std::collections::HashMap::new();
-    for enum_decl in &module.enum_decls {
-        let variants: Vec<(String, Vec<kodo_types::Type>)> = enum_decl
-            .variants
-            .iter()
-            .map(|v| {
-                let field_types: Vec<kodo_types::Type> = v
-                    .fields
-                    .iter()
-                    .filter_map(|f| kodo_types::resolve_type(f, v.span).ok())
-                    .collect();
-                (v.name.clone(), field_types)
-            })
-            .collect();
-        enum_defs.insert(enum_decl.name.clone(), variants);
-    }
+    // Use type checker registries for codegen (includes monomorphized generics).
+    let struct_defs: std::collections::HashMap<String, Vec<(String, kodo_types::Type)>> =
+        checker.struct_registry().clone();
+    let enum_defs: std::collections::HashMap<String, Vec<(String, Vec<kodo_types::Type>)>> =
+        checker.enum_registry().clone();
 
     // Code generation
     let options = kodo_codegen::CodegenOptions::default();
     let object_bytes = match kodo_codegen::compile_module_with_types(
-        &mir_functions,
+        &all_mir_functions,
         &struct_defs,
         &enum_defs,
         &options,
@@ -256,6 +325,74 @@ fn run_build(file: &PathBuf, output: Option<&std::path::Path>, json_errors: bool
             1
         }
     }
+}
+
+/// Converts a [`kodo_types::Type`] to a [`kodo_ast::TypeExpr`].
+fn type_to_type_expr(ty: &kodo_types::Type) -> kodo_ast::TypeExpr {
+    match ty {
+        kodo_types::Type::Int => kodo_ast::TypeExpr::Named("Int".to_string()),
+        kodo_types::Type::Bool => kodo_ast::TypeExpr::Named("Bool".to_string()),
+        kodo_types::Type::String => kodo_ast::TypeExpr::Named("String".to_string()),
+        kodo_types::Type::Unit => kodo_ast::TypeExpr::Unit,
+        kodo_types::Type::Struct(name) | kodo_types::Type::Enum(name) => {
+            kodo_ast::TypeExpr::Named(name.clone())
+        }
+        _ => kodo_ast::TypeExpr::Named("Unknown".to_string()),
+    }
+}
+
+/// Substitutes type parameters in a [`kodo_ast::TypeExpr`].
+fn substitute_type_expr_ast(
+    expr: &kodo_ast::TypeExpr,
+    subst: &std::collections::HashMap<String, kodo_ast::TypeExpr>,
+) -> kodo_ast::TypeExpr {
+    match expr {
+        kodo_ast::TypeExpr::Named(name) => {
+            if let Some(replacement) = subst.get(name) {
+                replacement.clone()
+            } else {
+                expr.clone()
+            }
+        }
+        kodo_ast::TypeExpr::Generic(name, args) => kodo_ast::TypeExpr::Generic(
+            name.clone(),
+            args.iter()
+                .map(|a| substitute_type_expr_ast(a, subst))
+                .collect(),
+        ),
+        kodo_ast::TypeExpr::Function(params, ret) => kodo_ast::TypeExpr::Function(
+            params
+                .iter()
+                .map(|p| substitute_type_expr_ast(p, subst))
+                .collect(),
+            Box::new(substitute_type_expr_ast(ret, subst)),
+        ),
+        kodo_ast::TypeExpr::Unit => kodo_ast::TypeExpr::Unit,
+    }
+}
+
+/// Resolves an import path to a `.ko` file path.
+///
+/// `import math.utils` resolves to `<base_dir>/math/utils.ko`.
+fn resolve_import_path(base_dir: &std::path::Path, segments: &[String]) -> std::path::PathBuf {
+    let mut path = base_dir.to_path_buf();
+    for segment in segments {
+        path.push(segment);
+    }
+    path.set_extension("ko");
+    path
+}
+
+/// Compiles an imported module and returns its parsed AST.
+fn compile_imported_module(
+    path: &std::path::Path,
+    _object_files: &mut Vec<std::path::PathBuf>,
+) -> std::result::Result<kodo_ast::Module, String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| format!("error: unresolved import `{}`: {e}", path.display()))?;
+    let module = kodo_parser::parse(&source)
+        .map_err(|e| format!("parse error in `{}`: {e}", path.display()))?;
+    Ok(module)
 }
 
 /// Links an object file with the Kōdo runtime to produce an executable.
@@ -430,8 +567,15 @@ fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
         }
     };
 
-    // Type check
+    // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    // Type check
     if let Err(e) = checker.check_module(&module) {
         if json_errors {
             diagnostics::render_type_error_json(&source, &filename, &e);

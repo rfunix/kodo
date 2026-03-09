@@ -119,6 +119,15 @@ impl NodeIdGen {
     }
 }
 
+/// An import declaration: `import std.option`
+#[derive(Debug, Clone)]
+pub struct ImportDecl {
+    /// The import path segments (e.g. `["std", "option"]`).
+    pub path: Vec<String>,
+    /// Source span.
+    pub span: Span,
+}
+
 /// The top-level compilation unit representing a `.ko` file.
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -128,6 +137,8 @@ pub struct Module {
     pub span: Span,
     /// The module name.
     pub name: String,
+    /// Import declarations.
+    pub imports: Vec<ImportDecl>,
     /// Module metadata block.
     pub meta: Option<Meta>,
     /// User-defined struct type declarations.
@@ -138,7 +149,7 @@ pub struct Module {
     pub functions: Vec<Function>,
 }
 
-/// A user-defined struct type declaration: `struct Name { field: Type, ... }`
+/// A user-defined struct type declaration: `struct Name<T> { field: Type, ... }`
 #[derive(Debug, Clone)]
 pub struct TypeDecl {
     /// Unique identifier for this node.
@@ -147,6 +158,8 @@ pub struct TypeDecl {
     pub span: Span,
     /// The struct name.
     pub name: String,
+    /// Generic type parameter names (empty for non-generic structs).
+    pub generic_params: Vec<String>,
     /// Fields of the struct.
     pub fields: Vec<FieldDef>,
 }
@@ -173,7 +186,7 @@ pub struct FieldInit {
     pub span: Span,
 }
 
-/// A user-defined enum type declaration: `enum Name { Variant1, Variant2(Type) }`
+/// A user-defined enum type declaration: `enum Name<T> { Variant1, Variant2(Type) }`
 #[derive(Debug, Clone)]
 pub struct EnumDecl {
     /// Unique identifier for this node.
@@ -182,6 +195,8 @@ pub struct EnumDecl {
     pub span: Span,
     /// The enum name.
     pub name: String,
+    /// Generic type parameter names (empty for non-generic enums).
+    pub generic_params: Vec<String>,
     /// Variants of the enum.
     pub variants: Vec<EnumVariant>,
 }
@@ -306,6 +321,8 @@ pub struct Function {
     pub span: Span,
     /// Function name.
     pub name: String,
+    /// Generic type parameter names (empty for non-generic functions).
+    pub generic_params: Vec<String>,
     /// Annotations (e.g. `@authored_by`, `@confidence`).
     pub annotations: Vec<Annotation>,
     /// Parameters.

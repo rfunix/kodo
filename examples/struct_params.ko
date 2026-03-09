@@ -1,0 +1,41 @@
+module struct_params {
+    meta {
+        purpose: "Demonstrate structs as function parameters and return values",
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn get_x(p: Point) -> Int {
+        return p.x
+    }
+
+    fn get_y(p: Point) -> Int {
+        return p.y
+    }
+
+    fn make_point(x: Int, y: Int) -> Point {
+        return Point { x: x, y: y }
+    }
+
+    fn add_points(a: Point, b: Point) -> Point {
+        return Point { x: a.x + b.x, y: a.y + b.y }
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10, y: 20 }
+        print_int(get_x(p))
+        print_int(get_y(p))
+
+        let q: Point = make_point(30, 40)
+        print_int(q.x)
+        print_int(q.y)
+
+        let r: Point = add_points(p, q)
+        print_int(r.x)
+        print_int(r.y)
+    }
+}

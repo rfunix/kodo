@@ -300,6 +300,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
+            imports: vec![],
             meta: Some(Meta {
                 id: NodeId(1),
                 span: Span::new(0, 50),
@@ -317,6 +318,7 @@ mod tests {
                     id: NodeId(2),
                     span: Span::new(0, 100),
                     name: name.to_string(),
+                    generic_params: vec![],
                     annotations: vec![],
                     params: vec![],
                     return_type: TypeExpr::Unit,

@@ -22,6 +22,12 @@ fn run_full_pipeline(source: &str) -> Result<(), String> {
     let module = kodo_parser::parse(source).map_err(|e| format!("parse error: {e}"))?;
 
     let mut checker = kodo_types::TypeChecker::new();
+    // Load stdlib prelude (Option, Result).
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
     checker
         .check_module(&module)
         .map_err(|e| format!("type error: {e}"))?;

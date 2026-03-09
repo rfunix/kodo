@@ -11,6 +11,7 @@ Module {
         end: 167,
     },
     name: "hello",
+    imports: [],
     meta: Some(
         Meta {
             id: NodeId(
@@ -60,6 +61,7 @@ Module {
                 end: 165,
             },
             name: "main",
+            generic_params: [],
             annotations: [],
             params: [],
             return_type: Unit,
