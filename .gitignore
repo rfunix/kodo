@@ -36,3 +36,19 @@ z3-sys/
 # Temporary files
 *.tmp
 *.bak
+
+# Compiled Kōdo binaries and certificates
+examples/hello
+examples/fibonacci
+examples/while_loop
+examples/struct_params
+examples/enum_params
+examples/generics
+examples/generic_fn
+examples/option_demo
+examples/result_demo
+examples/multi_file/main
+*.ko.cert.json
+
+# Proptest regressions
+*.proptest-regressions
