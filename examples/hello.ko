@@ -1,0 +1,13 @@
+// A minimal "Hello, World!" program in Kōdo.
+// This demonstrates the basic module structure that every .ko file follows.
+
+module hello {
+    meta {
+        purpose: "A minimal hello world program",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    fn main() {
+    }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "kodo_codegen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Code generation backend (Cranelift) for the Kōdo compiler"
+
+[dependencies]
+kodo_mir.workspace = true
+kodo_types.workspace = true
+thiserror.workspace = true
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-module.workspace = true
+cranelift-native.workspace = true

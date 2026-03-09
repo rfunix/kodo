@@ -1,0 +1,28 @@
+[package]
+name = "kodoc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The Kōdo compiler CLI — kodoc"
+
+[[bin]]
+name = "kodoc"
+path = "src/main.rs"
+
+[dependencies]
+kodo_ast.workspace = true
+kodo_lexer.workspace = true
+kodo_parser.workspace = true
+kodo_types.workspace = true
+kodo_contracts.workspace = true
+kodo_resolver.workspace = true
+kodo_mir.workspace = true
+kodo_codegen.workspace = true
+kodo_std.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ariadne.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true

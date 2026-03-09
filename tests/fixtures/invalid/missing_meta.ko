@@ -1,0 +1,6 @@
+// This module intentionally lacks a meta block.
+// In a full implementation, the semantic analyzer would reject this.
+module no_meta {
+    fn main() {
+    }
+}

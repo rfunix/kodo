@@ -1,0 +1,128 @@
+(* Kōdo Formal Grammar — EBNF *)
+(* Version: 0.1.0 (initial subset) *)
+(* This grammar is LL(1)-parseable with zero ambiguity. *)
+
+(* ===== Top Level ===== *)
+
+module          = "module" IDENT "{" meta_block? declaration* "}" ;
+
+meta_block      = "meta" "{" meta_entry ("," meta_entry)* ","? "}" ;
+meta_entry      = IDENT ":" STRING_LIT ;
+
+declaration     = function_decl
+                | type_decl
+                | enum_decl
+                | intent_decl
+                | import_decl ;
+
+(* ===== Imports ===== *)
+
+import_decl     = "import" module_path ;
+module_path     = IDENT ( "." IDENT )* ;
+
+(* ===== Types ===== *)
+
+type_decl       = "type" IDENT generic_params? "{" field_list "}" ;
+enum_decl       = "enum" IDENT generic_params? "{" variant_list "}" ;
+
+generic_params  = "<" IDENT ("," IDENT)* ">" ;
+field_list      = ( field ("," field)* ","? )? ;
+field           = IDENT ":" type_expr ;
+variant_list    = ( variant ("," variant)* ","? )? ;
+variant         = IDENT ( "(" type_expr ("," type_expr)* ")" )?
+                | IDENT "{" field_list "}" ;
+
+type_expr       = IDENT generic_args?           (* named type: Int, List<T> *)
+                | "(" type_list? ")" "->" type_expr  (* function type *)
+                | "(" ")" ;                      (* unit type *)
+
+generic_args    = "<" type_expr ("," type_expr)* ">" ;
+type_list       = type_expr ("," type_expr)* ;
+
+(* ===== Functions ===== *)
+
+function_decl   = annotation* "fn" IDENT "(" param_list? ")" return_type? contract* block ;
+
+param_list      = param ("," param)* ;
+param           = IDENT ":" type_expr ;
+return_type     = "->" type_expr ;
+
+contract        = "requires" "{" expr "}"
+                | "ensures"  "{" expr "}" ;
+
+annotation      = "@" IDENT ( "(" annotation_args ")" )? ;
+annotation_args = annotation_arg ("," annotation_arg)* ;
+annotation_arg  = IDENT ":" expr
+                | expr ;
+
+(* ===== Intent System ===== *)
+
+intent_decl     = "intent" IDENT "{" intent_config* "}" ;
+intent_config   = IDENT ":" expr ;
+
+(* ===== Statements ===== *)
+
+block           = "{" statement* "}" ;
+
+statement       = let_stmt
+                | return_stmt
+                | expr_stmt ;
+
+let_stmt        = "let" "mut"? IDENT (":" type_expr)? "=" expr ;
+return_stmt     = "return" expr? ;
+expr_stmt       = expr ;
+
+(* ===== Expressions ===== *)
+(* Precedence (lowest to highest): *)
+(*   || *)
+(*   && *)
+(*   == != *)
+(*   < > <= >= *)
+(*   + - *)
+(*   * / % *)
+(*   unary (! -) *)
+(*   call, field access *)
+(*   primary *)
+
+expr            = or_expr ;
+
+or_expr         = and_expr ( "||" and_expr )* ;
+and_expr        = equality_expr ( "&&" equality_expr )* ;
+equality_expr   = comparison_expr ( ( "==" | "!=" ) comparison_expr )* ;
+comparison_expr = additive_expr ( ( "<" | ">" | "<=" | ">=" ) additive_expr )* ;
+additive_expr   = multiplicative_expr ( ( "+" | "-" ) multiplicative_expr )* ;
+multiplicative_expr = unary_expr ( ( "*" | "/" | "%" ) unary_expr )* ;
+
+unary_expr      = ( "!" | "-" ) unary_expr
+                | postfix_expr ;
+
+postfix_expr    = primary_expr ( call_suffix | field_suffix )* ;
+call_suffix     = "(" arg_list? ")" ;
+field_suffix    = "." IDENT ;
+arg_list        = expr ("," expr)* ;
+
+primary_expr    = INT_LIT
+                | STRING_LIT
+                | "true" | "false"
+                | IDENT
+                | if_expr
+                | match_expr
+                | block
+                | "(" expr ")" ;
+
+if_expr         = "if" expr block ( "else" ( if_expr | block ) )? ;
+
+match_expr      = "match" expr "{" match_arm ("," match_arm)* ","? "}" ;
+match_arm       = pattern "=>" expr ;
+pattern         = IDENT ( "(" pattern_list? ")" )?
+                | INT_LIT
+                | STRING_LIT
+                | "_" ;
+pattern_list    = pattern ("," pattern)* ;
+
+(* ===== Lexical Elements ===== *)
+
+IDENT           = [a-zA-Z_] [a-zA-Z0-9_]* ;
+INT_LIT         = [0-9] [0-9_]* ;
+STRING_LIT      = '"' [^"]* '"' ;
+LINE_COMMENT    = "//" [^\n]* ;

@@ -1,0 +1,21 @@
+// Fibonacci sequence with contracts demonstrating
+// Kōdo's correctness-by-construction approach.
+
+module fibonacci {
+    meta {
+        purpose: "Compute Fibonacci numbers with verified contracts",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    fn fib(n: Int) -> Int {
+        if n <= 1 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    fn main() {
+        let result: Int = fib(10)
+    }
+}

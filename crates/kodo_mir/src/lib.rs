@@ -1,0 +1,215 @@
+//! # `kodo_mir` — Mid-Level Intermediate Representation
+//!
+//! This crate defines the MIR (Mid-level Intermediate Representation) used
+//! between the typed AST and code generation. MIR is a control-flow graph
+//! representation that enables optimizations and borrow checking.
+//!
+//! The MIR is designed to be a stable intermediate format that both the
+//! Cranelift backend and future LLVM backend can consume.
+//!
+//! ## Structure
+//!
+//! - [`MirFunction`] — A function as a control-flow graph of basic blocks
+//! - [`BasicBlock`] — A sequence of instructions with a terminator
+//! - [`Instruction`] — A single MIR operation
+//! - [`Terminator`] — How a basic block transfers control
+
+#![deny(missing_docs)]
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+#![warn(clippy::pedantic)]
+
+use kodo_types::Type;
+use thiserror::Error;
+
+/// Errors that can occur during MIR construction or validation.
+#[derive(Debug, Error)]
+pub enum MirError {
+    /// A basic block was referenced but not defined.
+    #[error("undefined basic block: {0}")]
+    UndefinedBlock(BlockId),
+    /// A local variable was referenced but not defined.
+    #[error("undefined local: {0}")]
+    UndefinedLocal(LocalId),
+    /// The MIR function has no entry block.
+    #[error("function `{0}` has no entry block")]
+    NoEntryBlock(String),
+}
+
+/// Alias for results in this crate.
+pub type Result<T> = std::result::Result<T, MirError>;
+
+/// Identifier for a basic block within a function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(pub u32);
+
+impl std::fmt::Display for BlockId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bb{}", self.0)
+    }
+}
+
+/// Identifier for a local variable within a function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalId(pub u32);
+
+impl std::fmt::Display for LocalId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "_{}", self.0)
+    }
+}
+
+/// A function in MIR form — a control-flow graph of basic blocks.
+#[derive(Debug)]
+pub struct MirFunction {
+    /// The function name.
+    pub name: String,
+    /// The return type.
+    pub return_type: Type,
+    /// Local variable declarations (params + temporaries).
+    pub locals: Vec<Local>,
+    /// Basic blocks forming the control-flow graph.
+    pub blocks: Vec<BasicBlock>,
+    /// The entry block.
+    pub entry: BlockId,
+}
+
+/// A local variable declaration.
+#[derive(Debug)]
+pub struct Local {
+    /// The local identifier.
+    pub id: LocalId,
+    /// The type of this local.
+    pub ty: Type,
+    /// Whether this local is mutable.
+    pub mutable: bool,
+}
+
+/// A basic block — a straight-line sequence of instructions ending in a terminator.
+#[derive(Debug)]
+pub struct BasicBlock {
+    /// The block identifier.
+    pub id: BlockId,
+    /// Instructions in this block.
+    pub instructions: Vec<Instruction>,
+    /// How this block transfers control.
+    pub terminator: Terminator,
+}
+
+/// A single MIR instruction.
+#[derive(Debug)]
+pub enum Instruction {
+    /// Assign a value to a local: `local = value`
+    Assign(LocalId, Value),
+    /// Call a function: `dest = callee(args...)`
+    Call {
+        /// Where to store the result.
+        dest: LocalId,
+        /// The function to call.
+        callee: String,
+        /// The arguments.
+        args: Vec<Value>,
+    },
+}
+
+/// A value in MIR — either a constant, a local reference, or a binary operation.
+#[derive(Debug)]
+pub enum Value {
+    /// An integer constant.
+    IntConst(i64),
+    /// A boolean constant.
+    BoolConst(bool),
+    /// A string constant.
+    StringConst(String),
+    /// A reference to a local variable.
+    Local(LocalId),
+    /// A binary operation on two values.
+    BinOp(kodo_ast::BinOp, Box<Value>, Box<Value>),
+    /// The unit value.
+    Unit,
+}
+
+/// How a basic block transfers control flow.
+#[derive(Debug)]
+pub enum Terminator {
+    /// Return from the function with a value.
+    Return(Value),
+    /// Unconditional jump to another block.
+    Goto(BlockId),
+    /// Conditional branch: if value then `true_block` else `false_block`.
+    Branch {
+        /// The condition.
+        condition: Value,
+        /// Block to jump to if true.
+        true_block: BlockId,
+        /// Block to jump to if false.
+        false_block: BlockId,
+    },
+    /// Unreachable — the block should never be entered.
+    Unreachable,
+}
+
+impl MirFunction {
+    /// Validates the MIR function for internal consistency.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MirError`] if the function has structural problems.
+    pub fn validate(&self) -> Result<()> {
+        if self.blocks.is_empty() {
+            return Err(MirError::NoEntryBlock(self.name.clone()));
+        }
+
+        let block_ids: std::collections::HashSet<_> = self.blocks.iter().map(|b| b.id).collect();
+
+        if !block_ids.contains(&self.entry) {
+            return Err(MirError::NoEntryBlock(self.name.clone()));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_function_fails_validation() {
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            locals: vec![],
+            blocks: vec![],
+            entry: BlockId(0),
+        };
+        assert!(func.validate().is_err());
+    }
+
+    #[test]
+    fn valid_function_passes_validation() {
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        assert!(func.validate().is_ok());
+    }
+
+    #[test]
+    fn block_id_display() {
+        assert_eq!(BlockId(0).to_string(), "bb0");
+        assert_eq!(BlockId(42).to_string(), "bb42");
+    }
+
+    #[test]
+    fn local_id_display() {
+        assert_eq!(LocalId(0).to_string(), "_0");
+        assert_eq!(LocalId(5).to_string(), "_5");
+    }
+}

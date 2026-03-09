@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kodo_ast",
+    "crates/kodo_lexer",
+    "crates/kodo_parser",
+    "crates/kodo_types",
+    "crates/kodo_contracts",
+    "crates/kodo_resolver",
+    "crates/kodo_mir",
+    "crates/kodo_codegen",
+    "crates/kodo_std",
+    "crates/kodoc",
+    "tools/ko",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/kodo-lang/kodo"
+description = "The Kōdo programming language compiler — designed for AI agents, transparent for humans"
+
+[workspace.dependencies]
+# Internal crates
+kodo_ast = { path = "crates/kodo_ast" }
+kodo_lexer = { path = "crates/kodo_lexer" }
+kodo_parser = { path = "crates/kodo_parser" }
+kodo_types = { path = "crates/kodo_types" }
+kodo_contracts = { path = "crates/kodo_contracts" }
+kodo_resolver = { path = "crates/kodo_resolver" }
+kodo_mir = { path = "crates/kodo_mir" }
+kodo_codegen = { path = "crates/kodo_codegen" }
+kodo_std = { path = "crates/kodo_std" }
+
+# Lexing
+logos = "0.16.1"
+
+# Error reporting
+ariadne = "0.6.0"
+thiserror = "2.0.18"
+
+# CLI
+clap = { version = "4.5.60", features = ["derive"] }
+
+# Tracing
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+# Code generation
+cranelift-codegen = "0.129.1"
+cranelift-frontend = "0.129.1"
+cranelift-module = "0.129.1"
+cranelift-native = "0.129.1"
+
+# SMT solver (optional)
+z3 = "0.19.13"
+
+# Testing
+insta = "1.46.3"
+proptest = "1.10.0"
+
+# Benchmarking
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

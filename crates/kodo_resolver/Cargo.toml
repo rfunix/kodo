@@ -1,0 +1,13 @@
+[package]
+name = "kodo_resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Intent resolution engine for the Kōdo language"
+
+[dependencies]
+kodo_ast.workspace = true
+kodo_types.workspace = true
+kodo_contracts.workspace = true
+thiserror.workspace = true

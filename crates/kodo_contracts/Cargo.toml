@@ -1,0 +1,20 @@
+[package]
+name = "kodo_contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Contract verification (requires/ensures) for the Kōdo language"
+
+[dependencies]
+kodo_ast.workspace = true
+kodo_types.workspace = true
+thiserror.workspace = true
+
+[dependencies.z3]
+workspace = true
+optional = true
+
+[features]
+default = []
+smt = ["dep:z3"]

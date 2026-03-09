@@ -1,0 +1,10 @@
+module hello {
+    meta {
+        purpose: "A minimal valid Kōdo program for testing",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn main() {
+    }
+}

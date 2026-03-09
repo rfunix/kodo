@@ -1,0 +1,15 @@
+[package]
+name = "kodo_ast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Abstract Syntax Tree definitions for the Kōdo language"
+
+[dependencies]
+thiserror.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]

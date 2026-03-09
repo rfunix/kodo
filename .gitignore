@@ -1,0 +1,38 @@
+# Build artifacts
+/target
+**/target
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Cargo lock for libraries (keep for workspace binary)
+# Cargo.lock is committed for reproducible builds
+
+# Coverage
+*.profraw
+*.profdata
+lcov.info
+coverage/
+
+# Benchmark results (local)
+target/criterion/
+
+# Z3 build artifacts
+z3-sys/
+
+# Temporary files
+*.tmp
+*.bak
