@@ -1,0 +1,370 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+assertion_line: 44
+expression: module
+---
+Module {
+    id: NodeId(
+        3,
+    ),
+    span: Span {
+        start: 54,
+        end: 567,
+    },
+    name: "contracts",
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 77,
+                end: 195,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Contract verification examples",
+                    span: Span {
+                        start: 77,
+                        end: 133,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 77,
+                        end: 159,
+                    },
+                },
+                MetaEntry {
+                    key: "author",
+                    value: "Kōdo Team",
+                    span: Span {
+                        start: 77,
+                        end: 189,
+                    },
+                },
+            ],
+        },
+    ),
+    functions: [
+        Function {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 201,
+                end: 331,
+            },
+            name: "safe_divide",
+            params: [
+                Param {
+                    name: "a",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 216,
+                        end: 222,
+                    },
+                },
+                Param {
+                    name: "b",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 224,
+                        end: 230,
+                    },
+                },
+            ],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [
+                BinaryOp {
+                    left: Ident(
+                        "b",
+                        Span {
+                            start: 258,
+                            end: 259,
+                        },
+                    ),
+                    op: Ne,
+                    right: IntLit(
+                        0,
+                        Span {
+                            start: 263,
+                            end: 264,
+                        },
+                    ),
+                    span: Span {
+                        start: 258,
+                        end: 264,
+                    },
+                },
+            ],
+            ensures: [
+                BinaryOp {
+                    left: Ident(
+                        "result",
+                        Span {
+                            start: 285,
+                            end: 291,
+                        },
+                    ),
+                    op: Ge,
+                    right: IntLit(
+                        0,
+                        Span {
+                            start: 295,
+                            end: 296,
+                        },
+                    ),
+                    span: Span {
+                        start: 285,
+                        end: 296,
+                    },
+                },
+            ],
+            body: Block {
+                span: Span {
+                    start: 303,
+                    end: 331,
+                },
+                stmts: [
+                    Return {
+                        span: Span {
+                            start: 313,
+                            end: 325,
+                        },
+                        value: Some(
+                            BinaryOp {
+                                left: Ident(
+                                    "a",
+                                    Span {
+                                        start: 320,
+                                        end: 321,
+                                    },
+                                ),
+                                op: Div,
+                                right: Ident(
+                                    "b",
+                                    Span {
+                                        start: 324,
+                                        end: 325,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 320,
+                                    end: 325,
+                                },
+                            },
+                        ),
+                    },
+                ],
+            },
+        },
+        Function {
+            id: NodeId(
+                2,
+            ),
+            span: Span {
+                start: 337,
+                end: 565,
+            },
+            name: "clamp",
+            params: [
+                Param {
+                    name: "value",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 346,
+                        end: 356,
+                    },
+                },
+                Param {
+                    name: "min",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 358,
+                        end: 366,
+                    },
+                },
+                Param {
+                    name: "max",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 368,
+                        end: 376,
+                    },
+                },
+            ],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [
+                BinaryOp {
+                    left: Ident(
+                        "min",
+                        Span {
+                            start: 404,
+                            end: 407,
+                        },
+                    ),
+                    op: Le,
+                    right: Ident(
+                        "max",
+                        Span {
+                            start: 411,
+                            end: 414,
+                        },
+                    ),
+                    span: Span {
+                        start: 404,
+                        end: 414,
+                    },
+                },
+            ],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 421,
+                    end: 565,
+                },
+                stmts: [
+                    Expr(
+                        If {
+                            condition: BinaryOp {
+                                left: Ident(
+                                    "value",
+                                    Span {
+                                        start: 434,
+                                        end: 439,
+                                    },
+                                ),
+                                op: Lt,
+                                right: Ident(
+                                    "min",
+                                    Span {
+                                        start: 442,
+                                        end: 445,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 434,
+                                    end: 445,
+                                },
+                            },
+                            then_branch: Block {
+                                span: Span {
+                                    start: 446,
+                                    end: 480,
+                                },
+                                stmts: [
+                                    Return {
+                                        span: Span {
+                                            start: 460,
+                                            end: 470,
+                                        },
+                                        value: Some(
+                                            Ident(
+                                                "min",
+                                                Span {
+                                                    start: 467,
+                                                    end: 470,
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ],
+                            },
+                            else_branch: None,
+                            span: Span {
+                                start: 431,
+                                end: 480,
+                            },
+                        },
+                    ),
+                    Expr(
+                        If {
+                            condition: BinaryOp {
+                                left: Ident(
+                                    "value",
+                                    Span {
+                                        start: 492,
+                                        end: 497,
+                                    },
+                                ),
+                                op: Gt,
+                                right: Ident(
+                                    "max",
+                                    Span {
+                                        start: 500,
+                                        end: 503,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 492,
+                                    end: 503,
+                                },
+                            },
+                            then_branch: Block {
+                                span: Span {
+                                    start: 504,
+                                    end: 538,
+                                },
+                                stmts: [
+                                    Return {
+                                        span: Span {
+                                            start: 518,
+                                            end: 528,
+                                        },
+                                        value: Some(
+                                            Ident(
+                                                "max",
+                                                Span {
+                                                    start: 525,
+                                                    end: 528,
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ],
+                            },
+                            else_branch: None,
+                            span: Span {
+                                start: 489,
+                                end: 538,
+                            },
+                        },
+                    ),
+                    Return {
+                        span: Span {
+                            start: 547,
+                            end: 559,
+                        },
+                        value: Some(
+                            Ident(
+                                "value",
+                                Span {
+                                    start: 554,
+                                    end: 559,
+                                },
+                            ),
+                        ),
+                    },
+                ],
+            },
+        },
+    ],
+}

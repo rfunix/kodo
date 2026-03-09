@@ -1,0 +1,28 @@
+// Demonstrates requires/ensures contracts in Kōdo.
+
+module contracts {
+    meta {
+        purpose: "Contract verification examples",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+
+    fn clamp(value: Int, min: Int, max: Int) -> Int
+        requires { min <= max }
+    {
+        if value < min {
+            return min
+        }
+        if value > max {
+            return max
+        }
+        return value
+    }
+}

@@ -1,0 +1,29 @@
+---
+source: crates/kodo_lexer/tests/snapshots.rs
+assertion_line: 32
+expression: format_tokens(&source)
+---
+Module @ 0..6
+Ident("hello") @ 7..12
+LBrace @ 13..14
+Meta @ 19..23
+LBrace @ 24..25
+Ident("purpose") @ 34..41
+Colon @ 41..42
+StringLit("A minimal valid Kōdo program for testing") @ 43..86
+Comma @ 86..87
+Ident("version") @ 96..103
+Colon @ 103..104
+StringLit("0.1.0") @ 105..112
+Comma @ 112..113
+Ident("author") @ 122..128
+Colon @ 128..129
+StringLit("test") @ 130..136
+RBrace @ 141..142
+Fn @ 148..150
+Ident("main") @ 151..155
+LParen @ 155..156
+RParen @ 156..157
+LBrace @ 158..159
+RBrace @ 164..165
+RBrace @ 166..167

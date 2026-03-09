@@ -1,0 +1,14 @@
+module valid_contracts {
+    meta {
+        purpose: "Valid contract expressions",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+        ensures { result >= 0 }
+    {
+        return x
+    }
+}

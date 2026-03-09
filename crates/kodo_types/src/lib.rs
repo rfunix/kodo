@@ -336,12 +336,38 @@ pub struct TypeChecker {
 
 impl TypeChecker {
     /// Creates a new type checker with an empty environment.
+    ///
+    /// Builtin functions (`println`, `print`) are registered automatically.
     #[must_use]
     pub fn new() -> Self {
-        Self {
+        let mut checker = Self {
             env: TypeEnv::new(),
             current_return_type: Type::Unit,
-        }
+        };
+        checker.register_builtins();
+        checker
+    }
+
+    /// Registers builtin functions in the type environment.
+    ///
+    /// These are functions provided by the runtime that do not need to be
+    /// declared in user code. Currently registers:
+    /// - `println(String) -> ()`
+    /// - `print(String) -> ()`
+    /// - `print_int(Int) -> ()`
+    fn register_builtins(&mut self) {
+        self.env.insert(
+            "println".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "print".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "print_int".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
     }
 
     /// Type-checks an entire module.

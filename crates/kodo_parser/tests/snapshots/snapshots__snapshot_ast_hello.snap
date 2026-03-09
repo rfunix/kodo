@@ -1,0 +1,75 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+assertion_line: 23
+expression: module
+---
+Module {
+    id: NodeId(
+        2,
+    ),
+    span: Span {
+        start: 0,
+        end: 167,
+    },
+    name: "hello",
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 19,
+                end: 142,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "A minimal valid Kōdo program for testing",
+                    span: Span {
+                        start: 19,
+                        end: 86,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 19,
+                        end: 112,
+                    },
+                },
+                MetaEntry {
+                    key: "author",
+                    value: "test",
+                    span: Span {
+                        start: 19,
+                        end: 136,
+                    },
+                },
+            ],
+        },
+    ),
+    functions: [
+        Function {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 148,
+                end: 165,
+            },
+            name: "main",
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 158,
+                    end: 165,
+                },
+                stmts: [],
+            },
+        },
+    ],
+}

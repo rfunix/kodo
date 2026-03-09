@@ -9,3 +9,7 @@ description = "Type system and type checker for the Kōdo language"
 [dependencies]
 kodo_ast.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+kodo_parser.workspace = true

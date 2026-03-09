@@ -74,10 +74,10 @@ fn main() {
     let exit_code = match cli.command {
         Command::Build {
             file,
-            output: _,
+            output,
             json_errors: _,
             contracts: _,
-        } => run_build(&file),
+        } => run_build(&file, output.as_deref()),
         Command::Check {
             file,
             json_errors: _,
@@ -89,7 +89,7 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn run_build(file: &PathBuf) -> i32 {
+fn run_build(file: &PathBuf, output: Option<&std::path::Path>) -> i32 {
     tracing::info!("building {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -100,21 +100,148 @@ fn run_build(file: &PathBuf) -> i32 {
         }
     };
 
-    match kodo_parser::parse(&source) {
-        Ok(module) => {
-            println!("Successfully parsed module `{}`", module.name);
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Type check
+    let mut checker = kodo_types::TypeChecker::new();
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    // Contract verification
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        if let Err(e) =
+            kodo_contracts::verify_contracts(&contracts, kodo_contracts::ContractMode::Runtime)
+        {
+            eprintln!("contract error: {e}");
+            return 1;
+        }
+    }
+
+    // MIR lowering
+    let mir_functions = match kodo_mir::lowering::lower_module(&module) {
+        Ok(fns) => fns,
+        Err(e) => {
+            eprintln!("MIR lowering error: {e}");
+            return 1;
+        }
+    };
+
+    // Code generation
+    let options = kodo_codegen::CodegenOptions::default();
+    let object_bytes = match kodo_codegen::compile_module(&mir_functions, &options) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("codegen error: {e}");
+            return 1;
+        }
+    };
+
+    // Determine output path
+    let output_path = output
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| file.with_extension(""));
+
+    // Write object file to a temporary location
+    let obj_path = output_path.with_extension("o");
+    if let Err(e) = std::fs::write(&obj_path, &object_bytes) {
+        eprintln!("error: could not write object file: {e}");
+        return 1;
+    }
+
+    // Link with the runtime
+    let link_result = link_executable(&obj_path, &output_path);
+
+    // Clean up the .o file
+    let _ = std::fs::remove_file(&obj_path);
+
+    match link_result {
+        Ok(()) => {
             println!(
-                "  {} function(s), meta: {}",
-                module.functions.len(),
-                if module.meta.is_some() { "yes" } else { "no" }
+                "Successfully compiled `{}` → {}",
+                module.name,
+                output_path.display()
             );
             0
         }
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("link error: {e}");
             1
         }
     }
+}
+
+/// Links an object file with the Kōdo runtime to produce an executable.
+fn link_executable(
+    obj_path: &std::path::Path,
+    output_path: &std::path::Path,
+) -> std::result::Result<(), String> {
+    // Find the runtime library.
+    // Strategy: look relative to the kodoc binary, then in the workspace target dir.
+    let runtime_path = find_runtime_lib()?;
+
+    let status = std::process::Command::new("cc")
+        .arg(obj_path)
+        .arg(&runtime_path)
+        .arg("-o")
+        .arg(output_path)
+        .status()
+        .map_err(|e| format!("failed to invoke linker `cc`: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "linker failed with exit code {}",
+            status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+/// Locates `libkodo_runtime.a` by searching common paths.
+fn find_runtime_lib() -> std::result::Result<PathBuf, String> {
+    // 1. Check KODO_RUNTIME_LIB env var
+    if let Ok(path) = std::env::var("KODO_RUNTIME_LIB") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+
+    // 2. Check relative to the current executable (workspace target/debug/)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("libkodo_runtime.a");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    // 3. Check common cargo target directories
+    let candidates = [
+        "target/debug/libkodo_runtime.a",
+        "target/release/libkodo_runtime.a",
+    ];
+    for candidate in &candidates {
+        let p = PathBuf::from(candidate);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+
+    Err(
+        "could not find libkodo_runtime.a — build the workspace first with `cargo build`"
+            .to_string(),
+    )
 }
 
 fn run_check(file: &PathBuf) -> i32 {
@@ -128,16 +255,34 @@ fn run_check(file: &PathBuf) -> i32 {
         }
     };
 
-    match kodo_parser::parse(&source) {
-        Ok(module) => {
-            println!("Check passed for module `{}`", module.name);
-            0
-        }
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
         Err(e) => {
-            eprintln!("error: {e}");
-            1
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Type check
+    let mut checker = kodo_types::TypeChecker::new();
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    // Contract verification
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        if let Err(e) =
+            kodo_contracts::verify_contracts(&contracts, kodo_contracts::ContractMode::Runtime)
+        {
+            eprintln!("contract error: {e}");
+            return 1;
         }
     }
+
+    println!("Check passed for module `{}`", module.name);
+    0
 }
 
 fn run_lex(file: &PathBuf) -> i32 {

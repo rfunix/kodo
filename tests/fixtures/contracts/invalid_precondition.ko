@@ -1,0 +1,13 @@
+module invalid_precondition {
+    meta {
+        purpose: "Invalid contract expression",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn bad_contract(x: Int) -> Int
+        requires { "not a boolean" }
+    {
+        return x
+    }
+}

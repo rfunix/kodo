@@ -1,0 +1,29 @@
+---
+source: crates/kodo_lexer/tests/snapshots.rs
+assertion_line: 38
+expression: format_tokens(&source)
+---
+Module @ 0..6
+Ident("minimal") @ 7..14
+LBrace @ 15..16
+Meta @ 21..25
+LBrace @ 26..27
+Ident("purpose") @ 36..43
+Colon @ 43..44
+StringLit("Minimal valid module") @ 45..67
+Comma @ 67..68
+Ident("version") @ 77..84
+Colon @ 84..85
+StringLit("0.1.0") @ 86..93
+Comma @ 93..94
+Ident("author") @ 103..109
+Colon @ 109..110
+StringLit("test") @ 111..117
+RBrace @ 122..123
+Fn @ 129..131
+Ident("noop") @ 132..136
+LParen @ 136..137
+RParen @ 137..138
+LBrace @ 139..140
+RBrace @ 145..146
+RBrace @ 147..148

@@ -17,5 +17,6 @@ module fibonacci {
 
     fn main() {
         let result: Int = fib(10)
+        print_int(result)
     }
 }

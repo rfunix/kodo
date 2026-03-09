@@ -14,3 +14,5 @@ cranelift-codegen.workspace = true
 cranelift-frontend.workspace = true
 cranelift-module.workspace = true
 cranelift-native.workspace = true
+cranelift-object.workspace = true
+kodo_ast.workspace = true

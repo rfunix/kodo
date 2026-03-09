@@ -1,0 +1,14 @@
+// This file has intentional type errors for testing the type checker.
+// kodoc check should report errors on this file.
+
+module type_errors {
+    meta {
+        purpose: "Intentional type errors for testing",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    fn bad_return() -> Int {
+        return true
+    }
+}

@@ -282,6 +282,35 @@ pub fn lower_function(function: &Function) -> Result<MirFunction> {
         let local_id = builder.alloc_local(ty, false);
         builder.name_map.insert(param.name.clone(), local_id);
     }
+    let param_count = function.params.len();
+
+    // Inject `requires` contract checks before the function body.
+    for (i, req_expr) in function.requires.iter().enumerate() {
+        let cond = builder.lower_expr(req_expr)?;
+        let fail_block = builder.new_block();
+        let continue_block = builder.new_block();
+        builder.seal_block(
+            Terminator::Branch {
+                condition: cond,
+                true_block: continue_block,
+                false_block: fail_block,
+            },
+            fail_block,
+        );
+        // In the fail block, call kodo_contract_fail with the message.
+        let msg = format!(
+            "requires clause {} failed in function `{}`",
+            i + 1,
+            function.name
+        );
+        let dest = builder.alloc_local(Type::Unit, false);
+        builder.emit(Instruction::Call {
+            dest,
+            callee: "kodo_contract_fail".to_string(),
+            args: vec![Value::StringConst(msg)],
+        });
+        builder.seal_block(Terminator::Unreachable, continue_block);
+    }
 
     // Lower the function body.
     builder.lower_block(&function.body)?;
@@ -297,6 +326,7 @@ pub fn lower_function(function: &Function) -> Result<MirFunction> {
     Ok(MirFunction {
         name: function.name.clone(),
         return_type,
+        param_count,
         locals: builder.locals,
         blocks: builder.blocks,
         entry: BlockId(0),

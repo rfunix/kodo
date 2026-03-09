@@ -1,0 +1,75 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+assertion_line: 30
+expression: module
+---
+Module {
+    id: NodeId(
+        2,
+    ),
+    span: Span {
+        start: 0,
+        end: 148,
+    },
+    name: "minimal",
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 21,
+                end: 123,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Minimal valid module",
+                    span: Span {
+                        start: 21,
+                        end: 67,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 21,
+                        end: 93,
+                    },
+                },
+                MetaEntry {
+                    key: "author",
+                    value: "test",
+                    span: Span {
+                        start: 21,
+                        end: 117,
+                    },
+                },
+            ],
+        },
+    ),
+    functions: [
+        Function {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 129,
+                end: 146,
+            },
+            name: "noop",
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 139,
+                    end: 146,
+                },
+                stmts: [],
+            },
+        },
+    ],
+}

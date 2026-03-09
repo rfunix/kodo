@@ -1,0 +1,11 @@
+module undefined_var {
+    meta {
+        purpose: "Uses an undefined variable",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn bad() -> Int {
+        return x
+    }
+}

@@ -1,0 +1,6 @@
+---
+source: crates/kodo_types/tests/snapshots.rs
+assertion_line: 25
+expression: err.to_string()
+---
+type mismatch: expected `Int`, found `Bool` at Span { start: 309, end: 320 }

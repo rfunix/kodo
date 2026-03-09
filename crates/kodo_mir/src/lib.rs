@@ -85,12 +85,22 @@ pub struct MirFunction {
     pub name: String,
     /// The return type.
     pub return_type: Type,
+    /// Number of function parameters (first N locals).
+    pub param_count: usize,
     /// Local variable declarations (params + temporaries).
     pub locals: Vec<Local>,
     /// Basic blocks forming the control-flow graph.
     pub blocks: Vec<BasicBlock>,
     /// The entry block.
     pub entry: BlockId,
+}
+
+impl MirFunction {
+    /// Returns the number of function parameters.
+    #[must_use]
+    pub fn param_count(&self) -> usize {
+        self.param_count
+    }
 }
 
 /// A local variable declaration.
@@ -202,6 +212,7 @@ mod tests {
         let func = MirFunction {
             name: "test".to_string(),
             return_type: Type::Unit,
+            param_count: 0,
             locals: vec![],
             blocks: vec![],
             entry: BlockId(0),
@@ -214,6 +225,7 @@ mod tests {
         let func = MirFunction {
             name: "test".to_string(),
             return_type: Type::Unit,
+            param_count: 0,
             locals: vec![],
             blocks: vec![BasicBlock {
                 id: BlockId(0),

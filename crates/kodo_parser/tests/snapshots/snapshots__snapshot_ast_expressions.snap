@@ -1,0 +1,651 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+assertion_line: 37
+expression: module
+---
+Module {
+    id: NodeId(
+        5,
+    ),
+    span: Span {
+        start: 71,
+        end: 815,
+    },
+    name: "expressions",
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 96,
+                end: 211,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Expression parsing showcase",
+                    span: Span {
+                        start: 96,
+                        end: 149,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 96,
+                        end: 175,
+                    },
+                },
+                MetaEntry {
+                    key: "author",
+                    value: "Kōdo Team",
+                    span: Span {
+                        start: 96,
+                        end: 205,
+                    },
+                },
+            ],
+        },
+    ),
+    functions: [
+        Function {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 217,
+                end: 350,
+            },
+            name: "arithmetic",
+            params: [],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 240,
+                    end: 350,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 250,
+                            end: 265,
+                        },
+                        mutable: false,
+                        name: "a",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: IntLit(
+                            10,
+                            Span {
+                                start: 263,
+                                end: 265,
+                            },
+                        ),
+                    },
+                    Let {
+                        span: Span {
+                            start: 274,
+                            end: 288,
+                        },
+                        mutable: false,
+                        name: "b",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: IntLit(
+                            3,
+                            Span {
+                                start: 287,
+                                end: 288,
+                            },
+                        ),
+                    },
+                    Let {
+                        span: Span {
+                            start: 297,
+                            end: 327,
+                        },
+                        mutable: false,
+                        name: "c",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: BinaryOp {
+                            left: BinaryOp {
+                                left: Ident(
+                                    "a",
+                                    Span {
+                                        start: 310,
+                                        end: 311,
+                                    },
+                                ),
+                                op: Add,
+                                right: BinaryOp {
+                                    left: Ident(
+                                        "b",
+                                        Span {
+                                            start: 314,
+                                            end: 315,
+                                        },
+                                    ),
+                                    op: Mul,
+                                    right: IntLit(
+                                        2,
+                                        Span {
+                                            start: 318,
+                                            end: 319,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 314,
+                                        end: 319,
+                                    },
+                                },
+                                span: Span {
+                                    start: 310,
+                                    end: 319,
+                                },
+                            },
+                            op: Sub,
+                            right: BinaryOp {
+                                left: Ident(
+                                    "a",
+                                    Span {
+                                        start: 322,
+                                        end: 323,
+                                    },
+                                ),
+                                op: Div,
+                                right: Ident(
+                                    "b",
+                                    Span {
+                                        start: 326,
+                                        end: 327,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 322,
+                                    end: 327,
+                                },
+                            },
+                            span: Span {
+                                start: 310,
+                                end: 327,
+                            },
+                        },
+                    },
+                    Return {
+                        span: Span {
+                            start: 336,
+                            end: 344,
+                        },
+                        value: Some(
+                            Ident(
+                                "c",
+                                Span {
+                                    start: 343,
+                                    end: 344,
+                                },
+                            ),
+                        ),
+                    },
+                ],
+            },
+        },
+        Function {
+            id: NodeId(
+                2,
+            ),
+            span: Span {
+                start: 356,
+                end: 500,
+            },
+            name: "logic",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 365,
+                        end: 371,
+                    },
+                },
+            ],
+            return_type: Named(
+                "Bool",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 381,
+                    end: 500,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 391,
+                            end: 417,
+                        },
+                        mutable: false,
+                        name: "positive",
+                        ty: Some(
+                            Named(
+                                "Bool",
+                            ),
+                        ),
+                        value: BinaryOp {
+                            left: Ident(
+                                "x",
+                                Span {
+                                    start: 412,
+                                    end: 413,
+                                },
+                            ),
+                            op: Gt,
+                            right: IntLit(
+                                0,
+                                Span {
+                                    start: 416,
+                                    end: 417,
+                                },
+                            ),
+                            span: Span {
+                                start: 412,
+                                end: 417,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 426,
+                            end: 451,
+                        },
+                        mutable: false,
+                        name: "small",
+                        ty: Some(
+                            Named(
+                                "Bool",
+                            ),
+                        ),
+                        value: BinaryOp {
+                            left: Ident(
+                                "x",
+                                Span {
+                                    start: 444,
+                                    end: 445,
+                                },
+                            ),
+                            op: Lt,
+                            right: IntLit(
+                                100,
+                                Span {
+                                    start: 448,
+                                    end: 451,
+                                },
+                            ),
+                            span: Span {
+                                start: 444,
+                                end: 451,
+                            },
+                        },
+                    },
+                    Return {
+                        span: Span {
+                            start: 460,
+                            end: 494,
+                        },
+                        value: Some(
+                            BinaryOp {
+                                left: BinaryOp {
+                                    left: Ident(
+                                        "positive",
+                                        Span {
+                                            start: 467,
+                                            end: 475,
+                                        },
+                                    ),
+                                    op: And,
+                                    right: Ident(
+                                        "small",
+                                        Span {
+                                            start: 479,
+                                            end: 484,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 467,
+                                        end: 484,
+                                    },
+                                },
+                                op: Or,
+                                right: BinaryOp {
+                                    left: Ident(
+                                        "x",
+                                        Span {
+                                            start: 488,
+                                            end: 489,
+                                        },
+                                    ),
+                                    op: Eq,
+                                    right: IntLit(
+                                        0,
+                                        Span {
+                                            start: 493,
+                                            end: 494,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 488,
+                                        end: 494,
+                                    },
+                                },
+                                span: Span {
+                                    start: 467,
+                                    end: 494,
+                                },
+                            },
+                        ),
+                    },
+                ],
+            },
+        },
+        Function {
+            id: NodeId(
+                3,
+            ),
+            span: Span {
+                start: 506,
+                end: 590,
+            },
+            name: "nesting",
+            params: [],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 526,
+                    end: 590,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 536,
+                            end: 565,
+                        },
+                        mutable: false,
+                        name: "x",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: BinaryOp {
+                            left: BinaryOp {
+                                left: IntLit(
+                                    1,
+                                    Span {
+                                        start: 550,
+                                        end: 551,
+                                    },
+                                ),
+                                op: Add,
+                                right: IntLit(
+                                    2,
+                                    Span {
+                                        start: 554,
+                                        end: 555,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 550,
+                                    end: 555,
+                                },
+                            },
+                            op: Mul,
+                            right: BinaryOp {
+                                left: IntLit(
+                                    3,
+                                    Span {
+                                        start: 560,
+                                        end: 561,
+                                    },
+                                ),
+                                op: Add,
+                                right: IntLit(
+                                    4,
+                                    Span {
+                                        start: 564,
+                                        end: 565,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 560,
+                                    end: 565,
+                                },
+                            },
+                            span: Span {
+                                start: 550,
+                                end: 565,
+                            },
+                        },
+                    },
+                    Return {
+                        span: Span {
+                            start: 575,
+                            end: 584,
+                        },
+                        value: Some(
+                            UnaryOp {
+                                op: Neg,
+                                operand: Ident(
+                                    "x",
+                                    Span {
+                                        start: 583,
+                                        end: 584,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 582,
+                                    end: 584,
+                                },
+                            },
+                        ),
+                    },
+                ],
+            },
+        },
+        Function {
+            id: NodeId(
+                4,
+            ),
+            span: Span {
+                start: 596,
+                end: 813,
+            },
+            name: "control_flow",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 612,
+                        end: 618,
+                    },
+                },
+            ],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 627,
+                    end: 813,
+                },
+                stmts: [
+                    Expr(
+                        If {
+                            condition: BinaryOp {
+                                left: Ident(
+                                    "n",
+                                    Span {
+                                        start: 640,
+                                        end: 641,
+                                    },
+                                ),
+                                op: Gt,
+                                right: IntLit(
+                                    0,
+                                    Span {
+                                        start: 644,
+                                        end: 645,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 640,
+                                    end: 645,
+                                },
+                            },
+                            then_branch: Block {
+                                span: Span {
+                                    start: 646,
+                                    end: 769,
+                                },
+                                stmts: [
+                                    Expr(
+                                        If {
+                                            condition: BinaryOp {
+                                                left: Ident(
+                                                    "n",
+                                                    Span {
+                                                        start: 663,
+                                                        end: 664,
+                                                    },
+                                                ),
+                                                op: Gt,
+                                                right: IntLit(
+                                                    100,
+                                                    Span {
+                                                        start: 667,
+                                                        end: 670,
+                                                    },
+                                                ),
+                                                span: Span {
+                                                    start: 663,
+                                                    end: 670,
+                                                },
+                                            },
+                                            then_branch: Block {
+                                                span: Span {
+                                                    start: 671,
+                                                    end: 713,
+                                                },
+                                                stmts: [
+                                                    Return {
+                                                        span: Span {
+                                                            start: 689,
+                                                            end: 699,
+                                                        },
+                                                        value: Some(
+                                                            IntLit(
+                                                                100,
+                                                                Span {
+                                                                    start: 696,
+                                                                    end: 699,
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                            else_branch: Some(
+                                                Block {
+                                                    span: Span {
+                                                        start: 719,
+                                                        end: 759,
+                                                    },
+                                                    stmts: [
+                                                        Return {
+                                                            span: Span {
+                                                                start: 737,
+                                                                end: 745,
+                                                            },
+                                                            value: Some(
+                                                                Ident(
+                                                                    "n",
+                                                                    Span {
+                                                                        start: 744,
+                                                                        end: 745,
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            ),
+                                            span: Span {
+                                                start: 660,
+                                                end: 759,
+                                            },
+                                        },
+                                    ),
+                                ],
+                            },
+                            else_branch: Some(
+                                Block {
+                                    span: Span {
+                                        start: 775,
+                                        end: 807,
+                                    },
+                                    stmts: [
+                                        Return {
+                                            span: Span {
+                                                start: 789,
+                                                end: 797,
+                                            },
+                                            value: Some(
+                                                IntLit(
+                                                    0,
+                                                    Span {
+                                                        start: 796,
+                                                        end: 797,
+                                                    },
+                                                ),
+                                            ),
+                                        },
+                                    ],
+                                },
+                            ),
+                            span: Span {
+                                start: 637,
+                                end: 807,
+                            },
+                        },
+                    ),
+                ],
+            },
+        },
+    ],
+}
