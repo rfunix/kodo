@@ -27,6 +27,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 
+pub mod lowering;
+
 use kodo_types::Type;
 use thiserror::Error;
 
@@ -42,6 +44,15 @@ pub enum MirError {
     /// The MIR function has no entry block.
     #[error("function `{0}` has no entry block")]
     NoEntryBlock(String),
+    /// A variable name could not be resolved to a local.
+    #[error("undefined variable `{0}`")]
+    UndefinedVariable(String),
+    /// A type expression could not be resolved.
+    #[error("type resolution error: {0}")]
+    TypeResolution(String),
+    /// A function call callee is not an identifier.
+    #[error("non-identifier callee in function call")]
+    NonIdentCallee,
 }
 
 /// Alias for results in this crate.
@@ -133,6 +144,10 @@ pub enum Value {
     Local(LocalId),
     /// A binary operation on two values.
     BinOp(kodo_ast::BinOp, Box<Value>, Box<Value>),
+    /// Logical negation of a value.
+    Not(Box<Value>),
+    /// Arithmetic negation of a value.
+    Neg(Box<Value>),
     /// The unit value.
     Unit,
 }
