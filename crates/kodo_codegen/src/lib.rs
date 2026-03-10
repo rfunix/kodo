@@ -1034,6 +1034,66 @@ fn declare_builtins(
         builtins.insert("json_free".to_string(), BuiltinInfo { func_id });
     }
 
+    // --- Actor runtime ---
+
+    // kodo_actor_new(state_size: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // state_size
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_actor_new", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_actor_new".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_actor_get_field(actor_ptr: i64, offset: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // actor_ptr
+        sig.params.push(AbiParam::new(types::I64)); // offset
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_actor_get_field", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_actor_get_field".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_actor_set_field(actor_ptr: i64, offset: i64, value: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // actor_ptr
+        sig.params.push(AbiParam::new(types::I64)); // offset
+        sig.params.push(AbiParam::new(types::I64)); // value
+        let func_id = module
+            .declare_function("kodo_actor_set_field", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_actor_set_field".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_actor_send(actor_ptr: i64, handler_fn: i64, arg: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // actor_ptr
+        sig.params.push(AbiParam::new(types::I64)); // handler_fn
+        sig.params.push(AbiParam::new(types::I64)); // arg
+        let func_id = module
+            .declare_function("kodo_actor_send", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_actor_send".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_actor_free(actor_ptr: i64, state_size: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // actor_ptr
+        sig.params.push(AbiParam::new(types::I64)); // state_size
+        let func_id = module
+            .declare_function("kodo_actor_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_actor_free".to_string(), BuiltinInfo { func_id });
+    }
+
     // --- Cleanup functions for heap-allocated values ---
 
     // kodo_string_free(ptr: i64, len: i64) -> void

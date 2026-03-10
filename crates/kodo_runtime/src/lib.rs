@@ -1311,6 +1311,130 @@ pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// Actor runtime builtins
+// ---------------------------------------------------------------------------
+
+/// Size of each field slot in actor state (8 bytes for i64 alignment).
+const ACTOR_FIELD_SIZE: usize = 8;
+
+/// Allocates a new actor state buffer of `state_size` bytes on the heap.
+///
+/// Returns an opaque handle (as i64) to the allocated buffer, or 0 if
+/// `state_size` is non-positive.
+///
+/// The buffer is zero-initialized so all fields start at their default value.
+#[no_mangle]
+pub extern "C" fn kodo_actor_new(state_size: i64) -> i64 {
+    if state_size <= 0 {
+        return 0;
+    }
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = state_size as usize;
+    let buffer = vec![0u8; size].into_boxed_slice();
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    // Freed by `kodo_actor_free`.
+    let ptr = Box::into_raw(buffer);
+    ptr.cast::<u8>() as i64
+}
+
+/// Reads an i64 value from the actor state buffer at the given byte offset.
+///
+/// Returns 0 if `actor_ptr` is zero (null handle) or the offset is negative.
+///
+/// # Safety
+///
+/// `actor_ptr` must be a valid pointer returned by `kodo_actor_new`, or zero.
+/// `offset` must be aligned to 8 bytes and within the allocated buffer.
+#[no_mangle]
+pub extern "C" fn kodo_actor_get_field(actor_ptr: i64, offset: i64) -> i64 {
+    if actor_ptr == 0 || offset < 0 {
+        return 0;
+    }
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let off = offset as usize;
+    // SAFETY: caller guarantees actor_ptr points to a valid buffer of
+    // sufficient size and offset is within bounds and 8-byte aligned.
+    unsafe {
+        let base = actor_ptr as *const u8;
+        #[allow(clippy::cast_ptr_alignment)]
+        let field_ptr = base.add(off).cast::<i64>();
+        *field_ptr
+    }
+}
+
+/// Writes an i64 value to the actor state buffer at the given byte offset.
+///
+/// Does nothing if `actor_ptr` is zero (null handle) or the offset is negative.
+///
+/// # Safety
+///
+/// `actor_ptr` must be a valid pointer returned by `kodo_actor_new`, or zero.
+/// `offset` must be aligned to 8 bytes and within the allocated buffer.
+#[no_mangle]
+pub extern "C" fn kodo_actor_set_field(actor_ptr: i64, offset: i64, value: i64) {
+    if actor_ptr == 0 || offset < 0 {
+        return;
+    }
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let off = offset as usize;
+    // SAFETY: caller guarantees actor_ptr points to a valid buffer of
+    // sufficient size and offset is within bounds and 8-byte aligned.
+    unsafe {
+        let base = actor_ptr as *mut u8;
+        #[allow(clippy::cast_ptr_alignment)]
+        let field_ptr = base.add(off).cast::<i64>();
+        *field_ptr = value;
+    }
+}
+
+/// Queues a message to an actor by spawning a task that calls the handler.
+///
+/// `handler_fn` is a function pointer to the compiled handler (which takes
+/// `(actor_ptr: i64, arg: i64)` as parameters). The task is enqueued in the
+/// scheduler and runs when `kodo_run_scheduler` is called.
+///
+/// Does nothing if `actor_ptr` is zero (null handle) or `handler_fn` is zero.
+#[no_mangle]
+pub extern "C" fn kodo_actor_send(actor_ptr: i64, handler_fn: i64, arg: i64) {
+    if actor_ptr == 0 || handler_fn == 0 {
+        return;
+    }
+    // Pack actor_ptr and arg into a two-element environment buffer.
+    let env: [i64; 2] = [actor_ptr, arg];
+    let env_ptr = env.as_ptr() as i64;
+    #[allow(clippy::cast_possible_wrap)]
+    let env_size = (ACTOR_FIELD_SIZE * 2) as i64;
+    kodo_spawn_task_with_env(handler_fn, env_ptr, env_size);
+}
+
+/// Frees an actor state buffer previously allocated by `kodo_actor_new`.
+///
+/// Does nothing if `actor_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `actor_ptr` must be a valid pointer returned by `kodo_actor_new`, or zero.
+/// The `state_size` must match the value originally passed to `kodo_actor_new`.
+/// After calling this function, the actor pointer must not be used again.
+#[no_mangle]
+pub extern "C" fn kodo_actor_free(actor_ptr: i64, state_size: i64) {
+    if actor_ptr == 0 || state_size <= 0 {
+        return;
+    }
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = state_size as usize;
+    // SAFETY: caller guarantees actor_ptr was returned by kodo_actor_new
+    // with exactly `state_size` bytes (i.e. Box::into_raw on a Box<[u8]>
+    // of `size` bytes).
+    let _ = unsafe {
+        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            actor_ptr as *mut u8,
+            size,
+        ))
+    };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP client builtins
 // ---------------------------------------------------------------------------
 
@@ -1660,7 +1784,7 @@ mod tests {
         let env_ptr = std::ptr::addr_of!(env_val) as i64;
         let env_size = std::mem::size_of::<i64>() as i64;
 
-        kodo_spawn_task_with_env(add_env_value as i64, env_ptr, env_size);
+        kodo_spawn_task_with_env(add_env_value as *const () as i64, env_ptr, env_size);
         assert_eq!(RESULT.load(Ordering::SeqCst), 0, "task not yet run");
         kodo_run_scheduler();
         assert_eq!(RESULT.load(Ordering::SeqCst), 42, "task read env value");
@@ -1684,7 +1808,7 @@ mod tests {
         let env_ptr = env.as_ptr() as i64;
         let env_size = (std::mem::size_of::<i64>() * 2) as i64;
 
-        kodo_spawn_task_with_env(sum_two_captures as i64, env_ptr, env_size);
+        kodo_spawn_task_with_env(sum_two_captures as *const () as i64, env_ptr, env_size);
         kodo_run_scheduler();
         assert_eq!(SUM.load(Ordering::SeqCst), 42, "task summed both captures");
     }
@@ -2494,5 +2618,107 @@ mod tests {
         // Free the error message.
         // SAFETY: out_ptr was allocated by write_string_out_mut.
         unsafe { kodo_string_free(out_ptr, out_len) };
+    }
+
+    // --- Actor runtime tests ---
+
+    #[test]
+    fn kodo_actor_new_returns_nonzero_handle() {
+        let handle = kodo_actor_new(16);
+        assert_ne!(handle, 0);
+        // Clean up.
+        kodo_actor_free(handle, 16);
+    }
+
+    #[test]
+    fn kodo_actor_new_zero_size_returns_zero() {
+        assert_eq!(kodo_actor_new(0), 0);
+        assert_eq!(kodo_actor_new(-1), 0);
+    }
+
+    #[test]
+    fn kodo_actor_set_get_field_roundtrip() {
+        let actor = kodo_actor_new(24); // 3 fields * 8 bytes
+        assert_ne!(actor, 0);
+
+        kodo_actor_set_field(actor, 0, 42);
+        kodo_actor_set_field(actor, 8, 100);
+        kodo_actor_set_field(actor, 16, -7);
+
+        assert_eq!(kodo_actor_get_field(actor, 0), 42);
+        assert_eq!(kodo_actor_get_field(actor, 8), 100);
+        assert_eq!(kodo_actor_get_field(actor, 16), -7);
+
+        kodo_actor_free(actor, 24);
+    }
+
+    #[test]
+    fn kodo_actor_get_field_null_returns_zero() {
+        assert_eq!(kodo_actor_get_field(0, 0), 0);
+        assert_eq!(kodo_actor_get_field(0, 8), 0);
+    }
+
+    #[test]
+    fn kodo_actor_set_field_null_does_not_crash() {
+        kodo_actor_set_field(0, 0, 42);
+        kodo_actor_set_field(0, 8, 99);
+    }
+
+    #[test]
+    fn kodo_actor_send_queues_task() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static ACTOR_RESULT: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn handler(env_ptr: i64) {
+            // SAFETY: env_ptr points to [actor_ptr, arg] packed by kodo_actor_send.
+            let actor_ptr = unsafe { *(env_ptr as *const i64) };
+            let arg = unsafe { *((env_ptr as *const i64).add(1)) };
+            // Read field 0 from actor state.
+            let current = kodo_actor_get_field(actor_ptr, 0);
+            kodo_actor_set_field(actor_ptr, 0, current + arg);
+            ACTOR_RESULT.store(kodo_actor_get_field(actor_ptr, 0), Ordering::SeqCst);
+        }
+
+        ACTOR_RESULT.store(0, Ordering::SeqCst);
+
+        let actor = kodo_actor_new(8);
+        kodo_actor_set_field(actor, 0, 10);
+        kodo_actor_send(actor, handler as *const () as i64, 5);
+
+        // Task not yet run.
+        assert_eq!(ACTOR_RESULT.load(Ordering::SeqCst), 0);
+
+        kodo_run_scheduler();
+
+        // Handler ran: 10 + 5 = 15.
+        assert_eq!(ACTOR_RESULT.load(Ordering::SeqCst), 15);
+
+        kodo_actor_free(actor, 8);
+    }
+
+    #[test]
+    fn kodo_actor_send_null_does_not_crash() {
+        extern "C" fn dummy(_env_ptr: i64) {}
+        kodo_actor_send(0, dummy as *const () as i64, 0);
+        kodo_actor_send(42, 0, 0);
+    }
+
+    #[test]
+    fn kodo_actor_free_null_does_not_crash() {
+        kodo_actor_free(0, 8);
+        kodo_actor_free(0, 0);
+    }
+
+    #[test]
+    fn kodo_actor_free_negative_size_does_not_crash() {
+        kodo_actor_free(0, -1);
+    }
+
+    #[test]
+    fn kodo_actor_fields_initialized_to_zero() {
+        let actor = kodo_actor_new(16);
+        assert_eq!(kodo_actor_get_field(actor, 0), 0);
+        assert_eq!(kodo_actor_get_field(actor, 8), 0);
+        kodo_actor_free(actor, 16);
     }
 }
