@@ -322,3 +322,34 @@ fn test_struct_field_access() {
         "should print 99 (p.second), got: {stdout}"
     );
 }
+
+#[test]
+fn test_string_concat_operator() {
+    let source = r#"module string_concat_test {
+    meta {
+        purpose: "Test string concatenation with + operator",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let a: String = "hello "
+        let b: String = "world"
+        let c: String = a + b
+        println(c)
+        let d: String = "foo" + "bar"
+        println(d)
+    }
+}"#;
+    let binary = compile_source(source, "test_string_concat_op");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("hello world"),
+        "should print 'hello world', got: {stdout}"
+    );
+    assert!(
+        stdout.contains("foobar"),
+        "should print 'foobar', got: {stdout}"
+    );
+}

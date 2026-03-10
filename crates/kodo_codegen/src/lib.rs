@@ -1455,6 +1455,76 @@ fn translate_instruction(
 ) -> Result<()> {
     match instr {
         Instruction::Assign(local_id, value) => {
+            // Handle String + String concatenation via the `+` operator.
+            if let Value::BinOp(kodo_ast::BinOp::Add, lhs, rhs) = value {
+                let lhs_ty = infer_value_type(lhs, var_map);
+                let rhs_ty = infer_value_type(rhs, var_map);
+                if lhs_ty == Some(Type::String) || rhs_ty == Some(Type::String) {
+                    let (lhs_ptr, lhs_len) = expand_string_value(lhs, builder, module, var_map)?;
+                    let (rhs_ptr, rhs_len) = expand_string_value(rhs, builder, module, var_map)?;
+                    let out_slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            16,
+                            0,
+                        ));
+                    let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+                    let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+                    let concat_info = builtins.get("String_concat").ok_or_else(|| {
+                        CodegenError::Unsupported("String_concat builtin not found".to_string())
+                    })?;
+                    let func_ref = module.declare_func_in_func(concat_info.func_id, builder.func);
+                    builder.ins().call(
+                        func_ref,
+                        &[
+                            lhs_ptr,
+                            lhs_len,
+                            rhs_ptr,
+                            rhs_len,
+                            out_ptr_addr,
+                            out_len_addr,
+                        ],
+                    );
+                    if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(local_id) {
+                        if dest_name == "_String" {
+                            let result_ptr =
+                                builder
+                                    .ins()
+                                    .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+                            let result_len =
+                                builder
+                                    .ins()
+                                    .load(types::I64, MemFlags::new(), out_len_addr, 0);
+                            let dest_ptr_addr =
+                                builder
+                                    .ins()
+                                    .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+                            builder
+                                .ins()
+                                .store(MemFlags::new(), result_ptr, dest_ptr_addr, 0);
+                            let dest_len_addr =
+                                builder
+                                    .ins()
+                                    .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+                            builder
+                                .ins()
+                                .store(MemFlags::new(), result_len, dest_len_addr, 0);
+                            let var = var_map.get(*local_id)?;
+                            let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+                            builder.def_var(var, addr);
+                            return Ok(());
+                        }
+                    }
+                    let result_ptr =
+                        builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+                    let var = var_map.get(*local_id)?;
+                    builder.def_var(var, result_ptr);
+                    return Ok(());
+                }
+            }
+
             // Handle StringConst assignment to a String stack slot.
             if let Value::StringConst(s) = value {
                 if let Some((slot, ref slot_name)) = var_map.stack_slots.get(local_id) {
@@ -2007,6 +2077,7 @@ fn translate_value(
 ) -> Result<cranelift_codegen::ir::Value> {
     match value {
         Value::IntConst(n) => Ok(builder.ins().iconst(types::I64, *n)),
+        Value::FloatConst(f) => Ok(builder.ins().f64const(*f)),
         Value::BoolConst(b) => Ok(builder.ins().iconst(types::I8, i64::from(*b))),
         Value::StringConst(s) => {
             let data_id = create_string_data(module, s)?;
@@ -3623,5 +3694,139 @@ mod tests {
             result.is_ok(),
             "struct with multiple string fields failed: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_string_concat_literals() {
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::BinOp(
+                        kodo_ast::BinOp::Add,
+                        Box::new(Value::StringConst("hello ".to_string())),
+                        Box::new(Value::StringConst("world".to_string())),
+                    ),
+                )],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &HashMap::new(),
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(result.is_ok(), "string concat literals failed: {result:?}");
+    }
+
+    #[test]
+    fn test_string_concat_var_and_literal() {
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("hello ".to_string())),
+                    Instruction::Assign(
+                        LocalId(1),
+                        Value::BinOp(
+                            kodo_ast::BinOp::Add,
+                            Box::new(Value::Local(LocalId(0))),
+                            Box::new(Value::StringConst("world".to_string())),
+                        ),
+                    ),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &HashMap::new(),
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(
+            result.is_ok(),
+            "string concat var + literal failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_concat_var_and_var() {
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("foo".to_string())),
+                    Instruction::Assign(LocalId(1), Value::StringConst("bar".to_string())),
+                    Instruction::Assign(
+                        LocalId(2),
+                        Value::BinOp(
+                            kodo_ast::BinOp::Add,
+                            Box::new(Value::Local(LocalId(0))),
+                            Box::new(Value::Local(LocalId(1))),
+                        ),
+                    ),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &HashMap::new(),
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(result.is_ok(), "string concat var + var failed: {result:?}");
     }
 }

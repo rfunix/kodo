@@ -1,0 +1,16 @@
+module string_concat_demo {
+    meta {
+        purpose: "Demonstrate string concatenation with the + operator",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let greeting: String = "Hello"
+        let target: String = " World!"
+        let message: String = greeting + target
+        println(message)
+
+        let combined: String = "foo" + "bar"
+        println(combined)
+    }
+}

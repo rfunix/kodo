@@ -2887,6 +2887,10 @@ impl TypeChecker {
         match op {
             // Arithmetic operators: both operands must be the same numeric type.
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                // String + String is allowed for concatenation.
+                if op == BinOp::Add && left_ty == Type::String && right_ty == Type::String {
+                    return Ok(Type::String);
+                }
                 if !left_ty.is_numeric() {
                     return Err(TypeError::Mismatch {
                         expected: "numeric type".to_string(),
