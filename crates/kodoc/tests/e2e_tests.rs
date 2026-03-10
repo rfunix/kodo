@@ -353,3 +353,137 @@ fn test_string_concat_operator() {
         "should print 'foobar', got: {stdout}"
     );
 }
+
+#[test]
+fn test_closure_simple() {
+    let source = r#"module closure_simple {
+    meta {
+        purpose: "Test simple closure compilation"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        let result: Int = double(21)
+        print_int(result)
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_closure_simple");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "closure should exit with 0");
+    assert!(
+        stdout.contains("42"),
+        "double(21) should produce 42, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_closure_with_capture() {
+    let source = r#"module closure_capture {
+    meta {
+        purpose: "Test closure with captured variable"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let offset: Int = 100
+        let add_offset: (Int) -> Int = |x: Int| -> Int { x + offset }
+        let result: Int = add_offset(42)
+        print_int(result)
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_closure_capture");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "closure with capture should exit with 0");
+    assert!(
+        stdout.contains("142"),
+        "add_offset(42) with offset=100 should produce 142, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_closure_inferred_return_type() {
+    let source = r#"module closure_inferred {
+    meta {
+        purpose: "Test closure with inferred return type"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let triple: (Int) -> Int = |x: Int| { x * 3 }
+        let result: Int = triple(10)
+        print_int(result)
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_closure_inferred");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "closure with inferred type should exit with 0"
+    );
+    assert!(
+        stdout.contains("30"),
+        "triple(10) should produce 30, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_closures_example_file() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/closures.ko"), "test_closures_example");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "closures example should exit with 0");
+    assert!(
+        stdout.contains("42"),
+        "closures example should print 42 (double(21)), got: {stdout}"
+    );
+    assert!(
+        stdout.contains("142"),
+        "closures example should print 142 (add_offset(42)), got: {stdout}"
+    );
+    assert!(
+        stdout.contains("30"),
+        "closures example should print 30 (triple(10)), got: {stdout}"
+    );
+    assert!(
+        stdout.contains("35"),
+        "closures example should print 35 (sum_with(5)), got: {stdout}"
+    );
+}
+
+#[test]
+fn test_dynamic_strings_freed_without_crash() {
+    // Creates multiple dynamic strings via concatenation. If cleanup is broken,
+    // this would crash or leak (detectable by sanitizers, not here, but at least
+    // we verify it runs without error).
+    let source = r#"module string_cleanup {
+    meta {
+        purpose: "Test dynamic string cleanup",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let a: String = "hello"
+        let b: String = " "
+        let c: String = "world"
+        let ab: String = a + b
+        let abc: String = ab + c
+        println(abc)
+    }
+}"#;
+    let binary = compile_source(source, "test_string_cleanup");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("hello world"),
+        "should print 'hello world', got: {stdout}"
+    );
+}

@@ -5,6 +5,7 @@ use kodo_ast::{
 };
 use kodo_mir::lowering::{lower_function, lower_module};
 use kodo_mir::Instruction;
+use kodo_types::Type;
 
 fn span() -> Span {
     Span { start: 0, end: 0 }
@@ -410,4 +411,167 @@ fn closure_capture_preserves_variable_type() {
         .find(|f| f.name.starts_with("__closure_"))
         .expect("expected a lambda-lifted closure function");
     assert_eq!(closure_fn.param_count, 2);
+}
+
+#[test]
+fn closure_return_type_inferred_as_int() {
+    let module = make_module(vec![make_fn(
+        "main",
+        vec![],
+        Block {
+            span: span(),
+            stmts: vec![Stmt::Let {
+                span: span(),
+                mutable: false,
+                name: "f".to_string(),
+                ty: None,
+                value: Expr::Closure {
+                    params: vec![ClosureParam {
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        span: span(),
+                    }],
+                    return_type: None,
+                    body: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string(), span())),
+                        op: BinOp::Add,
+                        right: Box::new(Expr::IntLit(1, span())),
+                        span: span(),
+                    }),
+                    span: span(),
+                },
+            }],
+        },
+        TypeExpr::Unit,
+    )]);
+    let mir_functions = lower_module(&module).unwrap();
+    let closure_fn = mir_functions
+        .iter()
+        .find(|f| f.name.starts_with("__closure_"))
+        .expect("expected a lambda-lifted closure function");
+    assert_eq!(
+        closure_fn.return_type,
+        Type::Int,
+        "closure returning x + 1 should have return_type Int"
+    );
+}
+
+#[test]
+fn closure_return_type_inferred_as_bool() {
+    let module = make_module(vec![make_fn(
+        "main",
+        vec![],
+        Block {
+            span: span(),
+            stmts: vec![Stmt::Let {
+                span: span(),
+                mutable: false,
+                name: "f".to_string(),
+                ty: None,
+                value: Expr::Closure {
+                    params: vec![ClosureParam {
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        span: span(),
+                    }],
+                    return_type: None,
+                    body: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string(), span())),
+                        op: BinOp::Gt,
+                        right: Box::new(Expr::IntLit(0, span())),
+                        span: span(),
+                    }),
+                    span: span(),
+                },
+            }],
+        },
+        TypeExpr::Unit,
+    )]);
+    let mir_functions = lower_module(&module).unwrap();
+    let closure_fn = mir_functions
+        .iter()
+        .find(|f| f.name.starts_with("__closure_"))
+        .expect("expected a lambda-lifted closure function");
+    assert_eq!(
+        closure_fn.return_type,
+        Type::Bool,
+        "closure returning x > 0 should have return_type Bool"
+    );
+}
+
+#[test]
+fn closure_explicit_return_type_annotation() {
+    let module = make_module(vec![make_fn(
+        "main",
+        vec![],
+        Block {
+            span: span(),
+            stmts: vec![Stmt::Let {
+                span: span(),
+                mutable: false,
+                name: "f".to_string(),
+                ty: None,
+                value: Expr::Closure {
+                    params: vec![ClosureParam {
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        span: span(),
+                    }],
+                    return_type: Some(TypeExpr::Named("Int".to_string())),
+                    body: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("x".to_string(), span())),
+                        op: BinOp::Mul,
+                        right: Box::new(Expr::IntLit(2, span())),
+                        span: span(),
+                    }),
+                    span: span(),
+                },
+            }],
+        },
+        TypeExpr::Unit,
+    )]);
+    let mir_functions = lower_module(&module).unwrap();
+    let closure_fn = mir_functions
+        .iter()
+        .find(|f| f.name.starts_with("__closure_"))
+        .expect("expected a lambda-lifted closure function");
+    assert_eq!(
+        closure_fn.return_type,
+        Type::Int,
+        "closure with explicit -> Int should have return_type Int"
+    );
+}
+
+#[test]
+fn closure_return_type_bool_constant() {
+    let module = make_module(vec![make_fn(
+        "main",
+        vec![],
+        Block {
+            span: span(),
+            stmts: vec![Stmt::Let {
+                span: span(),
+                mutable: false,
+                name: "always_true".to_string(),
+                ty: None,
+                value: Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: Box::new(Expr::BoolLit(true, span())),
+                    span: span(),
+                },
+            }],
+        },
+        TypeExpr::Unit,
+    )]);
+    let mir_functions = lower_module(&module).unwrap();
+    let closure_fn = mir_functions
+        .iter()
+        .find(|f| f.name.starts_with("__closure_"))
+        .expect("expected a lambda-lifted closure function");
+    assert_eq!(
+        closure_fn.return_type,
+        Type::Bool,
+        "closure returning true should have return_type Bool"
+    );
 }

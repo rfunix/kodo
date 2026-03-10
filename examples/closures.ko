@@ -15,9 +15,29 @@ module closures {
     }
 
     fn main() -> Int {
+        // Simple closure with explicit return type
         let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
         let result: Int = double(21)
         print_int(result)
+
+        // Closure that captures a variable from the enclosing scope
+        let offset: Int = 100
+        let add_offset: (Int) -> Int = |x: Int| -> Int { x + offset }
+        let shifted: Int = add_offset(42)
+        print_int(shifted)
+
+        // Closure without explicit return type (inferred as Int)
+        let triple: (Int) -> Int = |x: Int| { x * 3 }
+        let tripled: Int = triple(10)
+        print_int(tripled)
+
+        // Closure with multiple captures
+        let a: Int = 10
+        let b: Int = 20
+        let sum_with: (Int) -> Int = |x: Int| { x + a + b }
+        let total: Int = sum_with(5)
+        print_int(total)
+
         return 0
     }
 }

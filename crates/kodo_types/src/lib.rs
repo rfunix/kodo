@@ -1287,6 +1287,8 @@ impl TypeChecker {
         self.register_float_methods();
         self.register_list_functions();
         self.register_map_functions();
+        self.register_http_functions();
+        self.register_json_functions();
     }
 
     /// Registers builtin methods for the `String` type.
@@ -1588,6 +1590,53 @@ impl TypeChecker {
                 vec![Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])],
                 Box::new(Type::Int),
             ),
+        );
+    }
+
+    /// Registers builtin functions for HTTP client operations.
+    ///
+    /// These functions are implemented in the runtime as `kodo_http_*` functions.
+    fn register_http_functions(&mut self) {
+        // http_get(url: String) -> Int (status code; response via out-params)
+        self.env.insert(
+            "http_get".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // http_post(url: String, body: String) -> Int (status code; response via out-params)
+        self.env.insert(
+            "http_post".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers builtin functions for JSON parsing operations.
+    ///
+    /// These functions are implemented in the runtime as `kodo_json_*` functions.
+    /// JSON values are represented as opaque `Int` handles.
+    fn register_json_functions(&mut self) {
+        // json_parse(s: String) -> Int (handle, 0 on error)
+        self.env.insert(
+            "json_parse".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // json_get_string(handle: Int, key: String) -> Int (0=ok, -1=error; string via out-params)
+        self.env.insert(
+            "json_get_string".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+
+        // json_get_int(handle: Int, key: String) -> Int
+        self.env.insert(
+            "json_get_int".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+
+        // json_free(handle: Int) -> ()
+        self.env.insert(
+            "json_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
     }
 

@@ -1258,6 +1258,258 @@ pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
     // map is dropped here, freeing the KodoMap struct itself.
 }
 
+// ---------------------------------------------------------------------------
+// HTTP client builtins
+// ---------------------------------------------------------------------------
+
+/// Performs an HTTP GET request to the given URL.
+///
+/// On success, writes the response body to `out_ptr`/`out_len` and returns 0.
+/// On error, writes the error message to `out_ptr`/`out_len` and returns -1.
+/// The caller must free the output string with `kodo_string_free`.
+///
+/// # Safety
+///
+/// `url_ptr` must point to `url_len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_http_get(
+    url_ptr: *const u8,
+    url_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i64 {
+    if url_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return -1;
+    }
+    // SAFETY: caller guarantees url_ptr/url_len form a valid UTF-8 slice.
+    let url_bytes = unsafe { std::slice::from_raw_parts(url_ptr, url_len) };
+    let Ok(url) = std::str::from_utf8(url_bytes) else {
+        write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len);
+        return -1;
+    };
+    match ureq::get(url).call() {
+        Ok(response) => match response.into_body().read_to_string() {
+            Ok(body) => {
+                write_string_out_mut(body, out_ptr, out_len);
+                0
+            }
+            Err(e) => {
+                let msg = format!("failed to read response body: {e}");
+                write_string_out_mut(msg, out_ptr, out_len);
+                -1
+            }
+        },
+        Err(e) => {
+            let msg = format!("HTTP GET failed: {e}");
+            write_string_out_mut(msg, out_ptr, out_len);
+            -1
+        }
+    }
+}
+
+/// Performs an HTTP POST request to the given URL with the provided body.
+///
+/// On success, writes the response body to `out_ptr`/`out_len` and returns 0.
+/// On error, writes the error message to `out_ptr`/`out_len` and returns -1.
+/// The caller must free the output string with `kodo_string_free`.
+///
+/// # Safety
+///
+/// `url_ptr` must point to `url_len` valid UTF-8 bytes.
+/// `body_ptr` must point to `body_len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_http_post(
+    url_ptr: *const u8,
+    url_len: usize,
+    body_ptr: *const u8,
+    body_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i64 {
+    if url_ptr.is_null() || body_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return -1;
+    }
+    // SAFETY: caller guarantees valid UTF-8 slices.
+    let url_bytes = unsafe { std::slice::from_raw_parts(url_ptr, url_len) };
+    let post_body = unsafe { std::slice::from_raw_parts(body_ptr, body_len) };
+    let Ok(url) = std::str::from_utf8(url_bytes) else {
+        write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len);
+        return -1;
+    };
+    let Ok(content) = std::str::from_utf8(post_body) else {
+        write_string_out_mut("invalid body: not UTF-8".to_string(), out_ptr, out_len);
+        return -1;
+    };
+    match ureq::post(url)
+        .header("Content-Type", "application/json")
+        .send(content)
+    {
+        Ok(response) => match response.into_body().read_to_string() {
+            Ok(resp_body) => {
+                write_string_out_mut(resp_body, out_ptr, out_len);
+                0
+            }
+            Err(e) => {
+                let msg = format!("failed to read response body: {e}");
+                write_string_out_mut(msg, out_ptr, out_len);
+                -1
+            }
+        },
+        Err(e) => {
+            let msg = format!("HTTP POST failed: {e}");
+            write_string_out_mut(msg, out_ptr, out_len);
+            -1
+        }
+    }
+}
+
+/// Writes a Rust `String` to mutable out-parameter pointers.
+///
+/// Similar to `write_string_out` but uses `*mut *mut u8` for compatibility
+/// with builtins that return freeable strings.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+unsafe fn write_string_out_mut(s: String, out_ptr: *mut *mut u8, out_len: *mut usize) {
+    let bytes = s.into_bytes().into_boxed_slice();
+    let len = bytes.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
+    // Freed by `kodo_string_free`.
+    let raw_slice = Box::into_raw(bytes);
+    unsafe {
+        // SAFETY: raw_slice is a valid fat pointer from Box::into_raw.
+        let ptr = (*raw_slice).as_mut_ptr();
+        // SAFETY: caller guarantees these are valid writable pointers.
+        *out_ptr = ptr;
+        *out_len = len;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON parsing builtins
+// ---------------------------------------------------------------------------
+
+/// Parses a JSON string and returns an opaque handle to the parsed value.
+///
+/// Returns a non-zero handle on success, or 0 on parse error.
+/// The handle must be freed with `kodo_json_free` when no longer needed.
+///
+/// # Safety
+///
+/// `str_ptr` must point to `str_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_parse(str_ptr: *const u8, str_len: usize) -> i64 {
+    if str_ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: caller guarantees str_ptr/str_len form a valid UTF-8 slice.
+    let bytes = unsafe { std::slice::from_raw_parts(str_ptr, str_len) };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return 0;
+    };
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(value) => {
+            let boxed = Box::new(value);
+            // SAFETY: intentionally leaks so caller manages via opaque handle.
+            // Freed by `kodo_json_free`.
+            Box::into_raw(boxed) as i64
+        }
+        Err(_) => 0,
+    }
+}
+
+/// Retrieves a string value from a parsed JSON object by key.
+///
+/// Returns 0 on success (writing the string to `out_ptr`/`out_len`),
+/// or -1 if the key does not exist or the value is not a string.
+/// The caller must free the output string with `kodo_string_free`.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_json_get_string(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i64 {
+    if handle == 0 || key_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return -1;
+    }
+    // SAFETY: caller guarantees handle is a valid pointer from kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: caller guarantees key_ptr/key_len form a valid UTF-8 slice.
+    let key_bytes = unsafe { std::slice::from_raw_parts(key_ptr, key_len) };
+    let Ok(key) = std::str::from_utf8(key_bytes) else {
+        return -1;
+    };
+    match value.get(key) {
+        Some(serde_json::Value::String(s)) => {
+            write_string_out_mut(s.clone(), out_ptr, out_len);
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// Retrieves an integer value from a parsed JSON object by key.
+///
+/// Returns the integer value if the key exists and the value is a number
+/// that fits in i64. Returns 0 if the key does not exist or the value
+/// is not an integer (callers should use `kodo_json_get_string` for
+/// type-safe access).
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_json_get_int(handle: i64, key_ptr: *const u8, key_len: usize) -> i64 {
+    if handle == 0 || key_ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: caller guarantees handle is a valid pointer from kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: caller guarantees key_ptr/key_len form a valid UTF-8 slice.
+    let key_bytes = unsafe { std::slice::from_raw_parts(key_ptr, key_len) };
+    let Ok(key) = std::str::from_utf8(key_bytes) else {
+        return 0;
+    };
+    match value.get(key) {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Frees a parsed JSON value previously returned by `kodo_json_parse`.
+///
+/// Does nothing if `handle` is 0 (null handle).
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`, or 0.
+/// After calling this function, the handle must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_free(handle: i64) {
+    if handle == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees handle was returned by kodo_json_parse
+    // (i.e. Box::into_raw on a Box<serde_json::Value>).
+    let _ = unsafe { Box::from_raw(handle as *mut serde_json::Value) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1960,5 +2212,188 @@ mod tests {
         assert_eq!(unsafe { kodo_map_length(map) }, 50);
         // SAFETY: map was returned by kodo_map_new.
         unsafe { kodo_map_free(map) };
+    }
+
+    // --- JSON tests ---
+
+    #[test]
+    fn kodo_json_parse_valid() {
+        let json = r#"{"name": "kodo", "version": 1}"#;
+        // SAFETY: json is a valid string slice.
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        assert_ne!(handle, 0, "parse should succeed");
+        // SAFETY: handle is valid.
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn kodo_json_parse_invalid() {
+        let bad = "not json {{{";
+        // SAFETY: bad is a valid string slice.
+        let handle = unsafe { kodo_json_parse(bad.as_ptr(), bad.len()) };
+        assert_eq!(handle, 0, "parse should fail for invalid JSON");
+    }
+
+    #[test]
+    fn kodo_json_parse_null_ptr() {
+        // SAFETY: testing null pointer handling.
+        let handle = unsafe { kodo_json_parse(std::ptr::null(), 0) };
+        assert_eq!(handle, 0, "null pointer should return 0");
+    }
+
+    #[test]
+    fn kodo_json_get_string_works() {
+        let json = r#"{"name": "kodo", "lang": "rust"}"#;
+        // SAFETY: json is a valid string slice.
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        assert_ne!(handle, 0);
+
+        let key = "name";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: handle and key are valid.
+        let status = unsafe {
+            kodo_json_get_string(handle, key.as_ptr(), key.len(), &mut out_ptr, &mut out_len)
+        };
+        assert_eq!(status, 0, "should find key 'name'");
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "kodo");
+
+        // SAFETY: handle is valid.
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn kodo_json_get_string_missing_key() {
+        let json = r#"{"name": "kodo"}"#;
+        // SAFETY: json is a valid string slice.
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        assert_ne!(handle, 0);
+
+        let key = "missing";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: handle and key are valid.
+        let status = unsafe {
+            kodo_json_get_string(handle, key.as_ptr(), key.len(), &mut out_ptr, &mut out_len)
+        };
+        assert_eq!(status, -1, "missing key should return -1");
+
+        // SAFETY: handle is valid.
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn kodo_json_get_int_works() {
+        let json = r#"{"count": 42, "name": "test"}"#;
+        // SAFETY: json is a valid string slice.
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        assert_ne!(handle, 0);
+
+        let key = "count";
+        // SAFETY: handle and key are valid.
+        let value = unsafe { kodo_json_get_int(handle, key.as_ptr(), key.len()) };
+        assert_eq!(value, 42);
+
+        // Non-integer key returns 0.
+        let key2 = "name";
+        let value2 = unsafe { kodo_json_get_int(handle, key2.as_ptr(), key2.len()) };
+        assert_eq!(value2, 0);
+
+        // SAFETY: handle is valid.
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn kodo_json_free_null_handle() {
+        // SAFETY: testing null handle, should be a no-op.
+        unsafe { kodo_json_free(0) };
+    }
+
+    #[test]
+    fn kodo_json_get_string_null_handle() {
+        let key = "test";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: testing null handle.
+        let status =
+            unsafe { kodo_json_get_string(0, key.as_ptr(), key.len(), &mut out_ptr, &mut out_len) };
+        assert_eq!(status, -1);
+    }
+
+    #[test]
+    fn kodo_json_get_int_null_handle() {
+        let key = "test";
+        // SAFETY: testing null handle.
+        let value = unsafe { kodo_json_get_int(0, key.as_ptr(), key.len()) };
+        assert_eq!(value, 0);
+    }
+
+    // --- HTTP tests ---
+
+    #[test]
+    fn kodo_http_get_invalid_url_returns_error() {
+        let url = "not-a-valid-url";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: url is a valid string slice, out pointers are valid.
+        let status = unsafe { kodo_http_get(url.as_ptr(), url.len(), &mut out_ptr, &mut out_len) };
+        assert_eq!(status, -1, "invalid URL should return -1");
+        assert!(!out_ptr.is_null(), "error message should be written");
+        assert!(out_len > 0, "error message should be non-empty");
+        // Free the error message.
+        // SAFETY: out_ptr was allocated by write_string_out_mut.
+        unsafe { kodo_string_free(out_ptr, out_len) };
+    }
+
+    #[test]
+    fn kodo_http_get_null_ptr_returns_error() {
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: testing null pointer handling.
+        let status = unsafe { kodo_http_get(std::ptr::null(), 0, &mut out_ptr, &mut out_len) };
+        assert_eq!(status, -1);
+    }
+
+    #[test]
+    fn kodo_http_post_null_ptr_returns_error() {
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: testing null pointer handling.
+        let status = unsafe {
+            kodo_http_post(
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                &mut out_ptr,
+                &mut out_len,
+            )
+        };
+        assert_eq!(status, -1);
+    }
+
+    #[test]
+    fn kodo_http_post_invalid_url_returns_error() {
+        let url = "not-a-valid-url";
+        let body = r#"{"key": "value"}"#;
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        // SAFETY: url and body are valid string slices, out pointers are valid.
+        let status = unsafe {
+            kodo_http_post(
+                url.as_ptr(),
+                url.len(),
+                body.as_ptr(),
+                body.len(),
+                &mut out_ptr,
+                &mut out_len,
+            )
+        };
+        assert_eq!(status, -1, "invalid URL should return -1");
+        assert!(!out_ptr.is_null(), "error message should be written");
+        // Free the error message.
+        // SAFETY: out_ptr was allocated by write_string_out_mut.
+        unsafe { kodo_string_free(out_ptr, out_len) };
     }
 }

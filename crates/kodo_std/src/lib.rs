@@ -295,6 +295,40 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Returns the number of entries in the map".to_string(),
             param_count: 1,
         },
+        // HTTP client
+        BuiltinFunction {
+            name: "kodo::http::get".to_string(),
+            description: "Performs an HTTP GET request and returns the response body".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::post".to_string(),
+            description:
+                "Performs an HTTP POST request with the given body and returns the response"
+                    .to_string(),
+            param_count: 2,
+        },
+        // JSON parsing
+        BuiltinFunction {
+            name: "kodo::json::parse".to_string(),
+            description: "Parses a JSON string and returns an opaque handle".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::json::get_string".to_string(),
+            description: "Gets a string value from a JSON object by key".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::json::get_int".to_string(),
+            description: "Gets an integer value from a JSON object by key".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::json::free".to_string(),
+            description: "Frees a parsed JSON handle".to_string(),
+            param_count: 1,
+        },
     ]
 }
 
@@ -320,7 +354,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 36);
+        assert_eq!(builtins.len(), 42);
     }
 
     #[test]

@@ -935,7 +935,135 @@ fn declare_builtins(
         builtins.insert("map_length".to_string(), BuiltinInfo { func_id });
     }
 
+    // --- HTTP client ---
+
+    // kodo_http_get(url_ptr, url_len, out_ptr, out_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // url_ptr
+        sig.params.push(AbiParam::new(types::I64)); // url_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_http_get", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("http_get".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_http_post(url_ptr, url_len, body_ptr, body_len, out_ptr, out_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // url_ptr
+        sig.params.push(AbiParam::new(types::I64)); // url_len
+        sig.params.push(AbiParam::new(types::I64)); // body_ptr
+        sig.params.push(AbiParam::new(types::I64)); // body_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_http_post", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("http_post".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- JSON parsing ---
+
+    // kodo_json_parse(str_ptr, str_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // str_ptr
+        sig.params.push(AbiParam::new(types::I64)); // str_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_json_parse", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("json_parse".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_json_get_string(handle, key_ptr, key_len, out_ptr, out_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // key_ptr
+        sig.params.push(AbiParam::new(types::I64)); // key_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_json_get_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("json_get_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_json_get_int(handle, key_ptr, key_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // key_ptr
+        sig.params.push(AbiParam::new(types::I64)); // key_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_json_get_int", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("json_get_int".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_json_free(handle) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        let func_id = module
+            .declare_function("kodo_json_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("json_free".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Cleanup functions for heap-allocated values ---
+
+    // kodo_string_free(ptr: i64, len: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        let func_id = module
+            .declare_function("kodo_string_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_string_free".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_list_free(list_ptr: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // list_ptr
+        let func_id = module
+            .declare_function("kodo_list_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_list_free".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_map_free(map_ptr: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // map_ptr
+        let func_id = module
+            .declare_function("kodo_map_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_map_free".to_string(), BuiltinInfo { func_id });
+    }
+
     Ok(builtins)
+}
+
+/// Classifies heap-allocated locals so the correct free function is called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeapKind {
+    /// A dynamically allocated `String` (ptr + len in a `_String` stack slot).
+    String,
+    /// A heap-allocated `List` (opaque i64 handle).
+    List,
+    /// A heap-allocated `Map` (opaque i64 handle).
+    Map,
 }
 
 /// Holds the mapping from MIR locals to Cranelift variables during translation.
@@ -946,6 +1074,8 @@ struct VarMap {
     var_types: HashMap<LocalId, types::Type>,
     /// Stack slots for struct values.
     stack_slots: HashMap<LocalId, (cranelift_codegen::ir::StackSlot, String)>,
+    /// Locals that hold heap-allocated values and must be freed before return.
+    heap_locals: HashMap<LocalId, HeapKind>,
 }
 
 impl VarMap {
@@ -954,6 +1084,7 @@ impl VarMap {
             vars: HashMap::new(),
             var_types: HashMap::new(),
             stack_slots: HashMap::new(),
+            heap_locals: HashMap::new(),
         }
     }
 
@@ -1016,6 +1147,11 @@ fn is_special_builtin(callee: &str) -> bool {
             | "file_write"
             | "list_get"
             | "map_get"
+            | "http_get"
+            | "http_post"
+            | "json_parse"
+            | "json_get_string"
+            | "json_get_int"
     )
 }
 
@@ -1031,7 +1167,20 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "String_replace"
             | "Int_to_string"
             | "Float64_to_string"
+            | "http_get"
+            | "http_post"
+            | "json_get_string"
     )
+}
+
+/// Returns true if the builtin allocates a new list on the heap.
+fn is_list_allocating_builtin(callee: &str) -> bool {
+    matches!(callee, "list_new" | "String_split")
+}
+
+/// Returns true if the builtin allocates a new map on the heap.
+fn is_map_allocating_builtin(callee: &str) -> bool {
+    matches!(callee, "map_new")
 }
 
 /// Emits a call to a string builtin, expanding `StringConst` args into (ptr, len) pairs.
@@ -1436,7 +1585,7 @@ fn translate_function(
                 module,
                 func_ids,
                 builtins,
-                &var_map,
+                &mut var_map,
                 struct_layouts,
                 enum_layouts,
             )?;
@@ -1474,7 +1623,7 @@ fn translate_instruction(
     module: &mut ObjectModule,
     func_ids: &HashMap<String, FuncId>,
     builtins: &HashMap<String, BuiltinInfo>,
-    var_map: &VarMap,
+    var_map: &mut VarMap,
     struct_layouts: &HashMap<String, StructLayout>,
     enum_layouts: &HashMap<String, EnumLayout>,
 ) -> Result<()> {
@@ -1537,6 +1686,8 @@ fn translate_instruction(
                             let var = var_map.get(*local_id)?;
                             let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
                             builder.def_var(var, addr);
+                            // Mark as heap-allocated so it will be freed before return.
+                            var_map.heap_locals.insert(*local_id, HeapKind::String);
                             return Ok(());
                         }
                     }
@@ -1546,6 +1697,8 @@ fn translate_instruction(
                             .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
                     let var = var_map.get(*local_id)?;
                     builder.def_var(var, result_ptr);
+                    // Mark as heap-allocated so it will be freed before return.
+                    var_map.heap_locals.insert(*local_id, HeapKind::String);
                     return Ok(());
                 }
             }
@@ -1896,8 +2049,19 @@ fn translate_instruction(
                     struct_layouts,
                 )?;
                 if handled {
+                    // Mark heap-allocated string locals for cleanup.
+                    if is_string_returning_builtin(callee) {
+                        var_map.heap_locals.insert(*dest, HeapKind::String);
+                    }
                     return Ok(());
                 }
+            }
+
+            // Track list/map allocating builtins for cleanup before return.
+            if is_list_allocating_builtin(callee) {
+                var_map.heap_locals.insert(*dest, HeapKind::List);
+            } else if is_map_allocating_builtin(callee) {
+                var_map.heap_locals.insert(*dest, HeapKind::Map);
             }
 
             // Check if the dest has a composite type (sret return from callee).
@@ -2473,6 +2637,80 @@ fn translate_float_binop(
     }
 }
 
+/// Emits cleanup calls for all heap-allocated locals before a function returns.
+///
+/// Iterates over `var_map.heap_locals` and emits the appropriate free function
+/// call for each allocation kind. Locals whose value is being returned
+/// (identified by `return_local`) are skipped — the caller owns that value.
+fn emit_heap_cleanup(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+    return_local: Option<LocalId>,
+) -> Result<()> {
+    // Collect into a Vec to avoid borrow issues with the builder.
+    let mut locals_to_free: Vec<(LocalId, HeapKind)> = var_map
+        .heap_locals
+        .iter()
+        .map(|(id, kind)| (*id, *kind))
+        .collect();
+    // Sort for deterministic codegen output.
+    locals_to_free.sort_by_key(|(id, _)| id.0);
+
+    for (local_id, kind) in locals_to_free {
+        // Do not free the value being returned — ownership transfers to caller.
+        if return_local == Some(local_id) {
+            continue;
+        }
+        match kind {
+            HeapKind::String => {
+                // Load ptr and len from the _String stack slot, then call kodo_string_free.
+                if let Some((slot, ref slot_name)) = var_map.stack_slots.get(&local_id) {
+                    if slot_name == "_String" {
+                        let ptr_addr =
+                            builder
+                                .ins()
+                                .stack_addr(types::I64, *slot, STRING_PTR_OFFSET);
+                        let ptr = builder.ins().load(types::I64, MemFlags::new(), ptr_addr, 0);
+                        let len_addr =
+                            builder
+                                .ins()
+                                .stack_addr(types::I64, *slot, STRING_LEN_OFFSET);
+                        let len = builder.ins().load(types::I64, MemFlags::new(), len_addr, 0);
+                        let free_info = builtins.get("kodo_string_free").ok_or_else(|| {
+                            CodegenError::Unsupported(
+                                "kodo_string_free builtin not found".to_string(),
+                            )
+                        })?;
+                        let func_ref = module.declare_func_in_func(free_info.func_id, builder.func);
+                        builder.ins().call(func_ref, &[ptr, len]);
+                    }
+                }
+            }
+            HeapKind::List => {
+                let var = var_map.get(local_id)?;
+                let handle = builder.use_var(var);
+                let free_info = builtins.get("kodo_list_free").ok_or_else(|| {
+                    CodegenError::Unsupported("kodo_list_free builtin not found".to_string())
+                })?;
+                let func_ref = module.declare_func_in_func(free_info.func_id, builder.func);
+                builder.ins().call(func_ref, &[handle]);
+            }
+            HeapKind::Map => {
+                let var = var_map.get(local_id)?;
+                let handle = builder.use_var(var);
+                let free_info = builtins.get("kodo_map_free").ok_or_else(|| {
+                    CodegenError::Unsupported("kodo_map_free builtin not found".to_string())
+                })?;
+                let func_ref = module.declare_func_in_func(free_info.func_id, builder.func);
+                builder.ins().call(func_ref, &[handle]);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Translates a MIR terminator.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn translate_terminator(
@@ -2490,6 +2728,13 @@ fn translate_terminator(
 ) -> Result<()> {
     match term {
         Terminator::Return(value) => {
+            // Identify the local being returned so we skip freeing it.
+            let return_local = if let Value::Local(id) = value {
+                Some(*id)
+            } else {
+                None
+            };
+
             if is_composite(&mir_fn.return_type) {
                 // sret: copy local struct/enum data to the sret pointer, then return void.
                 if let Some(sret_v) = sret_var {
@@ -2539,6 +2784,8 @@ fn translate_terminator(
                         }
                     }
                 }
+                // Free heap-allocated locals before returning.
+                emit_heap_cleanup(builder, module, builtins, var_map, return_local)?;
                 builder.ins().return_(&[]);
             } else if is_unit(&mir_fn.return_type) {
                 let _ = translate_value(
@@ -2550,6 +2797,8 @@ fn translate_terminator(
                     var_map,
                     struct_layouts,
                 )?;
+                // Free heap-allocated locals before returning.
+                emit_heap_cleanup(builder, module, builtins, var_map, return_local)?;
                 builder.ins().return_(&[]);
             } else {
                 let val = translate_value(
@@ -2572,6 +2821,8 @@ fn translate_terminator(
                 } else {
                     val
                 };
+                // Free heap-allocated locals before returning.
+                emit_heap_cleanup(builder, module, builtins, var_map, return_local)?;
                 builder.ins().return_(&[val]);
             }
         }
@@ -4016,5 +4267,271 @@ mod tests {
         };
         let result = compile_module(&[func], &CodegenOptions::default(), None);
         assert!(result.is_ok(), "Float64 negation failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_lambda_lifted_closure_with_capture() {
+        // Simulates: let offset = 10; let f = |x: Int| -> Int { x + offset }; f(offset, 5)
+        // The lambda-lifted __closure_0 takes (offset, x) and returns x + offset.
+        let closure_fn = MirFunction {
+            name: "__closure_0".to_string(),
+            return_type: Type::Int,
+            param_count: 2,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Add,
+                    Box::new(Value::Local(LocalId(1))),
+                    Box::new(Value::Local(LocalId(0))),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        // main: let offset = 10; let result = __closure_0(offset, 5); return result
+        let main_fn = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::IntConst(10)),
+                    Instruction::Call {
+                        dest: LocalId(1),
+                        callee: "__closure_0".to_string(),
+                        args: vec![Value::Local(LocalId(0)), Value::IntConst(5)],
+                    },
+                ],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[closure_fn, main_fn], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "lambda-lifted closure compilation failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_lambda_lifted_closure_returning_bool() {
+        // Simulates: let f = |x: Int| -> Bool { x > 0 }
+        let closure_fn = MirFunction {
+            name: "__closure_0".to_string(),
+            return_type: Type::Bool,
+            param_count: 1,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Gt,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::IntConst(0)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let caller = MirFunction {
+            name: "caller".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Bool,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "__closure_0".to_string(),
+                    args: vec![Value::IntConst(5)],
+                }],
+                terminator: Terminator::Return(Value::IntConst(0)),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[closure_fn, caller], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "closure returning Bool compilation failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_string_concat_emits_free() {
+        // A function that creates a dynamic string via concatenation and returns Int.
+        // The dynamic string must be freed before return.
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    // _0 = "hello"
+                    Instruction::Assign(LocalId(0), Value::StringConst("hello".to_string())),
+                    // _1 = " world"
+                    Instruction::Assign(LocalId(1), Value::StringConst(" world".to_string())),
+                    // _2 = _0 + _1  (heap-allocated)
+                    Instruction::Assign(
+                        LocalId(2),
+                        Value::BinOp(
+                            kodo_ast::BinOp::Add,
+                            Box::new(Value::Local(LocalId(0))),
+                            Box::new(Value::Local(LocalId(1))),
+                        ),
+                    ),
+                    // println(_2)
+                    Instruction::Call {
+                        dest: LocalId(0),
+                        callee: "println".to_string(),
+                        args: vec![Value::Local(LocalId(2))],
+                    },
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "String concat with free failed: {result:?}");
+        // Verify the compiled object references kodo_string_free.
+        let object_bytes = result.as_ref().ok();
+        assert!(object_bytes.is_some());
+        let bytes = object_bytes.map(|b| String::from_utf8_lossy(b).to_string());
+        assert!(
+            bytes
+                .as_ref()
+                .map_or(false, |b| b.contains("kodo_string_free")),
+            "compiled object should reference kodo_string_free"
+        );
+    }
+
+    #[test]
+    fn compile_list_new_emits_free() {
+        // A function that creates a list and returns Unit — the list must be freed.
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "list_new".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "List new with free failed: {result:?}");
+        let bytes = result
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .ok();
+        assert!(
+            bytes
+                .as_ref()
+                .map_or(false, |b| b.contains("kodo_list_free")),
+            "compiled object should reference kodo_list_free"
+        );
+    }
+
+    #[test]
+    fn compile_map_new_emits_free() {
+        // A function that creates a map and returns Unit — the map must be freed.
+        let func = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "map_new".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "Map new with free failed: {result:?}");
+        let bytes = result
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .ok();
+        assert!(
+            bytes
+                .as_ref()
+                .map_or(false, |b| b.contains("kodo_map_free")),
+            "compiled object should reference kodo_map_free"
+        );
+    }
+
+    #[test]
+    fn heap_kind_enum_variants() {
+        assert_ne!(HeapKind::String, HeapKind::List);
+        assert_ne!(HeapKind::List, HeapKind::Map);
+        assert_eq!(HeapKind::String, HeapKind::String);
     }
 }

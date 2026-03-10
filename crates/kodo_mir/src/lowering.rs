@@ -99,6 +99,40 @@ impl MirBuilder {
         id
     }
 
+    /// Infers the type of a [`Value`] from the builder's local type map.
+    ///
+    /// Constants map to their corresponding primitive types, locals are
+    /// looked up in the `local_types` map, and composite values (struct
+    /// literals, enum variants) resolve to their named types.
+    fn infer_value_type(&self, value: &Value) -> Type {
+        match value {
+            Value::IntConst(_) | Value::EnumDiscriminant(_) => Type::Int,
+            Value::FloatConst(_) => Type::Float64,
+            Value::BoolConst(_) | Value::Not(_) => Type::Bool,
+            Value::StringConst(_) => Type::String,
+            Value::Unit => Type::Unit,
+            Value::Local(lid) => self.local_types.get(lid).cloned().unwrap_or(Type::Unknown),
+            Value::BinOp(op, lhs, _rhs) => {
+                use kodo_ast::BinOp;
+                match op {
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or => Type::Bool,
+                    _ => self.infer_value_type(lhs),
+                }
+            }
+            Value::Neg(inner) => self.infer_value_type(inner),
+            Value::StructLit { name, .. } => Type::Struct(name.clone()),
+            Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
+            Value::EnumPayload { .. } | Value::FieldGet { .. } | Value::FuncRef(_) => Type::Unknown,
+        }
+    }
+
     /// Creates a new basic block and returns its identifier.
     ///
     /// The block is not yet added to the function — it becomes current
@@ -290,6 +324,7 @@ impl MirBuilder {
     fn lift_closure(
         &mut self,
         closure_params: &[kodo_ast::ClosureParam],
+        return_type: Option<&kodo_ast::TypeExpr>,
         body: &Expr,
     ) -> Result<(String, Vec<String>)> {
         let closure_name = format!("__closure_{}", self.closure_counter);
@@ -355,11 +390,23 @@ impl MirBuilder {
 
         // Lower the closure body.
         let body_val = closure_builder.lower_expr(body)?;
+
+        // Determine the return type: prefer an explicit annotation, then
+        // fall back to inferring from the body value.
+        let inferred_ret = if let Some(ret_expr) = return_type {
+            let enum_names: std::collections::HashSet<String> =
+                self.enum_registry.keys().cloned().collect();
+            resolve_type_with_enums(ret_expr, kodo_ast::Span::new(0, 0), &enum_names)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?
+        } else {
+            closure_builder.infer_value_type(&body_val)
+        };
+
         closure_builder.seal_block_final(Terminator::Return(body_val));
 
         let mir_func = MirFunction {
             name: closure_name.clone(),
-            return_type: Type::Unknown,
+            return_type: inferred_ret.clone(),
             param_count,
             locals: closure_builder.locals,
             blocks: closure_builder.blocks,
@@ -373,7 +420,7 @@ impl MirBuilder {
 
         // Register the closure in fn_return_types so calls resolve.
         self.fn_return_types
-            .insert(closure_name.clone(), Type::Unknown);
+            .insert(closure_name.clone(), inferred_ret);
 
         Ok((closure_name, captures))
     }
@@ -1088,8 +1135,14 @@ impl MirBuilder {
             | Expr::Is { .. } => Ok(Value::Unit),
 
             // Lambda-lift closures into top-level functions.
-            Expr::Closure { params, body, .. } => {
-                let (closure_name, captures) = self.lift_closure(params, body)?;
+            Expr::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                let (closure_name, captures) =
+                    self.lift_closure(params, return_type.as_ref(), body)?;
 
                 // Register this local's variable name → closure mapping.
                 // The caller (Let statement) will pick up the closure_registry
