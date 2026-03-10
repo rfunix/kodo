@@ -58,6 +58,8 @@ pub enum TypeError {
         name: String,
         /// Source location.
         span: Span,
+        /// A similar name found via Levenshtein distance, if any.
+        similar: Option<String>,
     },
     /// A function was called with the wrong number of arguments.
     #[error("expected {expected} arguments, found {found} at {span:?}")]
@@ -476,8 +478,12 @@ impl kodo_ast::Diagnostic for TypeError {
             Self::Mismatch { expected, .. } => Some(format!(
                 "ensure the expression produces a value of type `{expected}`"
             )),
-            Self::Undefined { name, .. } => {
-                Some(format!("check for typos or declare `{name}` before use"))
+            Self::Undefined { name, similar, .. } => {
+                if let Some(suggestion) = similar {
+                    Some(format!("did you mean `{suggestion}`? (check for typos or declare `{name}` before use)"))
+                } else {
+                    Some(format!("check for typos or declare `{name}` before use"))
+                }
             }
             Self::ArityMismatch {
                 expected, found, ..
@@ -603,6 +609,33 @@ impl kodo_ast::Diagnostic for TypeError {
             Vec::new()
         }
     }
+
+    fn fix_patch(&self) -> Option<kodo_ast::FixPatch> {
+        match self {
+            Self::MissingMeta => Some(kodo_ast::FixPatch {
+                description: "add a meta block with a purpose field".to_string(),
+                file: std::string::String::new(),
+                start_offset: 0,
+                end_offset: 0,
+                replacement: "    meta { purpose: \"TODO: describe this module\" }\n".to_string(),
+            }),
+            Self::EmptyPurpose { span } => Some(kodo_ast::FixPatch {
+                description: "provide a non-empty purpose string".to_string(),
+                file: std::string::String::new(),
+                start_offset: span.start as usize,
+                end_offset: span.end as usize,
+                replacement: "purpose: \"TODO: describe this module\"".to_string(),
+            }),
+            Self::LowConfidenceWithoutReview { span, .. } => Some(kodo_ast::FixPatch {
+                description: "add @reviewed_by annotation for human review".to_string(),
+                file: std::string::String::new(),
+                start_offset: span.start as usize,
+                end_offset: span.start as usize,
+                replacement: "@reviewed_by(human: \"reviewer\")\n    ".to_string(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// Alias for results in this crate.
@@ -676,6 +709,32 @@ impl Type {
                 | Self::Uint64
                 | Self::Float32
                 | Self::Float64
+        )
+    }
+
+    /// Returns `true` if the type has implicit Copy semantics.
+    ///
+    /// Primitive types (integers, floats, booleans, bytes, unit) are implicitly
+    /// copied rather than moved, similar to Rust's `Copy` trait.
+    #[must_use]
+    pub fn is_copy(&self) -> bool {
+        matches!(
+            self,
+            Self::Int
+                | Self::Int8
+                | Self::Int16
+                | Self::Int32
+                | Self::Int64
+                | Self::Uint
+                | Self::Uint8
+                | Self::Uint16
+                | Self::Uint32
+                | Self::Uint64
+                | Self::Float32
+                | Self::Float64
+                | Self::Bool
+                | Self::Byte
+                | Self::Unit
         )
     }
 }
@@ -770,6 +829,13 @@ impl TypeEnv {
     /// Used to restore the environment when leaving a scope.
     pub fn truncate(&mut self, level: usize) {
         self.bindings.truncate(level);
+    }
+
+    /// Returns an iterator over all unique binding names currently in scope.
+    ///
+    /// Used for suggesting similar names via Levenshtein distance.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.bindings.iter().map(|(n, _)| n.as_str())
     }
 
     /// Checks that two types are equal, returning an error if not.
@@ -1017,6 +1083,11 @@ pub struct TypeChecker {
         std::collections::HashMap<std::string::String, OwnershipState>,
         std::collections::HashSet<std::string::String>,
     )>,
+    /// Parameter ownership qualifiers per function.
+    ///
+    /// Maps function name to a list of ownership qualifiers for each parameter.
+    /// Used during `check_call` to determine whether passing a variable moves it.
+    fn_param_ownership: std::collections::HashMap<std::string::String, Vec<kodo_ast::Ownership>>,
 }
 
 impl TypeChecker {
@@ -1046,6 +1117,7 @@ impl TypeChecker {
             ownership_map: std::collections::HashMap::new(),
             active_borrows: std::collections::HashSet::new(),
             ownership_scopes: Vec::new(),
+            fn_param_ownership: std::collections::HashMap::new(),
         };
         checker.register_builtins();
         checker
@@ -1299,6 +1371,11 @@ impl TypeChecker {
                 func.name.clone(),
                 Type::Function(param_types, Box::new(ret_type)),
             );
+            // Record parameter ownership qualifiers for ownership tracking in check_call.
+            let qualifiers: Vec<kodo_ast::Ownership> =
+                func.params.iter().map(|p| p.ownership).collect();
+            self.fn_param_ownership
+                .insert(func.name.clone(), qualifiers);
         }
 
         // Second pass: check each function body (skip generic functions).
@@ -1580,6 +1657,11 @@ impl TypeChecker {
             match param.ownership {
                 kodo_ast::Ownership::Owned => self.track_owned(&param.name),
                 kodo_ast::Ownership::Ref => {
+                    // `ref` parameters are borrowed references — the caller
+                    // retains ownership. Inside the callee, the parameter is
+                    // usable but cannot be moved (only its state is Borrowed,
+                    // it is NOT added to active_borrows since there is no
+                    // source variable to protect within this scope).
                     self.ownership_map
                         .insert(param.name.clone(), OwnershipState::Borrowed);
                 }
@@ -1650,17 +1732,17 @@ impl TypeChecker {
                 }
                 // Track ownership for the new binding.
                 // If the value is an identifier, this is a move or borrow.
+                // Primitive (Copy) types are never moved — they are implicitly copied.
+                let binding_ty = self.env.lookup(name).cloned();
                 if let Expr::Ident(source_name, _) = value {
-                    // Check if the type annotation specifies `ref`.
-                    // We detect this by checking if `ty` is present and contains a Named type
-                    // (a rough proxy — proper ref detection would need AST support for
-                    // `let y: ref T = x`). For now, variables default to owned.
                     self.track_owned(name);
-                    // If source variable is owned, moving it.
-                    if let Some(OwnershipState::Owned) = self.ownership_map.get(source_name) {
-                        // Check it can be moved.
-                        self.check_can_move(source_name, *span)?;
-                        self.track_moved(source_name, Self::span_to_line(span.start));
+                    // If source variable is owned, moving it (unless it's a Copy type).
+                    let is_copy = binding_ty.as_ref().is_some_and(Type::is_copy);
+                    if !is_copy {
+                        if let Some(OwnershipState::Owned) = self.ownership_map.get(source_name) {
+                            self.check_can_move(source_name, *span)?;
+                            self.track_moved(source_name, Self::span_to_line(span.start));
+                        }
                     }
                 } else {
                     self.track_owned(name);
@@ -1721,14 +1803,14 @@ impl TypeChecker {
                 span, name, value, ..
             } => {
                 let value_ty = self.infer_expr(value)?;
-                let existing_ty =
-                    self.env
-                        .lookup(name)
-                        .cloned()
-                        .ok_or_else(|| TypeError::Undefined {
-                            name: name.clone(),
-                            span: *span,
-                        })?;
+                let existing_ty = self.env.lookup(name).cloned().ok_or_else(|| {
+                    let similar = self.find_similar_name(name);
+                    TypeError::Undefined {
+                        name: name.clone(),
+                        span: *span,
+                        similar,
+                    }
+                })?;
                 TypeEnv::check_eq(&existing_ty, &value_ty, *span)?;
                 Ok(())
             }
@@ -1786,13 +1868,14 @@ impl TypeChecker {
             Expr::Ident(name, span) => {
                 // Check for use-after-move before type lookup.
                 self.check_not_moved(name, *span)?;
-                self.env
-                    .lookup(name)
-                    .cloned()
-                    .ok_or_else(|| TypeError::Undefined {
+                self.env.lookup(name).cloned().ok_or_else(|| {
+                    let similar = self.find_similar_name(name);
+                    TypeError::Undefined {
                         name: name.clone(),
                         span: *span,
-                    })
+                        similar,
+                    }
+                })
             }
 
             Expr::BinaryOp {
@@ -2408,6 +2491,8 @@ impl TypeChecker {
     ///
     /// Verifies the callee is a function type, the argument count matches,
     /// and each argument type matches the corresponding parameter type.
+    /// Also tracks ownership: arguments passed to `own` parameters are moved.
+    #[allow(clippy::too_many_lines)]
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
         // Check for method call pattern: callee is FieldAccess (e.g. obj.method(args))
         if let Expr::FieldAccess {
@@ -2476,14 +2561,18 @@ impl TypeChecker {
         }
 
         // Record call graph edge for direct Ident calls (non-generic).
-        if let Expr::Ident(name, _) = callee {
+        // Also look up parameter ownership qualifiers for move tracking.
+        let callee_name = if let Expr::Ident(name, _) = callee {
             if let Some(ref caller) = self.current_function_name.clone() {
                 self.call_graph
                     .entry(caller.clone())
                     .or_default()
                     .insert(name.clone());
             }
-        }
+            Some(name.clone())
+        } else {
+            None
+        };
 
         let callee_ty = self.infer_expr(callee)?;
         match callee_ty {
@@ -2495,9 +2584,34 @@ impl TypeChecker {
                         span,
                     });
                 }
-                for (param_ty, arg) in param_types.iter().zip(args) {
+                // Get ownership qualifiers for tracking moves.
+                let qualifiers = callee_name
+                    .as_ref()
+                    .and_then(|n| self.fn_param_ownership.get(n))
+                    .cloned();
+                for (i, (param_ty, arg)) in param_types.iter().zip(args).enumerate() {
                     let arg_ty = self.infer_expr(arg)?;
                     TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
+                    // Track ownership: if parameter is `own` and argument is an ident,
+                    // mark the variable as moved (unless it's a Copy type).
+                    let is_own = qualifiers
+                        .as_ref()
+                        .and_then(|q| q.get(i))
+                        .map_or(true, |o| *o == kodo_ast::Ownership::Owned);
+                    if let Expr::Ident(arg_name, arg_span) = arg {
+                        if is_own && !arg_ty.is_copy() {
+                            // Only move variables that are actually Owned (not Borrowed refs).
+                            if let Some(OwnershipState::Owned) = self.ownership_map.get(arg_name) {
+                                self.check_can_move(arg_name, *arg_span)?;
+                                self.track_moved(arg_name, Self::span_to_line(arg_span.start));
+                            }
+                        } else if !is_own {
+                            // Parameter is `ref` — the source variable is borrowed.
+                            // Use track_borrowed with the arg as both the binding and
+                            // source, since the caller's variable is the borrow source.
+                            self.track_borrowed(arg_name, arg_name);
+                        }
+                    }
                 }
                 Ok(*ret_type)
             }
@@ -2922,8 +3036,8 @@ impl TypeChecker {
 
     /// Records that a variable is borrowed (via `ref`).
     ///
-    /// Will be used when full `ref` parameter tracking is implemented.
-    #[allow(dead_code)]
+    /// Marks `name` as borrowed and adds `source_var` to `active_borrows`,
+    /// preventing it from being moved until the borrow is released.
     fn track_borrowed(&mut self, name: &str, source_var: &str) {
         self.ownership_map
             .insert(name.to_string(), OwnershipState::Borrowed);
@@ -2961,6 +3075,22 @@ impl TypeChecker {
             });
         }
         Ok(())
+    }
+
+    /// Finds the most similar name in the current environment using Levenshtein distance.
+    ///
+    /// Returns `Some(name)` if a name within distance 3 is found (and shorter than
+    /// the input name's length), otherwise `None`.
+    fn find_similar_name(&self, name: &str) -> Option<String> {
+        let mut best: Option<(usize, String)> = None;
+        let threshold = std::cmp::max(name.len() / 2, 3);
+        for binding_name in self.env.names() {
+            let dist = strsim::levenshtein(name, binding_name);
+            if dist > 0 && dist <= threshold && best.as_ref().map_or(true, |(d, _)| dist < *d) {
+                best = Some((dist, binding_name.to_string()));
+            }
+        }
+        best.map(|(_, n)| n)
     }
 
     /// Computes the source line number from a span's byte offset.
@@ -3948,6 +4078,7 @@ mod tests {
         let err = TypeError::Undefined {
             name: "x".to_string(),
             span: Span::new(3, 4),
+            similar: None,
         };
         assert_eq!(err.span(), Some(Span::new(3, 4)));
     }
@@ -5280,11 +5411,8 @@ mod tests {
 
     #[test]
     fn ownership_primitives_can_be_reused() {
-        // Primitives (Int, Bool) are Copy-like and should not trigger move.
-        // This test ensures let x: Int = 42; let y: Int = x; println(x) still works.
-        // In our current implementation, Int idents ARE tracked, so this test validates
-        // the current behavior where all idents from let are tracked.
-        // NOTE: This will move x. In a future version, Copy types would be exempt.
+        // Primitives (Int, Bool) have implicit Copy semantics and should not trigger move.
+        // let x: Int = 42; let y: Int = x; print_int(x) — x is still usable.
         let func = make_function(
             "main",
             vec![],
@@ -5314,8 +5442,109 @@ mod tests {
         let module = make_module(vec![func]);
         let mut checker = TypeChecker::new();
         let result = checker.check_module(&module);
-        // Currently, all types are tracked for moves — this will be E0240.
-        // When Copy types are exempt in the future, this test can be updated.
-        assert!(result.is_err(), "Int move tracking active in V1");
+        assert!(result.is_ok(), "Copy types (Int) should not be moved");
+    }
+
+    #[test]
+    fn levenshtein_suggests_similar_name() {
+        // let x: Int = 42; let y: Int = xz should suggest "x"
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![
+                Stmt::Let {
+                    span: Span::new(0, 20),
+                    mutable: false,
+                    name: "counter".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::IntLit(0, Span::new(15, 16)),
+                },
+                Stmt::Expr(Expr::Ident("conter".to_string(), Span::new(25, 31))),
+            ],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        if let TypeError::Undefined { similar, .. } = &err {
+            assert_eq!(similar.as_deref(), Some("counter"));
+        } else {
+            panic!("expected TypeError::Undefined, got {err:?}");
+        }
+    }
+
+    #[test]
+    fn is_copy_returns_true_for_primitives() {
+        assert!(Type::Int.is_copy());
+        assert!(Type::Bool.is_copy());
+        assert!(Type::Float64.is_copy());
+        assert!(Type::Byte.is_copy());
+        assert!(Type::Unit.is_copy());
+        assert!(!Type::String.is_copy());
+        assert!(!Type::Struct("Foo".to_string()).is_copy());
+    }
+
+    #[test]
+    fn struct_type_is_moved_in_let() {
+        // let x: Foo = ...; let y: Foo = x; use(x) should fail with E0240
+        // We need a struct to test non-Copy move semantics via let.
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![
+                Stmt::Let {
+                    span: Span::new(0, 20),
+                    mutable: false,
+                    name: "a".to_string(),
+                    ty: Some(TypeExpr::Named("String".to_string())),
+                    value: Expr::StringLit("hello".to_string(), Span::new(10, 17)),
+                },
+                Stmt::Let {
+                    span: Span::new(25, 45),
+                    mutable: false,
+                    name: "b".to_string(),
+                    ty: Some(TypeExpr::Named("String".to_string())),
+                    value: Expr::Ident("a".to_string(), Span::new(35, 36)),
+                },
+                Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("println".to_string(), Span::new(50, 57))),
+                    args: vec![Expr::Ident("a".to_string(), Span::new(58, 59))],
+                    span: Span::new(50, 60),
+                }),
+            ],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), "E0240");
+    }
+
+    #[test]
+    fn fix_patch_for_missing_meta() {
+        use kodo_ast::Diagnostic;
+        let err = TypeError::MissingMeta;
+        let patch = err.fix_patch();
+        assert!(patch.is_some());
+        let patch = patch.unwrap();
+        assert!(patch.replacement.contains("meta"));
+        assert!(patch.replacement.contains("purpose"));
+    }
+
+    #[test]
+    fn fix_patch_for_low_confidence() {
+        use kodo_ast::Diagnostic;
+        let err = TypeError::LowConfidenceWithoutReview {
+            name: "process".to_string(),
+            confidence: "0.5".to_string(),
+            span: Span::new(10, 20),
+        };
+        let patch = err.fix_patch();
+        assert!(patch.is_some());
+        let patch = patch.unwrap();
+        assert!(patch.replacement.contains("@reviewed_by"));
     }
 }

@@ -9,11 +9,11 @@ module struct_params {
         y: Int
     }
 
-    fn get_x(p: Point) -> Int {
+    fn get_x(ref p: Point) -> Int {
         return p.x
     }
 
-    fn get_y(p: Point) -> Int {
+    fn get_y(ref p: Point) -> Int {
         return p.y
     }
 
@@ -21,7 +21,7 @@ module struct_params {
         return Point { x: x, y: y }
     }
 
-    fn add_points(a: Point, b: Point) -> Point {
+    fn add_points(ref a: Point, ref b: Point) -> Point {
         return Point { x: a.x + b.x, y: a.y + b.y }
     }
 
