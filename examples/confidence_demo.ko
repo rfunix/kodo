@@ -1,0 +1,55 @@
+// Demonstrates Kōdo's transitive confidence propagation.
+//
+// Confidence scores flow through the call graph: if function A calls
+// function B, A's effective confidence is min(A_declared, B_effective).
+// You can't hide low-quality code behind a high-confidence wrapper.
+//
+// Use `kodoc confidence-report` to see the full call graph:
+//   kodoc confidence-report examples/confidence_demo.ko
+//
+// Compile and run:
+//   kodoc build examples/confidence_demo.ko -o confidence_demo
+//   ./confidence_demo
+
+module confidence_demo {
+    meta {
+        purpose: "Demonstrate transitive confidence propagation through call graph"
+        version: "0.1.0"
+    }
+
+    // High confidence: well-tested utility function.
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    // Medium confidence: uses add() internally.
+    // Effective confidence = min(0.85, 0.99) = 0.85
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    fn sum_three(a: Int, b: Int, c: Int) -> Int {
+        return add(add(a, b), c)
+    }
+
+    // Lower confidence but human-reviewed.
+    // Effective confidence = min(0.6, 0.85) = 0.6
+    // Without @reviewed_by, this would fail to compile (0.6 < 0.8).
+    @authored_by(agent: "gpt-4")
+    @confidence(0.6)
+    @reviewed_by(human: "rafael")
+    fn weighted_sum(a: Int, b: Int, weight: Int) -> Int {
+        return sum_three(a, b, weight)
+    }
+
+    // Human-written code: no annotations needed.
+    fn main() {
+        let result: Int = weighted_sum(10, 20, 5)
+        println("weighted_sum(10, 20, 5) =")
+        print_int(result)
+
+        let simple: Int = add(100, 200)
+        println("add(100, 200) =")
+        print_int(simple)
+    }
+}

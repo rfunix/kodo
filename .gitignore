@@ -62,6 +62,8 @@ examples/enums
 examples/optional_sugar
 examples/stdlib_demo
 examples/structs
+examples/copy_semantics
+examples/confidence_demo
 concurrency_dem
 *.ko.cert.json
 

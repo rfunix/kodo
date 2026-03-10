@@ -300,13 +300,15 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 | [`closures_functional.ko`](examples/closures_functional.ko) | Higher-order functions and indirect calls |
 | [`stdlib_demo.ko`](examples/stdlib_demo.ko) | Standard library: `abs`, `min`, `max`, `clamp` |
 
-### Contracts & Safety
+### Contracts, Ownership & AI Traceability
 
 | File | What it demonstrates |
 |------|---------------------|
-| [`contracts_demo.ko`](examples/contracts_demo.ko) | Runtime contract checking |
-| [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref` qualifiers |
-| [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by` |
+| [`contracts_demo.ko`](examples/contracts_demo.ko) | Runtime contract checking (`requires`/`ensures`) |
+| [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref`, move semantics for structs |
+| [`copy_semantics.ko`](examples/copy_semantics.ko) | Implicit Copy for primitives vs move for compounds |
+| [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
+| [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by`, `@security_sensitive` |
 
 ### Intent System
 

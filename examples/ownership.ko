@@ -1,7 +1,8 @@
 // Demonstrates Kōdo's ownership system (own/ref).
 //
-// Kōdo enforces linear ownership: when a value is moved,
+// Kōdo enforces linear ownership: when a non-Copy value is moved,
 // it cannot be used again. Use `ref` to borrow instead.
+// Primitives (Int, Bool, Float) are implicitly copied and never moved.
 //
 // Compile and run:
 //   kodoc build examples/ownership.ko -o ownership
@@ -13,25 +14,42 @@ module ownership_demo {
         version: "0.1.0"
     }
 
-    // This function takes ownership -- the caller loses access.
-    fn consume_string(own s: String) {
-        println(s)
+    struct Message {
+        text: String
     }
 
-    // This function borrows -- the caller retains access.
-    fn borrow_string(ref s: String) {
-        println(s)
+    // Takes ownership — the caller loses access to the argument.
+    fn consume_message(own msg: Message) {
+        println(msg.text)
+    }
+
+    // Borrows — the caller retains access.
+    fn read_message(ref msg: Message) {
+        println(msg.text)
+    }
+
+    // Returns a new owned value.
+    fn create_greeting(name: String) -> Message {
+        return Message { text: name }
     }
 
     fn main() {
-        // Borrowing: s remains usable after the call.
-        let greeting: String = "Hello, ownership!"
-        borrow_string(greeting)
+        // --- Borrowing: msg remains usable after each call ---
+        let msg: Message = create_greeting("Hello from Kodo!")
+        read_message(msg)
+        read_message(msg)
+        println("msg was borrowed twice, still alive")
 
-        // Ownership transfer is tracked at the variable level.
-        let a: Int = 10
-        let b: Int = 20
-        let sum: Int = a + b
-        print_int(sum)
+        // --- Ownership transfer ---
+        // After consume_message(msg), msg is moved and can't be used.
+        consume_message(msg)
+        // Uncomment the next line to see E0240 (use-after-move):
+        // read_message(msg)  // ERROR: msg was moved on the line above
+
+        // --- Primitives are Copy — never moved ---
+        let x: Int = 42
+        let y: Int = x
+        let z: Int = x + y
+        print_int(z)
     }
 }

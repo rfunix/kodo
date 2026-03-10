@@ -1,0 +1,63 @@
+// Demonstrates Kōdo's Copy semantics for primitive types.
+//
+// Primitive types (Int, Bool, Float32, Float64, Byte, Unit) are implicitly
+// copied when assigned or passed to functions. This means they are never
+// "moved" — you can keep using them after passing them around.
+//
+// Compound types (String, structs) ARE moved and require `ref` to borrow.
+//
+// Compile and run:
+//   kodoc build examples/copy_semantics.ko -o copy_semantics
+//   ./copy_semantics
+
+module copy_semantics {
+    meta {
+        purpose: "Demonstrate Copy semantics for primitives vs move semantics for compounds"
+        version: "0.1.0"
+    }
+
+    fn double(x: Int) -> Int {
+        return x + x
+    }
+
+    fn negate(x: Bool) -> Bool {
+        if x { return false }
+        return true
+    }
+
+    // Strings are NOT Copy — this takes ownership.
+    fn consume_string(own s: String) {
+        println(s)
+    }
+
+    // Use `ref` to borrow a String without moving it.
+    fn print_string(ref s: String) {
+        println(s)
+    }
+
+    fn main() {
+        // --- Primitives: implicitly copied, never moved ---
+        let x: Int = 42
+        let y: Int = double(x)
+        // x is still usable after being passed to double()!
+        let z: Int = x + y
+        print_int(z)
+
+        let flag: Bool = true
+        let flipped: Bool = negate(flag)
+        // flag is still usable — Bool is Copy.
+        if flag {
+            println("flag is still true")
+        }
+
+        // --- Strings: moved unless borrowed with ref ---
+        let greeting: String = "Hello, Kodo!"
+        print_string(greeting)
+        // greeting is still usable because print_string borrows with ref.
+        print_string(greeting)
+
+        // Uncomment the next two lines to see E0240 (use-after-move):
+        // consume_string(greeting)
+        // println(greeting)  // ERROR: greeting was moved
+    }
+}
