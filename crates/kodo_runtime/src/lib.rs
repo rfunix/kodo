@@ -579,11 +579,29 @@ pub extern "C" fn kodo_float64_to_int(value: f64) -> i64 {
     result
 }
 
+/// A queued task — either a plain function pointer or one with an environment.
+enum Task {
+    /// A zero-argument task (no captures).
+    Plain(extern "C" fn()),
+    /// A task with a captured environment.
+    ///
+    /// The function takes a pointer to the environment data. The `env` Vec
+    /// owns the copied environment bytes so they stay alive until the task
+    /// runs.
+    WithEnv {
+        /// Function pointer that accepts an env pointer as its sole argument.
+        func: extern "C" fn(i64),
+        /// Owned copy of the environment data.
+        env: Vec<u8>,
+    },
+}
+
 /// Task queue for the cooperative scheduler.
 ///
-/// Stores function pointers to tasks that have been spawned.
+/// Stores tasks that have been spawned — either plain function pointers or
+/// functions paired with captured environment data.
 /// All tasks are executed when `kodo_run_scheduler` is called.
-static TASK_QUEUE: std::sync::Mutex<Vec<extern "C" fn()>> = std::sync::Mutex::new(Vec::new());
+static TASK_QUEUE: std::sync::Mutex<Vec<Task>> = std::sync::Mutex::new(Vec::new());
 
 /// Spawns a task by adding its function pointer to the task queue.
 ///
@@ -591,7 +609,38 @@ static TASK_QUEUE: std::sync::Mutex<Vec<extern "C" fn()>> = std::sync::Mutex::ne
 #[no_mangle]
 pub extern "C" fn kodo_spawn_task(task: extern "C" fn()) {
     if let Ok(mut queue) = TASK_QUEUE.lock() {
-        queue.push(task);
+        queue.push(Task::Plain(task));
+    }
+}
+
+/// Spawns a task that carries a captured environment.
+///
+/// `fn_ptr` is a function that takes a single `i64` argument (a pointer to
+/// the environment data). `env_ptr` points to the environment buffer in the
+/// caller's stack frame and `env_size` is its size in bytes. The runtime
+/// copies the environment so it remains valid when the task eventually runs.
+///
+/// # Safety
+///
+/// The caller must ensure that `env_ptr` points to a readable buffer of at
+/// least `env_size` bytes.
+#[no_mangle]
+pub extern "C" fn kodo_spawn_task_with_env(fn_ptr: i64, env_ptr: i64, env_size: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = env_size as usize;
+    let mut env = vec![0u8; size];
+    if size > 0 {
+        // SAFETY: The caller guarantees `env_ptr` points to `env_size`
+        // readable bytes (the captures packed on the caller's stack).
+        unsafe {
+            std::ptr::copy_nonoverlapping(env_ptr as *const u8, env.as_mut_ptr(), size);
+        }
+    }
+    // SAFETY: `fn_ptr` is a valid function pointer produced by Cranelift
+    // codegen with the `extern "C" fn(i64)` signature.
+    let func: extern "C" fn(i64) = unsafe { std::mem::transmute(fn_ptr) };
+    if let Ok(mut queue) = TASK_QUEUE.lock() {
+        queue.push(Task::WithEnv { func, env });
     }
 }
 
@@ -603,7 +652,7 @@ pub extern "C" fn kodo_spawn_task(task: extern "C" fn()) {
 #[no_mangle]
 pub extern "C" fn kodo_run_scheduler() {
     loop {
-        let tasks: Vec<extern "C" fn()> = {
+        let tasks: Vec<Task> = {
             if let Ok(mut queue) = TASK_QUEUE.lock() {
                 std::mem::take(&mut *queue)
             } else {
@@ -614,7 +663,10 @@ pub extern "C" fn kodo_run_scheduler() {
             break;
         }
         for task in tasks {
-            task();
+            match task {
+                Task::Plain(func) => func(),
+                Task::WithEnv { func, env } => func(env.as_ptr() as i64),
+            }
         }
     }
 }
@@ -1588,6 +1640,53 @@ mod tests {
         assert_eq!(COUNTER.load(Ordering::SeqCst), 0, "tasks not yet run");
         kodo_run_scheduler();
         assert_eq!(COUNTER.load(Ordering::SeqCst), 2, "both tasks ran");
+    }
+
+    #[test]
+    fn kodo_spawn_task_with_env_and_scheduler() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static RESULT: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn add_env_value(env_ptr: i64) {
+            // SAFETY: env_ptr points to an i64 value packed by the test.
+            let val = unsafe { *(env_ptr as *const i64) };
+            RESULT.fetch_add(val, Ordering::SeqCst);
+        }
+
+        RESULT.store(0, Ordering::SeqCst);
+
+        // Pack an i64 value (42) as the environment.
+        let env_val: i64 = 42;
+        let env_ptr = std::ptr::addr_of!(env_val) as i64;
+        let env_size = std::mem::size_of::<i64>() as i64;
+
+        kodo_spawn_task_with_env(add_env_value as i64, env_ptr, env_size);
+        assert_eq!(RESULT.load(Ordering::SeqCst), 0, "task not yet run");
+        kodo_run_scheduler();
+        assert_eq!(RESULT.load(Ordering::SeqCst), 42, "task read env value");
+    }
+
+    #[test]
+    fn kodo_spawn_task_with_env_multiple_captures() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static SUM: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn sum_two_captures(env_ptr: i64) {
+            // SAFETY: env_ptr points to two consecutive i64 values.
+            let a = unsafe { *(env_ptr as *const i64) };
+            let b = unsafe { *((env_ptr as *const i64).add(1)) };
+            SUM.store(a + b, Ordering::SeqCst);
+        }
+
+        SUM.store(0, Ordering::SeqCst);
+
+        let env: [i64; 2] = [10, 32];
+        let env_ptr = env.as_ptr() as i64;
+        let env_size = (std::mem::size_of::<i64>() * 2) as i64;
+
+        kodo_spawn_task_with_env(sum_two_captures as i64, env_ptr, env_size);
+        kodo_run_scheduler();
+        assert_eq!(SUM.load(Ordering::SeqCst), 42, "task summed both captures");
     }
 
     #[test]

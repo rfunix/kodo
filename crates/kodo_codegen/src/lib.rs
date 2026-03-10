@@ -523,6 +523,21 @@ fn declare_builtins(
         builtins.insert("kodo_spawn_task".to_string(), BuiltinInfo { func_id });
     }
 
+    // kodo_spawn_task_with_env(fn_ptr: i64, env_ptr: i64, env_size: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // function pointer
+        sig.params.push(AbiParam::new(types::I64)); // env pointer
+        sig.params.push(AbiParam::new(types::I64)); // env size
+        let func_id = module
+            .declare_function("kodo_spawn_task_with_env", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert(
+            "kodo_spawn_task_with_env".to_string(),
+            BuiltinInfo { func_id },
+        );
+    }
+
     // kodo_clamp(val: i64, lo: i64, hi: i64) -> i64
     {
         let mut sig = Signature::new(call_conv);
@@ -2035,6 +2050,63 @@ fn translate_instruction(
             var_map.def_var_with_cast(*local_id, val, builder)?;
         }
         Instruction::Call { dest, callee, args } => {
+            // Synthetic __env_pack: allocate a stack slot and pack capture
+            // values into it, returning a pointer to the slot.
+            if callee == "__env_pack" {
+                let num_captures = args.len();
+                #[allow(clippy::cast_possible_truncation)]
+                let slot_size = (num_captures * 8) as u32;
+                let slot =
+                    builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                        slot_size,
+                        0,
+                    ));
+                for (idx, arg) in args.iter().enumerate() {
+                    let val = translate_value(
+                        arg,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?;
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                    let offset = (idx * 8) as i32;
+                    let addr = builder.ins().stack_addr(types::I64, slot, offset);
+                    builder.ins().store(MemFlags::new(), val, addr, 0);
+                }
+                let base_addr = builder.ins().stack_addr(types::I64, slot, 0);
+                let var = var_map.get(*dest)?;
+                builder.def_var(var, base_addr);
+                return Ok(());
+            }
+
+            // Synthetic __env_load: load a value from an env pointer at a
+            // given byte offset.
+            if callee == "__env_load" {
+                if let (Some(ptr_arg), Some(Value::IntConst(offset))) = (args.first(), args.get(1))
+                {
+                    let ptr_val = translate_value(
+                        ptr_arg,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?;
+                    #[allow(clippy::cast_possible_truncation)]
+                    let off = *offset as i32;
+                    let val = builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), ptr_val, off);
+                    var_map.def_var_with_cast(*dest, val, builder)?;
+                    return Ok(());
+                }
+            }
+
             // Check if this is a builtin that needs special arg/return handling.
             if is_special_builtin(callee) {
                 let handled = emit_string_builtin_call(

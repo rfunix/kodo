@@ -487,3 +487,84 @@ fn test_dynamic_strings_freed_without_crash() {
         "should print 'hello world', got: {stdout}"
     );
 }
+
+#[test]
+fn test_spawn_without_captures() {
+    let source = r#"module spawn_no_cap {
+    meta {
+        purpose: "Test spawn without captures"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        spawn {
+            print_int(99)
+        }
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_spawn_no_cap");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "spawn without captures should exit with 0");
+    assert!(
+        stdout.contains("99"),
+        "spawned task should print 99, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_spawn_with_captured_variable() {
+    let source = r#"module spawn_cap {
+    meta {
+        purpose: "Test spawn with captured variable"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let x: Int = 42
+        spawn {
+            print_int(x)
+        }
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_spawn_cap");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "spawn with capture should exit with 0");
+    assert!(
+        stdout.contains("42"),
+        "spawned task should print captured value 42, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_spawn_with_multiple_captures() {
+    let source = r#"module spawn_multi_cap {
+    meta {
+        purpose: "Test spawn with multiple captured variables"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let a: Int = 10
+        let b: Int = 32
+        spawn {
+            print_int(a + b)
+        }
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_spawn_multi_cap");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "spawn with multiple captures should exit with 0"
+    );
+    assert!(
+        stdout.contains("42"),
+        "spawned task should print 42 (10+32), got: {stdout}"
+    );
+}

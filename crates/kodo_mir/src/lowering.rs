@@ -544,7 +544,8 @@ impl MirBuilder {
             // IfLet is desugared before MIR lowering.
             Stmt::IfLet { .. } => Ok(Value::Unit),
             // Spawn: lambda-lift body into a task function and schedule it.
-            // If the body captures variables, fall back to inline execution.
+            // When the body captures variables, we pack them into an
+            // environment buffer and use `kodo_spawn_task_with_env`.
             Stmt::Spawn { body, .. } => {
                 // Check for free variables in the spawn body.
                 let params = std::collections::HashSet::new();
@@ -553,28 +554,26 @@ impl MirBuilder {
                 for s in &body.stmts {
                     Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
                 }
-                let has_captures = free_vars
-                    .iter()
-                    .any(|name| self.name_map.contains_key(name));
+                let captures: Vec<String> = free_vars
+                    .into_iter()
+                    .filter(|name| self.name_map.contains_key(name))
+                    .collect();
 
-                if has_captures {
-                    // Fall back to inline execution if the body captures variables.
-                    self.lower_block(body)
-                } else {
-                    // Lambda-lift into a zero-arg function.
-                    let spawn_name = format!("__spawn_{}", self.closure_counter);
-                    self.closure_counter += 1;
+                let spawn_name = format!("__spawn_{}", self.closure_counter);
+                self.closure_counter += 1;
 
-                    let mut spawn_builder = MirBuilder::new();
-                    spawn_builder
-                        .struct_registry
-                        .clone_from(&self.struct_registry);
-                    spawn_builder.enum_registry.clone_from(&self.enum_registry);
-                    spawn_builder
-                        .fn_return_types
-                        .clone_from(&self.fn_return_types);
-                    spawn_builder.fn_name.clone_from(&spawn_name);
+                let mut spawn_builder = MirBuilder::new();
+                spawn_builder
+                    .struct_registry
+                    .clone_from(&self.struct_registry);
+                spawn_builder.enum_registry.clone_from(&self.enum_registry);
+                spawn_builder
+                    .fn_return_types
+                    .clone_from(&self.fn_return_types);
+                spawn_builder.fn_name.clone_from(&spawn_name);
 
+                if captures.is_empty() {
+                    // No captures — lambda-lift into a zero-arg function.
                     let body_val = spawn_builder.lower_block(body)?;
                     let _ = body_val;
                     spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
@@ -600,9 +599,97 @@ impl MirBuilder {
                         callee: "kodo_spawn_task".to_string(),
                         args: vec![Value::FuncRef(spawn_name)],
                     });
+                } else {
+                    // Has captures — lambda-lift into a function that takes a
+                    // single env-pointer argument and unpacks the captures.
+                    // The spawned function receives one i64 param (env pointer).
+                    let env_param = spawn_builder.alloc_local(Type::Int, false);
+                    spawn_builder
+                        .name_map
+                        .insert("__env_ptr".to_string(), env_param);
 
-                    Ok(Value::Unit)
+                    // For each capture, emit an unpack instruction that loads
+                    // the value from the env buffer at the correct offset.
+                    // Each capture occupies 8 bytes (one i64 word).
+                    for (idx, cap_name) in captures.iter().enumerate() {
+                        let cap_ty = self
+                            .name_map
+                            .get(cap_name)
+                            .and_then(|lid| self.local_types.get(lid))
+                            .cloned()
+                            .unwrap_or(Type::Int);
+                        let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
+                        spawn_builder.name_map.insert(cap_name.clone(), cap_local);
+                        spawn_builder.local_types.insert(cap_local, cap_ty);
+                        // Emit: cap_local = env_ptr + offset (via BinOp)
+                        // We load the value: cap_local = *(env_ptr + idx*8)
+                        // Represented as: cap_local = __env_load(env_ptr, offset)
+                        // Using a Call to a synthetic builtin that codegen
+                        // will translate as a memory load.
+                        #[allow(clippy::cast_possible_wrap)]
+                        let offset = (idx as i64) * 8;
+                        spawn_builder.emit(Instruction::Call {
+                            dest: cap_local,
+                            callee: "__env_load".to_string(),
+                            args: vec![Value::Local(env_param), Value::IntConst(offset)],
+                        });
+                    }
+
+                    let param_count = 1; // just the env pointer
+
+                    let body_val = spawn_builder.lower_block(body)?;
+                    let _ = body_val;
+                    spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+
+                    let mir_func = MirFunction {
+                        name: spawn_name.clone(),
+                        return_type: Type::Unit,
+                        param_count,
+                        locals: spawn_builder.locals,
+                        blocks: spawn_builder.blocks,
+                        entry: BlockId(0),
+                    };
+
+                    self.generated_closures
+                        .extend(spawn_builder.generated_closures);
+                    self.generated_closures.push(mir_func);
+                    self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
+
+                    // In the caller: pack captures into an env buffer on the
+                    // stack, then call kodo_spawn_task_with_env.
+                    // Emit: env_local = __env_pack(capture1, capture2, ...)
+                    let env_local = self.alloc_local(Type::Int, false);
+                    let mut pack_args = Vec::with_capacity(captures.len());
+                    for cap_name in &captures {
+                        let cap_lid = self
+                            .name_map
+                            .get(cap_name)
+                            .copied()
+                            .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
+                        pack_args.push(Value::Local(cap_lid));
+                    }
+                    self.emit(Instruction::Call {
+                        dest: env_local,
+                        callee: "__env_pack".to_string(),
+                        args: pack_args,
+                    });
+
+                    // Emit: kodo_spawn_task_with_env(FuncRef, env_ptr, env_size)
+                    #[allow(clippy::cast_possible_wrap)]
+                    let env_size = (captures.len() as i64) * 8;
+                    let dest = self.alloc_local(Type::Unit, false);
+                    self.emit(Instruction::Call {
+                        dest,
+                        callee: "kodo_spawn_task_with_env".to_string(),
+                        args: vec![
+                            Value::FuncRef(spawn_name),
+                            Value::Local(env_local),
+                            Value::IntConst(env_size),
+                        ],
+                    });
                 }
+
+                Ok(Value::Unit)
             }
         }
     }
@@ -2734,5 +2821,109 @@ mod tests {
             .expect("get_x not found");
         // Verify the return type is Int
         assert_eq!(get_x.return_type, Type::Int);
+    }
+
+    #[test]
+    fn lower_spawn_without_captures() {
+        // fn main() { spawn { print_int(42) } }
+        let func = make_fn(
+            "main",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Spawn {
+                    span: span(),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Expr(Expr::Call {
+                            span: span(),
+                            callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                            args: vec![Expr::IntLit(42, span())],
+                        })],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let (mir, closures) =
+            lower_function_with_closures(&func, &HashMap::new(), &HashMap::new(), &HashMap::new())
+                .unwrap();
+        mir.validate().unwrap();
+
+        // Should generate a __spawn_ function and call kodo_spawn_task.
+        assert!(!closures.is_empty(), "expected a generated spawn function");
+        let has_spawn_task_call = mir.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_spawn_task"),
+            )
+        });
+        assert!(has_spawn_task_call, "expected kodo_spawn_task call");
+    }
+
+    #[test]
+    fn lower_spawn_with_captures() {
+        // fn main() { let x: Int = 10; spawn { print_int(x) } }
+        let func = make_fn(
+            "main",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        mutable: false,
+                        value: Expr::IntLit(10, span()),
+                    },
+                    Stmt::Spawn {
+                        span: span(),
+                        body: Block {
+                            span: span(),
+                            stmts: vec![Stmt::Expr(Expr::Call {
+                                span: span(),
+                                callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                                args: vec![Expr::Ident("x".to_string(), span())],
+                            })],
+                        },
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let (mir, closures) =
+            lower_function_with_closures(&func, &HashMap::new(), &HashMap::new(), &HashMap::new())
+                .unwrap();
+        mir.validate().unwrap();
+
+        // Should generate a __spawn_ function that takes 1 param (env ptr).
+        let spawn_fn = closures
+            .iter()
+            .find(|f| f.name.starts_with("__spawn_"))
+            .expect("expected a __spawn_ function");
+        assert_eq!(spawn_fn.param_count, 1, "spawn fn should take env pointer");
+
+        // Main should call __env_pack and kodo_spawn_task_with_env.
+        let has_env_pack = mir.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "__env_pack"))
+        });
+        assert!(has_env_pack, "expected __env_pack call in main");
+
+        let has_spawn_with_env = mir.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_spawn_task_with_env")
+            })
+        });
+        assert!(has_spawn_with_env, "expected kodo_spawn_task_with_env call");
+
+        // The spawn function should contain an __env_load call.
+        let has_env_load = spawn_fn.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "__env_load"))
+        });
+        assert!(has_env_load, "spawn fn should unpack env with __env_load");
     }
 }

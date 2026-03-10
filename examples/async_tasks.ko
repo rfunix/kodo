@@ -1,0 +1,37 @@
+// Async Tasks — Demonstrates spawn with captured variables.
+//
+// Kōdo's cooperative scheduler executes spawned tasks after `main`
+// returns. When a spawn block references variables from the enclosing
+// scope, those values are captured into an environment buffer and
+// passed to the task function at execution time.
+
+module async_tasks {
+    meta {
+        purpose: "Demonstrate spawn with captured variables",
+        version: "1.0.0",
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        // Spawn without captures — body is lambda-lifted as a zero-arg function.
+        spawn {
+            println("[Task 1] no captures")
+        }
+
+        // Spawn with a single captured variable.
+        let greeting: Int = 42
+        spawn {
+            print_int(greeting)
+        }
+
+        // Spawn with multiple captured variables.
+        let a: Int = 10
+        let b: Int = 32
+        spawn {
+            print_int(a + b)
+        }
+
+        println("[main] all tasks queued, finishing main")
+        return 0
+    }
+}
