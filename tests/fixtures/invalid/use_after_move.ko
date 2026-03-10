@@ -1,0 +1,11 @@
+// Test that use-after-move is detected.
+// ERROR E0240
+module use_after_move_test {
+    meta { purpose: "test use-after-move detection" }
+    fn consume(own s: String) { }
+    fn main() {
+        let x: String = "hello"
+        let y: String = x
+        println(x)
+    }
+}

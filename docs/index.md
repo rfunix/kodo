@@ -18,10 +18,12 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Error Handling](guide/error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling
 - [Contracts](guide/contracts.md) — `requires` and `ensures` for runtime verification
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
+- [Ownership](guide/ownership.md) — linear ownership with `own` and `ref`
+- [Agent Traceability](guide/agent-traceability.md) — annotations, trust policies, and confidence propagation
 
 ### Tools
 
-- [CLI Reference](guide/cli-reference.md) — all `kodoc` commands, flags, and environment variables
+- [CLI Reference](guide/cli-reference.md) — all `kodoc` commands, flags, and environment variables, including `confidence-report` and `fix`
 
 ## Reference
 
@@ -56,3 +58,4 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`closures_functional.ko`](../examples/closures_functional.ko) | Higher-order functions and indirect calls |
 | [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
 | [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |
+| [`ownership.ko`](../examples/ownership.ko) | Linear ownership with `own` and `ref` |

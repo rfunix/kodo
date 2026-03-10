@@ -135,6 +135,23 @@ error[E0252]: cannot access actor field `count` directly on `Counter`
    |                 ^^^^^ use a handler method to access `count` instead
 ```
 
+### E0240: Use After Move
+A variable was used after its ownership was transferred (moved). Once a value is moved, it cannot be accessed.
+
+```
+error[E0240]: variable `x` was moved at line 5 and cannot be used here
+  --> src/main.ko:6:15
+   |
+ 6 |     println(x)
+   |             ^ use `ref` to borrow instead of moving
+```
+
+### E0241: Borrow Escapes Scope
+A borrowed reference cannot escape the scope that created it.
+
+### E0242: Move of Borrowed Value
+A value cannot be moved while it is currently borrowed by another variable.
+
 ### E0260: Low Confidence Without Review
 A function annotated with `@confidence(X)` where X < 0.8 is missing a `@reviewed_by(human: "...")` annotation. Agent-generated code with low confidence must be reviewed by a human.
 
@@ -144,6 +161,17 @@ error[E0260]: function `risky_fn` has @confidence(0.5) < 0.8 and is missing `@re
    |
  5 | fn risky_fn() {
    | ^^^^^^^^^^^^^^ add `@reviewed_by(human: "reviewer_name")` to function `risky_fn`
+```
+
+### E0261: Module Confidence Below Threshold
+The computed confidence of a function is below the `min_confidence` threshold declared in the module's `meta` block. Confidence propagates transitively through the call chain.
+
+```
+error[E0261]: module confidence 0.50 is below threshold 0.90. Weakest link: fn `weak_link` at @confidence(0.50)
+  --> src/main.ko:10:1
+   |
+10 | fn main() -> Int {
+   | ^^^^^^^^^^^^^^^^ increase confidence of `weak_link` or lower `min_confidence`
 ```
 
 ### E0262: Security-Sensitive Without Contract

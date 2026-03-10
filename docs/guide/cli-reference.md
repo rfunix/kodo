@@ -125,6 +125,54 @@ kodoc fmt my_program.ko
 # Output: Formatted output of my_program.ko
 ```
 
+### `kodoc confidence-report`
+
+Generate a confidence report showing declared and computed confidence for each function in a module.
+
+```bash
+kodoc confidence-report <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json` | Output as JSON instead of human-readable table | `false` |
+
+**Example:**
+
+```bash
+kodoc confidence-report agent_traceability.ko
+# Output: Table of function confidences
+
+kodoc confidence-report agent_traceability.ko --json
+# Output: JSON confidence report
+```
+
+### `kodoc fix`
+
+Automatically apply fix patches suggested by the compiler.
+
+```bash
+kodoc fix <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--dry-run` | Show patches without applying them | `false` |
+
+**Example:**
+
+```bash
+# Show what would be fixed
+kodoc fix my_program.ko --dry-run
+
+# Apply fixes
+kodoc fix my_program.ko
+```
+
 ### `kodoc lsp`
 
 Start the Kōdo Language Server Protocol server on stdin/stdout. Connect it to any LSP-compatible editor (VS Code, Neovim, etc.) or AI agent.

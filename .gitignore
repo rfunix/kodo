@@ -48,6 +48,21 @@ examples/generic_fn
 examples/option_demo
 examples/result_demo
 examples/multi_file/main
+examples/closures
+examples/flow_typing
+examples/for_loop
+examples/traits
+examples/agent_traceability
+examples/async_demo
+examples/async_real
+examples/closures_functional
+examples/contracts_demo
+examples/contracts_verified
+examples/enums
+examples/optional_sugar
+examples/stdlib_demo
+examples/structs
+concurrency_dem
 *.ko.cert.json
 
 # Proptest regressions

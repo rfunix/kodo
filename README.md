@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-363%20passing-brightgreen" alt="Tests: 363 passing">
+  <img src="https://img.shields.io/badge/tests-369%20passing-brightgreen" alt="Tests: 369 passing">
 </p>
 
 ---
@@ -158,6 +158,9 @@ Kōdo isn't just annotations — it's a full compiled language with native binar
 - **Type system** — `Int`, `Bool`, `String`, structs, enums, generics with monomorphization
 - **Pattern matching** — exhaustive `match` on enums with destructuring
 - **Closures** — lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types
+- **Ownership** — linear ownership with `own`/`ref` qualifiers, use-after-move detection (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242)
+- **Confidence propagation** — transitive confidence computation via call graph, `min_confidence` threshold enforcement, `kodoc confidence-report`
+- **Auto-repair hints** — machine-applicable `FixPatch` in JSON diagnostics, `kodoc fix` for automatic error correction
 - **Error handling** — `Option<T>` and `Result<T, E>` in the prelude, no null, no exceptions
 - **Standard library** — `abs`, `min`, `max`, `clamp`, `string_length`
 - **Multi-file imports** — `import module_name` across `.ko` files
@@ -249,6 +252,7 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 | File | What it demonstrates |
 |------|---------------------|
 | [`contracts_demo.ko`](examples/contracts_demo.ko) | Runtime contract checking |
+| [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref` qualifiers |
 | [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by` |
 
 ### Intent System
@@ -321,6 +325,8 @@ Source (.ko)
 - [Generics](docs/guide/generics.md) — generic types and functions
 - [Error Handling](docs/guide/error-handling.md) — `Option<T>` and `Result<T, E>`
 - [Contracts](docs/guide/contracts.md) — `requires` and `ensures`
+- [Ownership](docs/guide/ownership.md) — linear ownership with `own`/`ref`
+- [Agent Traceability](docs/guide/agent-traceability.md) — confidence propagation and trust policies
 - [Modules and Imports](docs/guide/modules-and-imports.md) — multi-file programs and standard library
 - [Intent System](docs/intent_system.md) — intent-driven programming
 - [CLI Reference](docs/guide/cli-reference.md) — all `kodoc` commands and flags

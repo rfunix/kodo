@@ -88,6 +88,26 @@ enum Command {
     },
     /// Start the Kōdo Language Server Protocol server.
     Lsp,
+    /// Generate a confidence report for a module.
+    ConfidenceReport {
+        /// The source file to analyze.
+        #[arg()]
+        file: PathBuf,
+
+        /// Output as JSON instead of human-readable table.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Apply auto-fix patches to resolve compiler errors.
+    Fix {
+        /// The source file to fix.
+        #[arg()]
+        file: PathBuf,
+
+        /// Show patches without applying them.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
 }
 
 fn main() {
@@ -114,6 +134,8 @@ fn main() {
         Command::Fmt { file, check } => run_fmt(&file, check),
         Command::IntentExplain { file } => run_intent_explain(&file),
         Command::Lsp => run_lsp(),
+        Command::ConfidenceReport { file, json } => run_confidence_report(&file, json),
+        Command::Fix { file, dry_run } => run_fix(&file, dry_run),
     };
 
     std::process::exit(exit_code);
@@ -786,11 +808,19 @@ fn link_executable(
     // Strategy: look relative to the kodoc binary, then in the workspace target dir.
     let runtime_path = find_runtime_lib()?;
 
-    let status = std::process::Command::new("cc")
-        .arg(obj_path)
+    let mut cmd = std::process::Command::new("cc");
+    cmd.arg(obj_path)
         .arg(&runtime_path)
         .arg("-o")
-        .arg(output_path)
+        .arg(output_path);
+
+    // On macOS, Cranelift object files lack LC_BUILD_VERSION metadata,
+    // producing harmless linker warnings. Suppress them.
+    if cfg!(target_os = "macos") {
+        cmd.arg("-Wl,-w");
+    }
+
+    let status = cmd
         .status()
         .map_err(|e| format!("failed to invoke linker `cc`: {e}"))?;
 
@@ -1134,6 +1164,205 @@ fn run_intent_explain(file: &PathBuf) -> i32 {
             }
         }
     }
+    0
+}
+
+/// Generates a confidence report for a source file.
+///
+/// Parses the file, type-checks it (with the stdlib prelude), and then
+/// asks the type checker to compute per-function confidence scores.
+/// Reports both the declared `@confidence` value and the propagated
+/// minimum across all direct callees.
+fn run_confidence_report(file: &PathBuf, json: bool) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    let report = checker.confidence_report(&module);
+
+    // Compute overall module confidence: min of all function confidences.
+    let overall = report
+        .iter()
+        .map(|(_, _, computed, _)| *computed)
+        .fold(1.0_f64, f64::min);
+
+    if json {
+        let functions: Vec<serde_json::Value> = report
+            .iter()
+            .map(|(name, declared, computed, callees)| {
+                serde_json::json!({
+                    "name": name,
+                    "declared_confidence": declared,
+                    "computed_confidence": computed,
+                    "callees": callees,
+                })
+            })
+            .collect();
+        let output = serde_json::json!({
+            "module": module.name,
+            "overall_confidence": overall,
+            "functions": functions,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+        );
+    } else {
+        println!("Confidence Report for module `{}`", module.name);
+        println!("{}", "=".repeat(60));
+        println!("Overall confidence: {overall:.2}");
+        println!();
+        println!("{:<30} {:>10} {:>10}", "Function", "Declared", "Computed");
+        println!("{}", "-".repeat(60));
+        for (name, declared, computed, _) in &report {
+            println!("{name:<30} {declared:>10.2} {computed:>10.2}");
+        }
+    }
+
+    0
+}
+
+/// Attempts to auto-fix compiler errors in a source file.
+///
+/// Runs the parse and type-check pipeline, collects any [`kodo_ast::FixPatch`] diagnostics
+/// produced, then either applies them in-place (default) or prints them as JSON
+/// (`--dry-run`).
+fn run_fix(file: &PathBuf, dry_run: bool) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let filename = file.display().to_string();
+
+    // Collect diagnostics by attempting to parse and type-check.
+    let mut patches: Vec<kodo_ast::FixPatch> = Vec::new();
+
+    // Try parsing first.
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            use kodo_ast::Diagnostic;
+            if let Some(patch) = e.fix_patch() {
+                patches.push(patch);
+            }
+            if patches.is_empty() {
+                eprintln!("parse error with no auto-fix available: {e}");
+                return 1;
+            }
+            // Apply or show patches.
+            return apply_patches(file, &source, &patches, dry_run);
+        }
+    };
+
+    // Try type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    if let Err(e) = checker.check_module(&module) {
+        use kodo_ast::Diagnostic;
+        if let Some(mut patch) = e.fix_patch() {
+            if patch.file.is_empty() {
+                patch.file = filename;
+            }
+            patches.push(patch);
+        }
+    }
+
+    if patches.is_empty() {
+        println!("No auto-fixable errors found in `{}`", file.display());
+        return 0;
+    }
+
+    apply_patches(file, &source, &patches, dry_run)
+}
+
+/// Applies or displays fix patches.
+///
+/// In dry-run mode, prints the patches as JSON without modifying any file.
+/// Otherwise, applies the patches in reverse offset order (to preserve byte
+/// offsets) and writes the result back to `file`.
+fn apply_patches(
+    file: &PathBuf,
+    source: &str,
+    patches: &[kodo_ast::FixPatch],
+    dry_run: bool,
+) -> i32 {
+    if dry_run {
+        let json_patches: Vec<serde_json::Value> = patches
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "description": p.description,
+                    "file": p.file,
+                    "start_offset": p.start_offset,
+                    "end_offset": p.end_offset,
+                    "replacement": p.replacement,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "patches": json_patches,
+                "applied": false,
+            }))
+            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+        );
+        return 0;
+    }
+
+    // Apply patches in reverse order (by start_offset) to preserve offsets.
+    let mut result = source.to_string();
+    let mut sorted_patches: Vec<&kodo_ast::FixPatch> = patches.iter().collect();
+    sorted_patches.sort_by(|a, b| b.start_offset.cmp(&a.start_offset));
+
+    for patch in &sorted_patches {
+        let start = patch.start_offset.min(result.len());
+        let end = patch.end_offset.min(result.len());
+        result.replace_range(start..end, &patch.replacement);
+        println!("Applied fix: {}", patch.description);
+    }
+
+    if let Err(e) = std::fs::write(file, &result) {
+        eprintln!("error: could not write file `{}`: {e}", file.display());
+        return 1;
+    }
+
+    println!("Applied {} fix(es) to `{}`", patches.len(), file.display());
     0
 }
 

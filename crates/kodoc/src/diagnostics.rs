@@ -72,6 +72,13 @@ pub fn render(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
 /// Accepts any type implementing [`kodo_ast::Diagnostic`] and produces
 /// a single-error JSON output suitable for consumption by AI agents.
 pub fn render_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
+    let fix_patch = diagnostic.fix_patch().map(|p| JsonFixPatch {
+        description: p.description,
+        file: p.file,
+        start_offset: p.start_offset,
+        end_offset: p.end_offset,
+        replacement: p.replacement,
+    });
     let json_diag = JsonDiagnostic {
         code: diagnostic.code(),
         severity: match diagnostic.severity() {
@@ -84,6 +91,8 @@ pub fn render_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
             .span()
             .map(|s| make_json_span(source, filename, s)),
         suggestion: diagnostic.suggestion(),
+        fix_patch,
+        see_also: diagnostic.see_also(),
     };
     let output = JsonOutput {
         errors: vec![json_diag],
@@ -124,6 +133,16 @@ struct JsonSpan {
     column: u32,
 }
 
+/// A machine-applicable fix patch in JSON output.
+#[derive(Serialize)]
+struct JsonFixPatch {
+    description: String,
+    file: String,
+    start_offset: usize,
+    end_offset: usize,
+    replacement: String,
+}
+
 /// A single diagnostic entry in JSON output.
 #[derive(Serialize)]
 struct JsonDiagnostic {
@@ -132,6 +151,10 @@ struct JsonDiagnostic {
     message: String,
     span: Option<JsonSpan>,
     suggestion: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix_patch: Option<JsonFixPatch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    see_also: Option<String>,
 }
 
 /// The top-level JSON diagnostics output.

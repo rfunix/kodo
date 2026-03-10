@@ -188,3 +188,25 @@ fn ui_test_json_output_includes_suggestion() {
         "expected suggestion in JSON output, got: {first_error}"
     );
 }
+
+#[test]
+fn ui_test_use_after_move() {
+    let root = workspace_root();
+    let fixture_path = root.join("tests/fixtures/invalid/use_after_move.ko");
+    if !fixture_path.exists() {
+        // Skip if fixture not created yet.
+        return;
+    }
+    let source = std::fs::read_to_string(&fixture_path).unwrap();
+    let expected = extract_expected_errors(&source);
+    assert!(!expected.is_empty(), "no ERROR annotations found");
+
+    let (success, stdout) = run_check_json("invalid/use_after_move.ko");
+    assert!(!success, "expected kodoc to fail for use_after_move.ko");
+    for code in &expected {
+        assert!(
+            stdout.contains(code),
+            "Expected error code {code} in output but got: {stdout}"
+        );
+    }
+}

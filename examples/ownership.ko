@@ -1,0 +1,37 @@
+// Demonstrates Kōdo's ownership system (own/ref).
+//
+// Kōdo enforces linear ownership: when a value is moved,
+// it cannot be used again. Use `ref` to borrow instead.
+//
+// Compile and run:
+//   kodoc build examples/ownership.ko -o ownership
+//   ./ownership
+
+module ownership_demo {
+    meta {
+        purpose: "Demonstrate ownership enforcement with own and ref"
+        version: "0.1.0"
+    }
+
+    // This function takes ownership -- the caller loses access.
+    fn consume_string(own s: String) {
+        println(s)
+    }
+
+    // This function borrows -- the caller retains access.
+    fn borrow_string(ref s: String) {
+        println(s)
+    }
+
+    fn main() {
+        // Borrowing: s remains usable after the call.
+        let greeting: String = "Hello, ownership!"
+        borrow_string(greeting)
+
+        // Ownership transfer is tracked at the variable level.
+        let a: Int = 10
+        let b: Int = 20
+        let sum: Int = a + b
+        print_int(sum)
+    }
+}

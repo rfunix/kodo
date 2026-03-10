@@ -780,6 +780,25 @@ pub struct DiagnosticLabel {
     pub message: String,
 }
 
+/// A machine-applicable fix patch that agents can apply automatically.
+///
+/// Represents a text replacement in a source file. Agents can apply these
+/// patches without interpreting human-readable error messages.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FixPatch {
+    /// Human-readable description of the fix.
+    pub description: String,
+    /// The file path where the fix should be applied.
+    pub file: String,
+    /// Byte offset of the start of the region to replace.
+    pub start_offset: usize,
+    /// Byte offset of the end of the region to replace.
+    pub end_offset: usize,
+    /// The replacement text.
+    pub replacement: String,
+}
+
 /// Unified diagnostic trait for all compiler errors.
 ///
 /// Every error type in the compiler should implement this trait
@@ -800,6 +819,16 @@ pub trait Diagnostic: std::fmt::Display {
     /// Returns additional labeled spans for context.
     fn labels(&self) -> Vec<DiagnosticLabel> {
         Vec::new()
+    }
+    /// Returns a machine-applicable fix patch, if available.
+    ///
+    /// When present, agents can apply this patch automatically to fix the error.
+    fn fix_patch(&self) -> Option<FixPatch> {
+        None
+    }
+    /// Returns a reference to the error index documentation.
+    fn see_also(&self) -> Option<String> {
+        Some(format!("docs/error_index.md#{}", self.code()))
     }
 }
 
