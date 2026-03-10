@@ -53,6 +53,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
+      - run: cargo build --workspace
       - run: cargo test --workspace
 
   msrv:
