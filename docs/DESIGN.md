@@ -189,7 +189,7 @@ fn modify(data: mut Buffer) {
 
 ### Concurrency
 
-> **V1 Status:** Concurrency is syntax-only in v1. `async` functions, `spawn`, and `actor` blocks parse and type-check, but compile to synchronous code. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are not yet implemented. Full async runtime with cooperative scheduling is planned for v2.
+> **V1 Status:** `spawn` with captured variables and `actor` with state/message passing are fully working in v1. `async`/`await` compiles to synchronous code. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are planned for v2.
 
 ```
 // Structured concurrency — no raw threads, no unstructured spawns
@@ -345,12 +345,12 @@ kodo::string      — UTF-8 string operations (implemented)
 kodo::io          — File I/O, stdin/stdout (implemented)
 kodo::math        — abs, min, max, clamp (implemented)
 kodo::net         — TCP/UDP, DNS (planned)
-kodo::http        — HTTP client & server (planned; intent resolver exists)
-kodo::json        — JSON serialization (planned)
+kodo::http        — HTTP client: http_get, http_post (implemented)
+kodo::json        — JSON: json_parse, json_get_string, json_get_int, json_free (implemented)
 kodo::db          — Database abstractions (planned)
 kodo::crypto      — Hashing, encryption, signing (planned)
 kodo::time        — Time, Duration, Timezone (planned)
-kodo::concurrency — Channels, parallel, structured tasks (planned for v2)
+kodo::concurrency — spawn with captures, actors with state/message passing (implemented); channels, parallel (planned for v2)
 kodo::test        — Test framework, property-based testing (planned)
 kodo::ffi         — C FFI for interop (planned)
 ```
@@ -398,7 +398,11 @@ kodo::ffi         — C FFI for interop (planned)
 
 ### Phase 6 — Production
 - [ ] LLVM backend for optimized builds (currently Cranelift only)
-- [ ] Full async runtime (v1 concurrency is syntax-only — async/spawn/actor compile synchronously)
+- [x] Closures with full capture (lambda lifting + closure capture end-to-end)
+- [x] Spawn with captured variables
+- [x] Actor runtime with state and message passing
+- [x] HTTP client and JSON stdlib (`http_get`, `http_post`, `json_parse`, `json_get_string`, `json_get_int`, `json_free`)
+- [ ] Full async/await runtime (v1 async/await is syntax-only)
 - [ ] Channels and parallel execution
 - [ ] Cross-compilation targets
 - [ ] Package registry

@@ -209,15 +209,15 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 |----------|----------|
 | **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, generics with monomorphization, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
-| **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types *(partial — lambda lifting works, full closure capture not yet end-to-end)* |
+| **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242) |
 | **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), File I/O |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
-| **Concurrency** | Syntax preview: `async`, `spawn`, `actor` parse and type-check *(v1 compiles to synchronous code; full async runtime planned for v2)* |
+| **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
 | **Developer tools** | LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
 | **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes |
 
@@ -267,7 +267,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 41 compilable programs:
+The [`examples/`](examples/) directory contains 46 compilable programs:
 
 ### Core Language
 
@@ -314,6 +314,7 @@ The [`examples/`](examples/) directory contains 41 compilable programs:
 | [`contracts_demo.ko`](examples/contracts_demo.ko) | Runtime contract checking (`requires`/`ensures`) |
 | [`contracts_verified.ko`](examples/contracts_verified.ko) | Statically verified contracts via Z3 |
 | [`contracts_smt_demo.ko`](examples/contracts_smt_demo.ko) | SMT solver contract verification demo |
+| [`smt_verified.ko`](examples/smt_verified.ko) | SMT contract verification |
 | [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref`, move semantics for structs |
 | [`copy_semantics.ko`](examples/copy_semantics.ko) | Implicit Copy for primitives vs move for compounds |
 | [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
@@ -336,17 +337,20 @@ The [`examples/`](examples/) directory contains 41 compilable programs:
 | [`map_demo.ko`](examples/map_demo.ko) | `Map<K,V>` — `map_new`, `map_insert`, `map_get`, `map_contains_key`, `map_length` |
 | [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
+| [`http_client.ko`](examples/http_client.ko) | HTTP GET and JSON parsing |
 
-### Concurrency (Syntax Preview) & Multi-File
+### Concurrency & Multi-File
 
-> **Note:** Concurrency features (`async`, `spawn`, `actor`) are syntax previews in v1. They parse and type-check, but compile to synchronous code. Channels and parallel execution are not yet implemented. Full async runtime is planned for v2.
+> **Note:** `spawn` with captured variables and `actor` with state/message passing are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously). Channels and parallel execution are planned for v2.
 
 | File | What it demonstrates |
 |------|---------------------|
 | [`async_demo.ko`](examples/async_demo.ko) | Async syntax preview (compiles synchronously) |
-| [`async_real.ko`](examples/async_real.ko) | Cooperative `spawn` syntax preview (compiles synchronously) |
-| [`concurrency_demo.ko`](examples/concurrency_demo.ko) | Concurrency patterns syntax preview |
-| [`actor_demo.ko`](examples/actor_demo.ko) | Actor model syntax preview (compiles synchronously) |
+| [`async_real.ko`](examples/async_real.ko) | Cooperative `spawn` syntax preview |
+| [`async_tasks.ko`](examples/async_tasks.ko) | Spawn with captured variables |
+| [`concurrency_demo.ko`](examples/concurrency_demo.ko) | Concurrency patterns |
+| [`actors.ko`](examples/actors.ko) | Actor state and message passing |
+| [`actor_demo.ko`](examples/actor_demo.ko) | Actor demonstration |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---
@@ -412,6 +416,9 @@ Source (.ko)
 - [Agent Traceability](docs/guide/agent-traceability.md) — confidence propagation and trust policies
 - [Closures](docs/guide/closures.md) — closures, lambda lifting, and higher-order functions
 - [Modules and Imports](docs/guide/modules-and-imports.md) — multi-file programs and standard library
+- [HTTP & JSON](docs/guide/http.md) — HTTP client and JSON parsing
+- [Actors](docs/guide/actors.md) — actor model with state and message passing
+- [Concurrency & Spawn](docs/guide/concurrency.md) — spawn with captured variables
 - [Intent System](docs/intent_system.md) — intent-driven programming
 - [CLI Reference](docs/guide/cli-reference.md) — all `kodoc` commands and flags
 - [Language Design](docs/DESIGN.md) — full specification

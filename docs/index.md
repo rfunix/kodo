@@ -23,6 +23,9 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
 - [Ownership](guide/ownership.md) — linear ownership with `own` and `ref`
 - [Agent Traceability](guide/agent-traceability.md) — annotations, trust policies, and confidence propagation
+- [HTTP & JSON](guide/http.md) — HTTP client and JSON parsing
+- [Actors](guide/actors.md) — actor model with state and message passing
+- [Concurrency & Spawn](guide/concurrency.md) — spawn with captured variables
 
 ### Tools
 
@@ -71,3 +74,8 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`string_demo.ko`](../examples/string_demo.ko) | String methods including `split` |
 | [`file_io_demo.ko`](../examples/file_io_demo.ko) | File I/O operations |
 | [`contracts_smt_demo.ko`](../examples/contracts_smt_demo.ko) | SMT-verified contracts |
+| [`smt_verified.ko`](../examples/smt_verified.ko) | SMT contract verification |
+| [`http_client.ko`](../examples/http_client.ko) | HTTP GET and JSON parsing |
+| [`async_tasks.ko`](../examples/async_tasks.ko) | Spawn with captured variables |
+| [`actors.ko`](../examples/actors.ko) | Actor state and message passing |
+| [`actor_demo.ko`](../examples/actor_demo.ko) | Actor demonstration |
