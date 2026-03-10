@@ -1,0 +1,146 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 258,
+    },
+    name: "test",
+    imports: [],
+    meta: None,
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [
+        Function {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 30,
+                end: 244,
+            },
+            name: "main",
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 40,
+                    end: 244,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 62,
+                            end: 226,
+                        },
+                        mutable: false,
+                        name: "r",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: Match {
+                            expr: Ident(
+                                "x",
+                                Span {
+                                    start: 81,
+                                    end: 82,
+                                },
+                            ),
+                            arms: [
+                                MatchArm {
+                                    pattern: Variant {
+                                        enum_name: Some(
+                                            "Option",
+                                        ),
+                                        variant: "Some",
+                                        bindings: [
+                                            "v",
+                                        ],
+                                        span: Span {
+                                            start: 109,
+                                            end: 124,
+                                        },
+                                    },
+                                    body: Ident(
+                                        "v",
+                                        Span {
+                                            start: 128,
+                                            end: 129,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 109,
+                                        end: 129,
+                                    },
+                                },
+                                MatchArm {
+                                    pattern: Variant {
+                                        enum_name: Some(
+                                            "Option",
+                                        ),
+                                        variant: "None",
+                                        bindings: [],
+                                        span: Span {
+                                            start: 155,
+                                            end: 167,
+                                        },
+                                    },
+                                    body: IntLit(
+                                        0,
+                                        Span {
+                                            start: 171,
+                                            end: 172,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 155,
+                                        end: 172,
+                                    },
+                                },
+                                MatchArm {
+                                    pattern: Wildcard(
+                                        Span {
+                                            start: 198,
+                                            end: 199,
+                                        },
+                                    ),
+                                    body: IntLit(
+                                        1,
+                                        Span {
+                                            start: 203,
+                                            end: 204,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 198,
+                                        end: 204,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 75,
+                                end: 226,
+                            },
+                        },
+                    },
+                ],
+            },
+        },
+    ],
+}

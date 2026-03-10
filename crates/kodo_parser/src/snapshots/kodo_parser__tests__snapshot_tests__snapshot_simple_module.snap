@@ -1,0 +1,43 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 41,
+    },
+    name: "hello",
+    imports: [],
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 15,
+                end: 39,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "test",
+                    span: Span {
+                        start: 15,
+                        end: 37,
+                    },
+                },
+            ],
+        },
+    ),
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [],
+}

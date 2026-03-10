@@ -1,0 +1,9 @@
+module borrow_test {
+    meta {
+        purpose: "Test borrow escapes scope detection"
+    }
+
+    fn bad_return(ref s: String) -> String {
+        return s
+    }
+}

@@ -1,0 +1,5 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: err.to_string()
+---
+expected Module, found Ident("hello") at Span { start: 0, end: 5 }

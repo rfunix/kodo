@@ -1,0 +1,21 @@
+module string_demo {
+    meta {
+        purpose: "Demonstrates builtin String, Int, and Float64 methods"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let greeting: String = "Hello, Kodo!"
+        let len: Int = "Hello".length()
+
+        let has_kodo: Bool = "Hello, Kodo!".contains("Kodo")
+        let starts: Bool = "Hello, Kodo!".starts_with("Hello")
+        let ends: Bool = "Hello, Kodo!".ends_with("!")
+
+        let n: Int = 42
+        println("String operations demo complete")
+        print_int(len)
+
+        return 0
+    }
+}

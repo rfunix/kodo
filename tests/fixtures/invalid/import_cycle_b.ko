@@ -1,0 +1,12 @@
+module cycle_b {
+    import import_cycle_a
+
+    meta {
+        purpose: "Test import cycle detection (B -> A -> B)"
+        version: "0.1.0"
+    }
+
+    fn helper() -> Int {
+        return 1
+    }
+}

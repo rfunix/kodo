@@ -365,6 +365,154 @@ static EXPLANATIONS: &[ExplanationEntry] = &[
 }"#,
     },
     ExplanationEntry {
+        code: "E0214",
+        title: "Missing Struct Field",
+        explanation: "A required field is missing from a struct literal. All fields defined \
+            in the struct declaration must be provided when constructing an instance.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1 }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1, y: 2 }
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0215",
+        title: "Extra Struct Field",
+        explanation: "An unknown field was provided in a struct literal. Only fields defined \
+            in the struct declaration can be used.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1, y: 2, z: 3 }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1, y: 2 }
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0216",
+        title: "Duplicate Struct Field",
+        explanation: "A field was specified more than once in a struct literal. Each field \
+            can only appear once.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1, x: 2, y: 3 }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() {
+        let p: Point = Point { x: 1, y: 3 }
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0217",
+        title: "No Such Field",
+        explanation: "A field access was attempted on a field that does not exist on the type. \
+            Check the struct definition for available fields.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2 }
+        return p.z
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2 }
+        return p.x
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0218",
+        title: "Unknown Enum",
+        explanation: "An enum type was referenced but has not been defined in the current \
+            module or any imported module. Check the spelling or define the enum.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    fn main() {
+        let c: Color = Color::Red
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    enum Color { Red, Green, Blue }
+    fn main() {
+        let c: Color = Color::Red
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0219",
+        title: "Unknown Variant",
+        explanation: "A variant was referenced that does not exist in the enum. Check the \
+            enum definition for available variants.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    enum Color { Red, Green, Blue }
+    fn main() {
+        let c: Color = Color::Purple
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    enum Color { Red, Green, Blue }
+    fn main() {
+        let c: Color = Color::Red
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0220",
+        title: "Non-Exhaustive Match",
+        explanation: "A match expression does not cover all variants of an enum. Kōdo requires \
+            exhaustive matching — every variant must be handled to prevent runtime errors.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    enum Color { Red, Green, Blue }
+    fn name(c: Color) -> String {
+        match c {
+            Color::Red => { return "red" }
+            Color::Green => { return "green" }
+        }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    enum Color { Red, Green, Blue }
+    fn name(c: Color) -> String {
+        match c {
+            Color::Red => { return "red" }
+            Color::Green => { return "green" }
+            Color::Blue => { return "blue" }
+        }
+    }
+}"#,
+    },
+    ExplanationEntry {
         code: "E0221",
         title: "Wrong Type Argument Count",
         explanation: "A generic type was instantiated with the wrong number of type arguments. \
@@ -401,6 +549,85 @@ static EXPLANATIONS: &[ExplanationEntry] = &[
 }"#,
     },
     ExplanationEntry {
+        code: "E0222",
+        title: "Undefined Type Parameter",
+        explanation: "A type parameter was referenced but not defined in the generic parameter \
+            list. Check the function or type signature for the correct type parameter names.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    fn identity<T>(x: U) -> T {
+        return x
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0224",
+        title: "Try in Non-Result Function",
+        explanation: "The try operator `?` can only be used in functions that return `Result`. \
+            It propagates errors by early-returning `Err`, which requires the function's return \
+            type to be `Result<T, E>`.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    fn read_value() -> Int {
+        let val: Int = parse("42")?
+        return val
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    fn read_value() -> Result<Int, String> {
+        let val: Int = parse("42")?
+        return val
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0225",
+        title: "Optional Chain on Non-Option",
+        explanation: "Optional chaining `?.` can only be used on `Option<T>` types. It safely \
+            accesses the inner value when present or propagates `None`.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let x: Int = 42
+        return x?.abs()
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let x: Option<Int> = Option::Some(42)
+        return x ?? 0
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0226",
+        title: "Coalesce Type Mismatch",
+        explanation: "The null coalescing operator `??` requires the left operand to be \
+            `Option<T>`. It returns the inner value if present, or the right operand as fallback.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let x: Int = 42
+        return x ?? 0
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let x: Option<Int> = Option::Some(42)
+        return x ?? 0
+    }
+}"#,
+    },
+    ExplanationEntry {
         code: "E0227",
         title: "Closure Parameter Missing Type",
         explanation: "A closure parameter is missing its type annotation. In Kōdo v1, \
@@ -418,6 +645,83 @@ static EXPLANATIONS: &[ExplanationEntry] = &[
     fn main() -> Int {
         let f = |x: Int| -> Int { x + 1 }
         return f(41)
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0230",
+        title: "Unknown Trait",
+        explanation: "A trait was referenced but has not been defined in the current module. \
+            Check the spelling or define the trait before implementing it.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    impl Printable for Point {
+        fn to_string(self) -> String { return "point" }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    trait Printable {
+        fn to_string(self) -> String
+    }
+    struct Point { x: Int, y: Int }
+    impl Printable for Point {
+        fn to_string(self) -> String { return "point" }
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0231",
+        title: "Missing Trait Method",
+        explanation: "A required method from a trait is missing in an impl block. All methods \
+            declared in the trait must be implemented.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    trait Shape {
+        fn area(self) -> Int
+        fn perimeter(self) -> Int
+    }
+    struct Square { side: Int }
+    impl Shape for Square {
+        fn area(self) -> Int { return self.side * self.side }
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    trait Shape {
+        fn area(self) -> Int
+        fn perimeter(self) -> Int
+    }
+    struct Square { side: Int }
+    impl Shape for Square {
+        fn area(self) -> Int { return self.side * self.side }
+        fn perimeter(self) -> Int { return self.side * 4 }
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0235",
+        title: "Method Not Found",
+        explanation: "A method was called on a type that does not have it. Check the type's \
+            impl blocks and traits for available methods.",
+        bad_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2 }
+        return p.length()
+    }
+}"#,
+        good_example: r#"module example {
+    meta { purpose: "test" }
+    struct Point { x: Int, y: Int }
+    impl Point {
+        fn length(self) -> Int { return self.x + self.y }
+    }
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2 }
+        return p.length()
     }
 }"#,
     },
@@ -551,6 +855,32 @@ static EXPLANATIONS: &[ExplanationEntry] = &[
         requires { data != "" }
     {
         return data
+    }
+}"#,
+    },
+    ExplanationEntry {
+        code: "E0350",
+        title: "Policy Violation",
+        explanation: "A trust policy violation was detected. Module-level constraints such as \
+            minimum confidence thresholds or required review annotations are not satisfied.",
+        bad_example: r#"module example {
+    meta {
+        purpose: "test"
+        trust_policy: "strict"
+    }
+    fn unverified() -> Int {
+        return 42
+    }
+}"#,
+        good_example: r#"module example {
+    meta {
+        purpose: "test"
+        trust_policy: "strict"
+    }
+    @confidence(0.95)
+    @reviewed_by(human: "alice")
+    fn verified() -> Int {
+        return 42
     }
 }"#,
     },

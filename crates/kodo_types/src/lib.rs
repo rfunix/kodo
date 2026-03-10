@@ -987,7 +987,7 @@ fn find_similar_in<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) ->
     let threshold = std::cmp::max(name.len() / 2, 3);
     for candidate in candidates {
         let dist = strsim::levenshtein(name, candidate);
-        if dist > 0 && dist <= threshold && best.as_ref().map_or(true, |(d, _)| dist < *d) {
+        if dist > 0 && dist <= threshold && best.as_ref().is_none_or(|(d, _)| dist < *d) {
             best = Some((dist, candidate.to_string()));
         }
     }
@@ -3082,7 +3082,7 @@ impl TypeChecker {
                     let is_own = qualifiers
                         .as_ref()
                         .and_then(|q| q.get(i))
-                        .map_or(true, |o| *o == kodo_ast::Ownership::Owned);
+                        .is_none_or(|o| *o == kodo_ast::Ownership::Owned);
                     if let Expr::Ident(arg_name, arg_span) = arg {
                         if is_own && !arg_ty.is_copy() {
                             // Only move variables that are actually Owned (not Borrowed refs).

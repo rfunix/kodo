@@ -1,0 +1,125 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 137,
+    },
+    name: "test",
+    imports: [],
+    meta: None,
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [
+        Function {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 30,
+                end: 123,
+            },
+            name: "main",
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 40,
+                    end: 123,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 62,
+                            end: 105,
+                        },
+                        mutable: false,
+                        name: "result",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: If {
+                            condition: BinaryOp {
+                                left: Ident(
+                                    "x",
+                                    Span {
+                                        start: 83,
+                                        end: 84,
+                                    },
+                                ),
+                                op: Gt,
+                                right: IntLit(
+                                    0,
+                                    Span {
+                                        start: 87,
+                                        end: 88,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 83,
+                                    end: 88,
+                                },
+                            },
+                            then_branch: Block {
+                                span: Span {
+                                    start: 89,
+                                    end: 94,
+                                },
+                                stmts: [
+                                    Expr(
+                                        IntLit(
+                                            1,
+                                            Span {
+                                                start: 91,
+                                                end: 92,
+                                            },
+                                        ),
+                                    ),
+                                ],
+                            },
+                            else_branch: Some(
+                                Block {
+                                    span: Span {
+                                        start: 100,
+                                        end: 105,
+                                    },
+                                    stmts: [
+                                        Expr(
+                                            IntLit(
+                                                0,
+                                                Span {
+                                                    start: 102,
+                                                    end: 103,
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                },
+                            ),
+                            span: Span {
+                                start: 80,
+                                end: 105,
+                            },
+                        },
+                    },
+                ],
+            },
+        },
+    ],
+}

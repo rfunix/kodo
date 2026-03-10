@@ -1,0 +1,112 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 163,
+    },
+    name: "test",
+    imports: [],
+    meta: None,
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [
+        Function {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 30,
+                end: 149,
+            },
+            name: "main",
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 40,
+                    end: 149,
+                },
+                stmts: [
+                    While {
+                        span: Span {
+                            start: 62,
+                            end: 131,
+                        },
+                        condition: BinaryOp {
+                            left: Ident(
+                                "x",
+                                Span {
+                                    start: 68,
+                                    end: 69,
+                                },
+                            ),
+                            op: Gt,
+                            right: IntLit(
+                                0,
+                                Span {
+                                    start: 72,
+                                    end: 73,
+                                },
+                            ),
+                            span: Span {
+                                start: 68,
+                                end: 73,
+                            },
+                        },
+                        body: Block {
+                            span: Span {
+                                start: 74,
+                                end: 131,
+                            },
+                            stmts: [
+                                Assign {
+                                    span: Span {
+                                        start: 100,
+                                        end: 109,
+                                    },
+                                    name: "x",
+                                    value: BinaryOp {
+                                        left: Ident(
+                                            "x",
+                                            Span {
+                                                start: 104,
+                                                end: 105,
+                                            },
+                                        ),
+                                        op: Sub,
+                                        right: IntLit(
+                                            1,
+                                            Span {
+                                                start: 108,
+                                                end: 109,
+                                            },
+                                        ),
+                                        span: Span {
+                                            start: 104,
+                                            end: 109,
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+        },
+    ],
+}

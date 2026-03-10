@@ -1,0 +1,73 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 107,
+    },
+    name: "test",
+    imports: [],
+    meta: None,
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [
+        Function {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 30,
+                end: 93,
+            },
+            name: "main",
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Unit,
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 40,
+                    end: 93,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 62,
+                            end: 75,
+                        },
+                        mutable: false,
+                        name: "f",
+                        ty: None,
+                        value: Closure {
+                            params: [],
+                            return_type: None,
+                            body: IntLit(
+                                42,
+                                Span {
+                                    start: 73,
+                                    end: 75,
+                                },
+                            ),
+                            span: Span {
+                                start: 70,
+                                end: 75,
+                            },
+                        },
+                    },
+                ],
+            },
+        },
+    ],
+}

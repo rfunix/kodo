@@ -1,0 +1,57 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        1,
+    ),
+    span: Span {
+        start: 0,
+        end: 139,
+    },
+    name: "test",
+    imports: [],
+    meta: None,
+    type_decls: [
+        TypeDecl {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 30,
+                end: 125,
+            },
+            name: "Point",
+            generic_params: [],
+            fields: [
+                FieldDef {
+                    name: "x",
+                    ty: Named(
+                        "Float64",
+                    ),
+                    span: Span {
+                        start: 65,
+                        end: 75,
+                    },
+                },
+                FieldDef {
+                    name: "y",
+                    ty: Named(
+                        "Float64",
+                    ),
+                    span: Span {
+                        start: 97,
+                        end: 107,
+                    },
+                },
+            ],
+        },
+    ],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    functions: [],
+}

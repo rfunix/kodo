@@ -633,4 +633,196 @@ mod tests {
             vec![&TokenKind::Own, &TokenKind::Ref, &TokenKind::Is]
         );
     }
+
+    mod proptest_fuzz {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Any arbitrary string must tokenize without panicking.
+            /// The result may be Ok (valid tokens) or Err (unexpected char),
+            /// but the lexer must never panic.
+            #[test]
+            fn no_panics_on_arbitrary_input(s in "\\PC*") {
+                let _ = tokenize(&s);
+            }
+
+            /// ASCII-only arbitrary input must not panic either.
+            #[test]
+            fn no_panics_on_ascii_input(s in "[[:ascii:]]{0,256}") {
+                let _ = tokenize(&s);
+            }
+
+            /// Valid integer literals must tokenize to IntLit with the correct value.
+            #[test]
+            fn valid_integer_literals(n in 0i64..=999_999_999i64) {
+                let source = n.to_string();
+                let tokens = tokenize(&source).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert_eq!(tokens[0].kind, TokenKind::IntLit(n));
+            }
+
+            /// Integers with underscore separators must parse correctly.
+            #[test]
+            fn integer_with_underscores(n in 1_000i64..=9_999_999i64) {
+                // Format with underscores every 3 digits (manually build a simple case)
+                let plain = n.to_string();
+                let with_underscores = format!("{}_0", &plain[..plain.len()-1]);
+                // Just verify no panic; the value may differ due to our formatting
+                let result = tokenize(&with_underscores);
+                assert!(result.is_ok());
+                let tokens = result.unwrap();
+                assert!(!tokens.is_empty());
+                assert!(matches!(tokens[0].kind, TokenKind::IntLit(_)));
+            }
+
+            /// Zero must tokenize correctly.
+            #[test]
+            fn zero_tokenizes_correctly(_dummy in 0..1u8) {
+                let tokens = tokenize("0").unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert_eq!(tokens[0].kind, TokenKind::IntLit(0));
+            }
+
+            /// Float literals with varying decimal parts must tokenize correctly.
+            #[test]
+            fn valid_float_literals(
+                int_part in 0u32..1000u32,
+                frac_part in 0u32..1000u32,
+            ) {
+                let source = format!("{int_part}.{frac_part}");
+                let tokens = tokenize(&source).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert!(matches!(tokens[0].kind, TokenKind::FloatLit(_)));
+                if let TokenKind::FloatLit(v) = tokens[0].kind {
+                    let expected: f64 = source.parse().unwrap();
+                    assert!((v - expected).abs() < f64::EPSILON);
+                }
+            }
+
+            /// Empty string literals must tokenize to an empty StringLit.
+            #[test]
+            fn empty_string_literal(_dummy in 0..1u8) {
+                let tokens = tokenize(r#""""#).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s.is_empty()));
+            }
+
+            /// String literals with arbitrary content (no inner quotes) must tokenize.
+            #[test]
+            fn string_literals_with_content(content in "[^\"]{0,100}") {
+                let source = format!("\"{content}\"");
+                let tokens = tokenize(&source).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == &content));
+            }
+
+            /// Strings with special characters (that aren't quotes) must tokenize.
+            #[test]
+            fn string_with_special_chars(content in "[a-z !@#$%^&*()\\\\/:;,.<>\\[\\]{}]{0,50}") {
+                let source = format!("\"{content}\"");
+                let result = tokenize(&source);
+                // Should not panic; may succeed or fail depending on content
+                let _ = result;
+            }
+
+            /// Valid identifiers must tokenize to Ident tokens.
+            #[test]
+            fn valid_identifiers(name in "[a-zA-Z_][a-zA-Z0-9_]{0,30}") {
+                let tokens = tokenize(&name).unwrap();
+                assert_eq!(tokens.len(), 1);
+                // It may be a keyword or an identifier — both are valid
+                match &tokens[0].kind {
+                    TokenKind::Ident(s) => assert_eq!(s, &name),
+                    // Keywords are also valid results for identifier-like strings
+                    _ => {} // keyword match is acceptable
+                }
+            }
+
+            /// Very long identifiers must not cause panics or crashes.
+            #[test]
+            fn long_identifiers(len in 100usize..500usize) {
+                let name: String = std::iter::once('x').chain(std::iter::repeat('a').take(len)).collect();
+                let tokens = tokenize(&name).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == &name));
+            }
+
+            /// Identifiers that are prefixes of keywords must still tokenize correctly.
+            #[test]
+            fn keyword_prefixes_are_identifiers(
+                suffix in "[a-z]{1,5}"
+            ) {
+                // e.g. "letx", "returnfoo", "ify" — should be identifiers, not keywords
+                let keywords = ["let", "fn", "if", "else", "return", "module", "meta",
+                                "while", "for", "true", "false", "struct", "enum",
+                                "match", "import", "trait", "impl", "self",
+                                "own", "ref", "is", "async", "await", "spawn", "actor"];
+                for kw in &keywords {
+                    let name = format!("{kw}{suffix}");
+                    let tokens = tokenize(&name).unwrap();
+                    assert_eq!(tokens.len(), 1);
+                    assert!(
+                        matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == &name),
+                        "Expected Ident for '{name}', got {:?}",
+                        tokens[0].kind
+                    );
+                }
+            }
+
+            /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
+            #[test]
+            fn keywords_are_not_identifiers(idx in 0usize..26usize) {
+                let keywords = [
+                    ("module", TokenKind::Module), ("meta", TokenKind::Meta),
+                    ("fn", TokenKind::Fn), ("let", TokenKind::Let),
+                    ("mut", TokenKind::Mut), ("if", TokenKind::If),
+                    ("else", TokenKind::Else), ("return", TokenKind::Return),
+                    ("true", TokenKind::True), ("false", TokenKind::False),
+                    ("requires", TokenKind::Requires), ("ensures", TokenKind::Ensures),
+                    ("intent", TokenKind::Intent), ("struct", TokenKind::Struct),
+                    ("enum", TokenKind::Enum), ("match", TokenKind::Match),
+                    ("import", TokenKind::Import), ("while", TokenKind::While),
+                    ("for", TokenKind::For), ("trait", TokenKind::Trait),
+                    ("impl", TokenKind::Impl), ("self", TokenKind::SelfValue),
+                    ("own", TokenKind::Own), ("ref", TokenKind::Ref),
+                    ("is", TokenKind::Is), ("async", TokenKind::Async),
+                ];
+                let (src, expected) = &keywords[idx % keywords.len()];
+                let tokens = tokenize(src).unwrap();
+                assert_eq!(tokens.len(), 1);
+                assert_eq!(&tokens[0].kind, expected);
+            }
+
+            /// Multiple tokens separated by spaces must produce the correct count.
+            #[test]
+            fn whitespace_separated_tokens(
+                count in 1usize..20usize,
+            ) {
+                let source: String = std::iter::repeat("42")
+                    .take(count)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let tokens = tokenize(&source).unwrap();
+                assert_eq!(tokens.len(), count);
+            }
+
+            /// Sequences of valid operators must not panic.
+            #[test]
+            fn random_operator_sequences(ops in prop::collection::vec(
+                prop::sample::select(vec![
+                    "+", "-", "*", "/", "%", "=", "==", "!=",
+                    "<", ">", "<=", ">=", "&&", "||", "!", "->",
+                    "::", "=>", "(", ")", "{", "}", "[", "]",
+                    ",", ":", ";", ".", "..", "..=", "@", "?",
+                ]),
+                1..20
+            )) {
+                let source = ops.join(" ");
+                let result = tokenize(&source);
+                // Operators are all valid tokens, so this should succeed
+                assert!(result.is_ok());
+            }
+        }
+    }
 }

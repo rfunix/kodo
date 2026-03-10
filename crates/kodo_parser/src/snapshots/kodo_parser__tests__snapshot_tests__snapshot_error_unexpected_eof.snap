@@ -1,0 +1,5 @@
+---
+source: crates/kodo_parser/src/lib.rs
+expression: err.to_string()
+---
+unexpected end of input, expected RBrace

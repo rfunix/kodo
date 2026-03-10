@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-374%20passing-brightgreen" alt="Tests: 374 passing">
+  <img src="https://img.shields.io/badge/tests-475%20passing-brightgreen" alt="Tests: 475 passing">
 </p>
 
 ---
@@ -267,7 +267,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 22+ compilable programs:
+The [`examples/`](examples/) directory contains 39 compilable programs:
 
 ### Core Language
 
@@ -280,6 +280,10 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 | [`struct_params.ko`](examples/struct_params.ko) | Structs as function parameters and return values |
 | [`enums.ko`](examples/enums.ko) | Enum types and pattern matching |
 | [`enum_params.ko`](examples/enum_params.ko) | Enums as function parameters |
+| [`expressions.ko`](examples/expressions.ko) | Arithmetic and boolean expressions |
+| [`for_loop.ko`](examples/for_loop.ko) | For loop iteration |
+| [`optional_sugar.ko`](examples/optional_sugar.ko) | Optional syntactic sugar (`?.`, `??`) |
+| [`type_errors.ko`](examples/type_errors.ko) | Demonstrates type error messages |
 
 ### Type System
 
@@ -304,7 +308,10 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 
 | File | What it demonstrates |
 |------|---------------------|
+| [`contracts.ko`](examples/contracts.ko) | Basic contract syntax |
 | [`contracts_demo.ko`](examples/contracts_demo.ko) | Runtime contract checking (`requires`/`ensures`) |
+| [`contracts_verified.ko`](examples/contracts_verified.ko) | Statically verified contracts via Z3 |
+| [`contracts_smt_demo.ko`](examples/contracts_smt_demo.ko) | SMT solver contract verification demo |
 | [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref`, move semantics for structs |
 | [`copy_semantics.ko`](examples/copy_semantics.ko) | Implicit Copy for primitives vs move for compounds |
 | [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
@@ -331,7 +338,10 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 
 | File | What it demonstrates |
 |------|---------------------|
+| [`async_demo.ko`](examples/async_demo.ko) | Async syntax demonstration |
 | [`async_real.ko`](examples/async_real.ko) | Cooperative `spawn` with deferred execution |
+| [`concurrency_demo.ko`](examples/concurrency_demo.ko) | Concurrency patterns demo |
+| [`actor_demo.ko`](examples/actor_demo.ko) | Actor model with message passing |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---

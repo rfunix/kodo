@@ -1,0 +1,17 @@
+// Demonstrates file I/O operations in Kodo.
+//
+// Run with: kodoc check examples/file_io_demo.ko
+
+module file_io_demo {
+    meta {
+        purpose: "File I/O demonstration"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let exists: Bool = file_exists("hello.ko")
+        let content: Result<String, String> = file_read("hello.ko")
+
+        return 0
+    }
+}

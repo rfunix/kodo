@@ -91,11 +91,143 @@ The `purpose` field in the `meta` block is an empty string.
 ### E0212: Missing Purpose
 The `meta` block does not contain a `purpose` field.
 
+### E0213: Unknown Struct
+A struct type was referenced but has not been defined in the current module or any imported module.
+
+```
+error[E0213]: unknown struct `Point` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let p: Point = Point { x: 1, y: 2 }
+   |                    ^^^^^ struct not defined
+```
+
+### E0214: Missing Struct Field
+A required field is missing from a struct literal.
+
+```
+error[E0214]: missing field `y` in struct `Point` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let p: Point = Point { x: 1 }
+   |                    ^^^^^^^^^^^^^^ missing field `y`
+```
+
+### E0215: Extra Struct Field
+An unknown field was provided in a struct literal.
+
+```
+error[E0215]: unknown field `z` in struct `Point` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let p: Point = Point { x: 1, y: 2, z: 3 }
+   |                                         ^ unknown field
+```
+
+### E0216: Duplicate Struct Field
+A field was specified more than once in a struct literal.
+
+```
+error[E0216]: duplicate field `x` in struct `Point` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let p: Point = Point { x: 1, x: 2 }
+   |                                   ^ duplicate field
+```
+
+### E0217: No Such Field
+A field access was attempted on a non-existent field.
+
+```
+error[E0217]: no field `z` on type `Point` at 6:20
+  --> src/main.ko:6:20
+   |
+ 6 |     let val: Int = p.z
+   |                      ^ field does not exist
+```
+
+### E0218: Unknown Enum
+An enum type was referenced but has not been defined.
+
+```
+error[E0218]: unknown enum `Color` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let c: Color = Color::Red
+   |                    ^^^^^ enum not defined
+```
+
+### E0219: Unknown Variant
+A variant was referenced that does not exist in the enum.
+
+```
+error[E0219]: unknown variant `Purple` in enum `Color` at 5:20
+  --> src/main.ko:5:20
+   |
+ 5 |     let c: Color = Color::Purple
+   |                          ^^^^^^^ variant does not exist
+```
+
+### E0220: Non-Exhaustive Match
+A match expression does not cover all variants of an enum.
+
+```
+error[E0220]: non-exhaustive match on `Color`: missing variants ["Blue"] at 6:5
+  --> src/main.ko:6:5
+   |
+ 6 |     match c {
+   |     ^^^^^ add missing arm: `Color::Blue => { ... }`
+```
+
 ### E0221: Wrong Type Argument Count
 A generic type was instantiated with the wrong number of type arguments.
 
+### E0222: Undefined Type Parameter
+A type parameter was referenced but not defined.
+
+```
+error[E0222]: undefined type parameter `U` at 5:30
+  --> src/main.ko:5:30
+   |
+ 5 |     fn identity<T>(x: U) -> T {
+   |                        ^ type parameter `U` not in scope
+```
+
 ### E0223: Missing Type Arguments
 A generic type was used without providing required type arguments.
+
+### E0224: Try in Non-Result Function
+The try operator `?` was used in a function that does not return `Result`.
+
+```
+error[E0224]: operator `?` can only be used in functions returning Result at 6:25
+  --> src/main.ko:6:25
+   |
+ 6 |     let val: Int = risky()?
+   |                           ^ function must return Result to use `?`
+```
+
+### E0225: Optional Chain on Non-Option
+Optional chaining `?.` was used on a non-Option type.
+
+```
+error[E0225]: optional chaining `?.` requires Option type, found `Int` at 6:20
+  --> src/main.ko:6:20
+   |
+ 6 |     let val: Int = x?.value
+   |                     ^^ `x` is `Int`, not `Option<T>`
+```
+
+### E0226: Coalesce Type Mismatch
+Null coalescing `??` was used on a non-Option type.
+
+```
+error[E0226]: null coalescing type mismatch: left must be Option, found `Int` at 6:20
+  --> src/main.ko:6:20
+   |
+ 6 |     let val: Int = x ?? 0
+   |                    ^ left side must be `Option<T>`
+```
 
 ### E0227: Closure Parameter Missing Type Annotation
 A closure parameter is missing its type annotation. In Kōdo v1, all closure parameters must have explicit type annotations.
@@ -133,6 +265,39 @@ error[E0252]: cannot access actor field `count` directly on `Counter`
    |
 10 | let x = counter.count
    |                 ^^^^^ use a handler method to access `count` instead
+```
+
+### E0230: Unknown Trait
+A trait was referenced but has not been defined.
+
+```
+error[E0230]: unknown trait `Printable` at 5:10
+  --> src/main.ko:5:10
+   |
+ 5 | impl Printable for Point {
+   |      ^^^^^^^^^ trait not defined
+```
+
+### E0231: Missing Trait Method
+A required method from a trait is missing in an impl block.
+
+```
+error[E0231]: missing trait method `to_string` for trait `Printable` at 5:1
+  --> src/main.ko:5:1
+   |
+ 5 | impl Printable for Point {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^ add missing method: `fn to_string(self) -> String`
+```
+
+### E0235: Method Not Found
+A method was called on a type that does not have it.
+
+```
+error[E0235]: no method `length` on type `Int` at 6:20
+  --> src/main.ko:6:20
+   |
+ 6 |     let n: Int = x.length()
+   |                    ^^^^^^ method does not exist on `Int`
 ```
 
 ### E0240: Use After Move
@@ -185,6 +350,9 @@ error[E0262]: function `process_input` is marked `@security_sensitive` but has n
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ add `requires { ... }` or `ensures { ... }` to function `process_input`
 ```
 
+### E0350: Policy Violation
+A trust policy violation was detected. This occurs when module-level constraints are not met.
+
 ## Contract Errors (E0300–E0399)
 
 ### E0300: Precondition Unverifiable
@@ -195,6 +363,18 @@ An `ensures` clause cannot be statically proven.
 
 ### E0302: Contract Violation
 A contract is provably violated by the implementation.
+
+### E0303: Contract Statically Refuted
+The Z3 SMT solver found a counter-example disproving the contract. This occurs
+when using `--contracts=static` or `--contracts=both`.
+
+```
+error[E0303]: contract refuted at 10..16: counter-example: b -> 0
+  --> src/main.ko:3:9
+   |
+ 3 |     requires { b != 0 }
+   |              ^^^^^^^^^^ Z3 found counter-example: b = 0
+```
 
 ## Resolver Errors (E0400–E0499)
 

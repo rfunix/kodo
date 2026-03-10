@@ -764,3 +764,79 @@ fn meta_included_in_json_output() {
     assert_eq!(json["meta"]["module"], "hello");
     assert!(json["meta"]["purpose"].as_str().is_some());
 }
+
+// ========== SMT contract verification tests ==========
+
+#[test]
+fn smt_static_proves_trivial_contract() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/contracts_smt_demo.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", "--contracts=static", fixture.to_str().unwrap()])
+        .output()
+        .expect("failed to run kodoc");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected check to pass, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("statically verified"),
+        "expected static verification report: {stdout}"
+    );
+}
+
+#[test]
+fn smt_static_refutes_unprovable_contract() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/contracts_verified.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", "--contracts=static", fixture.to_str().unwrap()])
+        .output()
+        .expect("failed to run kodoc");
+
+    // `b != 0` cannot be proved without call-site context — Z3 refutes it
+    assert!(
+        !output.status.success(),
+        "expected check to fail for unprovable contract"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("refuted") || stderr.contains("counter-example"),
+        "expected refutation message: {stderr}"
+    );
+}
+
+#[test]
+fn smt_runtime_mode_accepts_unprovable_contract() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/contracts_verified.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["check", "--contracts=runtime", fixture.to_str().unwrap()])
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        output.status.success(),
+        "runtime mode should accept unprovable contracts"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("runtime checks"),
+        "expected runtime checks report: {stdout}"
+    );
+}

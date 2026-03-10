@@ -1,0 +1,27 @@
+// Demonstrates SMT-based static contract verification in Kodo.
+//
+// Run with: kodoc check --contracts=static examples/contracts_smt_demo.ko
+//
+// The Z3 solver proves these trivially true contracts at compile time,
+// eliminating the need for runtime checks.
+
+module contracts_smt_demo {
+    meta {
+        purpose: "SMT contract verification demo"
+        version: "0.1.0"
+    }
+
+    // This contract is trivially true: `true` is always satisfied.
+    // Z3 proves it statically — no runtime check needed.
+    fn always_valid(x: Int) -> Int
+        requires { true }
+    {
+        return x
+    }
+
+    fn main() -> Int {
+        let result: Int = always_valid(42)
+        print_int(result)
+        return 0
+    }
+}

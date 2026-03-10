@@ -131,6 +131,42 @@ impl kodo_ast::Diagnostic for ParseError {
             Vec::new()
         }
     }
+
+    fn fix_patch(&self) -> Option<kodo_ast::FixPatch> {
+        match self {
+            Self::UnexpectedToken { expected, span, .. } => {
+                let insert = match expected.as_str() {
+                    "RBrace" => Some(("}", "insert closing `}`")),
+                    "RParen" => Some((")", "insert closing `)`")),
+                    "RBracket" => Some(("]", "insert closing `]`")),
+                    _ => None,
+                };
+                insert.map(|(text, desc)| kodo_ast::FixPatch {
+                    description: desc.to_string(),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: text.to_string(),
+                })
+            }
+            Self::UnexpectedEof { expected } => {
+                let insert = match expected.as_str() {
+                    "RBrace" => Some(("}", "append closing `}` at end of file")),
+                    "RParen" => Some((")", "append closing `)` at end of file")),
+                    "RBracket" => Some(("]", "append closing `]` at end of file")),
+                    _ => None,
+                };
+                insert.map(|(text, desc)| kodo_ast::FixPatch {
+                    description: desc.to_string(),
+                    file: String::new(),
+                    start_offset: 0,
+                    end_offset: 0,
+                    replacement: text.to_string(),
+                })
+            }
+            Self::LexError(_) => None,
+        }
+    }
 }
 
 /// Alias for results in this crate.
@@ -3669,5 +3705,200 @@ mod tests {
             "expected BoolLit(false), got {:?}",
             intent.config[2].value
         );
+    }
+
+    #[test]
+    fn fix_patch_missing_rbrace() {
+        use kodo_ast::Diagnostic;
+        // Missing closing brace for module — parser expects RBrace but finds something else
+        let err = parse("module test { fn main() { }").unwrap_err();
+        let patch = err.fix_patch();
+        assert!(patch.is_some(), "expected a fix patch for missing `}}`");
+        let patch = patch.unwrap();
+        assert_eq!(patch.replacement, "}");
+        assert!(
+            patch.description.contains('}'),
+            "description should mention `}}`: {}",
+            patch.description
+        );
+    }
+
+    #[test]
+    fn fix_patch_eof_missing_rbrace() {
+        use kodo_ast::Diagnostic;
+        // Module with unclosed brace — parser hits EOF expecting RBrace
+        let err = parse("module test {").unwrap_err();
+        let patch = err.fix_patch();
+        assert!(patch.is_some(), "expected a fix patch for EOF missing `}}`");
+        let patch = patch.unwrap();
+        assert_eq!(patch.replacement, "}");
+        assert!(
+            patch.description.contains("end of file"),
+            "description should mention end of file: {}",
+            patch.description
+        );
+    }
+
+    #[test]
+    fn fix_patch_none_for_non_delimiter() {
+        use kodo_ast::Diagnostic;
+        // Missing module keyword — no delimiter fix expected
+        let err = parse("hello { }").unwrap_err();
+        let patch = err.fix_patch();
+        assert!(
+            patch.is_none(),
+            "should not produce fix patch for non-delimiter errors"
+        );
+    }
+
+    mod snapshot_tests {
+        use super::*;
+
+        #[test]
+        fn snapshot_simple_module() {
+            let source = r#"module hello { meta { purpose: "test" } }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_function_with_params_and_return() {
+            let source = r#"module m {
+                meta { purpose: "t" }
+                fn add(a: Int, b: Int) -> Int {
+                    return a + b
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_let_bindings() {
+            let source = r#"module test {
+                fn main() {
+                    let x: Int = 42
+                    let name: String = "hello"
+                    let flag: Bool = true
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_if_else() {
+            let source = r#"module test {
+                fn main() {
+                    let result: Int = if x > 0 { 1 } else { 0 }
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_nested_if_else() {
+            let source = r#"module test {
+                fn main() {
+                    let result: Int = if x > 0 { 1 } else if x < 0 { 2 } else { 0 }
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_while_loop() {
+            let source = r#"module test {
+                fn main() {
+                    while x > 0 {
+                        x = x - 1
+                    }
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_match_expression() {
+            let source = r#"module test {
+                fn main() {
+                    let r: Int = match x {
+                        Option::Some(v) => v,
+                        Option::None => 0,
+                        _ => 1
+                    }
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_struct_decl() {
+            let source = r#"module test {
+                struct Point {
+                    x: Float64,
+                    y: Float64
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_enum_decl() {
+            let source = r#"module test {
+                enum Shape {
+                    Circle(Float64),
+                    Rectangle(Float64, Float64),
+                    Point
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_closure_no_params() {
+            let source = r#"module test {
+                fn main() {
+                    let f = || 42
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_closure_with_params() {
+            let source = r#"module test {
+                fn main() {
+                    let f = |x: Int, y: Int| x + y
+                }
+            }"#;
+            let module = parse(source).unwrap();
+            insta::assert_debug_snapshot!(module);
+        }
+
+        #[test]
+        fn snapshot_error_missing_module_keyword() {
+            let err = parse("hello { }").unwrap_err();
+            insta::assert_snapshot!(err.to_string());
+        }
+
+        #[test]
+        fn snapshot_error_unexpected_eof() {
+            let err = parse("module test {").unwrap_err();
+            insta::assert_snapshot!(err.to_string());
+        }
+
+        #[test]
+        fn snapshot_error_missing_brace() {
+            let err = parse("module test { fn foo() }").unwrap_err();
+            insta::assert_snapshot!(err.to_string());
+        }
     }
 }

@@ -1,0 +1,50 @@
+module concurrency_demo {
+    meta {
+        purpose: "Demonstrates cooperative concurrency with spawn and deferred execution",
+        version: "1.0.0"
+    }
+
+    fn work_a() {
+        println("[Task A] started")
+        let mut i: Int = 0
+        while i < 3 {
+            print_int(i)
+            i = i + 1
+        }
+        println("[Task A] done")
+    }
+
+    fn work_b() {
+        println("[Task B] computing fibonacci(10)...")
+        let result: Int = fib(10)
+        print_int(result)
+        println("[Task B] done")
+    }
+
+    fn work_c() {
+        println("[Task C] countdown!")
+        let mut n: Int = 5
+        while n > 0 {
+            print_int(n)
+            n = n - 1
+        }
+        println("[Task C] liftoff!")
+    }
+
+    fn fib(n: Int) -> Int {
+        if n <= 1 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    fn kodo_main() {
+        println("=== main: scheduling tasks ===")
+
+        spawn { work_a() }
+        spawn { work_b() }
+        spawn { work_c() }
+
+        println("=== main: all tasks queued, finishing main ===")
+    }
+}

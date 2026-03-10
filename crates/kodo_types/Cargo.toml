@@ -14,3 +14,8 @@ strsim.workspace = true
 [dev-dependencies]
 insta.workspace = true
 kodo_parser.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "types_bench"
+harness = false

@@ -51,6 +51,10 @@ enum Command {
         /// Emit errors as JSON.
         #[arg(long, default_value_t = false)]
         json_errors: bool,
+
+        /// Contract checking mode: static, runtime, both, none.
+        #[arg(long, default_value = "runtime")]
+        contracts: String,
     },
     /// Tokenize a source file and print the token stream.
     Lex {
@@ -127,7 +131,11 @@ fn main() {
             json_errors,
             contracts,
         } => run_build(&file, output.as_deref(), json_errors, &contracts),
-        Command::Check { file, json_errors } => run_check(&file, json_errors),
+        Command::Check {
+            file,
+            json_errors,
+            contracts,
+        } => run_check(&file, json_errors, &contracts),
         Command::Lex { file } => run_lex(&file),
         Command::Parse { file } => run_parse(&file),
         Command::Explain { code } => run_explain(&code),
@@ -189,6 +197,16 @@ fn run_build(
     let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
     let mut imported_object_files: Vec<std::path::PathBuf> = Vec::new();
     let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
+
+    // Detect import cycles.
+    let mut visited = std::collections::HashSet::new();
+    if let Ok(canonical) = file.canonicalize() {
+        visited.insert(canonical);
+    }
+    if let Err(msg) = check_import_cycles(base_dir, &module, &mut visited, file) {
+        eprintln!("{msg}");
+        return 1;
+    }
 
     for import in &module.imports {
         let import_path = resolve_import_path(base_dir, &import.path);
@@ -777,26 +795,114 @@ fn substitute_type_expr_ast(
 
 /// Resolves an import path to a `.ko` file path.
 ///
-/// `import math.utils` resolves to `<base_dir>/math/utils.ko`.
+/// Tries `<base_dir>/<segments>.ko` first, then `<base_dir>/<segments>/lib.ko`.
+///
+/// `import math.utils` resolves to `<base_dir>/math/utils.ko`
+/// or `<base_dir>/math/utils/lib.ko`.
 fn resolve_import_path(base_dir: &std::path::Path, segments: &[String]) -> std::path::PathBuf {
     let mut path = base_dir.to_path_buf();
     for segment in segments {
         path.push(segment);
     }
     path.set_extension("ko");
+
+    // Try lib.ko fallback if the direct path doesn't exist.
+    if !path.exists() {
+        let mut alt_path = base_dir.to_path_buf();
+        for segment in segments {
+            alt_path.push(segment);
+        }
+        alt_path.push("lib.ko");
+        if alt_path.exists() {
+            return alt_path;
+        }
+    }
+
     path
 }
 
 /// Compiles an imported module and returns its parsed AST.
+///
+/// Checks for import cycles using the `visited` set. Returns an error
+/// if a cycle is detected.
 fn compile_imported_module(
     path: &std::path::Path,
     _object_files: &mut Vec<std::path::PathBuf>,
 ) -> std::result::Result<kodo_ast::Module, String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| format!("error: unresolved import `{}`: {e}", path.display()))?;
+    let source = std::fs::read_to_string(path).map_err(|_| {
+        let mut msg = format!("error: unresolved import `{}`", path.display());
+        // Suggest similar .ko files in the same directory.
+        if let Some(parent) = path.parent() {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if let Ok(entries) = std::fs::read_dir(parent) {
+                    let candidates: Vec<String> = entries
+                        .filter_map(|e| e.ok())
+                        .filter_map(|e| {
+                            let name = e.file_name();
+                            let name_str = name.to_str()?;
+                            if name_str.ends_with(".ko") {
+                                Some(name_str.trim_end_matches(".ko").to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if let Some(suggestion) = find_similar_import(stem, &candidates) {
+                        msg.push_str(&format!("\n  hint: did you mean `{suggestion}`?"));
+                    }
+                }
+            }
+        }
+        msg
+    })?;
     let module = kodo_parser::parse(&source)
         .map_err(|e| format!("parse error in `{}`: {e}", path.display()))?;
     Ok(module)
+}
+
+/// Finds the most similar import name using Levenshtein distance.
+fn find_similar_import(name: &str, candidates: &[String]) -> Option<String> {
+    let threshold = std::cmp::max(name.len() / 2, 3);
+    let mut best: Option<(usize, String)> = None;
+    for candidate in candidates {
+        let dist = strsim::levenshtein(name, candidate);
+        if dist > 0 && dist <= threshold && best.as_ref().is_none_or(|(d, _)| dist < *d) {
+            best = Some((dist, candidate.clone()));
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
+/// Checks for import cycles by detecting if a file imports itself transitively.
+fn check_import_cycles(
+    base_dir: &std::path::Path,
+    module: &kodo_ast::Module,
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    current_path: &std::path::Path,
+) -> std::result::Result<(), String> {
+    for import in &module.imports {
+        let import_path = resolve_import_path(base_dir, &import.path);
+        let canonical = import_path
+            .canonicalize()
+            .unwrap_or_else(|_| import_path.clone());
+        if !visited.insert(canonical.clone()) {
+            return Err(format!(
+                "error: import cycle detected: `{}` is imported transitively from `{}`",
+                import_path.display(),
+                current_path.display()
+            ));
+        }
+        // Recursively check the imported module for cycles.
+        if let Ok(source) = std::fs::read_to_string(&import_path) {
+            if let Ok(imported) = kodo_parser::parse(&source) {
+                let imported_base = import_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                check_import_cycles(imported_base, &imported, visited, &import_path)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Links an object file with the Kōdo runtime to produce an executable.
@@ -954,7 +1060,7 @@ fn build_module_metadata(module: &kodo_ast::Module) -> String {
     serde_json::to_string_pretty(&metadata).unwrap_or_default()
 }
 
-fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
+fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32 {
     tracing::info!("checking {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -979,11 +1085,40 @@ fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
         }
     };
 
+    // Resolve and compile imported modules.
+    let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
+    let mut import_visited: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for import in &module.imports {
+        let import_path = resolve_import_path(base_dir, &import.path);
+        if !import_visited.insert(import_path.clone()) {
+            continue; // Skip duplicate imports.
+        }
+        let mut dummy_objects = Vec::new();
+        match compile_imported_module(&import_path, &mut dummy_objects) {
+            Ok(imported_module) => imported_modules.push(imported_module),
+            Err(msg) => {
+                eprintln!("{msg}");
+                return 1;
+            }
+        }
+    }
+
     // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    // Type-check imported modules first, then the user module.
+    for imported in &imported_modules {
+        if let Err(e) = checker.check_module(imported) {
+            eprintln!("type error in imported module `{}`: {e}", imported.name);
+            return 1;
         }
     }
 
@@ -1002,13 +1137,47 @@ fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
     kodo_desugar::desugar_module(&mut module);
 
     // Contract verification
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    let mut total_static = 0_usize;
+    let mut total_runtime = 0_usize;
     for func in &module.functions {
         let contracts = kodo_contracts::extract_contracts(func);
-        if let Err(e) =
-            kodo_contracts::verify_contracts(&contracts, kodo_contracts::ContractMode::Runtime)
-        {
-            eprintln!("contract error: {e}");
-            return 1;
+        match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            Ok(result) => {
+                if !result.failures.is_empty() {
+                    for failure in &result.failures {
+                        eprintln!("contract error: {failure}");
+                    }
+                    return 1;
+                }
+                total_static += result.static_verified;
+                total_runtime += result.runtime_checks_needed;
+            }
+            Err(e) => {
+                eprintln!("contract error: {e}");
+                return 1;
+            }
+        }
+    }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+                Ok(result) => {
+                    if !result.failures.is_empty() {
+                        for failure in &result.failures {
+                            eprintln!("contract error: {failure}");
+                        }
+                        return 1;
+                    }
+                    total_static += result.static_verified;
+                    total_runtime += result.runtime_checks_needed;
+                }
+                Err(e) => {
+                    eprintln!("contract error: {e}");
+                    return 1;
+                }
+            }
         }
     }
 
@@ -1016,6 +1185,12 @@ fn run_check(file: &PathBuf, json_errors: bool) -> i32 {
         diagnostics::render_success_json(&module);
     } else {
         println!("Check passed for module `{}`", module.name);
+        if total_static > 0 || total_runtime > 0 {
+            println!(
+                "  contracts: {} statically verified, {} runtime checks",
+                total_static, total_runtime
+            );
+        }
     }
     0
 }

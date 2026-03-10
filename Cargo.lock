@@ -1240,6 +1240,7 @@ dependencies = [
 name = "kodo_parser"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "insta",
  "kodo_ast",
  "kodo_lexer",
@@ -1273,6 +1274,7 @@ dependencies = [
 name = "kodo_types"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "insta",
  "kodo_ast",
  "kodo_parser",
@@ -1300,6 +1302,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "strsim",
  "thiserror",
  "tokio",
  "tracing",
