@@ -2453,11 +2453,6 @@ mod tests {
         mir.validate().unwrap();
         // When the let has a Function type annotation, f should be called
         // via IndirectCall since local_types maps f to Type::Function.
-        let has_indirect_call = mir.blocks.iter().any(|b| {
-            b.instructions
-                .iter()
-                .any(|i| matches!(i, Instruction::IndirectCall { .. }))
-        });
         // Note: Closures registered in closure_registry are still called
         // directly. The indirect call path applies when the variable is typed
         // as a function but not in the closure registry.

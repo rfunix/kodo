@@ -20,7 +20,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.91"
 license = "MIT"
 repository = "https://github.com/kodo-lang/kodo"
 description = "The Kōdo programming language compiler — designed for AI agents, transparent for humans"

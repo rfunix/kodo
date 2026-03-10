@@ -171,7 +171,7 @@ Kōdo isn't just annotations — it's a full compiled language with native binar
 
 ### Prerequisites
 
-- [Rust toolchain](https://rustup.rs/) (1.85+)
+- [Rust toolchain](https://rustup.rs/) (1.91+)
 - A C linker (`cc`) — Xcode Command Line Tools on macOS or `build-essential` on Linux
 
 ### Build

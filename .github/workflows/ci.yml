@@ -48,13 +48,13 @@ jobs:
       - run: cargo test --workspace
 
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.91)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85"
+          toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv
