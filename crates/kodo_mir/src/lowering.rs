@@ -1304,6 +1304,22 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
         mir_functions.extend(closures);
     }
 
+    // Lower actor handler functions with mangled names.
+    for actor_decl in &module.actor_decls {
+        for handler in &actor_decl.handlers {
+            let mangled_name = format!("{}_{}", actor_decl.name, handler.name);
+            let mut renamed = handler.clone();
+            renamed.name.clone_from(&mangled_name);
+            let ret_ty = resolve_type_with_enums(&renamed.return_type, renamed.span, &enum_ns)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            fn_return_types.insert(mangled_name, ret_ty);
+            let (func, closures) =
+                lower_function_with_closures(&renamed, &struct_reg, &enum_reg, &fn_return_types)?;
+            mir_functions.push(func);
+            mir_functions.extend(closures);
+        }
+    }
+
     // Generate validator functions for contracts.
     for func in &module.functions {
         if func.requires.is_empty() || !func.generic_params.is_empty() {
@@ -1378,6 +1394,26 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             lower_function_with_closures(f, &struct_registry, &enum_registry, &fn_return_types)?;
         mir_functions.push(func);
         mir_functions.extend(closures);
+    }
+
+    // Lower actor handler functions with mangled names.
+    for actor_decl in &module.actor_decls {
+        for handler in &actor_decl.handlers {
+            let mangled_name = format!("{}_{}", actor_decl.name, handler.name);
+            let mut renamed = handler.clone();
+            renamed.name.clone_from(&mangled_name);
+            let ret_ty = resolve_type_with_enums(&renamed.return_type, renamed.span, &enum_names)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            fn_return_types.insert(mangled_name, ret_ty);
+            let (func, closures) = lower_function_with_closures(
+                &renamed,
+                &struct_registry,
+                &enum_registry,
+                &fn_return_types,
+            )?;
+            mir_functions.push(func);
+            mir_functions.extend(closures);
+        }
     }
 
     // Generate validator functions for contracts.

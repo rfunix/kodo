@@ -843,6 +843,8 @@ fn declare_builtins(
 struct VarMap {
     /// Variables for scalar values.
     vars: HashMap<LocalId, Variable>,
+    /// Cranelift type for each scalar variable.
+    var_types: HashMap<LocalId, types::Type>,
     /// Stack slots for struct values.
     stack_slots: HashMap<LocalId, (cranelift_codegen::ir::StackSlot, String)>,
 }
@@ -851,6 +853,7 @@ impl VarMap {
     fn new() -> Self {
         Self {
             vars: HashMap::new(),
+            var_types: HashMap::new(),
             stack_slots: HashMap::new(),
         }
     }
@@ -860,6 +863,27 @@ impl VarMap {
             .get(&id)
             .copied()
             .ok_or_else(|| CodegenError::Cranelift(format!("undefined local: {id}")))
+    }
+
+    /// Defines a variable value with automatic type narrowing/widening when needed.
+    fn def_var_with_cast(
+        &self,
+        id: LocalId,
+        val: cranelift_codegen::ir::Value,
+        builder: &mut FunctionBuilder,
+    ) -> Result<()> {
+        let var = self.get(id)?;
+        let declared = self.var_types.get(&id).copied().unwrap_or(types::I64);
+        let actual = builder.func.dfg.value_type(val);
+        let final_val = if declared == actual {
+            val
+        } else if declared.bits() < actual.bits() {
+            builder.ins().ireduce(declared, val)
+        } else {
+            builder.ins().uextend(declared, val)
+        };
+        builder.def_var(var, final_val);
+        Ok(())
     }
 }
 
@@ -883,6 +907,8 @@ fn is_special_builtin(callee: &str) -> bool {
             | "Int_to_string"
             | "Float64_to_string"
             | "file_exists"
+            | "file_read"
+            | "file_write"
             | "list_get"
             | "map_get"
     )
@@ -904,7 +930,7 @@ fn is_string_returning_builtin(callee: &str) -> bool {
 /// Emits a call to a string builtin, expanding `StringConst` args into (ptr, len) pairs.
 ///
 /// Returns `Ok(true)` if the call was handled, `Ok(false)` if not.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn emit_string_builtin_call(
     callee: &str,
     args: &[Value],
@@ -998,19 +1024,65 @@ fn emit_string_builtin_call(
         return Ok(true);
     }
 
+    // file_read and file_write return Result<String, String> via out-parameters.
+    // Layout: discriminant (8 bytes) + string ptr (8 bytes) = 16 bytes in enum stack slot.
+    // The runtime function returns i64 (0=Ok, 1=Err) and writes result string
+    // to out-parameter pointers.
+    if callee == "file_read" || callee == "file_write" {
+        // Allocate out-parameters for the result string (ptr, len).
+        let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            16, // 8 bytes for ptr + 8 bytes for len
+            0,
+        ));
+        let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+        let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+        arg_vals.push(out_ptr_addr);
+        arg_vals.push(out_len_addr);
+
+        let builtin = builtins
+            .get(callee)
+            .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
+        let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+        let call = builder.ins().call(func_ref, &arg_vals);
+        let discriminant = builder.inst_results(call)[0]; // 0=Ok, 1=Err
+
+        // Store the Result enum into the destination stack slot.
+        // Layout: [discriminant: i64] [payload: i64 (string ptr)]
+        if let Some((dest_slot, _)) = var_map.stack_slots.get(&dest) {
+            let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+            // Store discriminant.
+            builder
+                .ins()
+                .store(MemFlags::new(), discriminant, dest_addr, 0);
+            // Store string pointer (the out_ptr value) as payload.
+            let result_ptr = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+            builder
+                .ins()
+                .store(MemFlags::new(), result_ptr, dest_addr, 8);
+            let var = var_map.get(dest)?;
+            builder.def_var(var, dest_addr);
+        } else {
+            // Fallback: store discriminant as scalar.
+            var_map.def_var_with_cast(dest, discriminant, builder)?;
+        }
+        return Ok(true);
+    }
+
     let builtin = builtins
         .get(callee)
         .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
     let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
     let call = builder.ins().call(func_ref, &arg_vals);
 
-    let var = var_map.get(dest)?;
     let results = builder.inst_results(call);
     if results.is_empty() {
         let zero = builder.ins().iconst(types::I64, 0);
-        builder.def_var(var, zero);
+        var_map.def_var_with_cast(dest, zero, builder)?;
     } else {
-        builder.def_var(var, results[0]);
+        var_map.def_var_with_cast(dest, results[0], builder)?;
     }
 
     Ok(true)
@@ -1063,6 +1135,7 @@ fn translate_function(
                 }
                 let var = builder.declare_var(types::I64);
                 var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, types::I64);
             }
             Type::Enum(ref name) => {
                 // Allocate a stack slot for enum types.
@@ -1077,10 +1150,13 @@ fn translate_function(
                 }
                 let var = builder.declare_var(types::I64);
                 var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, types::I64);
             }
             _ => {
-                let var = builder.declare_var(cranelift_type(&local.ty));
+                let cl_ty = cranelift_type(&local.ty);
+                let var = builder.declare_var(cl_ty);
                 var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, cl_ty);
             }
         }
     }
@@ -1443,8 +1519,7 @@ fn translate_instruction(
                 var_map,
                 struct_layouts,
             )?;
-            let var = var_map.get(*local_id)?;
-            builder.def_var(var, val);
+            var_map.def_var_with_cast(*local_id, val, builder)?;
         }
         Instruction::Call { dest, callee, args } => {
             // Check if this is a builtin that needs special arg/return handling.
@@ -1504,10 +1579,10 @@ fn translate_instruction(
             if let Some(builtin) = builtins.get(callee.as_str()) {
                 let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
                 let call = builder.ins().call(func_ref, &arg_vals);
-                let var = var_map.get(*dest)?;
                 if dest_is_composite {
                     // The result was written into the stack slot via sret; set var to addr.
                     if let Some((slot, _)) = var_map.stack_slots.get(dest) {
+                        let var = var_map.get(*dest)?;
                         let addr = builder.ins().stack_addr(types::I64, *slot, 0);
                         builder.def_var(var, addr);
                     }
@@ -1515,18 +1590,18 @@ fn translate_instruction(
                     let results = builder.inst_results(call);
                     if results.is_empty() {
                         let zero = builder.ins().iconst(types::I64, 0);
-                        builder.def_var(var, zero);
+                        var_map.def_var_with_cast(*dest, zero, builder)?;
                     } else {
-                        builder.def_var(var, results[0]);
+                        var_map.def_var_with_cast(*dest, results[0], builder)?;
                     }
                 }
             } else if let Some(&user_func_id) = func_ids.get(callee.as_str()) {
                 let func_ref = module.declare_func_in_func(user_func_id, builder.func);
                 let call = builder.ins().call(func_ref, &arg_vals);
-                let var = var_map.get(*dest)?;
                 if dest_is_composite {
                     // The result was written into the stack slot via sret.
                     if let Some((slot, _)) = var_map.stack_slots.get(dest) {
+                        let var = var_map.get(*dest)?;
                         let addr = builder.ins().stack_addr(types::I64, *slot, 0);
                         builder.def_var(var, addr);
                     }
@@ -1534,9 +1609,9 @@ fn translate_instruction(
                     let results = builder.inst_results(call);
                     if results.is_empty() {
                         let zero = builder.ins().iconst(types::I64, 0);
-                        builder.def_var(var, zero);
+                        var_map.def_var_with_cast(*dest, zero, builder)?;
                     } else {
-                        builder.def_var(var, results[0]);
+                        var_map.def_var_with_cast(*dest, results[0], builder)?;
                     }
                 }
             } else {
@@ -1776,6 +1851,23 @@ fn translate_value(
     }
 }
 
+/// Widens or narrows boolean operands so they share the same Cranelift type.
+fn normalize_bool_operands(
+    left: cranelift_codegen::ir::Value,
+    right: cranelift_codegen::ir::Value,
+    builder: &mut FunctionBuilder,
+) -> (cranelift_codegen::ir::Value, cranelift_codegen::ir::Value) {
+    let lt = builder.func.dfg.value_type(left);
+    let rt = builder.func.dfg.value_type(right);
+    if lt == rt {
+        (left, right)
+    } else if lt.bits() < rt.bits() {
+        (builder.ins().uextend(rt, left), right)
+    } else {
+        (left, builder.ins().uextend(lt, right))
+    }
+}
+
 /// Translates a binary operation to Cranelift IR.
 fn translate_binop(
     op: BinOp,
@@ -1817,8 +1909,14 @@ fn translate_binop(
                 .icmp(IntCC::SignedGreaterThanOrEqual, left, right);
             builder.ins().uextend(types::I64, cmp)
         }
-        BinOp::And => builder.ins().band(left, right),
-        BinOp::Or => builder.ins().bor(left, right),
+        BinOp::And => {
+            let (l, r) = normalize_bool_operands(left, right, builder);
+            builder.ins().band(l, r)
+        }
+        BinOp::Or => {
+            let (l, r) = normalize_bool_operands(left, right, builder);
+            builder.ins().bor(l, r)
+        }
     }
 }
 
