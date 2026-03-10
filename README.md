@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-369%20passing-brightgreen" alt="Tests: 369 passing">
+  <img src="https://img.shields.io/badge/tests-374%20passing-brightgreen" alt="Tests: 374 passing">
 </p>
 
 ---
@@ -20,65 +20,68 @@
 
 AI agents are writing more and more production code. But the languages they write in were designed decades ago, for humans typing at keyboards. The result: ambiguous code, no correctness guarantees, no way to trace which agent wrote what, and no enforcement that safety-critical code was actually reviewed.
 
-Kōdo is a compiled language where **correctness is built-in**, **intent is explicit**, and **authorship is tracked**. Contracts are part of the grammar, not bolted-on comments. Modules must describe themselves. Low-confidence AI code is rejected unless a human signs off. The compiler doesn't just catch bugs — it enforces a trust model between humans and AI agents.
+Kōdo is the first compiled language **designed from scratch for AI agents to write, reason about, and maintain software** — while remaining fully transparent and auditable by humans. It's not a framework, a linter, or a set of conventions bolted onto an existing language. It's a new language where the problems of AI-generated code are solved **at the grammar level**.
 
 If your team uses AI agents to generate or maintain code, Kōdo gives you what no other language does: **mathematical proof that the code is correct, traceability of who wrote every function, and a compiler that understands intent**.
 
+### The Problem with AI + Existing Languages
+
+| Problem | What happens today | What Kōdo does |
+|---------|-------------------|----------------|
+| **No correctness guarantees** | AI generates code that "looks right" but has subtle bugs | Contracts (`requires`/`ensures`) verified by Z3 SMT solver at compile time |
+| **No authorship tracking** | You can't tell which agent wrote which function | `@authored_by`, `@confidence`, `@reviewed_by` — compiler-enforced |
+| **No trust enforcement** | Low-quality AI code ships without review | Code below 0.8 confidence **won't compile** without human sign-off |
+| **Ambiguous semantics** | AI hallucinates APIs, misunderstands ownership | Zero-ambiguity LL(1) grammar, linear ownership (`own`/`ref`), no implicit conversions |
+| **Boilerplate generation** | AI generates repetitive glue code that rots | Intent blocks: declare **what**, compiler generates **how** |
+| **Opaque modules** | AI generates code without explaining purpose | Mandatory `meta` blocks — every module is self-describing |
+| **Useless error messages** | Compiler errors are for humans, not agents | Structured JSON errors with machine-applicable fix patches, Levenshtein suggestions |
+| **No repair loop** | Agent gets an error, guesses the fix | `kodoc fix` applies patches automatically — agent reads error, applies fix, recompiles |
+
 ---
 
-## Features That No Other Language Has
+## What Makes Kōdo Different
 
-### 1. Intent-Driven Programming
+### 1. Compiler-as-Reviewer: Trust Policies for AI Code
 
-Declare **what** you want. The compiler generates **how**.
+No other language tracks AI vs. human authorship **with compiler enforcement**. In Kōdo, every function can declare who wrote it, how confident the agent was, and whether a human reviewed it. The compiler uses this to **reject unsafe AI code before it ships**.
 
-```
-module intent_demo {
-    meta {
-        purpose: "Demonstrates intent-driven programming in Kōdo",
-        version: "1.0.0"
-    }
+```rust
+// High confidence — compiles without review
+@authored_by(agent: "claude")
+@confidence(0.95)
+fn add(a: Int, b: Int) -> Int {
+    return a + b
+}
 
-    intent console_app {
-        greeting: "Hello from intent-driven Kōdo!"
-    }
+// Low confidence — won't compile without human sign-off
+@authored_by(agent: "claude")
+@confidence(0.5)
+@reviewed_by(human: "rafael")
+fn experimental(a: Int, b: Int) -> Int {
+    return a * b
+}
+
+// Security-sensitive — won't compile without contracts
+@security_sensitive
+fn safe_divide(a: Int, b: Int) -> Int
+    requires { b != 0 }
+{
+    return a / b
 }
 ```
 
-No `main()`, no boilerplate. The `intent` block is not executable code — it's a **declaration of intent** with a key-value config. The compiler does the rest:
+**Confidence propagation is transitive:** if function A (confidence 0.95) calls function B (confidence 0.5), A's effective confidence drops to 0.5. You can't hide low-quality code behind a high-confidence wrapper. `kodoc confidence-report` visualizes the entire call graph with effective confidence scores.
 
-```
-                          ┌─────────────────────────────┐
-  intent console_app {    │  1. Parser reads the block   │
-    greeting: "Hello!"    │     → IntentDecl AST node    │
-  }                       │                              │
-                          │  2. Resolver finds strategy   │
-                          │     → ConsoleAppStrategy     │
-                          │                              │
-                          │  3. Strategy generates code   │
-                          │     → fn kodo_main() {       │
-                          │         println("Hello!")    │
-                          │       }                      │
-                          │                              │
-                          │  4. Injected into module as   │
-                          │     if hand-written          │
-                          │     → type check → codegen   │
-                          └─────────────────────────────┘
-```
+**Enforced policies:**
+- `@confidence` below 0.8 → `@reviewed_by(human: "...")` required, or **compilation fails** (E0260)
+- `@security_sensitive` → at least one `requires`/`ensures` contract required (E0262)
+- `min_confidence` in module meta → all functions must meet the threshold (E0261)
 
-Think of it as a **semantic macro at the compiler level**. Unlike textual macros (like C's `#define`), intent expansion happens at the AST level with full validation — invalid keys and type mismatches produce clear compiler errors, not cryptic failures.
+### 2. Contracts as Grammar — Verified by Z3 Before Code Runs
 
-**Why this matters for AI agents:** an agent doesn't need to generate boilerplate. It declares intent (`"I want a console app that prints X"`) and the compiler guarantees the implementation is correct. Less generated code = fewer bugs.
+Contracts aren't comments, decorators, or type annotations — they're **part of the language syntax**, verified by the **Z3 SMT solver** at compile time. The compiler doesn't just catch type errors; it catches **logical errors**.
 
-You can inspect what any intent generates: `kodoc intent-explain intent_demo.ko`
-
-Built-in resolvers: `console_app`, `math_module`. Intents are composable — use multiple in the same module.
-
-### 2. Contracts Verified at Compile Time
-
-Contracts aren't comments or decorators — they're part of the language grammar, verified by **Z3 SMT solver** before your code ever runs.
-
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Int
     requires { b != 0 }
 {
@@ -94,79 +97,129 @@ fn clamp(value: Int, min: Int, max: Int) -> Int
 }
 ```
 
-`requires` checks preconditions. `ensures` checks postconditions. With `--contracts static`, the compiler uses Z3 to **mathematically prove** your contracts hold — bugs are caught before the code ever runs, not in production at 3 AM.
+**Why this matters for AI agents:** an agent doesn't just generate code — it generates code with **mathematical proof of correctness**. When an agent writes `requires { b != 0 }`, the compiler verifies it at every call site. Bugs that would survive code review in other languages are caught at compile time.
 
-### 3. Agent Traceability & Trust Policies
+### 3. Error Messages Designed for Machines (and Humans)
 
-Every function can declare **who** wrote it, how **confident** the agent was, and whether a **human reviewed** it. The compiler enforces trust policies:
+In most languages, error messages are formatted for humans. AI agents have to parse free-text output, guess what went wrong, and hope their fix is right. Kōdo's compiler is designed for **agent consumption**:
 
+```bash
+# Structured JSON with machine-applicable patches
+kodoc check file.ko --json-errors
 ```
-// High confidence — no review needed
-@authored_by(agent: "claude")
-@confidence(0.95)
-fn add(a: Int, b: Int) -> Int {
-    return a + b
-}
 
-// Low confidence — requires human review to compile
-@authored_by(agent: "claude")
-@confidence(0.5)
-@reviewed_by(human: "rafael")
-fn experimental_multiply(a: Int, b: Int) -> Int {
-    return a * b
-}
-
-// Security-sensitive — requires contracts to compile
-@security_sensitive
-fn safe_divide(a: Int, b: Int) -> Int
-    requires { b != 0 }
+```json
 {
-    return a / b
+  "code": "E0201",
+  "message": "undefined type `conter`",
+  "suggestion": "did you mean `counter`?",
+  "fix_patch": {
+    "description": "rename to closest match",
+    "start_offset": 42,
+    "end_offset": 48,
+    "replacement": "counter"
+  }
 }
 ```
 
-**Trust policies enforced by the compiler:**
-- `@confidence` below 0.8 → `@reviewed_by` required, or the code **won't compile**
-- `@security_sensitive` → at least one `requires` or `ensures` clause required
-
-No other language tracks AI vs. human authorship with compiler enforcement.
-
-### 4. Self-Describing Modules
-
-Every Kōdo module **must** include a `meta` block. No exceptions.
-
+```bash
+# Automatic error correction — no guessing
+kodoc fix file.ko
 ```
+
+**What the compiler gives agents:**
+- **Unique error codes** (E0001–E0699) with structured JSON — no regex parsing needed
+- **Levenshtein-based suggestions** — "did you mean `counter`?" for typos (E0201)
+- **Machine-applicable fix patches** — byte offsets + replacement text, apply without interpreting prose
+- **`kodoc fix`** — applies all patches automatically, creating a compile→fix→recompile loop
+- **Complete explanations** — `kodoc explain E0240` gives full context for any error code
+
+This creates a **closed-loop repair cycle**: agent writes code → compiler returns structured error → agent applies fix patch → recompile. No ambiguity, no guessing.
+
+### 4. Intent-Driven Programming
+
+Declare **what** you want. The compiler generates **how**.
+
+```rust
+module intent_demo {
+    meta {
+        purpose: "Demonstrates intent-driven programming in Kōdo",
+        version: "1.0.0"
+    }
+
+    intent console_app {
+        greeting: "Hello from intent-driven Kōdo!"
+    }
+}
+```
+
+No `main()`, no boilerplate. The `intent` block is a **declaration of intent** — the compiler expands it into concrete code at the AST level with full type checking. Think of it as a semantic macro, not a text substitution.
+
+**Why this matters for AI agents:** less generated code = fewer bugs. The agent declares intent (`"I want a console app that prints X"`) and the compiler guarantees the implementation is correct. Inspect what any intent generates with `kodoc intent-explain`.
+
+### 5. Linear Ownership — Correct by Construction
+
+Kōdo enforces linear ownership at the type level. Every value has exactly one owner. When a value is moved, it cannot be used again. Borrow with `ref` to share without transferring ownership.
+
+```rust
+fn consume(own s: String) {
+    println(s)
+}
+
+fn borrow(ref s: String) {
+    println(s)
+}
+
+fn main() {
+    let msg: String = "hello"
+    borrow(msg)       // OK — msg is borrowed, still usable
+    borrow(msg)       // OK — msg is still owned
+    consume(msg)      // OK — msg is moved to consume
+    // println(msg)   // E0240: use-after-move
+}
+```
+
+**Copy semantics for primitives:** `Int`, `Bool`, `Float`, `Byte` are implicitly copied — only compound types (structs, strings) enforce move semantics. This eliminates false positives without sacrificing safety.
+
+**Why this matters for AI agents:** agents frequently generate code with aliasing bugs, dangling references, and use-after-free. Kōdo catches these at compile time with clear, structured error messages that the agent can fix automatically.
+
+### 6. Self-Describing Modules
+
+Every Kōdo module **must** include a `meta` block. The compiler rejects code without it.
+
+```rust
 module payments {
     meta {
         purpose: "Process recurring subscription payments",
-        version: "2.1.0",
-        author: "Billing Team"
+        version: "2.1.0"
     }
-
     // ...
 }
 ```
 
-AI agents and humans can understand any module's purpose without reading the implementation. The compiler rejects modules without `meta` — self-documentation isn't optional, it's enforced.
+AI agents and humans can understand any module's purpose without reading the implementation. Self-documentation isn't optional — it's enforced at the grammar level.
 
 ---
 
 ## A Complete Language
 
-Kōdo isn't just annotations — it's a full compiled language with native binary output via Cranelift:
+Kōdo isn't just annotations on top of another language — it's a **full compiled language** with native binary output via Cranelift:
 
-- **Type system** — `Int`, `Bool`, `String`, structs, enums, generics with monomorphization
-- **Pattern matching** — exhaustive `match` on enums with destructuring
-- **Closures** — lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types
-- **Ownership** — linear ownership with `own`/`ref` qualifiers, use-after-move detection (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242)
-- **Confidence propagation** — transitive confidence computation via call graph, `min_confidence` threshold enforcement, `kodoc confidence-report`
-- **Auto-repair hints** — machine-applicable `FixPatch` in JSON diagnostics, `kodoc fix` for automatic error correction
-- **Error handling** — `Option<T>` and `Result<T, E>` in the prelude, no null, no exceptions
-- **Standard library** — `abs`, `min`, `max`, `clamp`, `string_length`
-- **Multi-file imports** — `import module_name` across `.ko` files
-- **Concurrency** — cooperative `spawn` with deferred task execution
-- **Developer tools** — LSP server with real-time diagnostics and hover, JSON error output
-- **Build artifacts** — compilation certificates (`.ko.cert.json`) with SHA-256 hashes
+| Category | Features |
+|----------|----------|
+| **Type system** | `Int`, `Bool`, `String`, structs, enums, generics with monomorphization, no implicit conversions |
+| **Pattern matching** | Exhaustive `match` on enums with destructuring |
+| **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
+| **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242) |
+| **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback |
+| **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
+| **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
+| **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, `string_length` |
+| **Multi-file** | `import module_name` across `.ko` files |
+| **Concurrency** | Cooperative `spawn` with deferred task execution |
+| **Developer tools** | LSP server with real-time diagnostics and hover, JSON error output, `kodoc explain` for any error code |
+| **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes |
 
 ---
 
@@ -189,7 +242,7 @@ cargo build --workspace
 
 Create `hello.ko`:
 
-```
+```rust
 module hello {
     meta {
         purpose: "My first Kōdo program",
