@@ -232,6 +232,11 @@ impl LanguageServer for KodoLanguageServer {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".to_string()]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -282,6 +287,56 @@ impl LanguageServer for KodoLanguageServer {
             .await;
     }
 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let source = {
+            let docs = self
+                .documents
+                .lock()
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            docs.get(&uri.to_string()).cloned()
+        };
+
+        if let Some(source) = source {
+            if let Some(span) = definition_at_position(&source, position) {
+                let (line, col) = offset_to_line_col(&source, span.start);
+                let (end_line, end_col) = offset_to_line_col(&source, span.end);
+                let range = Range::new(Position::new(line, col), Position::new(end_line, end_col));
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location::new(
+                    uri, range,
+                ))));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+
+        let source = {
+            let docs = self
+                .documents
+                .lock()
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            docs.get(&uri.to_string()).cloned()
+        };
+
+        if let Some(source) = source {
+            let items = completions_for_source(&source);
+            if !items.is_empty() {
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
+        }
+
+        Ok(None)
+    }
+
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
@@ -308,6 +363,128 @@ impl LanguageServer for KodoLanguageServer {
 
         Ok(None)
     }
+}
+
+/// Finds the definition span of the identifier at the given position.
+///
+/// Parses the source, runs the type checker to build the definition index,
+/// then looks up the word at the cursor position.
+fn definition_at_position(source: &str, position: Position) -> Option<kodo_ast::Span> {
+    let offset = line_col_to_offset(source, position.line, position.character)?;
+    let word = word_at_offset(source, offset);
+    if word.is_empty() {
+        return None;
+    }
+
+    let module = kodo_parser::parse(source).ok()?;
+    let mut checker = kodo_types::TypeChecker::new();
+    let _ = checker.check_module(&module);
+
+    checker.definition_spans().get(word).copied()
+}
+
+/// Extracts the word (identifier) at the given byte offset.
+fn word_at_offset(source: &str, offset: usize) -> &str {
+    let bytes = source.as_bytes();
+    if offset >= bytes.len() {
+        return "";
+    }
+    // Check if the offset is within an identifier character.
+    if !is_ident_char(bytes[offset]) {
+        return "";
+    }
+    let mut start = offset;
+    while start > 0 && is_ident_char(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = offset;
+    while end < bytes.len() && is_ident_char(bytes[end]) {
+        end += 1;
+    }
+    &source[start..end]
+}
+
+/// Returns true if the byte is a valid identifier character.
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Returns completion items for the current source.
+///
+/// Provides function names, struct/enum names, and builtin method completions.
+fn completions_for_source(source: &str) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+
+    let Ok(module) = kodo_parser::parse(source) else {
+        return items;
+    };
+
+    let mut checker = kodo_types::TypeChecker::new();
+    let _ = checker.check_module(&module);
+
+    // Add function names.
+    for func in &module.functions {
+        items.push(CompletionItem {
+            label: func.name.clone(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!("fn {}(...)", func.name)),
+            ..Default::default()
+        });
+    }
+
+    // Add struct names.
+    for type_decl in &module.type_decls {
+        items.push(CompletionItem {
+            label: type_decl.name.clone(),
+            kind: Some(CompletionItemKind::STRUCT),
+            detail: Some(format!("struct {}", type_decl.name)),
+            ..Default::default()
+        });
+    }
+
+    // Add enum names.
+    for enum_decl in &module.enum_decls {
+        items.push(CompletionItem {
+            label: enum_decl.name.clone(),
+            kind: Some(CompletionItemKind::ENUM),
+            detail: Some(format!("enum {}", enum_decl.name)),
+            ..Default::default()
+        });
+    }
+
+    // Add builtin functions.
+    let builtins = [
+        "println",
+        "print",
+        "print_int",
+        "abs",
+        "min",
+        "max",
+        "clamp",
+        "file_exists",
+        "file_read",
+        "file_write",
+        "list_new",
+        "list_push",
+        "list_get",
+        "list_length",
+        "list_contains",
+        "map_new",
+        "map_insert",
+        "map_get",
+        "map_contains_key",
+        "map_length",
+    ];
+    for name in &builtins {
+        items.push(CompletionItem {
+            label: (*name).to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some("builtin".to_string()),
+            ..Default::default()
+        });
+    }
+
+    items
 }
 
 /// Starts the Kōdo LSP server on stdin/stdout.
@@ -426,5 +603,64 @@ mod tests {
 }"#;
         let hover = hover_at_position(source, Position::new(0, 0));
         assert!(hover.is_none(), "no hover outside functions");
+    }
+
+    #[test]
+    fn completions_include_functions() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn my_func(x: Int) -> Int {
+        return x
+    }
+}"#;
+        let items = completions_for_source(source);
+        let func_names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            func_names.contains(&"my_func"),
+            "should contain user function"
+        );
+        assert!(func_names.contains(&"println"), "should contain builtin");
+        assert!(
+            func_names.contains(&"list_new"),
+            "should contain list builtin"
+        );
+        assert!(
+            func_names.contains(&"map_new"),
+            "should contain map builtin"
+        );
+    }
+
+    #[test]
+    fn definition_at_position_finds_function() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2)
+    }
+}"#;
+        // Position of "add" in the call at line 11
+        let span = definition_at_position(source, Position::new(11, 21));
+        assert!(span.is_some(), "should find definition of add");
+    }
+
+    #[test]
+    fn word_at_offset_extracts_identifier() {
+        let source = "let hello = 42";
+        assert_eq!(word_at_offset(source, 4), "hello");
+        assert_eq!(word_at_offset(source, 5), "hello");
+        assert_eq!(word_at_offset(source, 0), "let");
+        assert_eq!(word_at_offset(source, 3), ""); // space
     }
 }

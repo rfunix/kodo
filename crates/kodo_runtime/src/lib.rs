@@ -167,6 +167,253 @@ pub extern "C" fn kodo_string_length(_ptr: *const u8, len: usize) -> i64 {
     result
 }
 
+/// Returns 1 if the haystack string contains the needle string, 0 otherwise.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_contains(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    needle_ptr: *const u8,
+    needle_len: usize,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let needle = unsafe { std::slice::from_raw_parts(needle_ptr, needle_len) };
+    // Byte-level substring search — no UTF-8 decoding needed.
+    i64::from(contains_bytes(haystack, needle))
+}
+
+/// Returns 1 if the string starts with the given prefix, 0 otherwise.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_starts_with(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    prefix_ptr: *const u8,
+    prefix_len: usize,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let prefix = unsafe { std::slice::from_raw_parts(prefix_ptr, prefix_len) };
+    i64::from(haystack.starts_with(prefix))
+}
+
+/// Returns 1 if the string ends with the given suffix, 0 otherwise.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_ends_with(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    suffix_ptr: *const u8,
+    suffix_len: usize,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let suffix = unsafe { std::slice::from_raw_parts(suffix_ptr, suffix_len) };
+    i64::from(haystack.ends_with(suffix))
+}
+
+/// Byte-level substring search.
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// Returns a trimmed copy of the string (whitespace removed from both ends).
+///
+/// The result pointer and length are written to `out_ptr` and `out_len`.
+/// The trimmed string is a sub-slice of the original, so no allocation is needed.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_trim(
+    ptr: *const u8,
+    len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    // Find the trimmed sub-slice at the byte level.
+    let start = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(len);
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map_or(start, |p| p + 1);
+    unsafe {
+        *out_ptr = bytes.as_ptr().add(start);
+        *out_len = end - start;
+    }
+}
+
+/// Returns an uppercase copy of the string.
+///
+/// Allocates a new string on the heap. Caller does not need to free
+/// (managed by the Kōdo runtime's arena).
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_to_upper(
+    ptr: *const u8,
+    len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    // ASCII-level uppercase conversion (safe for any byte sequence).
+    let mut result = Vec::with_capacity(len);
+    for &b in bytes {
+        result.push(b.to_ascii_uppercase());
+    }
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
+/// Returns a lowercase copy of the string.
+///
+/// Allocates a new string on the heap.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_to_lower(
+    ptr: *const u8,
+    len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    // ASCII-level lowercase conversion (safe for any byte sequence).
+    let mut result = Vec::with_capacity(len);
+    for &b in bytes {
+        result.push(b.to_ascii_lowercase());
+    }
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
+/// Returns a substring from `start` to `end` byte indices.
+///
+/// Clamps indices to valid range. The result is a sub-slice (no allocation).
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_substring(
+    ptr: *const u8,
+    len: usize,
+    start: i64,
+    end: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let start_idx = (start.max(0) as usize).min(len);
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let end_idx = (end.max(0) as usize).min(len);
+    let actual_end = end_idx.max(start_idx);
+    unsafe {
+        *out_ptr = bytes.as_ptr().add(start_idx);
+        *out_len = actual_end - start_idx;
+    }
+}
+
+/// Converts an integer to its decimal string representation.
+///
+/// Allocates a new string on the heap.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_int_to_string(
+    value: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let s = value.to_string();
+    let boxed = s.into_boxed_str();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
+/// Converts an integer to a 64-bit float.
+#[no_mangle]
+pub extern "C" fn kodo_int_to_float64(value: i64) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    let result = value as f64;
+    result
+}
+
+/// Converts a 64-bit float to its string representation.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_float64_to_string(
+    value: f64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let s = value.to_string();
+    let boxed = s.into_boxed_str();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
+/// Converts a 64-bit float to an integer (truncates toward zero).
+#[no_mangle]
+pub extern "C" fn kodo_float64_to_int(value: f64) -> i64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let result = value as i64;
+    result
+}
+
 /// Task queue for the cooperative scheduler.
 ///
 /// Stores function pointers to tasks that have been spawned.
@@ -211,6 +458,558 @@ pub extern "C" fn kodo_run_scheduler() {
 #[no_mangle]
 pub extern "C" fn kodo_spawn() {
     // Legacy stub — new code uses kodo_spawn_task.
+}
+
+/// Checks if a file exists at the given path.
+///
+/// Returns 1 if the file exists, 0 otherwise.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_file_exists(path_ptr: *const u8, path_len: usize) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes at path_ptr..path_ptr+path_len.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let Ok(path_str) = std::str::from_utf8(path_bytes) else {
+        return 0;
+    };
+    i64::from(std::path::Path::new(path_str).exists())
+}
+
+/// Reads a file into a heap-allocated string.
+///
+/// Returns 0 on success (Ok), 1 on error (Err). In both cases,
+/// `out_ptr`/`out_len` are set to the content string or error message.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_file_read(
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes at path_ptr..path_ptr+path_len.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let path_str = match std::str::from_utf8(path_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("invalid path: {e}");
+            write_string_out(msg, out_ptr, out_len);
+            return 1;
+        }
+    };
+    match std::fs::read_to_string(path_str) {
+        Ok(contents) => {
+            write_string_out(contents, out_ptr, out_len);
+            0
+        }
+        Err(e) => {
+            let msg = format!("{e}");
+            write_string_out(msg, out_ptr, out_len);
+            1
+        }
+    }
+}
+
+/// Writes content to a file.
+///
+/// Returns 0 on success (Ok), 1 on error (Err). On error,
+/// `out_ptr`/`out_len` are set to the error message.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+/// `content_ptr` must point to `content_len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_file_write(
+    path_ptr: *const u8,
+    path_len: usize,
+    content_ptr: *const u8,
+    content_len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let content_bytes = unsafe { std::slice::from_raw_parts(content_ptr, content_len) };
+    let path_str = match std::str::from_utf8(path_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("invalid path: {e}");
+            write_string_out(msg, out_ptr, out_len);
+            return 1;
+        }
+    };
+    match std::fs::write(path_str, content_bytes) {
+        Ok(()) => 0,
+        Err(e) => {
+            let msg = format!("{e}");
+            write_string_out(msg, out_ptr, out_len);
+            1
+        }
+    }
+}
+
+/// Writes a Rust `String` to out-parameter pointers.
+///
+/// Leaks the string's bytes as a heap allocation, setting `out_ptr` and
+/// `out_len` to point to the data. The caller is responsible for freeing.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+unsafe fn write_string_out(s: String, out_ptr: *mut *const u8, out_len: *mut usize) {
+    let bytes = s.into_bytes().into_boxed_slice();
+    let len = bytes.len();
+    let ptr = Box::into_raw(bytes) as *const u8;
+    // SAFETY: caller guarantees these are valid writable pointers.
+    unsafe {
+        *out_ptr = ptr;
+        *out_len = len;
+    }
+}
+
+/// Represents a heap-allocated dynamic list.
+///
+/// Each element is stored as an `i64` (values for Int, pointers for String).
+/// This struct is never directly exposed to Kōdo code — the runtime manages
+/// it through opaque pointer handles.
+#[repr(C)]
+struct KodoList {
+    /// Pointer to the element array.
+    data: *mut i64,
+    /// Number of elements currently in the list.
+    len: usize,
+    /// Allocated capacity (number of i64 slots).
+    capacity: usize,
+}
+
+/// Creates a new empty list.
+///
+/// Returns a pointer (as i64) to a heap-allocated `KodoList`.
+#[no_mangle]
+pub extern "C" fn kodo_list_new() -> i64 {
+    let list = Box::new(KodoList {
+        data: std::ptr::null_mut(),
+        len: 0,
+        capacity: 0,
+    });
+    Box::into_raw(list) as i64
+}
+
+/// Pushes an element onto the end of a list.
+///
+/// Grows the backing array if needed (doubling strategy).
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_push(list_ptr: i64, value: i64) {
+    #[allow(clippy::cast_possible_truncation)]
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len == list.capacity {
+        let new_cap = if list.capacity == 0 {
+            4
+        } else {
+            list.capacity * 2
+        };
+        let new_layout = std::alloc::Layout::array::<i64>(new_cap);
+        let Ok(layout) = new_layout else { return };
+        let new_data = if list.data.is_null() {
+            // SAFETY: layout is valid and non-zero size.
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe {
+                std::alloc::alloc(layout).cast::<i64>()
+            }
+        } else {
+            let old_layout_result = std::alloc::Layout::array::<i64>(list.capacity);
+            let Ok(old_layout) = old_layout_result else {
+                return;
+            };
+            // SAFETY: list.data was allocated with old_layout, new size >= old size.
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe {
+                std::alloc::realloc(list.data.cast::<u8>(), old_layout, layout.size()).cast::<i64>()
+            }
+        };
+        if new_data.is_null() {
+            return; // allocation failed
+        }
+        list.data = new_data;
+        list.capacity = new_cap;
+    }
+    // SAFETY: list.len < list.capacity, data is valid.
+    unsafe { *list.data.add(list.len) = value };
+    list.len += 1;
+}
+
+/// Returns the element at the given index, or 0 if out of bounds.
+///
+/// Returns a two-value result: (value, `is_some`) where `is_some` is 1 if the
+/// index was valid, 0 otherwise. The values are written to out parameters.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `out_value` and `out_is_some` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_get(
+    list_ptr: i64,
+    index: i64,
+    out_value: *mut i64,
+    out_is_some: *mut i64,
+) {
+    #[allow(clippy::cast_possible_truncation)]
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = index as usize;
+    if idx < list.len {
+        // SAFETY: idx < len, data is valid.
+        unsafe {
+            *out_value = *list.data.add(idx);
+            *out_is_some = 1;
+        }
+    } else {
+        unsafe {
+            *out_value = 0;
+            *out_is_some = 0;
+        }
+    }
+}
+
+/// Returns the number of elements in the list.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_length(list_ptr: i64) -> i64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    #[allow(clippy::cast_possible_wrap)]
+    let result = list.len as i64;
+    result
+}
+
+/// Returns 1 if the list contains the given value, 0 otherwise.
+///
+/// Comparison is done by i64 equality (works for Int values).
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_contains(list_ptr: i64, value: i64) -> i64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    for i in 0..list.len {
+        // SAFETY: i < len, data is valid.
+        if unsafe { *list.data.add(i) } == value {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Splits a string by a separator and returns a List<String>.
+///
+/// Each resulting substring is allocated as a new (ptr, len) pair on the heap.
+/// The list contains pointers to these string values.
+///
+/// The returned list stores each string as two consecutive i64 values (ptr, len),
+/// but since our list holds single i64 elements, we actually return a list of
+/// string pointers. Each string "pointer" is a pointer to a heap-allocated
+/// (ptr: *const u8, len: usize) pair.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_split(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    sep_ptr: *const u8,
+    sep_len: usize,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let separator = unsafe { std::slice::from_raw_parts(sep_ptr, sep_len) };
+
+    let list = kodo_list_new();
+
+    if separator.is_empty() {
+        // Empty separator: return the whole string as a single element.
+        #[allow(clippy::cast_possible_wrap)]
+        let pair = Box::new([hay_ptr as i64, hay_len as i64]);
+        let pair_ptr = Box::into_raw(pair) as i64;
+        // SAFETY: list is valid, just created above.
+        unsafe { kodo_list_push(list, pair_ptr) };
+        return list;
+    }
+
+    let mut start = 0;
+    while start <= haystack.len() {
+        // Find next occurrence of separator.
+        let remaining = &haystack[start..];
+        let found = remaining
+            .windows(separator.len())
+            .position(|w| w == separator);
+
+        if let Some(pos) = found {
+            // Allocate a (ptr, len) pair for this substring.
+            let sub_ptr = unsafe { hay_ptr.add(start) };
+            let sub_len = pos;
+            #[allow(clippy::cast_possible_wrap)]
+            let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            let pair_ptr = Box::into_raw(pair) as i64;
+            // SAFETY: list is valid.
+            unsafe { kodo_list_push(list, pair_ptr) };
+            start += pos + separator.len();
+        } else {
+            // Last segment.
+            let sub_ptr = unsafe { hay_ptr.add(start) };
+            let sub_len = haystack.len() - start;
+            #[allow(clippy::cast_possible_wrap)]
+            let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            let pair_ptr = Box::into_raw(pair) as i64;
+            // SAFETY: list is valid.
+            unsafe { kodo_list_push(list, pair_ptr) };
+            break;
+        }
+    }
+
+    list
+}
+
+/// Represents a key-value pair in a hash map entry.
+#[derive(Clone)]
+#[repr(C)]
+struct KodoMapEntry {
+    /// The key (i64 value or pointer).
+    key: i64,
+    /// The value (i64 value or pointer).
+    value: i64,
+    /// Whether this entry is occupied.
+    occupied: bool,
+}
+
+/// Represents a heap-allocated hash map.
+///
+/// Uses open addressing with linear probing for simplicity.
+#[repr(C)]
+struct KodoMap {
+    /// Pointer to the entry array.
+    entries: *mut KodoMapEntry,
+    /// Number of occupied entries.
+    len: usize,
+    /// Total allocated capacity.
+    capacity: usize,
+}
+
+/// Default initial capacity for a new map.
+const MAP_INITIAL_CAPACITY: usize = 16;
+
+/// Creates a new empty map.
+///
+/// Returns a pointer (as i64) to a heap-allocated `KodoMap`.
+#[no_mangle]
+pub extern "C" fn kodo_map_new() -> i64 {
+    let entries = vec![
+        KodoMapEntry {
+            key: 0,
+            value: 0,
+            occupied: false,
+        };
+        MAP_INITIAL_CAPACITY
+    ];
+    let boxed = entries.into_boxed_slice();
+    let entries_ptr = Box::into_raw(boxed).cast::<KodoMapEntry>();
+    let map = Box::new(KodoMap {
+        entries: entries_ptr,
+        len: 0,
+        capacity: MAP_INITIAL_CAPACITY,
+    });
+    Box::into_raw(map) as i64
+}
+
+/// Computes a simple hash for an i64 key.
+fn map_hash(key: i64, capacity: usize) -> usize {
+    // FNV-inspired mixing.
+    #[allow(clippy::cast_sign_loss)]
+    let k = key as u64;
+    let mixed = k.wrapping_mul(0x517c_c1b7_2722_0a95);
+    #[allow(clippy::cast_possible_truncation)]
+    let index = mixed as usize;
+    index % capacity
+}
+
+/// Inserts a key-value pair into the map, overwriting any existing entry with the same key.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_insert(map_ptr: i64, key: i64, value: i64) {
+    #[allow(clippy::cast_possible_truncation)]
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+
+    // Grow if load factor > 0.75.
+    if map.len * 4 >= map.capacity * 3 {
+        map_grow(map);
+    }
+
+    let mut idx = map_hash(key, map.capacity);
+    loop {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            entry.key = key;
+            entry.value = value;
+            entry.occupied = true;
+            map.len += 1;
+            return;
+        }
+        if entry.key == key {
+            entry.value = value;
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+}
+
+/// Grows the map's backing array by doubling capacity and rehashing all entries.
+fn map_grow(map: &mut KodoMap) {
+    let new_cap = map.capacity * 2;
+    let new_entries = vec![
+        KodoMapEntry {
+            key: 0,
+            value: 0,
+            occupied: false,
+        };
+        new_cap
+    ];
+    let new_boxed = new_entries.into_boxed_slice();
+    let new_ptr = Box::into_raw(new_boxed).cast::<KodoMapEntry>();
+
+    // Rehash existing entries.
+    for i in 0..map.capacity {
+        // SAFETY: i < old capacity, entries is valid.
+        let old_entry = unsafe { &*map.entries.add(i) };
+        if old_entry.occupied {
+            let mut idx = map_hash(old_entry.key, new_cap);
+            loop {
+                // SAFETY: idx < new_cap, new_ptr is valid.
+                let new_entry = unsafe { &mut *new_ptr.add(idx) };
+                if !new_entry.occupied {
+                    new_entry.key = old_entry.key;
+                    new_entry.value = old_entry.value;
+                    new_entry.occupied = true;
+                    break;
+                }
+                idx = (idx + 1) % new_cap;
+            }
+        }
+    }
+
+    // Free old entries.
+    // SAFETY: entries was allocated as a Box<[KodoMapEntry]> with capacity elements.
+    let _ = unsafe {
+        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            map.entries,
+            map.capacity,
+        ))
+    };
+    map.entries = new_ptr;
+    map.capacity = new_cap;
+}
+
+/// Gets the value for a given key.
+///
+/// Returns the value via out parameters. `out_is_some` is set to 1 if found, 0 otherwise.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `out_value` and `out_is_some` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_get(
+    map_ptr: i64,
+    key: i64,
+    out_value: *mut i64,
+    out_is_some: *mut i64,
+) {
+    #[allow(clippy::cast_possible_truncation)]
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    let mut idx = map_hash(key, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            unsafe {
+                *out_value = 0;
+                *out_is_some = 0;
+            }
+            return;
+        }
+        if entry.key == key {
+            unsafe {
+                *out_value = entry.value;
+                *out_is_some = 1;
+            }
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    unsafe {
+        *out_value = 0;
+        *out_is_some = 0;
+    }
+}
+
+/// Returns 1 if the map contains the given key, 0 otherwise.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_contains_key(map_ptr: i64, key: i64) -> i64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    let mut idx = map_hash(key, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            return 0;
+        }
+        if entry.key == key {
+            return 1;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    0
+}
+
+/// Returns the number of entries in the map.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_length(map_ptr: i64) -> i64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    #[allow(clippy::cast_possible_wrap)]
+    let result = map.len as i64;
+    result
 }
 
 #[cfg(test)]
@@ -291,5 +1090,330 @@ mod tests {
         assert_eq!(COUNTER.load(Ordering::SeqCst), 0, "tasks not yet run");
         kodo_run_scheduler();
         assert_eq!(COUNTER.load(Ordering::SeqCst), 2, "both tasks ran");
+    }
+
+    #[test]
+    fn kodo_string_contains_works() {
+        let hay = "hello world";
+        let needle = "world";
+        // SAFETY: both are valid string slices.
+        let result =
+            unsafe { kodo_string_contains(hay.as_ptr(), hay.len(), needle.as_ptr(), needle.len()) };
+        assert_eq!(result, 1);
+
+        let missing = "xyz";
+        let result = unsafe {
+            kodo_string_contains(hay.as_ptr(), hay.len(), missing.as_ptr(), missing.len())
+        };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_starts_with_works() {
+        let s = "hello world";
+        let prefix = "hello";
+        let result =
+            unsafe { kodo_string_starts_with(s.as_ptr(), s.len(), prefix.as_ptr(), prefix.len()) };
+        assert_eq!(result, 1);
+
+        let bad = "world";
+        let result =
+            unsafe { kodo_string_starts_with(s.as_ptr(), s.len(), bad.as_ptr(), bad.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_ends_with_works() {
+        let s = "hello world";
+        let suffix = "world";
+        let result =
+            unsafe { kodo_string_ends_with(s.as_ptr(), s.len(), suffix.as_ptr(), suffix.len()) };
+        assert_eq!(result, 1);
+
+        let bad = "hello";
+        let result = unsafe { kodo_string_ends_with(s.as_ptr(), s.len(), bad.as_ptr(), bad.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_trim_works() {
+        let s = "  hello  ";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: s is a valid string slice, out_ptr/out_len are valid.
+        unsafe { kodo_string_trim(s.as_ptr(), s.len(), &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello");
+    }
+
+    #[test]
+    fn kodo_string_to_upper_works() {
+        let s = "hello";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: s is a valid string slice.
+        unsafe { kodo_string_to_upper(s.as_ptr(), s.len(), &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "HELLO");
+    }
+
+    #[test]
+    fn kodo_string_to_lower_works() {
+        let s = "HELLO";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: s is a valid string slice.
+        unsafe { kodo_string_to_lower(s.as_ptr(), s.len(), &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello");
+    }
+
+    #[test]
+    fn kodo_string_substring_works() {
+        let s = "hello world";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: s is a valid string slice.
+        unsafe { kodo_string_substring(s.as_ptr(), s.len(), 0, 5, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello");
+    }
+
+    #[test]
+    fn kodo_int_to_string_works() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: out_ptr/out_len are valid writable pointers.
+        unsafe { kodo_int_to_string(42, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "42");
+    }
+
+    #[test]
+    fn kodo_int_to_float64_works() {
+        assert!((kodo_int_to_float64(42) - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn kodo_float64_to_string_works() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: out_ptr/out_len are valid writable pointers.
+        unsafe { kodo_float64_to_string(3.14, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert!(std::str::from_utf8(result).unwrap().starts_with("3.14"));
+    }
+
+    #[test]
+    fn kodo_float64_to_int_works() {
+        assert_eq!(kodo_float64_to_int(3.7), 3);
+        assert_eq!(kodo_float64_to_int(-2.9), -2);
+    }
+
+    #[test]
+    fn kodo_file_exists_works() {
+        // Cargo.toml always exists relative to the crate root.
+        let existing = "Cargo.toml";
+        // SAFETY: existing is a valid UTF-8 string slice.
+        let result = unsafe { kodo_file_exists(existing.as_ptr(), existing.len()) };
+        assert_eq!(result, 1);
+
+        let missing = "definitely_nonexistent_file_xyz.ko";
+        // SAFETY: missing is a valid UTF-8 string slice.
+        let result = unsafe { kodo_file_exists(missing.as_ptr(), missing.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_file_read_works() {
+        let path = "Cargo.toml";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: path is a valid string, out_ptr/out_len are valid pointers.
+        let status =
+            unsafe { kodo_file_read(path.as_ptr(), path.len(), &mut out_ptr, &mut out_len) };
+        assert_eq!(status, 0, "expected Ok");
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        let content = std::str::from_utf8(result).unwrap();
+        assert!(content.contains("[package]"));
+    }
+
+    #[test]
+    fn kodo_file_read_missing_returns_error() {
+        let path = "nonexistent_xyz.txt";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: path is a valid string, out_ptr/out_len are valid pointers.
+        let status =
+            unsafe { kodo_file_read(path.as_ptr(), path.len(), &mut out_ptr, &mut out_len) };
+        assert_eq!(status, 1, "expected Err");
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        let msg = std::str::from_utf8(result).unwrap();
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn kodo_file_write_and_read_roundtrip() {
+        let path = "/tmp/kodo_test_file_write.txt";
+        let content = "hello from kodo";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: all pointers are valid.
+        let status = unsafe {
+            kodo_file_write(
+                path.as_ptr(),
+                path.len(),
+                content.as_ptr(),
+                content.len(),
+                &mut out_ptr,
+                &mut out_len,
+            )
+        };
+        assert_eq!(status, 0, "expected write Ok");
+
+        // Read it back.
+        let mut read_ptr: *const u8 = std::ptr::null();
+        let mut read_len: usize = 0;
+        let status =
+            unsafe { kodo_file_read(path.as_ptr(), path.len(), &mut read_ptr, &mut read_len) };
+        assert_eq!(status, 0, "expected read Ok");
+        let result = unsafe { std::slice::from_raw_parts(read_ptr, read_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), content);
+
+        // Clean up.
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn kodo_list_new_and_push() {
+        let list = kodo_list_new();
+        assert_ne!(list, 0);
+        unsafe { kodo_list_push(list, 42) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 1);
+        unsafe { kodo_list_push(list, 99) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 2);
+    }
+
+    #[test]
+    fn kodo_list_get_works() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+        }
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 10);
+
+        unsafe { kodo_list_get(list, 2, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 30);
+
+        unsafe { kodo_list_get(list, 5, &mut value, &mut is_some) };
+        assert_eq!(is_some, 0);
+    }
+
+    #[test]
+    fn kodo_list_contains_works() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+        }
+        assert_eq!(unsafe { kodo_list_contains(list, 10) }, 1);
+        assert_eq!(unsafe { kodo_list_contains(list, 20) }, 1);
+        assert_eq!(unsafe { kodo_list_contains(list, 30) }, 0);
+    }
+
+    #[test]
+    fn kodo_list_grows_dynamically() {
+        let list = kodo_list_new();
+        for i in 0..100 {
+            unsafe { kodo_list_push(list, i) };
+        }
+        assert_eq!(unsafe { kodo_list_length(list) }, 100);
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 99, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 99);
+    }
+
+    #[test]
+    fn kodo_string_split_works() {
+        let s = "hello,world,foo";
+        let sep = ",";
+        let list = unsafe { kodo_string_split(s.as_ptr(), s.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 3);
+    }
+
+    #[test]
+    fn kodo_map_new_and_insert() {
+        let map = kodo_map_new();
+        assert_ne!(map, 0);
+        unsafe { kodo_map_insert(map, 1, 100) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+    }
+
+    #[test]
+    fn kodo_map_get_works() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 2, 200);
+        }
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get(map, 1, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 100);
+
+        unsafe { kodo_map_get(map, 2, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 200);
+
+        unsafe { kodo_map_get(map, 3, &mut value, &mut is_some) };
+        assert_eq!(is_some, 0);
+    }
+
+    #[test]
+    fn kodo_map_contains_key_works() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 42, 1);
+        }
+        assert_eq!(unsafe { kodo_map_contains_key(map, 42) }, 1);
+        assert_eq!(unsafe { kodo_map_contains_key(map, 99) }, 0);
+    }
+
+    #[test]
+    fn kodo_map_overwrite_existing() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 1, 200);
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get(map, 1, &mut value, &mut is_some) };
+        assert_eq!(value, 200);
+    }
+
+    #[test]
+    fn kodo_map_grows_dynamically() {
+        let map = kodo_map_new();
+        for i in 0..100 {
+            unsafe { kodo_map_insert(map, i, i * 10) };
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 100);
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get(map, 50, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 500);
     }
 }

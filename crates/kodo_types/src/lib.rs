@@ -129,6 +129,8 @@ pub enum TypeError {
         struct_name: String,
         /// Source location.
         span: Span,
+        /// A similar field name found via Levenshtein distance.
+        similar: Option<String>,
     },
     /// A field was specified more than once in a struct literal.
     #[error("duplicate field `{field}` in struct `{struct_name}` at {span:?}")]
@@ -149,6 +151,8 @@ pub enum TypeError {
         type_name: String,
         /// Source location.
         span: Span,
+        /// A similar field name found via Levenshtein distance.
+        similar: Option<String>,
     },
     /// An enum type was referenced but not defined.
     #[error("unknown enum `{name}` at {span:?}")]
@@ -167,6 +171,8 @@ pub enum TypeError {
         enum_name: String,
         /// Source location.
         span: Span,
+        /// A similar variant name found via Levenshtein distance.
+        similar: Option<String>,
     },
     /// A match expression does not cover all variants of an enum.
     #[error("non-exhaustive match on `{enum_name}`: missing variants {missing:?} at {span:?}")]
@@ -263,6 +269,8 @@ pub enum TypeError {
         type_name: String,
         /// Source location.
         span: Span,
+        /// A similar method name found via Levenshtein distance.
+        similar: Option<String>,
     },
     /// An `await` expression was used outside an `async fn`.
     #[error("`.await` can only be used inside an `async fn` at {span:?}")]
@@ -506,25 +514,53 @@ impl kodo_ast::Diagnostic for TypeError {
             Self::MissingStructField { field, .. } => {
                 Some(format!("add `{field}: <value>` to the struct literal"))
             }
-            Self::ExtraStructField { field, .. } => {
-                Some(format!("remove field `{field}` from the struct literal"))
+            Self::ExtraStructField { field, similar, .. } => {
+                if let Some(suggestion) = similar {
+                    Some(format!(
+                        "did you mean `{suggestion}`? (unknown field `{field}`)"
+                    ))
+                } else {
+                    Some(format!("remove field `{field}` from the struct literal"))
+                }
             }
             Self::DuplicateStructField { field, .. } => {
                 Some(format!("remove the duplicate `{field}` field"))
             }
             Self::NoSuchField {
-                field, type_name, ..
-            } => Some(format!(
-                "type `{type_name}` does not have a field named `{field}`"
-            )),
+                field,
+                type_name,
+                similar,
+                ..
+            } => {
+                if let Some(suggestion) = similar {
+                    Some(format!(
+                        "did you mean `{suggestion}`? (type `{type_name}` has no field `{field}`)"
+                    ))
+                } else {
+                    Some(format!(
+                        "type `{type_name}` does not have a field named `{field}`"
+                    ))
+                }
+            }
             Self::UnknownEnum { name, .. } => {
                 Some(format!("define `enum {name} {{ ... }}` or check for typos"))
             }
             Self::UnknownVariant {
-                variant, enum_name, ..
-            } => Some(format!(
-                "check the variants of `{enum_name}` — `{variant}` is not one"
-            )),
+                variant,
+                enum_name,
+                similar,
+                ..
+            } => {
+                if let Some(suggestion) = similar {
+                    Some(format!(
+                        "did you mean `{suggestion}`? (enum `{enum_name}` has no variant `{variant}`)"
+                    ))
+                } else {
+                    Some(format!(
+                        "check the variants of `{enum_name}` — `{variant}` is not one"
+                    ))
+                }
+            }
             Self::NonExhaustiveMatch { missing, .. } => {
                 Some(format!("add match arms for: {}", missing.join(", ")))
             }
@@ -559,10 +595,21 @@ impl kodo_ast::Diagnostic for TypeError {
                 "add method `{method}` to the impl block for trait `{trait_name}`"
             )),
             Self::MethodNotFound {
-                method, type_name, ..
-            } => Some(format!(
-                "type `{type_name}` does not have a method named `{method}`"
-            )),
+                method,
+                type_name,
+                similar,
+                ..
+            } => {
+                if let Some(suggestion) = similar {
+                    Some(format!(
+                        "did you mean `{suggestion}`? (type `{type_name}` has no method `{method}`)"
+                    ))
+                } else {
+                    Some(format!(
+                        "type `{type_name}` does not have a method named `{method}`"
+                    ))
+                }
+            }
             Self::AwaitOutsideAsync { .. } => {
                 Some("move this expression into an `async fn`".to_string())
             }
@@ -735,6 +782,7 @@ impl Type {
                 | Self::Bool
                 | Self::Byte
                 | Self::Unit
+                | Self::Generic(..)
         )
     }
 }
@@ -930,6 +978,22 @@ pub fn resolve_type_with_enums(
     }
 }
 
+/// Finds the most similar name among candidates using Levenshtein distance.
+///
+/// Returns `Some(name)` if a candidate within the distance threshold is found.
+/// The threshold is `max(name.len() / 2, 3)`, ensuring reasonable fuzzy matching.
+fn find_similar_in<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+    let threshold = std::cmp::max(name.len() / 2, 3);
+    for candidate in candidates {
+        let dist = strsim::levenshtein(name, candidate);
+        if dist > 0 && dist <= threshold && best.as_ref().map_or(true, |(d, _)| dist < *d) {
+            best = Some((dist, candidate.to_string()));
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
 /// Extracts the source [`Span`] from an expression.
 fn expr_span(expr: &Expr) -> Span {
     match expr {
@@ -1088,6 +1152,15 @@ pub struct TypeChecker {
     /// Maps function name to a list of ownership qualifiers for each parameter.
     /// Used during `check_call` to determine whether passing a variable moves it.
     fn_param_ownership: std::collections::HashMap<std::string::String, Vec<kodo_ast::Ownership>>,
+    /// Names of imported modules, used to resolve qualified calls like `math.add(1, 2)`.
+    ///
+    /// When the caller registers module names via [`register_imported_module`],
+    /// `check_call` treats `FieldAccess` on module names as qualified function calls.
+    imported_module_names: std::collections::HashSet<std::string::String>,
+    /// Definition index: maps identifiers to their source spans.
+    ///
+    /// Used by the LSP for goto-definition. Built during `check_module`.
+    definition_spans: std::collections::HashMap<std::string::String, Span>,
 }
 
 impl TypeChecker {
@@ -1118,9 +1191,25 @@ impl TypeChecker {
             active_borrows: std::collections::HashSet::new(),
             ownership_scopes: Vec::new(),
             fn_param_ownership: std::collections::HashMap::new(),
+            imported_module_names: std::collections::HashSet::new(),
+            definition_spans: std::collections::HashMap::new(),
         };
         checker.register_builtins();
         checker
+    }
+
+    /// Registers a module name as imported, enabling qualified calls like `mod.func()`.
+    pub fn register_imported_module(&mut self, name: std::string::String) {
+        self.imported_module_names.insert(name);
+    }
+
+    /// Returns the definition spans index built during type checking.
+    ///
+    /// Maps identifier names (functions, variables, types) to their definition spans.
+    /// Used by the LSP for goto-definition.
+    #[must_use]
+    pub fn definition_spans(&self) -> &std::collections::HashMap<std::string::String, Span> {
+        &self.definition_spans
     }
 
     /// Registers builtin functions in the type environment.
@@ -1130,6 +1219,10 @@ impl TypeChecker {
     /// - `println(String) -> ()`
     /// - `print(String) -> ()`
     /// - `print_int(Int) -> ()`
+    /// - String methods: `length`, `contains`, `starts_with`, `ends_with`,
+    ///   `trim`, `to_upper`, `to_lower`, `substring`
+    /// - Int methods: `to_string`, `to_float64`
+    /// - Float64 methods: `to_string`, `to_int`
     fn register_builtins(&mut self) {
         self.env.insert(
             "println".to_string(),
@@ -1159,6 +1252,334 @@ impl TypeChecker {
         self.env.insert(
             "clamp".to_string(),
             Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+
+        // File I/O builtins
+        self.env.insert(
+            "file_exists".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Bool)),
+        );
+        self.env.insert(
+            "file_read".to_string(),
+            Type::Function(
+                vec![Type::String],
+                Box::new(Type::Enum("Result__String_String".to_string())),
+            ),
+        );
+        self.env.insert(
+            "file_write".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Enum("Result__Unit_String".to_string())),
+            ),
+        );
+
+        self.register_string_methods();
+        self.register_int_methods();
+        self.register_float_methods();
+        self.register_list_functions();
+        self.register_map_functions();
+    }
+
+    /// Registers builtin methods for the `String` type.
+    ///
+    /// These methods are available on all String values and are implemented
+    /// in the runtime as `kodo_string_*` functions.
+    #[allow(clippy::too_many_lines)]
+    fn register_string_methods(&mut self) {
+        // String.length() -> Int
+        self.method_lookup.insert(
+            ("String".to_string(), "length".to_string()),
+            ("String_length".to_string(), vec![Type::String], Type::Int),
+        );
+        self.env.insert(
+            "String_length".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // String.contains(s: String) -> Bool
+        self.method_lookup.insert(
+            ("String".to_string(), "contains".to_string()),
+            (
+                "String_contains".to_string(),
+                vec![Type::String, Type::String],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "String_contains".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Bool)),
+        );
+
+        // String.starts_with(s: String) -> Bool
+        self.method_lookup.insert(
+            ("String".to_string(), "starts_with".to_string()),
+            (
+                "String_starts_with".to_string(),
+                vec![Type::String, Type::String],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "String_starts_with".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Bool)),
+        );
+
+        // String.ends_with(s: String) -> Bool
+        self.method_lookup.insert(
+            ("String".to_string(), "ends_with".to_string()),
+            (
+                "String_ends_with".to_string(),
+                vec![Type::String, Type::String],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "String_ends_with".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Bool)),
+        );
+
+        // String.trim() -> String
+        self.method_lookup.insert(
+            ("String".to_string(), "trim".to_string()),
+            ("String_trim".to_string(), vec![Type::String], Type::String),
+        );
+        self.env.insert(
+            "String_trim".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::String)),
+        );
+
+        // String.to_upper() -> String
+        self.method_lookup.insert(
+            ("String".to_string(), "to_upper".to_string()),
+            (
+                "String_to_upper".to_string(),
+                vec![Type::String],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "String_to_upper".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::String)),
+        );
+
+        // String.to_lower() -> String
+        self.method_lookup.insert(
+            ("String".to_string(), "to_lower".to_string()),
+            (
+                "String_to_lower".to_string(),
+                vec![Type::String],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "String_to_lower".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::String)),
+        );
+
+        // String.substring(start: Int, end: Int) -> String
+        self.method_lookup.insert(
+            ("String".to_string(), "substring".to_string()),
+            (
+                "String_substring".to_string(),
+                vec![Type::String, Type::Int, Type::Int],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "String_substring".to_string(),
+            Type::Function(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+
+        // String.split(sep: String) -> List<String>
+        self.method_lookup.insert(
+            ("String".to_string(), "split".to_string()),
+            (
+                "String_split".to_string(),
+                vec![Type::String, Type::String],
+                Type::Generic("List".to_string(), vec![Type::String]),
+            ),
+        );
+        self.env.insert(
+            "String_split".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Generic("List".to_string(), vec![Type::String])),
+            ),
+        );
+    }
+
+    /// Registers builtin methods for the `Int` type.
+    fn register_int_methods(&mut self) {
+        // Int.to_string() -> String
+        self.method_lookup.insert(
+            ("Int".to_string(), "to_string".to_string()),
+            ("Int_to_string".to_string(), vec![Type::Int], Type::String),
+        );
+        self.env.insert(
+            "Int_to_string".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+
+        // Int.to_float64() -> Float64
+        self.method_lookup.insert(
+            ("Int".to_string(), "to_float64".to_string()),
+            ("Int_to_float64".to_string(), vec![Type::Int], Type::Float64),
+        );
+        self.env.insert(
+            "Int_to_float64".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Float64)),
+        );
+    }
+
+    /// Registers builtin methods for the `Float64` type.
+    fn register_float_methods(&mut self) {
+        // Float64.to_string() -> String
+        self.method_lookup.insert(
+            ("Float64".to_string(), "to_string".to_string()),
+            (
+                "Float64_to_string".to_string(),
+                vec![Type::Float64],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "Float64_to_string".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::String)),
+        );
+
+        // Float64.to_int() -> Int
+        self.method_lookup.insert(
+            ("Float64".to_string(), "to_int".to_string()),
+            ("Float64_to_int".to_string(), vec![Type::Float64], Type::Int),
+        );
+        self.env.insert(
+            "Float64_to_int".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers builtin functions for `List<T>` operations.
+    ///
+    /// These are free functions (not methods) available to all Kōdo programs.
+    /// At runtime, lists are opaque heap pointers managed by the runtime.
+    fn register_list_functions(&mut self) {
+        // list_new() -> List<Int>  (generic in spirit, monomorphic at runtime)
+        self.env.insert(
+            "list_new".to_string(),
+            Type::Function(
+                vec![],
+                Box::new(Type::Generic("List".to_string(), vec![Type::Int])),
+            ),
+        );
+
+        // list_push(list: List<Int>, item: Int) -> ()
+        self.env.insert(
+            "list_push".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Unit),
+            ),
+        );
+
+        // list_get(list: List<Int>, index: Int) -> Int
+        self.env.insert(
+            "list_get".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+
+        // list_length(list: List<Int>) -> Int
+        self.env.insert(
+            "list_length".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Box::new(Type::Int),
+            ),
+        );
+
+        // list_contains(list: List<Int>, item: Int) -> Bool
+        self.env.insert(
+            "list_contains".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
+    }
+
+    /// Registers builtin functions for `Map<K, V>` operations.
+    ///
+    /// Maps use integer keys and values at the runtime level. All values
+    /// are represented as i64 (pointers or values).
+    fn register_map_functions(&mut self) {
+        // map_new() -> Map<Int, Int>
+        self.env.insert(
+            "map_new".to_string(),
+            Type::Function(
+                vec![],
+                Box::new(Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])),
+            ),
+        );
+
+        // map_insert(map: Map<Int, Int>, key: Int, value: Int) -> ()
+        self.env.insert(
+            "map_insert".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]),
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Unit),
+            ),
+        );
+
+        // map_get(map: Map<Int, Int>, key: Int) -> Int
+        self.env.insert(
+            "map_get".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+
+        // map_contains_key(map: Map<Int, Int>, key: Int) -> Bool
+        self.env.insert(
+            "map_contains_key".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
+
+        // map_length(map: Map<Int, Int>) -> Int
+        self.env.insert(
+            "map_length".to_string(),
+            Type::Function(
+                vec![Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])],
+                Box::new(Type::Int),
+            ),
         );
     }
 
@@ -1197,6 +1618,8 @@ impl TypeChecker {
                     fields.push((field.name.clone(), ty));
                 }
                 self.struct_registry.insert(type_decl.name.clone(), fields);
+                self.definition_spans
+                    .insert(type_decl.name.clone(), type_decl.span);
             } else {
                 // Generic struct — store definition for monomorphization.
                 self.generic_structs.insert(
@@ -1371,6 +1794,8 @@ impl TypeChecker {
                 func.name.clone(),
                 Type::Function(param_types, Box::new(ret_type)),
             );
+            // Record definition span for LSP goto-definition.
+            self.definition_spans.insert(func.name.clone(), func.span);
             // Record parameter ownership qualifiers for ownership tracking in check_call.
             let qualifiers: Vec<kodo_ast::Ownership> =
                 func.params.iter().map(|p| p.ownership).collect();
@@ -1754,7 +2179,17 @@ impl TypeChecker {
                     Some(expr) => self.infer_expr(expr)?,
                     None => Type::Unit,
                 };
-                TypeEnv::check_eq(&self.current_return_type, &value_ty, *span)
+                TypeEnv::check_eq(&self.current_return_type, &value_ty, *span)?;
+                // A borrowed reference cannot escape its scope via return.
+                if let Some(Expr::Ident(name, _)) = value {
+                    if let Some(OwnershipState::Borrowed) = self.ownership_map.get(name) {
+                        return Err(TypeError::BorrowEscapesScope {
+                            name: name.clone(),
+                            span: *span,
+                        });
+                    }
+                }
+                Ok(())
             }
             Stmt::Expr(expr) => {
                 self.infer_expr(expr)?;
@@ -1914,10 +2349,15 @@ impl TypeChecker {
                             .iter()
                             .find(|(n, _)| n == field)
                             .map(|(_, t)| t.clone());
-                        field_ty.ok_or_else(|| TypeError::NoSuchField {
-                            field: field.clone(),
-                            type_name: name.clone(),
-                            span: *span,
+                        field_ty.ok_or_else(|| {
+                            let similar =
+                                find_similar_in(field, fields.iter().map(|(n, _)| n.as_str()));
+                            TypeError::NoSuchField {
+                                field: field.clone(),
+                                type_name: name.clone(),
+                                span: *span,
+                                similar,
+                            }
                         })
                     }
                     _ => {
@@ -1950,10 +2390,15 @@ impl TypeChecker {
                 // Check for extra fields.
                 for field in fields {
                     if !expected_fields.iter().any(|(n, _)| n == &field.name) {
+                        let similar = find_similar_in(
+                            &field.name,
+                            expected_fields.iter().map(|(n, _)| n.as_str()),
+                        );
                         return Err(TypeError::ExtraStructField {
                             field: field.name.clone(),
                             struct_name: name.clone(),
                             span: field.span,
+                            similar,
                         });
                     }
                 }
@@ -1994,10 +2439,13 @@ impl TypeChecker {
                 if let Some(variants) = self.enum_registry.get(enum_name).cloned() {
                     let variant_def =
                         variants.iter().find(|(n, _)| n == variant).ok_or_else(|| {
+                            let similar =
+                                find_similar_in(variant, variants.iter().map(|(n, _)| n.as_str()));
                             TypeError::UnknownVariant {
                                 variant: variant.clone(),
                                 enum_name: enum_name.clone(),
                                 span: *span,
+                                similar,
                             }
                         })?;
                     let expected_field_types = variant_def.1.clone();
@@ -2021,10 +2469,17 @@ impl TypeChecker {
                         def.variants
                             .iter()
                             .find(|(n, _)| n == variant)
-                            .ok_or_else(|| TypeError::UnknownVariant {
-                                variant: variant.clone(),
-                                enum_name: enum_name.clone(),
-                                span: *span,
+                            .ok_or_else(|| {
+                                let similar = find_similar_in(
+                                    variant,
+                                    def.variants.iter().map(|(n, _)| n.as_str()),
+                                );
+                                TypeError::UnknownVariant {
+                                    variant: variant.clone(),
+                                    enum_name: enum_name.clone(),
+                                    span: *span,
+                                    similar,
+                                }
                             })?;
                     if args.len() != variant_def.1.len() {
                         return Err(TypeError::ArityMismatch {
@@ -2494,6 +2949,24 @@ impl TypeChecker {
     /// Also tracks ownership: arguments passed to `own` parameters are moved.
     #[allow(clippy::too_many_lines)]
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
+        // Check for qualified call pattern: module.func(args)
+        // If the object is an identifier matching an imported module name,
+        // resolve field as a function in that module's namespace.
+        if let Expr::FieldAccess {
+            object,
+            field,
+            span: _fa_span,
+        } = callee
+        {
+            if let Expr::Ident(module_name, _) = object.as_ref() {
+                if self.imported_module_names.contains(module_name) {
+                    // Qualified call: treat as a direct call to `field`
+                    let field_ident = Expr::Ident(field.clone(), span);
+                    return self.check_call(&field_ident, args, span);
+                }
+            }
+        }
+
         // Check for method call pattern: callee is FieldAccess (e.g. obj.method(args))
         if let Expr::FieldAccess {
             object,
@@ -2504,6 +2977,9 @@ impl TypeChecker {
             let obj_ty = self.infer_expr(object)?;
             let type_name = match &obj_ty {
                 Type::Struct(n) | Type::Enum(n) => n.clone(),
+                Type::String => "String".to_string(),
+                Type::Int => "Int".to_string(),
+                Type::Float64 => "Float64".to_string(),
                 _ => std::string::String::new(),
             };
             if !type_name.is_empty() {
@@ -2538,10 +3014,19 @@ impl TypeChecker {
                     self.method_resolutions.insert(span.start, mangled_name);
                     return Ok(ret_type);
                 }
+                // Find similar method names for this type.
+                let similar = find_similar_in(
+                    field,
+                    self.method_lookup
+                        .keys()
+                        .filter(|(t, _)| t == &type_name)
+                        .map(|(_, m)| m.as_str()),
+                );
                 return Err(TypeError::MethodNotFound {
                     method: field.clone(),
                     type_name,
                     span,
+                    similar,
                 });
             }
         }
@@ -3079,18 +3564,10 @@ impl TypeChecker {
 
     /// Finds the most similar name in the current environment using Levenshtein distance.
     ///
-    /// Returns `Some(name)` if a name within distance 3 is found (and shorter than
-    /// the input name's length), otherwise `None`.
+    /// Returns `Some(name)` if a name within the distance threshold is found,
+    /// otherwise `None`.
     fn find_similar_name(&self, name: &str) -> Option<String> {
-        let mut best: Option<(usize, String)> = None;
-        let threshold = std::cmp::max(name.len() / 2, 3);
-        for binding_name in self.env.names() {
-            let dist = strsim::levenshtein(name, binding_name);
-            if dist > 0 && dist <= threshold && best.as_ref().map_or(true, |(d, _)| dist < *d) {
-                best = Some((dist, binding_name.to_string()));
-            }
-        }
-        best.map(|(_, n)| n)
+        find_similar_in(name, self.env.names())
     }
 
     /// Computes the source line number from a span's byte offset.
@@ -5546,5 +6023,404 @@ mod tests {
         assert!(patch.is_some());
         let patch = patch.unwrap();
         assert!(patch.replacement.contains("@reviewed_by"));
+    }
+
+    #[test]
+    fn borrow_escapes_scope_detected() {
+        // fn bad(ref s: String) -> String { return s }
+        // Returning a borrowed parameter should fail with E0241.
+        let func = make_function(
+            "bad",
+            vec![Param {
+                name: "s".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Ref,
+                span: Span::new(0, 10),
+            }],
+            TypeExpr::Named("String".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 60),
+                value: Some(Expr::Ident("s".to_string(), Span::new(57, 58))),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err(), "should detect borrow escaping scope");
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0241", "expected E0241, got {}", err.code());
+    }
+
+    #[test]
+    fn return_owned_value_ok() {
+        // fn good(own s: String) -> String { return s }
+        // Returning an owned parameter should succeed.
+        let func = make_function(
+            "good",
+            vec![Param {
+                name: "s".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Owned,
+                span: Span::new(0, 10),
+            }],
+            TypeExpr::Named("String".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 60),
+                value: Some(Expr::Ident("s".to_string(), Span::new(57, 58))),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "returning an owned value should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn builtin_string_methods_registered() {
+        let checker = TypeChecker::new();
+        let lookup = checker.method_lookup();
+
+        // String.length() -> Int
+        let key = ("String".to_string(), "length".to_string());
+        let (mangled, params, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(mangled, "String_length");
+        assert_eq!(params, vec![Type::String]);
+        assert_eq!(ret, Type::Int);
+
+        // String.contains(String) -> Bool
+        let key = ("String".to_string(), "contains".to_string());
+        let (mangled, params, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(mangled, "String_contains");
+        assert_eq!(params, vec![Type::String, Type::String]);
+        assert_eq!(ret, Type::Bool);
+
+        // String.starts_with(String) -> Bool
+        let key = ("String".to_string(), "starts_with".to_string());
+        assert!(
+            lookup.contains_key(&key),
+            "starts_with should be registered"
+        );
+
+        // String.ends_with(String) -> Bool
+        let key = ("String".to_string(), "ends_with".to_string());
+        assert!(lookup.contains_key(&key), "ends_with should be registered");
+
+        // String.trim() -> String
+        let key = ("String".to_string(), "trim".to_string());
+        let (_, _, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(ret, Type::String);
+
+        // String.to_upper() -> String
+        let key = ("String".to_string(), "to_upper".to_string());
+        assert!(lookup.contains_key(&key), "to_upper should be registered");
+
+        // String.to_lower() -> String
+        let key = ("String".to_string(), "to_lower".to_string());
+        assert!(lookup.contains_key(&key), "to_lower should be registered");
+
+        // String.substring(Int, Int) -> String
+        let key = ("String".to_string(), "substring".to_string());
+        let (_, params, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(params, vec![Type::String, Type::Int, Type::Int]);
+        assert_eq!(ret, Type::String);
+    }
+
+    #[test]
+    fn builtin_int_methods_registered() {
+        let checker = TypeChecker::new();
+        let lookup = checker.method_lookup();
+
+        // Int.to_string() -> String
+        let key = ("Int".to_string(), "to_string".to_string());
+        let (mangled, params, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(mangled, "Int_to_string");
+        assert_eq!(params, vec![Type::Int]);
+        assert_eq!(ret, Type::String);
+
+        // Int.to_float64() -> Float64
+        let key = ("Int".to_string(), "to_float64".to_string());
+        let (_, _, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(ret, Type::Float64);
+    }
+
+    #[test]
+    fn builtin_float64_methods_registered() {
+        let checker = TypeChecker::new();
+        let lookup = checker.method_lookup();
+
+        // Float64.to_string() -> String
+        let key = ("Float64".to_string(), "to_string".to_string());
+        let (mangled, _, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(mangled, "Float64_to_string");
+        assert_eq!(ret, Type::String);
+
+        // Float64.to_int() -> Int
+        let key = ("Float64".to_string(), "to_int".to_string());
+        let (_, _, ret) = lookup
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), vec![], Type::Unit));
+        assert_eq!(ret, Type::Int);
+    }
+
+    #[test]
+    fn string_method_call_typechecks() {
+        // Test that "hello".length() type-checks via the full module pipeline.
+        let func = make_function(
+            "test_string_length",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 80),
+                value: Some(Expr::Call {
+                    callee: Box::new(Expr::FieldAccess {
+                        object: Box::new(Expr::StringLit("hello".to_string(), Span::new(55, 62))),
+                        field: "length".to_string(),
+                        span: Span::new(55, 69),
+                    }),
+                    args: vec![],
+                    span: Span::new(55, 71),
+                }),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "String.length() should type-check: {result:?}"
+        );
+    }
+
+    #[test]
+    fn string_contains_method_typechecks() {
+        let func = make_function(
+            "test_contains",
+            vec![],
+            TypeExpr::Named("Bool".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 100),
+                value: Some(Expr::Call {
+                    callee: Box::new(Expr::FieldAccess {
+                        object: Box::new(Expr::StringLit(
+                            "hello world".to_string(),
+                            Span::new(55, 68),
+                        )),
+                        field: "contains".to_string(),
+                        span: Span::new(55, 77),
+                    }),
+                    args: vec![Expr::StringLit("world".to_string(), Span::new(78, 85))],
+                    span: Span::new(55, 86),
+                }),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "String.contains() should type-check: {result:?}"
+        );
+    }
+
+    #[test]
+    fn int_to_string_method_typechecks() {
+        let func = make_function(
+            "test_int_to_string",
+            vec![],
+            TypeExpr::Named("String".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 80),
+                value: Some(Expr::Call {
+                    callee: Box::new(Expr::FieldAccess {
+                        object: Box::new(Expr::IntLit(42, Span::new(55, 57))),
+                        field: "to_string".to_string(),
+                        span: Span::new(55, 67),
+                    }),
+                    args: vec![],
+                    span: Span::new(55, 69),
+                }),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "Int.to_string() should type-check: {result:?}"
+        );
+    }
+
+    #[test]
+    fn method_not_found_suggests_similar() {
+        // Call "hello".lenght() — should suggest "length".
+        let func = make_function(
+            "test_typo",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span: Span::new(50, 80),
+                value: Some(Expr::Call {
+                    callee: Box::new(Expr::FieldAccess {
+                        object: Box::new(Expr::StringLit("hello".to_string(), Span::new(55, 62))),
+                        field: "lenght".to_string(),
+                        span: Span::new(55, 69),
+                    }),
+                    args: vec![],
+                    span: Span::new(55, 71),
+                }),
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        if let Err(TypeError::MethodNotFound { similar, .. }) = result {
+            assert_eq!(
+                similar,
+                Some("length".to_string()),
+                "should suggest 'length' for typo 'lenght'"
+            );
+        } else {
+            panic!("expected MethodNotFound error");
+        }
+    }
+
+    #[test]
+    fn find_similar_in_finds_closest() {
+        let candidates = vec!["length", "contains", "starts_with", "ends_with"];
+        assert_eq!(
+            super::find_similar_in("lenght", candidates.into_iter()),
+            Some("length".to_string())
+        );
+        assert_eq!(
+            super::find_similar_in("contans", vec!["contains", "length"].into_iter()),
+            Some("contains".to_string())
+        );
+        // No match when distance is too large.
+        assert_eq!(
+            super::find_similar_in("xyz", vec!["contains", "length"].into_iter()),
+            None
+        );
+    }
+
+    #[test]
+    fn list_functions_registered() {
+        let checker = TypeChecker::new();
+        let list_new_ty = checker.env.lookup("list_new");
+        assert!(list_new_ty.is_some(), "list_new should be registered");
+        let list_push_ty = checker.env.lookup("list_push");
+        assert!(list_push_ty.is_some(), "list_push should be registered");
+        let list_get_ty = checker.env.lookup("list_get");
+        assert!(list_get_ty.is_some(), "list_get should be registered");
+        let list_length_ty = checker.env.lookup("list_length");
+        assert!(list_length_ty.is_some(), "list_length should be registered");
+        let list_contains_ty = checker.env.lookup("list_contains");
+        assert!(
+            list_contains_ty.is_some(),
+            "list_contains should be registered"
+        );
+    }
+
+    #[test]
+    fn map_functions_registered() {
+        let checker = TypeChecker::new();
+        let map_new_ty = checker.env.lookup("map_new");
+        assert!(map_new_ty.is_some(), "map_new should be registered");
+        let map_insert_ty = checker.env.lookup("map_insert");
+        assert!(map_insert_ty.is_some(), "map_insert should be registered");
+        let map_get_ty = checker.env.lookup("map_get");
+        assert!(map_get_ty.is_some(), "map_get should be registered");
+    }
+
+    #[test]
+    fn string_split_method_registered() {
+        let checker = TypeChecker::new();
+        let lookup = checker.method_lookup();
+        let split = lookup.get(&("String".to_string(), "split".to_string()));
+        assert!(split.is_some(), "String.split should be registered");
+        let (mangled, params, ret) = split.unwrap();
+        assert_eq!(mangled, "String_split");
+        assert_eq!(params.len(), 2); // self + separator
+        assert!(matches!(ret, Type::Generic(name, _) if name == "List"));
+    }
+
+    #[test]
+    fn qualified_call_with_imported_module() {
+        let source = r#"module helper {
+    meta {
+        purpose: "helper module"
+        version: "1.0.0"
+    }
+
+    fn double(x: Int) -> Int {
+        return x + x
+    }
+}"#;
+        // Simulate importing helper module then calling helper.double()
+        let module = kodo_parser::parse(source).unwrap();
+        let mut checker = TypeChecker::new();
+        // First, type check the helper module to register its functions
+        let _ = checker.check_module(&module);
+        // Register "helper" as an imported module name
+        checker.register_imported_module("helper".to_string());
+        // Now "double" should be accessible, and "helper.double(1)" should resolve
+        let double_ty = checker.env.lookup("double");
+        assert!(
+            double_ty.is_some(),
+            "double should be in env after check_module"
+        );
+    }
+
+    #[test]
+    fn generic_types_are_copy() {
+        assert!(Type::Generic("List".to_string(), vec![Type::Int]).is_copy());
+        assert!(Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]).is_copy());
+    }
+
+    #[test]
+    fn definition_spans_populated_after_check() {
+        let source = r#"module test {
+    meta {
+        purpose: "test"
+        version: "1.0.0"
+    }
+
+    fn my_func(x: Int) -> Int {
+        return x
+    }
+}"#;
+        let module = kodo_parser::parse(source).unwrap();
+        let mut checker = TypeChecker::new();
+        let _ = checker.check_module(&module);
+        let spans = checker.definition_spans();
+        assert!(
+            spans.contains_key("my_func"),
+            "should have definition span for my_func"
+        );
     }
 }

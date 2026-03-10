@@ -59,3 +59,8 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
 | [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |
 | [`ownership.ko`](../examples/ownership.ko) | Linear ownership with `own` and `ref` |
+| [`list_demo.ko`](../examples/list_demo.ko) | `List<T>` built-in collection |
+| [`map_demo.ko`](../examples/map_demo.ko) | `Map<K,V>` built-in collection |
+| [`string_demo.ko`](../examples/string_demo.ko) | String methods including `split` |
+| [`file_io_demo.ko`](../examples/file_io_demo.ko) | File I/O operations |
+| [`contracts_smt_demo.ko`](../examples/contracts_smt_demo.ko) | SMT-verified contracts |

@@ -8,11 +8,10 @@
 //!
 //! - **\[CC\]** *The Calculus of Computation* Ch. 10–12 — Decision procedures
 //!   and SMT solving. Our `expr_to_z3` function implements the translation
-//!   from the contract sub-language to QF_LIA (quantifier-free linear integer
+//!   from the contract sub-language to `QF_LIA` (quantifier-free linear integer
 //!   arithmetic) with boolean connectives.
 
 use kodo_ast::{BinOp, Expr, UnaryOp};
-use z3::ast::Ast;
 
 /// The outcome of an SMT verification attempt.
 ///
@@ -31,7 +30,7 @@ pub enum SmtResult {
 }
 
 /// Z3 solver timeout in milliseconds.
-const Z3_TIMEOUT_MS: u32 = 5_000;
+const Z3_TIMEOUT_MS: u64 = 5_000;
 
 /// Translates a Kodo [`Expr`] to a Z3 boolean or integer AST node.
 ///
@@ -45,32 +44,33 @@ const Z3_TIMEOUT_MS: u32 = 5_000;
 ///
 /// Returns `None` if the expression contains unsupported constructs (e.g.,
 /// field access, closures, function calls).
-pub fn expr_to_z3<'ctx>(ctx: &'ctx z3::Context, expr: &Expr) -> Option<Z3Expr<'ctx>> {
+#[must_use]
+pub fn expr_to_z3(expr: &Expr) -> Option<Z3Expr> {
     match expr {
-        Expr::IntLit(value, _) => Some(Z3Expr::Int(z3::ast::Int::from_i64(ctx, *value))),
-        Expr::BoolLit(value, _) => Some(Z3Expr::Bool(z3::ast::Bool::from_bool(ctx, *value))),
+        Expr::IntLit(value, _) => Some(Z3Expr::Int(z3::ast::Int::from_i64(*value))),
+        Expr::BoolLit(value, _) => Some(Z3Expr::Bool(z3::ast::Bool::from_bool(*value))),
         Expr::Ident(name, _) => {
             // Identifiers are uninterpreted integer constants by default.
             // In a more sophisticated system we would track types, but for
             // contract verification of integer-typed params this is sufficient.
-            Some(Z3Expr::Int(z3::ast::Int::new_const(ctx, name.as_str())))
+            Some(Z3Expr::Int(z3::ast::Int::new_const(name.as_str())))
         }
         Expr::UnaryOp { op, operand, .. } => {
-            let inner = expr_to_z3(ctx, operand)?;
+            let inner = expr_to_z3(operand)?;
             match op {
                 UnaryOp::Not => {
-                    let b = inner.as_bool()?;
+                    let b = inner.into_bool()?;
                     Some(Z3Expr::Bool(b.not()))
                 }
                 UnaryOp::Neg => {
-                    let i = inner.as_int()?;
+                    let i = inner.into_int()?;
                     Some(Z3Expr::Int(i.unary_minus()))
                 }
             }
         }
         Expr::BinaryOp {
             left, op, right, ..
-        } => translate_binop(ctx, left, *op, right),
+        } => translate_binop(left, *op, right),
         // Unsupported expression kinds — return None so the caller can
         // fall back to runtime verification.
         _ => None,
@@ -83,16 +83,16 @@ pub fn expr_to_z3<'ctx>(ctx: &'ctx z3::Context, expr: &Expr) -> Option<Z3Expr<'c
 /// arithmetic sub-expressions and boolean predicates, and Z3 distinguishes
 /// between the two sorts.
 #[derive(Debug)]
-pub enum Z3Expr<'ctx> {
+pub enum Z3Expr {
     /// A Z3 integer expression.
-    Int(z3::ast::Int<'ctx>),
+    Int(z3::ast::Int),
     /// A Z3 boolean expression.
-    Bool(z3::ast::Bool<'ctx>),
+    Bool(z3::ast::Bool),
 }
 
-impl<'ctx> Z3Expr<'ctx> {
+impl Z3Expr {
     /// Extracts the inner boolean, returning `None` if this is an integer.
-    fn as_bool(self) -> Option<z3::ast::Bool<'ctx>> {
+    fn into_bool(self) -> Option<z3::ast::Bool> {
         match self {
             Self::Bool(b) => Some(b),
             Self::Int(_) => None,
@@ -100,7 +100,7 @@ impl<'ctx> Z3Expr<'ctx> {
     }
 
     /// Extracts the inner integer, returning `None` if this is a boolean.
-    fn as_int(self) -> Option<z3::ast::Int<'ctx>> {
+    fn into_int(self) -> Option<z3::ast::Int> {
         match self {
             Self::Int(i) => Some(i),
             Self::Bool(_) => None,
@@ -109,83 +109,78 @@ impl<'ctx> Z3Expr<'ctx> {
 }
 
 /// Translates a binary operation to a Z3 expression.
-fn translate_binop<'ctx>(
-    ctx: &'ctx z3::Context,
-    left: &Expr,
-    op: BinOp,
-    right: &Expr,
-) -> Option<Z3Expr<'ctx>> {
-    let lhs = expr_to_z3(ctx, left)?;
-    let rhs = expr_to_z3(ctx, right)?;
+fn translate_binop(left: &Expr, op: BinOp, right: &Expr) -> Option<Z3Expr> {
+    let lhs = expr_to_z3(left)?;
+    let rhs = expr_to_z3(right)?;
 
     match op {
         // Arithmetic — both sides must be integers
         BinOp::Add => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
-            Some(Z3Expr::Int(z3::ast::Int::add(ctx, &[&l, &r])))
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
+            Some(Z3Expr::Int(z3::ast::Int::add(&[&l, &r])))
         }
         BinOp::Sub => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
-            Some(Z3Expr::Int(z3::ast::Int::sub(ctx, &[&l, &r])))
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
+            Some(Z3Expr::Int(z3::ast::Int::sub(&[&l, &r])))
         }
         BinOp::Mul => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
-            Some(Z3Expr::Int(z3::ast::Int::mul(ctx, &[&l, &r])))
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
+            Some(Z3Expr::Int(z3::ast::Int::mul(&[&l, &r])))
         }
         BinOp::Div => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Int(l.div(&r)))
         }
         BinOp::Mod => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Int(l.modulo(&r)))
         }
         // Comparisons — both sides must be integers, result is boolean
         BinOp::Eq => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
-            Some(Z3Expr::Bool(l._eq(&r)))
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
+            Some(Z3Expr::Bool(l.eq(&r)))
         }
         BinOp::Ne => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
-            Some(Z3Expr::Bool(z3::ast::Ast::distinct(ctx, &[&l, &r])))
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
+            Some(Z3Expr::Bool(l.ne(&r)))
         }
         BinOp::Lt => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Bool(l.lt(&r)))
         }
         BinOp::Gt => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Bool(l.gt(&r)))
         }
         BinOp::Le => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Bool(l.le(&r)))
         }
         BinOp::Ge => {
-            let l = lhs.as_int()?;
-            let r = rhs.as_int()?;
+            let l = lhs.into_int()?;
+            let r = rhs.into_int()?;
             Some(Z3Expr::Bool(l.ge(&r)))
         }
         // Logical — both sides must be booleans
         BinOp::And => {
-            let l = lhs.as_bool()?;
-            let r = rhs.as_bool()?;
-            Some(Z3Expr::Bool(z3::ast::Bool::and(ctx, &[&l, &r])))
+            let l = lhs.into_bool()?;
+            let r = rhs.into_bool()?;
+            Some(Z3Expr::Bool(z3::ast::Bool::and(&[&l, &r])))
         }
         BinOp::Or => {
-            let l = lhs.as_bool()?;
-            let r = rhs.as_bool()?;
-            Some(Z3Expr::Bool(z3::ast::Bool::or(ctx, &[&l, &r])))
+            let l = lhs.into_bool()?;
+            let r = rhs.into_bool()?;
+            Some(Z3Expr::Bool(z3::ast::Bool::or(&[&l, &r])))
         }
     }
 }
@@ -199,6 +194,7 @@ fn translate_binop<'ctx>(
 /// Note: without additional context (e.g., call-site argument constraints),
 /// this can only prove trivially true contracts like `requires { true }`.
 /// More sophisticated verification would add caller constraints as assumptions.
+#[must_use]
 pub fn verify_precondition(expr: &Expr) -> SmtResult {
     verify_expr(expr)
 }
@@ -208,8 +204,65 @@ pub fn verify_precondition(expr: &Expr) -> SmtResult {
 /// Same strategy as [`verify_precondition`] — checks if the negation of the
 /// postcondition is unsatisfiable. In practice, postcondition verification
 /// would also need the function body as additional context.
+#[must_use]
 pub fn verify_postcondition(expr: &Expr) -> SmtResult {
     verify_expr(expr)
+}
+
+/// Verifies that a conclusion follows from a set of hypotheses.
+///
+/// Adds each hypothesis as an assumption, then checks if the negation
+/// of the conclusion is unsatisfiable under those assumptions. This
+/// allows proving contracts like `requires { x > 0 }` implies `x + 1 > 0`.
+///
+/// # Returns
+///
+/// - `Proved` if the conclusion necessarily follows from the hypotheses
+/// - `Refuted` if Z3 found a counter-example (hypotheses true, conclusion false)
+/// - `Unknown` if any expression could not be translated or Z3 timed out
+#[must_use]
+pub fn verify_with_hypotheses(hypotheses: &[&Expr], conclusion: &Expr) -> SmtResult {
+    let mut cfg = z3::Config::new();
+    cfg.set_timeout_msec(Z3_TIMEOUT_MS);
+
+    z3::with_z3_config(&cfg, || {
+        let solver = z3::Solver::new();
+
+        // Add each hypothesis as an assumption.
+        for hyp in hypotheses {
+            let Some(z3_hyp) = expr_to_z3(hyp) else {
+                return SmtResult::Unknown;
+            };
+            let bool_hyp = match z3_hyp {
+                Z3Expr::Bool(b) => b,
+                Z3Expr::Int(_) => return SmtResult::Unknown,
+            };
+            solver.assert(bool_hyp);
+        }
+
+        // Translate the conclusion.
+        let Some(z3_concl) = expr_to_z3(conclusion) else {
+            return SmtResult::Unknown;
+        };
+        let bool_concl = match z3_concl {
+            Z3Expr::Bool(b) => b,
+            Z3Expr::Int(_) => return SmtResult::Unknown,
+        };
+
+        // Assert the negation of the conclusion.
+        solver.assert(bool_concl.not());
+
+        match solver.check() {
+            z3::SatResult::Unsat => SmtResult::Proved,
+            z3::SatResult::Sat => {
+                let model_str = solver
+                    .get_model()
+                    .map_or_else(|| "no model available".to_string(), |m| m.to_string());
+                SmtResult::Refuted(format!("counter-example: {model_str}"))
+            }
+            z3::SatResult::Unknown => SmtResult::Unknown,
+        }
+    })
 }
 
 /// Core verification: checks if an expression is a tautology via Z3.
@@ -218,37 +271,38 @@ pub fn verify_postcondition(expr: &Expr) -> SmtResult {
 /// negates it, and checks satisfiability.
 fn verify_expr(expr: &Expr) -> SmtResult {
     let mut cfg = z3::Config::new();
-    cfg.set_param_value("timeout", &Z3_TIMEOUT_MS.to_string());
-    let ctx = z3::Context::new(&cfg);
-    let solver = z3::Solver::new(&ctx);
+    cfg.set_timeout_msec(Z3_TIMEOUT_MS);
 
-    let z3_expr = match expr_to_z3(&ctx, expr) {
-        Some(e) => e,
-        None => return SmtResult::Unknown,
-    };
-
-    let bool_expr = match z3_expr {
-        Z3Expr::Bool(b) => b,
-        Z3Expr::Int(_) => {
-            // An integer expression cannot be a contract predicate.
+    z3::with_z3_config(&cfg, || {
+        let Some(z3_expr) = expr_to_z3(expr) else {
             return SmtResult::Unknown;
-        }
-    };
+        };
 
-    // Assert the negation: if UNSAT, the original is always true.
-    solver.assert(&bool_expr.not());
+        let bool_expr = match z3_expr {
+            Z3Expr::Bool(b) => b,
+            Z3Expr::Int(_) => {
+                // An integer expression cannot be a contract predicate.
+                return SmtResult::Unknown;
+            }
+        };
 
-    match solver.check() {
-        z3::SatResult::Unsat => SmtResult::Proved,
-        z3::SatResult::Sat => {
-            // Extract a counter-example from the model.
-            let model_str = solver
-                .get_model()
-                .map_or_else(|| "no model available".to_string(), |m| m.to_string());
-            SmtResult::Refuted(format!("counter-example: {model_str}"))
+        let solver = z3::Solver::new();
+
+        // Assert the negation: if UNSAT, the original is always true.
+        solver.assert(bool_expr.not());
+
+        match solver.check() {
+            z3::SatResult::Unsat => SmtResult::Proved,
+            z3::SatResult::Sat => {
+                // Extract a counter-example from the model.
+                let model_str = solver
+                    .get_model()
+                    .map_or_else(|| "no model available".to_string(), |m| m.to_string());
+                SmtResult::Refuted(format!("counter-example: {model_str}"))
+            }
+            z3::SatResult::Unknown => SmtResult::Unknown,
         }
-        z3::SatResult::Unknown => SmtResult::Unknown,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -265,6 +319,7 @@ mod tests {
     }
 
     fn ident_expr(name: &str) -> Expr {
+        #[allow(clippy::cast_possible_truncation)]
         Expr::Ident(name.to_string(), Span::new(0, name.len() as u32))
     }
 
@@ -301,11 +356,12 @@ mod tests {
     fn ne_zero_is_representable_in_z3() {
         // Verify that `b != 0` can be translated to Z3
         let mut cfg = z3::Config::new();
-        cfg.set_param_value("timeout", "5000");
-        let ctx = z3::Context::new(&cfg);
-        let expr = ne_expr(ident_expr("b"), int_expr(0));
-        let z3_expr = expr_to_z3(&ctx, &expr);
-        assert!(z3_expr.is_some());
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let expr = ne_expr(ident_expr("b"), int_expr(0));
+            let z3_expr = expr_to_z3(&expr);
+            assert!(z3_expr.is_some());
+        });
     }
 
     #[test]
@@ -393,5 +449,164 @@ mod tests {
         };
         let result = verify_precondition(&expr);
         assert_eq!(result, SmtResult::Proved);
+    }
+
+    // --- Prioridade 4: More complete SMT tests ---
+
+    /// Helper: build `left > right`.
+    fn gt_expr(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Gt,
+            right: Box::new(right),
+            span: Span::new(0, 10),
+        }
+    }
+
+    /// Helper: build `left + right`.
+    fn add_expr(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Add,
+            right: Box::new(right),
+            span: Span::new(0, 10),
+        }
+    }
+
+    /// Helper: build `left < right`.
+    fn lt_expr(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Lt,
+            right: Box::new(right),
+            span: Span::new(0, 10),
+        }
+    }
+
+    /// Helper: build `left * right`.
+    fn mul_expr(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Mul,
+            right: Box::new(right),
+            span: Span::new(0, 10),
+        }
+    }
+
+    #[test]
+    fn hypothesis_implies_conclusion() {
+        // requires { x > 0 } implies x + 1 > 0
+        let hypothesis = gt_expr(ident_expr("x"), int_expr(0));
+        let conclusion = gt_expr(add_expr(ident_expr("x"), int_expr(1)), int_expr(0));
+        let result = verify_with_hypotheses(&[&hypothesis], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn ensures_result_positive_with_negative_return_refuted() {
+        // ensures { result > 0 } but we "return -1" → result = -1
+        // Hypothesis: result == -1
+        // Conclusion: result > 0
+        let hypothesis = Expr::BinaryOp {
+            left: Box::new(ident_expr("result")),
+            op: BinOp::Eq,
+            right: Box::new(int_expr(-1)),
+            span: Span::new(0, 15),
+        };
+        let conclusion = gt_expr(ident_expr("result"), int_expr(0));
+        let result = verify_with_hypotheses(&[&hypothesis], &conclusion);
+        assert!(matches!(result, SmtResult::Refuted(_)));
+    }
+
+    #[test]
+    fn nonlinear_arithmetic_unknown() {
+        // x * x > 0 is generally not provable without constraints in QF_LIA
+        // (Z3 may return Refuted with x=0 since x*x == 0 when x == 0)
+        let expr = gt_expr(mul_expr(ident_expr("x"), ident_expr("x")), int_expr(0));
+        let result = verify_precondition(&expr);
+        // x = 0 is a counter-example: 0*0 = 0, which is NOT > 0
+        assert!(matches!(result, SmtResult::Refuted(_) | SmtResult::Unknown));
+    }
+
+    #[test]
+    fn multiple_hypotheses_proved() {
+        // If x > 0 and y > 0, then x + y > 0
+        let h1 = gt_expr(ident_expr("x"), int_expr(0));
+        let h2 = gt_expr(ident_expr("y"), int_expr(0));
+        let conclusion = gt_expr(add_expr(ident_expr("x"), ident_expr("y")), int_expr(0));
+        let result = verify_with_hypotheses(&[&h1, &h2], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn ensures_sum_bounds() {
+        // If x < 100 and y < 100, then x + y < 200
+        let h1 = lt_expr(ident_expr("x"), int_expr(100));
+        let h2 = lt_expr(ident_expr("y"), int_expr(100));
+        let conclusion = lt_expr(add_expr(ident_expr("x"), ident_expr("y")), int_expr(200));
+        let result = verify_with_hypotheses(&[&h1, &h2], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn equality_tautology() {
+        // x == x is always true
+        let expr = Expr::BinaryOp {
+            left: Box::new(ident_expr("x")),
+            op: BinOp::Eq,
+            right: Box::new(ident_expr("x")),
+            span: Span::new(0, 10),
+        };
+        let result = verify_precondition(&expr);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn negation_of_tautology_is_refuted() {
+        // !(x == x) should be refuted
+        let eq = Expr::BinaryOp {
+            left: Box::new(ident_expr("x")),
+            op: BinOp::Eq,
+            right: Box::new(ident_expr("x")),
+            span: Span::new(0, 10),
+        };
+        let not_eq = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(eq),
+            span: Span::new(0, 12),
+        };
+        let result = verify_precondition(&not_eq);
+        assert!(matches!(result, SmtResult::Refuted(_)));
+    }
+
+    #[test]
+    fn unary_neg_in_z3() {
+        // -(5) should translate to Z3
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            operand: Box::new(int_expr(5)),
+            span: Span::new(0, 4),
+        };
+        let z3_result = expr_to_z3(&expr);
+        assert!(z3_result.is_some());
+    }
+
+    #[test]
+    fn modulo_in_z3() {
+        // x % 2 == 0 is not provable without constraints (x can be odd)
+        let modulo = Expr::BinaryOp {
+            left: Box::new(ident_expr("x")),
+            op: BinOp::Mod,
+            right: Box::new(int_expr(2)),
+            span: Span::new(0, 10),
+        };
+        let expr = Expr::BinaryOp {
+            left: Box::new(modulo),
+            op: BinOp::Eq,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 15),
+        };
+        let result = verify_precondition(&expr);
+        assert!(matches!(result, SmtResult::Refuted(_)));
     }
 }

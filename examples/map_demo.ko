@@ -1,0 +1,37 @@
+module map_demo {
+    meta {
+        purpose: "Demonstrates Map<K, V> built-in operations"
+        version: "0.1.0"
+        authored_by: "kodo-team"
+    }
+
+    fn main() {
+        // Create a new map
+        let scores: Map<Int, Int> = map_new()
+
+        // Insert key-value pairs
+        map_insert(scores, 1, 100)
+        map_insert(scores, 2, 200)
+        map_insert(scores, 3, 300)
+
+        // Get length
+        let len: Int = map_length(scores)
+        println(len.to_string())
+
+        // Get value by key
+        let val: Int = map_get(scores, 2)
+        println(val.to_string())
+
+        // Check if key exists
+        let has_1: Bool = map_contains_key(scores, 1)
+        let has_99: Bool = map_contains_key(scores, 99)
+
+        if has_1 {
+            println("map contains key 1")
+        }
+
+        if !has_99 {
+            println("map does not contain key 99")
+        }
+    }
+}

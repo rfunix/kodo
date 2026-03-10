@@ -124,6 +124,54 @@ module my_program {
 
 Output: `42`
 
+## Built-in Collection Types
+
+Kōdo provides built-in collection types available in every program:
+
+### List\<T\>
+
+A dynamic array of elements, accessed via free functions:
+
+```
+let nums: List<Int> = list_new()
+list_push(nums, 10)
+list_push(nums, 20)
+let len: Int = list_length(nums)       // 2
+let first: Int = list_get(nums, 0)     // 10
+let has: Bool = list_contains(nums, 10) // true
+```
+
+### Map\<K, V\>
+
+A key-value hash map:
+
+```
+let scores: Map<Int, Int> = map_new()
+map_insert(scores, 1, 100)
+let val: Int = map_get(scores, 1)           // 100
+let has: Bool = map_contains_key(scores, 1)  // true
+let len: Int = map_length(scores)            // 1
+```
+
+### String.split()
+
+Splits a string by a separator, returning a `List<String>`:
+
+```
+let parts: List<String> = "a,b,c".split(",")
+```
+
+## Qualified Calls
+
+When importing a module, you can use qualified calls with dot notation:
+
+```
+import math
+let result: Int = math.add(1, 2)
+```
+
+This is equivalent to calling `add(1, 2)` directly — the module prefix makes the origin explicit.
+
 ## Compilation Certificates
 
 When you compile a Kōdo program, the compiler emits a **compilation certificate** alongside the binary. For `hello.ko`, the compiler creates `hello.ko.cert.json`:

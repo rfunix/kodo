@@ -215,10 +215,10 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, `string_length` |
-| **Multi-file** | `import module_name` across `.ko` files |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`), `List<T>`, `Map<K,V>`, File I/O |
+| **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | Cooperative `spawn` with deferred task execution |
-| **Developer tools** | LSP server with real-time diagnostics and hover, JSON error output, `kodoc explain` for any error code |
+| **Developer tools** | LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
 | **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes |
 
 ---
@@ -317,6 +317,15 @@ The [`examples/`](examples/) directory contains 22+ compilable programs:
 | [`intent_demo.ko`](examples/intent_demo.ko) | Intent-driven programming (`console_app`) |
 | [`intent_math.ko`](examples/intent_math.ko) | Math module intent resolver |
 | [`intent_composed.ko`](examples/intent_composed.ko) | Multiple intents composed in one module |
+
+### Collections & I/O
+
+| File | What it demonstrates |
+|------|---------------------|
+| [`list_demo.ko`](examples/list_demo.ko) | `List<T>` — `list_new`, `list_push`, `list_get`, `list_length`, `list_contains` |
+| [`map_demo.ko`](examples/map_demo.ko) | `Map<K,V>` — `map_new`, `map_insert`, `map_get`, `map_contains_key`, `map_length` |
+| [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
+| [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
 
 ### Concurrency & Multi-File
 

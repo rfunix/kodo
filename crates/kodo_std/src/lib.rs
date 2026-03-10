@@ -100,8 +100,10 @@ pub struct BuiltinFunction {
 
 /// Returns the list of builtin functions provided by the standard library.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn builtin_functions() -> Vec<BuiltinFunction> {
     vec![
+        // I/O
         BuiltinFunction {
             name: "kodo::io::println".to_string(),
             description: "Prints a line to standard output".to_string(),
@@ -117,6 +119,7 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Reads a line from standard input".to_string(),
             param_count: 0,
         },
+        // Math
         BuiltinFunction {
             name: "kodo::math::abs".to_string(),
             description: "Returns the absolute value".to_string(),
@@ -141,6 +144,138 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             name: "kodo::math::clamp".to_string(),
             description: "Clamps a value between a minimum and maximum".to_string(),
             param_count: 3,
+        },
+        // String methods
+        BuiltinFunction {
+            name: "kodo::string::length".to_string(),
+            description: "Returns the length of a string in bytes".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::contains".to_string(),
+            description: "Returns true if the string contains the given substring".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::string::starts_with".to_string(),
+            description: "Returns true if the string starts with the given prefix".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::string::ends_with".to_string(),
+            description: "Returns true if the string ends with the given suffix".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::string::trim".to_string(),
+            description: "Returns the string with leading and trailing whitespace removed"
+                .to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::to_upper".to_string(),
+            description: "Returns an uppercase copy of the string".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::to_lower".to_string(),
+            description: "Returns a lowercase copy of the string".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::substring".to_string(),
+            description: "Returns a substring from start to end byte index".to_string(),
+            param_count: 3,
+        },
+        // Int methods
+        BuiltinFunction {
+            name: "kodo::int::to_string".to_string(),
+            description: "Converts an integer to its string representation".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::int::to_float64".to_string(),
+            description: "Converts an integer to a 64-bit float".to_string(),
+            param_count: 1,
+        },
+        // Float64 methods
+        BuiltinFunction {
+            name: "kodo::float64::to_string".to_string(),
+            description: "Converts a float to its string representation".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::float64::to_int".to_string(),
+            description: "Converts a float to an integer (truncates toward zero)".to_string(),
+            param_count: 1,
+        },
+        // File I/O
+        BuiltinFunction {
+            name: "kodo::io::file_exists".to_string(),
+            description: "Checks if a file exists at the given path".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::io::file_read".to_string(),
+            description: "Reads a file to a string, returning Result<String, String>".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::io::file_write".to_string(),
+            description: "Writes content to a file, returning Result<Unit, String>".to_string(),
+            param_count: 2,
+        },
+        // List operations
+        BuiltinFunction {
+            name: "kodo::list::new".to_string(),
+            description: "Creates a new empty list".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::list::push".to_string(),
+            description: "Adds an element to the end of a list".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::list::get".to_string(),
+            description: "Gets an element by index, returning Option".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::list::length".to_string(),
+            description: "Returns the number of elements in a list".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::list::contains".to_string(),
+            description: "Returns true if the list contains the given element".to_string(),
+            param_count: 2,
+        },
+        // Map operations
+        BuiltinFunction {
+            name: "kodo::map::new".to_string(),
+            description: "Creates a new empty map".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::map::insert".to_string(),
+            description: "Inserts a key-value pair into the map".to_string(),
+            param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::map::get".to_string(),
+            description: "Gets a value by key, returning Option".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::map::contains_key".to_string(),
+            description: "Returns true if the map contains the given key".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::map::length".to_string(),
+            description: "Returns the number of entries in the map".to_string(),
+            param_count: 1,
         },
     ]
 }
@@ -167,7 +302,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 8);
+        assert_eq!(builtins.len(), 33);
     }
 
     #[test]
@@ -213,6 +348,22 @@ mod tests {
         let sqrt = builtins.iter().find(|f| f.name == "kodo::math::sqrt");
         assert!(sqrt.is_some());
         assert_eq!(sqrt.unwrap().param_count, 1);
+    }
+
+    #[test]
+    fn list_builtins_registered() {
+        let builtins = builtin_functions();
+        let list_new = builtins.iter().find(|f| f.name == "kodo::list::new");
+        assert!(list_new.is_some());
+        assert_eq!(list_new.unwrap().param_count, 0);
+    }
+
+    #[test]
+    fn map_builtins_registered() {
+        let builtins = builtin_functions();
+        let map_new = builtins.iter().find(|f| f.name == "kodo::map::new");
+        assert!(map_new.is_some());
+        assert_eq!(map_new.unwrap().param_count, 0);
     }
 
     #[test]

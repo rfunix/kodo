@@ -1,0 +1,27 @@
+module smt_provable {
+    meta {
+        purpose: "Test cases for SMT-provable contracts"
+        version: "0.1.0"
+    }
+
+    // This function has a provable precondition: x > 0 implies x + 1 > 0
+    fn increment_positive(x: Int) -> Int
+        requires { x > 0 }
+        ensures { result > 0 }
+    {
+        return x + 1
+    }
+
+    // This function's ensures clause should be provable given the requires
+    fn double_positive(x: Int) -> Int
+        requires { x > 0 }
+        ensures { result > 0 }
+    {
+        return x + x
+    }
+
+    fn main() {
+        let result: Int = increment_positive(5)
+        println(result.to_string())
+    }
+}

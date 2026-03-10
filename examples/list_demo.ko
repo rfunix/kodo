@@ -1,0 +1,37 @@
+module list_demo {
+    meta {
+        purpose: "Demonstrates List<T> built-in operations"
+        version: "0.1.0"
+        authored_by: "kodo-team"
+    }
+
+    fn main() {
+        // Create a new list
+        let nums: List<Int> = list_new()
+
+        // Push elements
+        list_push(nums, 10)
+        list_push(nums, 20)
+        list_push(nums, 30)
+
+        // Get length
+        let len: Int = list_length(nums)
+        println(len.to_string())
+
+        // Get element by index
+        let first: Int = list_get(nums, 0)
+        println(first.to_string())
+
+        // Check containment
+        let has_20: Bool = list_contains(nums, 20)
+        let has_99: Bool = list_contains(nums, 99)
+
+        if has_20 {
+            println("list contains 20")
+        }
+
+        if !has_99 {
+            println("list does not contain 99")
+        }
+    }
+}

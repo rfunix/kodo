@@ -389,6 +389,7 @@ struct BuiltinInfo {
 }
 
 /// Declares runtime builtin functions as imports in the object module.
+#[allow(clippy::too_many_lines)]
 fn declare_builtins(
     module: &mut ObjectModule,
     call_conv: CallConv,
@@ -496,6 +497,345 @@ fn declare_builtins(
         builtins.insert("clamp".to_string(), BuiltinInfo { func_id });
     }
 
+    // --- String methods ---
+
+    // kodo_string_length(ptr: i64, len: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_length", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_length".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_contains(hay_ptr, hay_len, needle_ptr, needle_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // hay_ptr
+        sig.params.push(AbiParam::new(types::I64)); // hay_len
+        sig.params.push(AbiParam::new(types::I64)); // needle_ptr
+        sig.params.push(AbiParam::new(types::I64)); // needle_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_contains", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_contains".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_starts_with(hay_ptr, hay_len, prefix_ptr, prefix_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_starts_with", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_starts_with".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_ends_with(hay_ptr, hay_len, suffix_ptr, suffix_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_ends_with", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_ends_with".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_trim(ptr, len, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_string_trim", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_trim".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_to_upper(ptr, len, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_to_upper", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_to_upper".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_to_lower(ptr, len, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_to_lower", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_to_lower".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_substring(ptr, len, start, end, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        sig.params.push(AbiParam::new(types::I64)); // start
+        sig.params.push(AbiParam::new(types::I64)); // end
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_string_substring", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_substring".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Int methods ---
+
+    // kodo_int_to_string(value: i64, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // value
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_int_to_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("Int_to_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_int_to_float64(value: i64) -> f64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::F64));
+        let func_id = module
+            .declare_function("kodo_int_to_float64", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("Int_to_float64".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Float64 methods ---
+
+    // kodo_float64_to_string(value: f64, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::F64)); // value
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_float64_to_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("Float64_to_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_float64_to_int(value: f64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::F64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_float64_to_int", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("Float64_to_int".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- File I/O ---
+
+    // kodo_file_exists(path_ptr: i64, path_len: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // path_ptr
+        sig.params.push(AbiParam::new(types::I64)); // path_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_file_exists", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("file_exists".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_file_read(path_ptr, path_len, out_ptr, out_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // path_ptr
+        sig.params.push(AbiParam::new(types::I64)); // path_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_file_read", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("file_read".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_file_write(path_ptr, path_len, content_ptr, content_len, out_ptr, out_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // path_ptr
+        sig.params.push(AbiParam::new(types::I64)); // path_len
+        sig.params.push(AbiParam::new(types::I64)); // content_ptr
+        sig.params.push(AbiParam::new(types::I64)); // content_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_file_write", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("file_write".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- List operations ---
+
+    // kodo_list_new() -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_list_new", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("list_new".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_list_push(list_ptr: i64, value: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // list_ptr
+        sig.params.push(AbiParam::new(types::I64)); // value
+        let func_id = module
+            .declare_function("kodo_list_push", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("list_push".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_list_get(list_ptr: i64, index: i64, out_value, out_is_some) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // list_ptr
+        sig.params.push(AbiParam::new(types::I64)); // index
+        sig.params.push(AbiParam::new(types::I64)); // out_value
+        sig.params.push(AbiParam::new(types::I64)); // out_is_some
+        let func_id = module
+            .declare_function("kodo_list_get", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("list_get".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_list_length(list_ptr: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_list_length", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("list_length".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_list_contains(list_ptr: i64, value: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_list_contains", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("list_contains".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- String.split ---
+
+    // kodo_string_split(hay_ptr, hay_len, sep_ptr, sep_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // hay_ptr
+        sig.params.push(AbiParam::new(types::I64)); // hay_len
+        sig.params.push(AbiParam::new(types::I64)); // sep_ptr
+        sig.params.push(AbiParam::new(types::I64)); // sep_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_split", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_split".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Map operations ---
+
+    // kodo_map_new() -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_map_new", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("map_new".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_map_insert(map_ptr: i64, key: i64, value: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // map_ptr
+        sig.params.push(AbiParam::new(types::I64)); // key
+        sig.params.push(AbiParam::new(types::I64)); // value
+        let func_id = module
+            .declare_function("kodo_map_insert", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("map_insert".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_map_get(map_ptr: i64, key: i64, out_value, out_is_some) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // map_ptr
+        sig.params.push(AbiParam::new(types::I64)); // key
+        sig.params.push(AbiParam::new(types::I64)); // out_value
+        sig.params.push(AbiParam::new(types::I64)); // out_is_some
+        let func_id = module
+            .declare_function("kodo_map_get", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("map_get".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_map_contains_key(map_ptr: i64, key: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_map_contains_key", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("map_contains_key".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_map_length(map_ptr: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_map_length", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("map_length".to_string(), BuiltinInfo { func_id });
+    }
+
     Ok(builtins)
 }
 
@@ -521,6 +861,159 @@ impl VarMap {
             .copied()
             .ok_or_else(|| CodegenError::Cranelift(format!("undefined local: {id}")))
     }
+}
+
+/// Returns true if the callee is a builtin that needs special handling
+/// (string arg expansion, out-parameter returns, etc.).
+fn is_special_builtin(callee: &str) -> bool {
+    matches!(
+        callee,
+        "println"
+            | "print"
+            | "kodo_contract_fail"
+            | "String_length"
+            | "String_contains"
+            | "String_starts_with"
+            | "String_ends_with"
+            | "String_trim"
+            | "String_to_upper"
+            | "String_to_lower"
+            | "String_substring"
+            | "String_split"
+            | "Int_to_string"
+            | "Float64_to_string"
+            | "file_exists"
+            | "list_get"
+            | "map_get"
+    )
+}
+
+/// Returns true if the builtin returns a String via out-parameters.
+fn is_string_returning_builtin(callee: &str) -> bool {
+    matches!(
+        callee,
+        "String_trim"
+            | "String_to_upper"
+            | "String_to_lower"
+            | "String_substring"
+            | "Int_to_string"
+            | "Float64_to_string"
+    )
+}
+
+/// Emits a call to a string builtin, expanding `StringConst` args into (ptr, len) pairs.
+///
+/// Returns `Ok(true)` if the call was handled, `Ok(false)` if not.
+#[allow(clippy::too_many_arguments)]
+fn emit_string_builtin_call(
+    callee: &str,
+    args: &[Value],
+    dest: LocalId,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+    func_ids: &HashMap<String, FuncId>,
+    struct_layouts: &HashMap<String, StructLayout>,
+) -> Result<bool> {
+    let mut arg_vals = Vec::new();
+
+    // Expand each argument: StringConst → (ptr, len), others → single value.
+    for arg in args {
+        if let Value::StringConst(s) = arg {
+            let data_id = create_string_data(module, s)?;
+            let gv = module.declare_data_in_func(data_id, builder.func);
+            let ptr = builder.ins().symbol_value(types::I64, gv);
+            #[allow(clippy::cast_possible_wrap)]
+            let len = builder.ins().iconst(types::I64, s.len() as i64);
+            arg_vals.push(ptr);
+            arg_vals.push(len);
+        } else {
+            arg_vals.push(translate_value(
+                arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?);
+        }
+    }
+
+    // list_get and map_get use out-parameters: (out_value, out_is_some).
+    // We call the runtime, then load the value from out_value as the result.
+    if callee == "list_get" || callee == "map_get" {
+        let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            16, // 8 bytes for value + 8 bytes for is_some
+            0,
+        ));
+        let out_value_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+        let out_is_some_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+        arg_vals.push(out_value_addr);
+        arg_vals.push(out_is_some_addr);
+
+        let builtin = builtins
+            .get(callee)
+            .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
+        let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+        builder.ins().call(func_ref, &arg_vals);
+
+        // Load the value as the result (for V1, we return the raw value;
+        // Option wrapping can be added later).
+        let result_val = builder
+            .ins()
+            .load(types::I64, MemFlags::new(), out_value_addr, 0);
+        let var = var_map.get(dest)?;
+        builder.def_var(var, result_val);
+        return Ok(true);
+    }
+
+    // For builtins that return a String via out-parameters, allocate stack space
+    // for the returned (ptr, len) pair and pass pointers to them.
+    if is_string_returning_builtin(callee) {
+        let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            16, // 8 bytes for ptr + 8 bytes for len
+            0,
+        ));
+        let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+        let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+        arg_vals.push(out_ptr_addr);
+        arg_vals.push(out_len_addr);
+
+        let builtin = builtins
+            .get(callee)
+            .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
+        let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+        builder.ins().call(func_ref, &arg_vals);
+
+        // Load the returned pointer as the result value.
+        let result_ptr = builder
+            .ins()
+            .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+        let var = var_map.get(dest)?;
+        builder.def_var(var, result_ptr);
+        return Ok(true);
+    }
+
+    let builtin = builtins
+        .get(callee)
+        .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
+    let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+    let call = builder.ins().call(func_ref, &arg_vals);
+
+    let var = var_map.get(dest)?;
+    let results = builder.inst_results(call);
+    if results.is_empty() {
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.def_var(var, zero);
+    } else {
+        builder.def_var(var, results[0]);
+    }
+
+    Ok(true)
 }
 
 /// Translates a single MIR function into Cranelift IR using the given builder.
@@ -954,27 +1447,20 @@ fn translate_instruction(
             builder.def_var(var, val);
         }
         Instruction::Call { dest, callee, args } => {
-            // Special-case: string-taking builtins with string literal.
-            let is_string_builtin =
-                (callee == "println" || callee == "print" || callee == "kodo_contract_fail")
-                    && args.len() == 1;
-            if is_string_builtin {
-                if let Value::StringConst(s) = &args[0] {
-                    let data_id = create_string_data(module, s)?;
-                    let gv = module.declare_data_in_func(data_id, builder.func);
-                    let ptr = builder.ins().symbol_value(types::I64, gv);
-                    #[allow(clippy::cast_possible_wrap)]
-                    let len = builder.ins().iconst(types::I64, s.len() as i64);
-
-                    let builtin = builtins
-                        .get(callee.as_str())
-                        .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
-                    let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
-                    builder.ins().call(func_ref, &[ptr, len]);
-
-                    let var = var_map.get(*dest)?;
-                    let zero = builder.ins().iconst(types::I64, 0);
-                    builder.def_var(var, zero);
+            // Check if this is a builtin that needs special arg/return handling.
+            if is_special_builtin(callee) {
+                let handled = emit_string_builtin_call(
+                    callee,
+                    args,
+                    *dest,
+                    builder,
+                    module,
+                    builtins,
+                    var_map,
+                    func_ids,
+                    struct_layouts,
+                )?;
+                if handled {
                     return Ok(());
                 }
             }
