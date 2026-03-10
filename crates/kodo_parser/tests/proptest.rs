@@ -20,7 +20,9 @@ proptest! {
             |n| !matches!(n.as_str(),
                 "module" | "meta" | "fn" | "let" | "mut" | "if" | "else" |
                 "return" | "true" | "false" | "requires" | "ensures" |
-                "intent" | "struct" | "enum" | "match" | "import" | "while"
+                "intent" | "struct" | "enum" | "match" | "import" | "while" |
+                "for" | "trait" | "impl" | "self" |
+                "own" | "ref" | "is" | "async" | "await" | "spawn" | "actor"
             ),
         ),
         purpose in "[a-zA-Z0-9 ]{1,30}",

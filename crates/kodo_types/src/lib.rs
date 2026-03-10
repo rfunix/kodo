@@ -34,7 +34,7 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    Annotation, AnnotationArg, BinOp, Block, Expr, Function, Module, Span, Stmt, UnaryOp,
+    Annotation, AnnotationArg, BinOp, Block, Expr, Function, Module, Pattern, Span, Stmt, UnaryOp,
 };
 use thiserror::Error;
 
@@ -204,6 +204,112 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// The try operator `?` was used in a function that does not return Result.
+    #[error("operator `?` can only be used in functions returning Result at {span:?}")]
+    TryInNonResultFn {
+        /// Source location.
+        span: Span,
+    },
+    /// Optional chaining `?.` was used on a non-Option type.
+    #[error("optional chaining `?.` requires Option type, found `{found}` at {span:?}")]
+    OptionalChainOnNonOption {
+        /// The type found instead of Option.
+        found: String,
+        /// Source location.
+        span: Span,
+    },
+    /// Null coalescing `??` type mismatch.
+    #[error("null coalescing type mismatch: left must be Option, found `{found}` at {span:?}")]
+    CoalesceTypeMismatch {
+        /// The type found instead of Option.
+        found: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A closure parameter is missing a type annotation.
+    #[error("closure parameter `{name}` requires a type annotation at {span:?}")]
+    ClosureParamTypeMissing {
+        /// The parameter name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A trait was referenced but not defined.
+    #[error("unknown trait `{name}` at {span:?}")]
+    UnknownTrait {
+        /// The trait name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A required method from a trait is missing in an impl block.
+    #[error("missing trait method `{method}` for trait `{trait_name}` at {span:?}")]
+    MissingTraitMethod {
+        /// The missing method name.
+        method: String,
+        /// The trait name.
+        trait_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A method was called on a type that does not have it.
+    #[error("no method `{method}` on type `{type_name}` at {span:?}")]
+    MethodNotFound {
+        /// The method name.
+        method: String,
+        /// The type name.
+        type_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// An `await` expression was used outside an `async fn`.
+    #[error("`.await` can only be used inside an `async fn` at {span:?}")]
+    AwaitOutsideAsync {
+        /// Source location.
+        span: Span,
+    },
+    /// A `spawn` block captures a mutable reference (reserved for future use).
+    #[error("spawn block cannot capture mutable reference `{name}` at {span:?}")]
+    SpawnCaptureMutableRef {
+        /// The captured variable name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// Direct field access on an actor (fields are private to handlers).
+    #[error("cannot access actor field `{field}` directly on `{actor_name}` at {span:?}")]
+    ActorDirectFieldAccess {
+        /// The field name.
+        field: String,
+        /// The actor type name.
+        actor_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A function with low `@confidence` is missing a `@reviewed_by(human: "...")` annotation.
+    ///
+    /// When `@confidence(X)` with X < 0.8 is present, a human review is required
+    /// to ensure agent-generated code meets quality standards.
+    #[error("function `{name}` has @confidence({confidence}) < 0.8 and is missing `@reviewed_by(human: \"...\")` at {span:?}")]
+    LowConfidenceWithoutReview {
+        /// The function name.
+        name: String,
+        /// The confidence value found.
+        confidence: String,
+        /// Source location of the function.
+        span: Span,
+    },
+    /// A `@security_sensitive` function is missing contract clauses.
+    ///
+    /// Functions marked `@security_sensitive` must have at least one `requires`
+    /// or `ensures` clause to document and enforce security invariants.
+    #[error("function `{name}` is marked `@security_sensitive` but has no `requires` or `ensures` contracts at {span:?}")]
+    SecuritySensitiveWithoutContract {
+        /// The function name.
+        name: String,
+        /// Source location of the function.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -228,7 +334,19 @@ impl TypeError {
             | Self::NonExhaustiveMatch { span, .. }
             | Self::WrongTypeArgCount { span, .. }
             | Self::UndefinedTypeParam { span, .. }
-            | Self::MissingTypeArgs { span, .. } => Some(*span),
+            | Self::MissingTypeArgs { span, .. }
+            | Self::TryInNonResultFn { span, .. }
+            | Self::OptionalChainOnNonOption { span, .. }
+            | Self::CoalesceTypeMismatch { span, .. }
+            | Self::ClosureParamTypeMissing { span, .. }
+            | Self::UnknownTrait { span, .. }
+            | Self::MissingTraitMethod { span, .. }
+            | Self::MethodNotFound { span, .. }
+            | Self::AwaitOutsideAsync { span, .. }
+            | Self::SpawnCaptureMutableRef { span, .. }
+            | Self::ActorDirectFieldAccess { span, .. }
+            | Self::LowConfidenceWithoutReview { span, .. }
+            | Self::SecuritySensitiveWithoutContract { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -255,7 +373,154 @@ impl TypeError {
             Self::WrongTypeArgCount { .. } => "E0221",
             Self::UndefinedTypeParam { .. } => "E0222",
             Self::MissingTypeArgs { .. } => "E0223",
+            Self::TryInNonResultFn { .. } => "E0224",
+            Self::OptionalChainOnNonOption { .. } => "E0225",
+            Self::CoalesceTypeMismatch { .. } => "E0226",
+            Self::ClosureParamTypeMissing { .. } => "E0227",
+            Self::UnknownTrait { .. } => "E0230",
+            Self::MissingTraitMethod { .. } => "E0231",
+            Self::MethodNotFound { .. } => "E0235",
+            Self::AwaitOutsideAsync { .. } => "E0250",
+            Self::SpawnCaptureMutableRef { .. } => "E0251",
+            Self::ActorDirectFieldAccess { .. } => "E0252",
             Self::PolicyViolation { .. } => "E0350",
+            Self::LowConfidenceWithoutReview { .. } => "E0260",
+            Self::SecuritySensitiveWithoutContract { .. } => "E0262",
+        }
+    }
+}
+
+impl kodo_ast::Diagnostic for TypeError {
+    fn code(&self) -> &'static str {
+        self.code()
+    }
+
+    fn severity(&self) -> kodo_ast::Severity {
+        kodo_ast::Severity::Error
+    }
+
+    fn span(&self) -> Option<kodo_ast::Span> {
+        self.span()
+    }
+
+    fn message(&self) -> String {
+        self.to_string()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            Self::Mismatch { expected, .. } => Some(format!(
+                "ensure the expression produces a value of type `{expected}`"
+            )),
+            Self::Undefined { name, .. } => {
+                Some(format!("check for typos or declare `{name}` before use"))
+            }
+            Self::ArityMismatch {
+                expected, found, ..
+            } => Some(format!(
+                "the function expects {expected} argument(s), but {found} were provided"
+            )),
+            Self::NotCallable { found, .. } => Some(format!(
+                "type `{found}` is not a function and cannot be called"
+            )),
+            Self::MissingMeta => {
+                Some("add a `meta { purpose: \"...\" }` block to your module".to_string())
+            }
+            Self::EmptyPurpose { .. } => Some("provide a non-empty purpose string".to_string()),
+            Self::MissingPurpose { .. } => {
+                Some("add `purpose: \"description\"` to the meta block".to_string())
+            }
+            Self::UnknownStruct { name, .. } => Some(format!(
+                "define `struct {name} {{ ... }}` or check for typos"
+            )),
+            Self::MissingStructField { field, .. } => {
+                Some(format!("add `{field}: <value>` to the struct literal"))
+            }
+            Self::ExtraStructField { field, .. } => {
+                Some(format!("remove field `{field}` from the struct literal"))
+            }
+            Self::DuplicateStructField { field, .. } => {
+                Some(format!("remove the duplicate `{field}` field"))
+            }
+            Self::NoSuchField {
+                field, type_name, ..
+            } => Some(format!(
+                "type `{type_name}` does not have a field named `{field}`"
+            )),
+            Self::UnknownEnum { name, .. } => {
+                Some(format!("define `enum {name} {{ ... }}` or check for typos"))
+            }
+            Self::UnknownVariant {
+                variant, enum_name, ..
+            } => Some(format!(
+                "check the variants of `{enum_name}` — `{variant}` is not one"
+            )),
+            Self::NonExhaustiveMatch { missing, .. } => {
+                Some(format!("add match arms for: {}", missing.join(", ")))
+            }
+            Self::WrongTypeArgCount { name, expected, .. } => Some(format!(
+                "`{name}` requires exactly {expected} type argument(s)"
+            )),
+            Self::UndefinedTypeParam { name, .. } => Some(format!(
+                "declare type parameter `{name}` in the generic parameters list"
+            )),
+            Self::MissingTypeArgs { name, .. } => {
+                Some(format!("specify type arguments, e.g. `{name}<Int>`"))
+            }
+            Self::TryInNonResultFn { .. } => Some(
+                "the `?` operator can only be used in functions that return `Result<T, E>`"
+                    .to_string(),
+            ),
+            Self::OptionalChainOnNonOption { .. } => {
+                Some("optional chaining `?.` can only be used on `Option<T>` values".to_string())
+            }
+            Self::CoalesceTypeMismatch { .. } => {
+                Some("the left-hand side of `??` must be an `Option<T>` value".to_string())
+            }
+            Self::ClosureParamTypeMissing { name, .. } => {
+                Some(format!("add a type annotation: `{name}: Type`"))
+            }
+            Self::UnknownTrait { name, .. } => Some(format!(
+                "define `trait {name} {{ ... }}` or check for typos"
+            )),
+            Self::MissingTraitMethod {
+                method, trait_name, ..
+            } => Some(format!(
+                "add method `{method}` to the impl block for trait `{trait_name}`"
+            )),
+            Self::MethodNotFound {
+                method, type_name, ..
+            } => Some(format!(
+                "type `{type_name}` does not have a method named `{method}`"
+            )),
+            Self::AwaitOutsideAsync { .. } => {
+                Some("move this expression into an `async fn`".to_string())
+            }
+            Self::SpawnCaptureMutableRef { name, .. } => Some(format!(
+                "spawn blocks cannot capture mutable references like `{name}`"
+            )),
+            Self::ActorDirectFieldAccess { field, .. } => {
+                Some(format!("use a handler method to access `{field}` instead"))
+            }
+            Self::PolicyViolation { .. } => None,
+            Self::LowConfidenceWithoutReview { name, .. } => Some(format!(
+                "add `@reviewed_by(human: \"reviewer_name\")` to function `{name}`"
+            )),
+            Self::SecuritySensitiveWithoutContract { name, .. } => Some(format!(
+                "add `requires {{ ... }}` or `ensures {{ ... }}` to function `{name}`"
+            )),
+        }
+    }
+
+    fn labels(&self) -> Vec<kodo_ast::DiagnosticLabel> {
+        if let Some(span) = self.span() {
+            vec![kodo_ast::DiagnosticLabel {
+                span,
+                message: self.to_string(),
+            }]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -502,6 +767,12 @@ pub fn resolve_type_with_enums(
                 .collect();
             Ok(Type::Generic(name.clone(), resolved?))
         }
+        kodo_ast::TypeExpr::Optional(inner) => {
+            // T? is sugar for Option<T>
+            let generic =
+                kodo_ast::TypeExpr::Generic("Option".to_string(), vec![(**inner).clone()]);
+            resolve_type_with_enums(&generic, span, enum_names)
+        }
         kodo_ast::TypeExpr::Function(params, ret) => {
             let resolved_params: std::result::Result<Vec<_>, _> = params
                 .iter()
@@ -517,6 +788,7 @@ pub fn resolve_type_with_enums(
 fn expr_span(expr: &Expr) -> Span {
     match expr {
         Expr::IntLit(_, span)
+        | Expr::FloatLit(_, span)
         | Expr::StringLit(_, span)
         | Expr::BoolLit(_, span)
         | Expr::Ident(_, span)
@@ -527,7 +799,14 @@ fn expr_span(expr: &Expr) -> Span {
         | Expr::FieldAccess { span, .. }
         | Expr::StructLit { span, .. }
         | Expr::EnumVariantExpr { span, .. }
-        | Expr::Match { span, .. } => *span,
+        | Expr::Match { span, .. }
+        | Expr::Try { span, .. }
+        | Expr::OptionalChain { span, .. }
+        | Expr::NullCoalesce { span, .. }
+        | Expr::Range { span, .. }
+        | Expr::Closure { span, .. }
+        | Expr::Is { span, .. }
+        | Expr::Await { span, .. } => *span,
         Expr::Block(block) => block.span,
     }
 }
@@ -602,6 +881,19 @@ pub struct TypeChecker {
     fn_instances: Vec<(std::string::String, Vec<Type>, std::string::String)>,
     /// Cache of already-monomorphized type names.
     mono_cache: std::collections::HashSet<std::string::String>,
+    /// Trait definitions: name to list of method signatures.
+    trait_registry:
+        std::collections::HashMap<std::string::String, Vec<(std::string::String, Vec<Type>, Type)>>,
+    /// Method lookup: (type, method) to (mangled name, params, return type).
+    method_lookup: std::collections::HashMap<
+        (std::string::String, std::string::String),
+        (std::string::String, Vec<Type>, Type),
+    >,
+    /// Method call resolutions: call span start to mangled function name.
+    /// Used by kodoc to rewrite method calls in the AST before MIR lowering.
+    method_resolutions: std::collections::HashMap<u32, std::string::String>,
+    /// Whether the currently-checked function is `async`.
+    in_async_fn: bool,
 }
 
 impl TypeChecker {
@@ -621,6 +913,10 @@ impl TypeChecker {
             generic_functions: std::collections::HashMap::new(),
             fn_instances: Vec::new(),
             mono_cache: std::collections::HashSet::new(),
+            trait_registry: std::collections::HashMap::new(),
+            method_lookup: std::collections::HashMap::new(),
+            method_resolutions: std::collections::HashMap::new(),
+            in_async_fn: false,
         };
         checker.register_builtins();
         checker
@@ -645,6 +941,23 @@ impl TypeChecker {
         self.env.insert(
             "print_int".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+        // Math builtins
+        self.env.insert(
+            "abs".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "min".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "max".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "clamp".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
         );
     }
 
@@ -730,6 +1043,108 @@ impl TypeChecker {
             }
         }
 
+        // Register trait declarations.
+        for trait_decl in &module.trait_decls {
+            let mut methods = Vec::new();
+            for method in &trait_decl.methods {
+                let param_types: std::result::Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_with_enums(&p.ty, p.span, &self.enum_names))
+                    .collect();
+                let param_types = param_types?;
+                let ret_type =
+                    resolve_type_with_enums(&method.return_type, method.span, &self.enum_names)?;
+                methods.push((method.name.clone(), param_types, ret_type));
+            }
+            self.trait_registry.insert(trait_decl.name.clone(), methods);
+        }
+
+        // Register impl blocks: validate traits and build method lookup.
+        for impl_block in &module.impl_blocks {
+            let trait_methods = self
+                .trait_registry
+                .get(&impl_block.trait_name)
+                .ok_or_else(|| TypeError::UnknownTrait {
+                    name: impl_block.trait_name.clone(),
+                    span: impl_block.span,
+                })?
+                .clone();
+
+            // Verify all trait methods are implemented.
+            for (method_name, _param_types, _ret_type) in &trait_methods {
+                let _found = impl_block
+                    .methods
+                    .iter()
+                    .find(|m| m.name == *method_name)
+                    .ok_or_else(|| TypeError::MissingTraitMethod {
+                        method: method_name.clone(),
+                        trait_name: impl_block.trait_name.clone(),
+                        span: impl_block.span,
+                    })?;
+            }
+
+            // Register each method with mangled name: TypeName_methodName
+            for method in &impl_block.methods {
+                let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                let param_types: std::result::Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                    .collect();
+                let param_types = param_types?;
+                let ret_type = self.resolve_type_mono(&method.return_type, method.span)?;
+
+                // Register in method lookup
+                self.method_lookup.insert(
+                    (impl_block.type_name.clone(), method.name.clone()),
+                    (mangled_name.clone(), param_types.clone(), ret_type.clone()),
+                );
+
+                // Register as a regular function in the environment
+                self.env.insert(
+                    mangled_name,
+                    Type::Function(param_types, Box::new(ret_type)),
+                );
+            }
+        }
+
+        // Check impl block method bodies.
+        for impl_block in &module.impl_blocks {
+            for method in &impl_block.methods {
+                self.check_function(method)?;
+            }
+        }
+
+        // Register actor declarations as structs + handler signatures.
+        // This must happen before function checking so that regular functions
+        // can reference actor types and call handler functions.
+        for actor_decl in &module.actor_decls {
+            // Register actor fields like a struct.
+            let mut fields = Vec::new();
+            for field in &actor_decl.fields {
+                let ty = self.resolve_type_mono(&field.ty, field.span)?;
+                fields.push((field.name.clone(), ty));
+            }
+            self.struct_registry.insert(actor_decl.name.clone(), fields);
+
+            // Register handler functions with mangled names.
+            for handler in &actor_decl.handlers {
+                let mangled_name = format!("{}_{}", actor_decl.name, handler.name);
+                let param_types: std::result::Result<Vec<_>, _> = handler
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                    .collect();
+                let param_types = param_types?;
+                let ret_type = self.resolve_type_mono(&handler.return_type, handler.span)?;
+                self.env.insert(
+                    mangled_name,
+                    Type::Function(param_types, Box::new(ret_type)),
+                );
+            }
+        }
+
         // First pass: register all function signatures so they can call each other.
         for func in &module.functions {
             if !func.generic_params.is_empty() {
@@ -764,6 +1179,13 @@ impl TypeChecker {
             }
         }
 
+        // Check actor handler bodies.
+        for actor_decl in &module.actor_decls {
+            for handler in &actor_decl.handlers {
+                self.check_function(handler)?;
+            }
+        }
+
         // Third pass: validate trust policies based on annotations.
         let trust_policy = module
             .meta
@@ -777,6 +1199,11 @@ impl TypeChecker {
                     Self::validate_trust_policy(func)?;
                 }
             }
+        }
+
+        // Fourth pass: check annotation-based policies (independent of trust_policy).
+        for func in &module.functions {
+            Self::check_annotation_policies(func)?;
         }
 
         Ok(())
@@ -844,6 +1271,8 @@ impl TypeChecker {
             match expr {
                 // If written as @confidence(95) — treat as percentage
                 Expr::IntLit(n, _) => return Some(*n as f64 / 100.0),
+                // If written as @confidence(0.95) — use directly
+                Expr::FloatLit(v, _) => return Some(*v),
                 // If written as @confidence("0.95")
                 Expr::StringLit(s, _) => return s.parse::<f64>().ok(),
                 _ => {}
@@ -853,16 +1282,56 @@ impl TypeChecker {
     }
 
     /// Checks if a function has a `@reviewed_by` annotation with a human reviewer.
+    ///
+    /// Accepts either positional `@reviewed_by("human:alice")` or named
+    /// `@reviewed_by(human: "alice")` syntax.
     fn has_human_review(func: &Function) -> bool {
         func.annotations
             .iter()
             .filter(|a| a.name == "reviewed_by")
             .any(|a| {
-                a.args.iter().any(|arg| {
-                    let expr = annotation_arg_expr(arg);
-                    matches!(expr, Expr::StringLit(s, _) if s.starts_with("human:"))
+                a.args.iter().any(|arg| match arg {
+                    AnnotationArg::Positional(expr) => {
+                        matches!(expr, Expr::StringLit(s, _) if s.starts_with("human:"))
+                    }
+                    AnnotationArg::Named(key, _) => key == "human",
                 })
             })
+    }
+
+    /// Checks annotation-based policies that apply regardless of `trust_policy`.
+    ///
+    /// This enforces two rules:
+    /// 1. `@confidence(X)` where X < 0.8 requires `@reviewed_by(human: "...")` (E0260).
+    /// 2. `@security_sensitive` requires at least one `requires` or `ensures` clause (E0262).
+    fn check_annotation_policies(func: &Function) -> Result<()> {
+        // Rule 1: low confidence without human review.
+        let confidence_ann = func.annotations.iter().find(|a| a.name == "confidence");
+        if let Some(ann) = confidence_ann {
+            if let Some(value) = Self::extract_confidence_value(ann) {
+                if value < 0.8 && !Self::has_human_review(func) {
+                    return Err(TypeError::LowConfidenceWithoutReview {
+                        name: func.name.clone(),
+                        confidence: format!("{value}"),
+                        span: func.span,
+                    });
+                }
+            }
+        }
+
+        // Rule 2: @security_sensitive without contracts.
+        let is_security_sensitive = func
+            .annotations
+            .iter()
+            .any(|a| a.name == "security_sensitive");
+        if is_security_sensitive && func.requires.is_empty() && func.ensures.is_empty() {
+            return Err(TypeError::SecuritySensitiveWithoutContract {
+                name: func.name.clone(),
+                span: func.span,
+            });
+        }
+
+        Ok(())
     }
 
     /// Returns the struct registry (including monomorphized instances).
@@ -886,6 +1355,25 @@ impl TypeChecker {
     #[must_use]
     pub fn enum_names(&self) -> &std::collections::HashSet<std::string::String> {
         &self.enum_names
+    }
+
+    /// Returns the method lookup table mapping (type, method) pairs to
+    /// their mangled name, parameter types, and return type.
+    #[must_use]
+    pub fn method_lookup(
+        &self,
+    ) -> &std::collections::HashMap<
+        (std::string::String, std::string::String),
+        (std::string::String, Vec<Type>, Type),
+    > {
+        &self.method_lookup
+    }
+
+    /// Returns method call resolutions: call span start position to mangled
+    /// function name. Used for AST rewriting before MIR lowering.
+    #[must_use]
+    pub fn method_resolutions(&self) -> &std::collections::HashMap<u32, std::string::String> {
+        &self.method_resolutions
     }
 
     /// Returns the list of monomorphized function instances.
@@ -912,6 +1400,8 @@ impl TypeChecker {
         let ret_type = self.resolve_type_mono(&func.return_type, func.span)?;
         let prev_return_type = self.current_return_type.clone();
         self.current_return_type = ret_type.clone();
+        let prev_async = self.in_async_fn;
+        self.in_async_fn = func.is_async;
 
         // Bind parameters in the function scope.
         for param in &func.params {
@@ -921,9 +1411,10 @@ impl TypeChecker {
 
         self.check_block(&func.body)?;
 
-        // Restore the previous scope and return type.
+        // Restore the previous scope, return type, and async state.
         self.env.truncate(scope);
         self.current_return_type = prev_return_type;
+        self.in_async_fn = prev_async;
 
         Ok(())
     }
@@ -953,6 +1444,7 @@ impl TypeChecker {
     /// # Errors
     ///
     /// Returns a [`TypeError`] on type mismatches or undefined variables.
+    #[allow(clippy::too_many_lines)]
     pub fn check_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Let {
@@ -996,6 +1488,37 @@ impl TypeChecker {
                 self.check_block(body)?;
                 Ok(())
             }
+            Stmt::For {
+                span,
+                name,
+                start,
+                end,
+                body,
+                ..
+            } => {
+                let start_ty = self.infer_expr(start)?;
+                TypeEnv::check_eq(&Type::Int, &start_ty, expr_span(start)).map_err(|_| {
+                    TypeError::Mismatch {
+                        expected: "Int".to_string(),
+                        found: format!("{start_ty}"),
+                        span: expr_span(start),
+                    }
+                })?;
+                let end_ty = self.infer_expr(end)?;
+                TypeEnv::check_eq(&Type::Int, &end_ty, expr_span(end)).map_err(|_| {
+                    TypeError::Mismatch {
+                        expected: "Int".to_string(),
+                        found: format!("{end_ty}"),
+                        span: expr_span(end),
+                    }
+                })?;
+                let scope = self.env.scope_level();
+                self.env.insert(name.clone(), Type::Int);
+                self.check_block(body)?;
+                self.env.truncate(scope);
+                let _ = span;
+                Ok(())
+            }
             Stmt::Assign {
                 span, name, value, ..
             } => {
@@ -1009,6 +1532,30 @@ impl TypeChecker {
                             span: *span,
                         })?;
                 TypeEnv::check_eq(&existing_ty, &value_ty, *span)?;
+                Ok(())
+            }
+            Stmt::IfLet {
+                pattern,
+                value,
+                body,
+                else_body,
+                ..
+            } => {
+                // Type check the value expression and introduce pattern
+                // bindings into scope for the body block.
+                let val_ty = self.infer_expr(value)?;
+                let scope = self.env.scope_level();
+                self.introduce_pattern_bindings(pattern, &val_ty);
+                self.check_block(body)?;
+                self.env.truncate(scope);
+                if let Some(else_block) = else_body {
+                    self.check_block(else_block)?;
+                }
+                Ok(())
+            }
+            Stmt::Spawn { body, .. } => {
+                // V1: spawn executes inline — just type-check the body.
+                self.check_block(body)?;
                 Ok(())
             }
         }
@@ -1034,6 +1581,7 @@ impl TypeChecker {
     pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
         match expr {
             Expr::IntLit(_, _) => Ok(Type::Int),
+            Expr::FloatLit(_, _) => Ok(Type::Float64),
             Expr::StringLit(_, _) => Ok(Type::String),
             Expr::BoolLit(_, _) => Ok(Type::Bool),
 
@@ -1348,6 +1896,136 @@ impl TypeChecker {
             }
 
             Expr::Block(block) => self.infer_block(block),
+
+            Expr::Range {
+                start, end, span, ..
+            } => {
+                let start_ty = self.infer_expr(start)?;
+                TypeEnv::check_eq(&Type::Int, &start_ty, expr_span(start)).map_err(|_| {
+                    TypeError::Mismatch {
+                        expected: "Int".to_string(),
+                        found: format!("{start_ty}"),
+                        span: expr_span(start),
+                    }
+                })?;
+                let end_ty = self.infer_expr(end)?;
+                TypeEnv::check_eq(&Type::Int, &end_ty, expr_span(end)).map_err(|_| {
+                    TypeError::Mismatch {
+                        expected: "Int".to_string(),
+                        found: format!("{end_ty}"),
+                        span: expr_span(end),
+                    }
+                })?;
+                let _ = span;
+                Ok(Type::Unit)
+            }
+
+            Expr::NullCoalesce { left, right, span } => {
+                let left_ty = self.infer_expr(left)?;
+                let right_ty = self.infer_expr(right)?;
+                // Basic validation: left should be an Option-like enum
+                let is_option = matches!(&left_ty, Type::Enum(name) if name.starts_with("Option"))
+                    || matches!(&left_ty, Type::Generic(name, _) if name == "Option");
+                if !is_option && left_ty != Type::Unknown {
+                    return Err(TypeError::CoalesceTypeMismatch {
+                        found: left_ty.to_string(),
+                        span: *span,
+                    });
+                }
+                Ok(right_ty)
+            }
+
+            Expr::Try { operand, span } => {
+                let operand_ty = self.infer_expr(operand)?;
+                // Validate current function returns Result
+                let returns_result = matches!(&self.current_return_type, Type::Enum(name) if name.starts_with("Result"))
+                    || matches!(&self.current_return_type, Type::Generic(name, _) if name == "Result");
+                if !returns_result && self.current_return_type != Type::Unknown {
+                    return Err(TypeError::TryInNonResultFn { span: *span });
+                }
+                // The operand should be a Result type
+                let _is_result = matches!(&operand_ty, Type::Enum(name) if name.starts_with("Result"))
+                    || matches!(&operand_ty, Type::Generic(name, _) if name == "Result");
+                // Result type is Unknown — desugaring will handle proper typing
+                Ok(Type::Unknown)
+            }
+
+            Expr::OptionalChain {
+                object,
+                field,
+                span,
+            } => {
+                let obj_ty = self.infer_expr(object)?;
+                let is_option = matches!(&obj_ty, Type::Enum(name) if name.starts_with("Option"))
+                    || matches!(&obj_ty, Type::Generic(name, _) if name == "Option");
+                if !is_option && obj_ty != Type::Unknown {
+                    return Err(TypeError::OptionalChainOnNonOption {
+                        found: obj_ty.to_string(),
+                        span: *span,
+                    });
+                }
+                let _ = field;
+                // Result is Option<FieldType> — complex to determine here.
+                // The desugared match will handle proper typing.
+                Ok(Type::Unknown)
+            }
+
+            Expr::Closure {
+                params,
+                return_type,
+                body,
+                span,
+            } => {
+                let scope = self.env.scope_level();
+
+                // Resolve parameter types — all must have annotations.
+                let mut param_types = Vec::new();
+                for p in params {
+                    let ty = if let Some(type_expr) = &p.ty {
+                        self.resolve_type_mono(type_expr, p.span)?
+                    } else {
+                        return Err(TypeError::ClosureParamTypeMissing {
+                            name: p.name.clone(),
+                            span: p.span,
+                        });
+                    };
+                    self.env.insert(p.name.clone(), ty.clone());
+                    param_types.push(ty);
+                }
+
+                // Infer body type.
+                let body_type = self.infer_expr(body)?;
+
+                // Check return type if annotated.
+                let ret_type = if let Some(ret_expr) = return_type {
+                    let expected = self.resolve_type_mono(ret_expr, *span)?;
+                    TypeEnv::check_eq(&expected, &body_type, *span)?;
+                    expected
+                } else {
+                    body_type
+                };
+
+                self.env.truncate(scope);
+
+                Ok(Type::Function(param_types, Box::new(ret_type)))
+            }
+
+            Expr::Is { operand, span, .. } => {
+                // Type check the operand; the result is always Bool.
+                self.infer_expr(operand)?;
+                let _ = span;
+                Ok(Type::Bool)
+            }
+
+            Expr::Await { operand, span } => {
+                // Check that we are inside an async fn.
+                if !self.in_async_fn {
+                    return Err(TypeError::AwaitOutsideAsync { span: *span });
+                }
+                // V1: await compiles as the inner expression — just return
+                // its type. In a future version, this would unwrap Future<T>.
+                self.infer_expr(operand)
+            }
         }
     }
 
@@ -1379,9 +2057,76 @@ impl TypeChecker {
                     self.infer_block(body)?;
                     last_ty = Type::Unit;
                 }
+                Stmt::For {
+                    start, end, body, ..
+                } => {
+                    self.infer_expr(start)?;
+                    self.infer_expr(end)?;
+                    self.infer_block(body)?;
+                    last_ty = Type::Unit;
+                }
+                Stmt::IfLet {
+                    pattern,
+                    value,
+                    body,
+                    else_body,
+                    ..
+                } => {
+                    let val_ty = self.infer_expr(value)?;
+                    let scope = self.env.scope_level();
+                    self.introduce_pattern_bindings(pattern, &val_ty);
+                    self.infer_block(body)?;
+                    self.env.truncate(scope);
+                    if let Some(else_block) = else_body {
+                        self.infer_block(else_block)?;
+                    }
+                    last_ty = Type::Unit;
+                }
+                Stmt::Spawn { body, .. } => {
+                    self.infer_block(body)?;
+                    last_ty = Type::Unit;
+                }
             }
         }
         Ok(last_ty)
+    }
+
+    /// Introduces pattern bindings into the current type environment.
+    ///
+    /// For variant patterns like `Option::Some(value)`, looks up the variant's
+    /// field types in the enum registry and inserts each binding.
+    fn introduce_pattern_bindings(&mut self, pattern: &Pattern, matched_ty: &Type) {
+        if let Pattern::Variant {
+            enum_name,
+            variant,
+            bindings,
+            ..
+        } = pattern
+        {
+            let matched_enum_name = if let Type::Enum(name) = matched_ty {
+                Some(name.as_str())
+            } else {
+                None
+            };
+            let pattern_name = enum_name.as_deref();
+            let resolved_enum = matched_enum_name
+                .filter(|n| self.enum_registry.contains_key(*n))
+                .or_else(|| pattern_name.filter(|n| self.enum_registry.contains_key(*n)))
+                .or(matched_enum_name);
+            let field_types_opt = resolved_enum.and_then(|ename| {
+                self.enum_registry.get(ename).and_then(|variants| {
+                    variants
+                        .iter()
+                        .find(|(n, _)| n == variant)
+                        .map(|(_, ft)| ft.clone())
+                })
+            });
+            if let Some(field_types) = field_types_opt {
+                for (binding, ty) in bindings.iter().zip(&field_types) {
+                    self.env.insert(binding.clone(), ty.clone());
+                }
+            }
+        }
     }
 
     /// Checks a binary operation and returns the result type.
@@ -1464,6 +2209,58 @@ impl TypeChecker {
     /// Verifies the callee is a function type, the argument count matches,
     /// and each argument type matches the corresponding parameter type.
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Result<Type> {
+        // Check for method call pattern: callee is FieldAccess (e.g. obj.method(args))
+        if let Expr::FieldAccess {
+            object,
+            field,
+            span: _fa_span,
+        } = callee
+        {
+            let obj_ty = self.infer_expr(object)?;
+            let type_name = match &obj_ty {
+                Type::Struct(n) | Type::Enum(n) => n.clone(),
+                _ => std::string::String::new(),
+            };
+            if !type_name.is_empty() {
+                if let Some((mangled_name, param_types, ret_type)) = self
+                    .method_lookup
+                    .get(&(type_name.clone(), field.clone()))
+                    .cloned()
+                {
+                    // Method call: verify arguments (excluding self param)
+                    // param_types[0] is the self parameter
+                    let method_params = if param_types.len() > 1 {
+                        &param_types[1..]
+                    } else {
+                        &[]
+                    };
+                    if method_params.len() != args.len() {
+                        return Err(TypeError::ArityMismatch {
+                            expected: method_params.len(),
+                            found: args.len(),
+                            span,
+                        });
+                    }
+                    for (param_ty, arg) in method_params.iter().zip(args) {
+                        let arg_ty = self.infer_expr(arg)?;
+                        TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
+                    }
+                    // Verify self type matches
+                    if let Some(self_ty) = param_types.first() {
+                        TypeEnv::check_eq(self_ty, &obj_ty, span)?;
+                    }
+                    // Record this method call for AST rewriting
+                    self.method_resolutions.insert(span.start, mangled_name);
+                    return Ok(ret_type);
+                }
+                return Err(TypeError::MethodNotFound {
+                    method: field.clone(),
+                    type_name,
+                    span,
+                });
+            }
+        }
+
         // Check for generic function call.
         if let Expr::Ident(name, _) = callee {
             if let Some(def) = self.generic_functions.get(name).cloned() {
@@ -1704,6 +2501,12 @@ impl TypeChecker {
                 Ok(Type::Generic(name.clone(), resolved?))
             }
             kodo_ast::TypeExpr::Unit => Ok(Type::Unit),
+            kodo_ast::TypeExpr::Optional(inner) => {
+                // T? is sugar for Option<T>
+                let generic =
+                    kodo_ast::TypeExpr::Generic("Option".to_string(), vec![(**inner).clone()]);
+                Self::substitute_type_expr(&generic, subst, span, enum_names)
+            }
             kodo_ast::TypeExpr::Function(params, ret) => {
                 let p: std::result::Result<Vec<_>, _> = params
                     .iter()
@@ -1888,6 +2691,10 @@ mod tests {
             }),
             type_decls: vec![],
             enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
             functions,
         }
     }
@@ -1903,6 +2710,7 @@ mod tests {
             id: NodeId(1),
             span: Span::new(0, 100),
             name: name.to_string(),
+            is_async: false,
             generic_params: vec![],
             annotations: vec![],
             params,
@@ -2074,11 +2882,13 @@ mod tests {
                     name: "a".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(0, 5),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
                 Param {
                     name: "b".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(7, 12),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
             ],
             TypeExpr::Named("Int".to_string()),
@@ -2193,11 +3003,13 @@ mod tests {
                     name: "a".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(0, 5),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
                 Param {
                     name: "b".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(7, 12),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
             ],
             TypeExpr::Named("Int".to_string()),
@@ -2238,11 +3050,13 @@ mod tests {
                     name: "a".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(0, 5),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
                 Param {
                     name: "b".to_string(),
                     ty: TypeExpr::Named("Int".to_string()),
                     span: Span::new(7, 12),
+                    ownership: kodo_ast::Ownership::Owned,
                 },
             ],
             TypeExpr::Named("Int".to_string()),
@@ -2338,6 +3152,7 @@ mod tests {
                 name: "x".to_string(),
                 ty: TypeExpr::Named("Int".to_string()),
                 span: Span::new(0, 5),
+                ownership: kodo_ast::Ownership::Owned,
             }],
             TypeExpr::Unit,
             vec![],
@@ -2591,6 +3406,10 @@ mod tests {
             }),
             type_decls: vec![],
             enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
             functions,
         }
     }
@@ -2601,6 +3420,7 @@ mod tests {
             id: NodeId(1),
             span: Span::new(0, 100),
             name: name.to_string(),
+            is_async: false,
             generic_params: vec![],
             annotations,
             params: vec![],
@@ -2766,6 +3586,10 @@ mod tests {
             }),
             type_decls,
             enum_decls,
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
             functions,
         }
     }
@@ -3126,6 +3950,7 @@ mod tests {
                     vec![TypeExpr::Named("Int".to_string())],
                 ),
                 span: Span::new(0, 20),
+                ownership: kodo_ast::Ownership::Owned,
             }],
             TypeExpr::Unit,
             vec![],
@@ -3171,6 +3996,7 @@ mod tests {
                     ],
                 ),
                 span: Span::new(0, 20),
+                ownership: kodo_ast::Ownership::Owned,
             }],
             TypeExpr::Unit,
             vec![],
@@ -3191,5 +4017,616 @@ mod tests {
 
         let ty = Type::Generic("Pair".to_string(), vec![Type::Int, Type::Bool]);
         assert_eq!(ty.to_string(), "Pair<Int, Bool>");
+    }
+
+    #[test]
+    fn for_loop_valid_passes() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::For {
+                span: Span::new(0, 30),
+                name: "i".to_string(),
+                start: Expr::IntLit(0, Span::new(9, 10)),
+                end: Expr::IntLit(10, Span::new(12, 14)),
+                inclusive: false,
+                body: Block {
+                    span: Span::new(15, 30),
+                    stmts: vec![],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn for_loop_non_int_start_fails() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::For {
+                span: Span::new(0, 30),
+                name: "i".to_string(),
+                start: Expr::BoolLit(true, Span::new(9, 13)),
+                end: Expr::IntLit(10, Span::new(15, 17)),
+                inclusive: false,
+                body: Block {
+                    span: Span::new(18, 30),
+                    stmts: vec![],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("type mismatch"));
+    }
+
+    #[test]
+    fn for_loop_non_int_end_fails() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::For {
+                span: Span::new(0, 30),
+                name: "i".to_string(),
+                start: Expr::IntLit(0, Span::new(9, 10)),
+                end: Expr::BoolLit(false, Span::new(12, 17)),
+                inclusive: false,
+                body: Block {
+                    span: Span::new(18, 30),
+                    stmts: vec![],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("type mismatch"));
+    }
+
+    #[test]
+    fn for_loop_body_can_use_loop_var() {
+        let func = make_function(
+            "main",
+            vec![],
+            TypeExpr::Unit,
+            vec![Stmt::For {
+                span: Span::new(0, 40),
+                name: "i".to_string(),
+                start: Expr::IntLit(0, Span::new(9, 10)),
+                end: Expr::IntLit(10, Span::new(12, 14)),
+                inclusive: false,
+                body: Block {
+                    span: Span::new(15, 40),
+                    stmts: vec![Stmt::Expr(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("i".to_string(), Span::new(20, 21))),
+                        op: BinOp::Add,
+                        right: Box::new(Expr::IntLit(1, Span::new(24, 25))),
+                        span: Span::new(20, 25),
+                    })],
+                },
+            }],
+        );
+        let module = make_module(vec![func]);
+        let mut checker = TypeChecker::new();
+        assert!(checker.check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn closure_type_inference() {
+        // |x: Int| x + 1 should infer type (Int) -> Int
+        let closure = Expr::Closure {
+            params: vec![kodo_ast::ClosureParam {
+                name: "x".to_string(),
+                ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+                span: Span::new(0, 5),
+            }],
+            return_type: None,
+            body: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string(), Span::new(7, 8))),
+                op: BinOp::Add,
+                right: Box::new(Expr::IntLit(1, Span::new(11, 12))),
+                span: Span::new(7, 12),
+            }),
+            span: Span::new(0, 12),
+        };
+        let mut checker = TypeChecker::new();
+        let ty = checker.infer_expr(&closure);
+        assert!(ty.is_ok());
+        let ty = ty.unwrap_or_else(|_| panic!("type error"));
+        assert_eq!(ty, Type::Function(vec![Type::Int], Box::new(Type::Int)));
+    }
+
+    #[test]
+    fn closure_param_missing_type_annotation() {
+        // |x| x should error because x has no type annotation
+        let closure = Expr::Closure {
+            params: vec![kodo_ast::ClosureParam {
+                name: "x".to_string(),
+                ty: None,
+                span: Span::new(1, 2),
+            }],
+            return_type: None,
+            body: Box::new(Expr::Ident("x".to_string(), Span::new(4, 5))),
+            span: Span::new(0, 5),
+        };
+        let mut checker = TypeChecker::new();
+        let result = checker.infer_expr(&closure);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0227");
+    }
+
+    #[test]
+    fn check_trait_and_impl_basic() {
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 200),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test traits".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_decls: vec![kodo_ast::TypeDecl {
+                id: NodeId(1),
+                span: Span::new(50, 80),
+                name: "Point".to_string(),
+                generic_params: vec![],
+                fields: vec![
+                    kodo_ast::FieldDef {
+                        name: "x".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                        span: Span::new(60, 65),
+                    },
+                    kodo_ast::FieldDef {
+                        name: "y".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                        span: Span::new(66, 71),
+                    },
+                ],
+            }],
+            enum_decls: vec![],
+            trait_decls: vec![kodo_ast::TraitDecl {
+                id: NodeId(2),
+                span: Span::new(80, 120),
+                name: "Summable".to_string(),
+                methods: vec![kodo_ast::TraitMethod {
+                    name: "sum".to_string(),
+                    params: vec![kodo_ast::Param {
+                        name: "self".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Self".to_string()),
+                        span: Span::new(90, 94),
+                        ownership: kodo_ast::Ownership::Owned,
+                    }],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    has_self: true,
+                    span: Span::new(85, 115),
+                }],
+            }],
+            impl_blocks: vec![kodo_ast::ImplBlock {
+                id: NodeId(3),
+                span: Span::new(120, 180),
+                trait_name: "Summable".to_string(),
+                type_name: "Point".to_string(),
+                methods: vec![Function {
+                    id: NodeId(4),
+                    span: Span::new(130, 175),
+                    name: "sum".to_string(),
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![kodo_ast::Param {
+                        name: "self".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Point".to_string()),
+                        span: Span::new(135, 139),
+                        ownership: kodo_ast::Ownership::Owned,
+                    }],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    requires: vec![],
+                    ensures: vec![],
+                    body: kodo_ast::Block {
+                        span: Span::new(145, 175),
+                        stmts: vec![kodo_ast::Stmt::Return {
+                            span: Span::new(150, 170),
+                            value: Some(Expr::BinaryOp {
+                                left: Box::new(Expr::FieldAccess {
+                                    object: Box::new(Expr::Ident(
+                                        "self".to_string(),
+                                        Span::new(157, 161),
+                                    )),
+                                    field: "x".to_string(),
+                                    span: Span::new(157, 163),
+                                }),
+                                op: kodo_ast::BinOp::Add,
+                                right: Box::new(Expr::FieldAccess {
+                                    object: Box::new(Expr::Ident(
+                                        "self".to_string(),
+                                        Span::new(166, 170),
+                                    )),
+                                    field: "y".to_string(),
+                                    span: Span::new(166, 172),
+                                }),
+                                span: Span::new(157, 172),
+                            }),
+                        }],
+                    },
+                }],
+            }],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![Function {
+                id: NodeId(5),
+                span: Span::new(180, 200),
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: kodo_ast::Block {
+                    span: Span::new(185, 200),
+                    stmts: vec![kodo_ast::Stmt::Return {
+                        span: Span::new(190, 198),
+                        value: Some(Expr::IntLit(0, Span::new(197, 198))),
+                    }],
+                },
+            }],
+        };
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_ok(), "trait + impl should type check: {result:?}");
+
+        // Verify method lookup was registered
+        let lookup = checker.method_lookup();
+        assert!(
+            lookup.contains_key(&("Point".to_string(), "sum".to_string())),
+            "method lookup should contain Point.sum"
+        );
+    }
+
+    #[test]
+    fn check_unknown_trait_error() {
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![kodo_ast::ImplBlock {
+                id: NodeId(1),
+                span: Span::new(50, 80),
+                trait_name: "NonExistent".to_string(),
+                type_name: "Int".to_string(),
+                methods: vec![],
+            }],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![],
+        };
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0230");
+    }
+
+    #[test]
+    fn check_missing_trait_method_error() {
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(99),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_decls: vec![kodo_ast::TypeDecl {
+                id: NodeId(1),
+                span: Span::new(50, 65),
+                name: "Point".to_string(),
+                generic_params: vec![],
+                fields: vec![kodo_ast::FieldDef {
+                    name: "x".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    span: Span::new(55, 60),
+                }],
+            }],
+            enum_decls: vec![],
+            trait_decls: vec![kodo_ast::TraitDecl {
+                id: NodeId(2),
+                span: Span::new(65, 80),
+                name: "Describable".to_string(),
+                methods: vec![kodo_ast::TraitMethod {
+                    name: "describe".to_string(),
+                    params: vec![kodo_ast::Param {
+                        name: "self".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Self".to_string()),
+                        span: Span::new(70, 74),
+                        ownership: kodo_ast::Ownership::Owned,
+                    }],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    has_self: true,
+                    span: Span::new(68, 78),
+                }],
+            }],
+            impl_blocks: vec![kodo_ast::ImplBlock {
+                id: NodeId(3),
+                span: Span::new(80, 95),
+                trait_name: "Describable".to_string(),
+                type_name: "Point".to_string(),
+                methods: vec![], // Missing the required `describe` method
+            }],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![],
+        };
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0231");
+    }
+
+    #[test]
+    fn await_outside_async_is_error() {
+        let module = make_module(vec![Function {
+            id: NodeId(0),
+            span: Span::new(0, 10),
+            name: "sync_fn".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: kodo_ast::Block {
+                span: Span::new(0, 10),
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: Span::new(0, 10),
+                    value: Some(Expr::Await {
+                        operand: Box::new(Expr::IntLit(42, Span::new(0, 2))),
+                        span: Span::new(0, 8),
+                    }),
+                }],
+            },
+        }]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(result.is_err(), "await outside async should be an error");
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0250");
+    }
+
+    #[test]
+    fn await_inside_async_is_ok() {
+        let module = make_module(vec![Function {
+            id: NodeId(0),
+            span: Span::new(0, 10),
+            name: "async_fn".to_string(),
+            is_async: true,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: kodo_ast::Block {
+                span: Span::new(0, 10),
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: Span::new(0, 10),
+                    value: Some(Expr::Await {
+                        operand: Box::new(Expr::IntLit(42, Span::new(0, 2))),
+                        span: Span::new(0, 8),
+                    }),
+                }],
+            },
+        }]);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "await inside async should be ok: {result:?}"
+        );
+    }
+
+    // ===== Phase 17: Annotation Policy Tests =====
+
+    #[test]
+    fn low_confidence_without_review_emits_e0260() {
+        let func = make_function_with_annotations(
+            "risky_fn",
+            vec![Annotation {
+                name: "confidence".to_string(),
+                args: vec![AnnotationArg::Positional(Expr::FloatLit(
+                    0.5,
+                    Span::new(0, 10),
+                ))],
+                span: Span::new(0, 20),
+            }],
+        );
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_err(),
+            "should reject low confidence without review"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0260");
+    }
+
+    #[test]
+    fn low_confidence_with_human_review_is_ok() {
+        let func = make_function_with_annotations(
+            "reviewed_fn",
+            vec![
+                Annotation {
+                    name: "confidence".to_string(),
+                    args: vec![AnnotationArg::Positional(Expr::FloatLit(
+                        0.5,
+                        Span::new(0, 10),
+                    ))],
+                    span: Span::new(0, 20),
+                },
+                Annotation {
+                    name: "reviewed_by".to_string(),
+                    args: vec![AnnotationArg::Named(
+                        "human".to_string(),
+                        Expr::StringLit("rafael".to_string(), Span::new(0, 10)),
+                    )],
+                    span: Span::new(0, 20),
+                },
+            ],
+        );
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "low confidence with @reviewed_by(human: ...) should pass: {result:?}"
+        );
+    }
+
+    #[test]
+    fn security_sensitive_without_contracts_emits_e0262() {
+        let func = make_function_with_annotations(
+            "unsafe_fn",
+            vec![Annotation {
+                name: "security_sensitive".to_string(),
+                args: vec![],
+                span: Span::new(0, 20),
+            }],
+        );
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_err(),
+            "should reject @security_sensitive without contracts"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), "E0262");
+    }
+
+    #[test]
+    fn security_sensitive_with_requires_is_ok() {
+        let mut func = make_function_with_annotations(
+            "safe_fn",
+            vec![Annotation {
+                name: "security_sensitive".to_string(),
+                args: vec![],
+                span: Span::new(0, 20),
+            }],
+        );
+        // Add a requires clause.
+        func.requires = vec![Expr::BoolLit(true, Span::new(0, 4))];
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "@security_sensitive with requires should pass: {result:?}"
+        );
+    }
+
+    #[test]
+    fn security_sensitive_with_ensures_is_ok() {
+        let mut func = make_function_with_annotations(
+            "safe_fn",
+            vec![Annotation {
+                name: "security_sensitive".to_string(),
+                args: vec![],
+                span: Span::new(0, 20),
+            }],
+        );
+        // Add an ensures clause.
+        func.ensures = vec![Expr::BoolLit(true, Span::new(0, 4))];
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "@security_sensitive with ensures should pass: {result:?}"
+        );
+    }
+
+    #[test]
+    fn confidence_at_threshold_is_ok() {
+        let func = make_function_with_annotations(
+            "threshold_fn",
+            vec![Annotation {
+                name: "confidence".to_string(),
+                args: vec![AnnotationArg::Positional(Expr::FloatLit(
+                    0.8,
+                    Span::new(0, 10),
+                ))],
+                span: Span::new(0, 20),
+            }],
+        );
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "@confidence(0.8) is at the threshold and should pass: {result:?}"
+        );
+    }
+
+    #[test]
+    fn high_confidence_without_review_is_ok() {
+        let func = make_function_with_annotations(
+            "confident_fn",
+            vec![Annotation {
+                name: "confidence".to_string(),
+                args: vec![AnnotationArg::Positional(Expr::FloatLit(
+                    0.95,
+                    Span::new(0, 10),
+                ))],
+                span: Span::new(0, 20),
+            }],
+        );
+        let module = make_module_with_policy(vec![func], None);
+        let mut checker = TypeChecker::new();
+        let result = checker.check_module(&module);
+        assert!(
+            result.is_ok(),
+            "@confidence(0.95) should not require review: {result:?}"
+        );
     }
 }

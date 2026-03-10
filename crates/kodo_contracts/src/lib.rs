@@ -19,7 +19,8 @@
 //!
 //! Runtime check generation is implemented. Contract expressions are validated
 //! for well-formedness (must be boolean expressions without side effects).
-//! The `smt` feature flag gates Z3 integration (not yet implemented).
+//! When the `smt` feature is enabled, Z3 is used to attempt static verification
+//! of contracts before falling back to runtime checks.
 //!
 //! ## Academic References
 //!
@@ -35,6 +36,9 @@
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
+
+#[cfg(feature = "smt")]
+pub mod smt;
 
 use kodo_ast::{Expr, Function, Span};
 use thiserror::Error;
@@ -63,6 +67,14 @@ pub enum ContractError {
     InvalidExpression {
         /// Human-readable description of the issue.
         message: String,
+        /// Source location.
+        span: Span,
+    },
+    /// A contract was statically refuted by the SMT solver.
+    #[error("contract refuted at {span:?}: {counter_example}")]
+    StaticRefutation {
+        /// The counter-example found by Z3.
+        counter_example: String,
         /// Source location.
         span: Span,
     },
@@ -145,6 +157,7 @@ pub struct ContractSummary {
 pub fn expr_span(expr: &Expr) -> Span {
     match expr {
         Expr::IntLit(_, span)
+        | Expr::FloatLit(_, span)
         | Expr::StringLit(_, span)
         | Expr::BoolLit(_, span)
         | Expr::Ident(_, span)
@@ -155,7 +168,14 @@ pub fn expr_span(expr: &Expr) -> Span {
         | Expr::FieldAccess { span, .. }
         | Expr::StructLit { span, .. }
         | Expr::EnumVariantExpr { span, .. }
-        | Expr::Match { span, .. } => *span,
+        | Expr::Match { span, .. }
+        | Expr::Try { span, .. }
+        | Expr::OptionalChain { span, .. }
+        | Expr::NullCoalesce { span, .. }
+        | Expr::Range { span, .. }
+        | Expr::Closure { span, .. }
+        | Expr::Is { span, .. }
+        | Expr::Await { span, .. } => *span,
         Expr::Block(block) => block.span,
     }
 }
@@ -203,7 +223,7 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
         // Boolean literals, identifiers, and integer literals are all valid
         // in contract expressions — booleans and identifiers as top-level
         // predicates, integers as operands in comparisons.
-        Expr::BoolLit(..) | Expr::Ident(..) | Expr::IntLit(..) => Ok(()),
+        Expr::BoolLit(..) | Expr::Ident(..) | Expr::IntLit(..) | Expr::FloatLit(..) => Ok(()),
 
         // Binary operations: both operands must be valid. All binary ops are
         // acceptable in contracts — comparison ops produce booleans, arithmetic
@@ -261,6 +281,48 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
             message: "match expressions are not allowed in contract expressions".to_string(),
             span: *span,
         }),
+
+        // Range expressions are not valid in contracts.
+        Expr::Range { span, .. } => Err(ContractError::InvalidExpression {
+            message: "range expressions are not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Try operator is not valid in contracts.
+        Expr::Try { span, .. } => Err(ContractError::InvalidExpression {
+            message: "try operator `?` is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Optional chaining is not valid in contracts.
+        Expr::OptionalChain { span, .. } => Err(ContractError::InvalidExpression {
+            message: "optional chaining `?.` is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Null coalescing is not valid in contracts.
+        Expr::NullCoalesce { span, .. } => Err(ContractError::InvalidExpression {
+            message: "null coalescing `??` is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Closures are not valid in contracts.
+        Expr::Closure { span, .. } => Err(ContractError::InvalidExpression {
+            message: "closures are not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Type test (is) is not valid in contracts.
+        Expr::Is { span, .. } => Err(ContractError::InvalidExpression {
+            message: "type test `is` is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Await is not valid in contracts.
+        Expr::Await { span, .. } => Err(ContractError::InvalidExpression {
+            message: "await is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
     }
 }
 
@@ -296,14 +358,16 @@ pub fn generate_runtime_check(contract: &Contract) -> RuntimeCheck {
 ///
 /// - In [`ContractMode::None`]: skips all validation, returns zero counts.
 /// - In [`ContractMode::Runtime`]: validates expressions, counts all as runtime checks.
-/// - In [`ContractMode::Static`]: validates expressions, counts all as runtime checks
-///   (Z3 integration is not yet available, so all fall back to runtime).
-/// - In [`ContractMode::Both`]: same as `Static` for now.
+/// - In [`ContractMode::Static`] (with `smt` feature): attempts Z3 proof first;
+///   proved contracts increment `static_verified`, refuted contracts become errors,
+///   unknown contracts fall back to runtime.
+/// - In [`ContractMode::Both`]: same as `Static` — static where possible, runtime fallback.
+/// - Without the `smt` feature, `Static` and `Both` modes fall back entirely to runtime.
 ///
 /// # Errors
 ///
 /// Returns [`ContractError`] if a contract expression is malformed and the
-/// mode is not [`ContractMode::None`].
+/// mode is not [`ContractMode::None`], or if a contract is statically refuted.
 pub fn verify_contracts(contracts: &[Contract], mode: ContractMode) -> Result<VerificationResult> {
     if mode == ContractMode::None {
         return Ok(VerificationResult {
@@ -314,12 +378,31 @@ pub fn verify_contracts(contracts: &[Contract], mode: ContractMode) -> Result<Ve
     }
 
     let mut failures = Vec::new();
-    let mut valid_count: usize = 0;
+    let mut static_verified: usize = 0;
+    let mut runtime_checks_needed: usize = 0;
+    let use_smt = mode == ContractMode::Static || mode == ContractMode::Both;
 
     for contract in contracts {
         match validate_contract_expr(&contract.expr) {
             Ok(()) => {
-                valid_count += 1;
+                if use_smt {
+                    match try_smt_verify(contract) {
+                        SmtOutcome::Proved => {
+                            static_verified += 1;
+                        }
+                        SmtOutcome::Refuted(counter_example) => {
+                            failures.push(ContractError::StaticRefutation {
+                                counter_example,
+                                span: contract.span,
+                            });
+                        }
+                        SmtOutcome::Fallback => {
+                            runtime_checks_needed += 1;
+                        }
+                    }
+                } else {
+                    runtime_checks_needed += 1;
+                }
             }
             Err(err) => {
                 failures.push(err);
@@ -327,13 +410,46 @@ pub fn verify_contracts(contracts: &[Contract], mode: ContractMode) -> Result<Ve
         }
     }
 
-    // Z3 is not yet integrated, so all valid contracts need runtime checks
-    // regardless of whether Static or Runtime mode was requested.
     Ok(VerificationResult {
-        static_verified: 0,
-        runtime_checks_needed: valid_count,
+        static_verified,
+        runtime_checks_needed,
         failures,
     })
+}
+
+/// Internal outcome of an SMT verification attempt.
+#[allow(dead_code)]
+enum SmtOutcome {
+    /// Z3 proved the contract holds.
+    Proved,
+    /// Z3 refuted the contract with a counter-example.
+    Refuted(String),
+    /// SMT verification was not available or inconclusive — fall back to runtime.
+    Fallback,
+}
+
+/// Attempts SMT verification of a single contract.
+///
+/// When the `smt` feature is enabled, delegates to the Z3-based verifier.
+/// Without it, always returns `Fallback`.
+fn try_smt_verify(contract: &Contract) -> SmtOutcome {
+    #[cfg(feature = "smt")]
+    {
+        let smt_fn = match contract.kind {
+            ContractKind::Requires => smt::verify_precondition,
+            ContractKind::Ensures => smt::verify_postcondition,
+        };
+        match smt_fn(&contract.expr) {
+            smt::SmtResult::Proved => SmtOutcome::Proved,
+            smt::SmtResult::Refuted(msg) => SmtOutcome::Refuted(msg),
+            smt::SmtResult::Unknown => SmtOutcome::Fallback,
+        }
+    }
+    #[cfg(not(feature = "smt"))]
+    {
+        let _ = contract;
+        SmtOutcome::Fallback
+    }
 }
 
 /// The result of contract verification.
@@ -419,10 +535,12 @@ mod tests {
                 name: "x".to_string(),
                 ty: TypeExpr::Named("Int".to_string()),
                 span: Span::new(10, 15),
+                ownership: kodo_ast::Ownership::Owned,
             }],
             return_type: TypeExpr::Named("Int".to_string()),
             requires,
             ensures,
+            is_async: false,
             body: Block {
                 span: Span::new(50, 100),
                 stmts: vec![],
@@ -694,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_contracts_static_mode_falls_back_to_runtime() {
+    fn verify_contracts_static_mode_without_smt_falls_back() {
         let contracts = vec![Contract {
             kind: ContractKind::Requires,
             expr: bool_expr(true),
@@ -703,13 +821,22 @@ mod tests {
         let result = verify_contracts(&contracts, ContractMode::Static);
         assert!(result.is_ok());
         let result = result.unwrap_or_else(|_| panic!("already checked"));
-        // Z3 not integrated, so nothing is statically verified.
-        assert_eq!(result.static_verified, 0);
-        assert_eq!(result.runtime_checks_needed, 1);
+        // Without SMT feature: falls back to runtime.
+        // With SMT feature: Z3 proves `true`, so static_verified = 1.
+        #[cfg(not(feature = "smt"))]
+        {
+            assert_eq!(result.static_verified, 0);
+            assert_eq!(result.runtime_checks_needed, 1);
+        }
+        #[cfg(feature = "smt")]
+        {
+            assert_eq!(result.static_verified, 1);
+            assert_eq!(result.runtime_checks_needed, 0);
+        }
     }
 
     #[test]
-    fn verify_contracts_both_mode_falls_back_to_runtime() {
+    fn verify_contracts_both_mode_without_smt_falls_back() {
         let contracts = vec![Contract {
             kind: ContractKind::Requires,
             expr: bool_expr(true),
@@ -718,8 +845,16 @@ mod tests {
         let result = verify_contracts(&contracts, ContractMode::Both);
         assert!(result.is_ok());
         let result = result.unwrap_or_else(|_| panic!("already checked"));
-        assert_eq!(result.static_verified, 0);
-        assert_eq!(result.runtime_checks_needed, 1);
+        #[cfg(not(feature = "smt"))]
+        {
+            assert_eq!(result.static_verified, 0);
+            assert_eq!(result.runtime_checks_needed, 1);
+        }
+        #[cfg(feature = "smt")]
+        {
+            assert_eq!(result.static_verified, 1);
+            assert_eq!(result.runtime_checks_needed, 0);
+        }
     }
 
     // --- summarize_function_contracts tests ---
@@ -769,5 +904,37 @@ mod tests {
         assert_eq!(expr_span(&Expr::BoolLit(true, span)), span);
         assert_eq!(expr_span(&Expr::IntLit(42, span)), span);
         assert_eq!(expr_span(&Expr::Ident("x".to_string(), span)), span);
+    }
+
+    #[test]
+    fn contract_error_static_refutation_variant() {
+        let err = ContractError::StaticRefutation {
+            counter_example: "b = 0".to_string(),
+            span: Span::new(0, 10),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("refuted"));
+        assert!(msg.contains("b = 0"));
+    }
+
+    #[test]
+    fn smt_outcome_fallback_without_feature() {
+        // Regardless of feature, runtime mode always uses runtime checks
+        let ne_expr = Expr::BinaryOp {
+            left: Box::new(ident_expr("b")),
+            op: BinOp::Ne,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: ne_expr,
+            span: Span::new(0, 10),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Runtime);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.runtime_checks_needed, 1);
+        assert_eq!(result.static_verified, 0);
     }
 }

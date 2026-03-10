@@ -54,7 +54,7 @@ type_list       = type_expr ("," type_expr)* ;
 
 (* ===== Functions ===== *)
 
-function_decl   = annotation* "fn" IDENT "(" param_list? ")" return_type? contract* block ;
+function_decl   = annotation* "async"? "fn" IDENT "(" param_list? ")" return_type? contract* block ;
 
 param_list      = param ("," param)* ;
 param           = IDENT ":" type_expr ;
@@ -80,12 +80,17 @@ block           = "{" statement* "}" ;
 statement       = let_stmt
                 | assign_stmt
                 | while_stmt
+                | for_stmt
                 | return_stmt
+                | spawn_stmt
                 | expr_stmt ;
+
+spawn_stmt      = "spawn" block ;
 
 let_stmt        = "let" "mut"? IDENT (":" type_expr)? "=" expr ;
 assign_stmt     = IDENT "=" expr ;
 while_stmt      = "while" expr block ;
+for_stmt        = "for" IDENT "in" range_expr block ;
 return_stmt     = "return" expr? ;
 expr_stmt       = expr ;
 
@@ -101,7 +106,8 @@ expr_stmt       = expr ;
 (*   call, field access *)
 (*   primary *)
 
-expr            = or_expr ;
+expr            = or_expr ( ( ".." | "..=" ) or_expr )? ;
+range_expr      = or_expr ( ".." | "..=" ) or_expr ;
 
 or_expr         = and_expr ( "||" and_expr )* ;
 and_expr        = equality_expr ( "&&" equality_expr )* ;
@@ -118,7 +124,8 @@ call_suffix     = "(" arg_list? ")" ;
 field_suffix    = "." IDENT ;
 arg_list        = expr ("," expr)* ;
 
-primary_expr    = INT_LIT
+primary_expr    = FLOAT_LIT
+                | INT_LIT
                 | STRING_LIT
                 | "true" | "false"
                 | IDENT
@@ -141,5 +148,6 @@ pattern_list    = pattern ("," pattern)* ;
 
 IDENT           = [a-zA-Z_] [a-zA-Z0-9_]* ;
 INT_LIT         = [0-9] [0-9_]* ;
+FLOAT_LIT       = [0-9] [0-9_]* "." [0-9] [0-9_]* ;
 STRING_LIT      = '"' [^"]* '"' ;
 LINE_COMMENT    = "//" [^\n]* ;

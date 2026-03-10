@@ -51,6 +51,10 @@ Module {
     ),
     type_decls: [],
     enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
     functions: [
         Function {
             id: NodeId(
@@ -61,6 +65,7 @@ Module {
                 end: 331,
             },
             name: "safe_divide",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [
@@ -73,6 +78,7 @@ Module {
                         start: 216,
                         end: 222,
                     },
+                    ownership: Owned,
                 },
                 Param {
                     name: "b",
@@ -83,6 +89,7 @@ Module {
                         start: 224,
                         end: 230,
                     },
+                    ownership: Owned,
                 },
             ],
             return_type: Named(
@@ -181,6 +188,7 @@ Module {
                 end: 565,
             },
             name: "clamp",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [
@@ -193,6 +201,7 @@ Module {
                         start: 346,
                         end: 356,
                     },
+                    ownership: Owned,
                 },
                 Param {
                     name: "min",
@@ -203,6 +212,7 @@ Module {
                         start: 358,
                         end: 366,
                     },
+                    ownership: Owned,
                 },
                 Param {
                     name: "max",
@@ -213,6 +223,7 @@ Module {
                         start: 368,
                         end: 376,
                     },
+                    ownership: Owned,
                 },
             ],
             return_type: Named(

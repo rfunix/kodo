@@ -139,6 +139,19 @@ pub enum Instruction {
         /// The arguments.
         args: Vec<Value>,
     },
+    /// Call a function indirectly through a function pointer: `dest = (*func_ptr)(args...)`
+    IndirectCall {
+        /// Where to store the result.
+        dest: LocalId,
+        /// The value holding the function pointer.
+        callee: Value,
+        /// The arguments.
+        args: Vec<Value>,
+        /// The return type of the function being called.
+        return_type: Type,
+        /// The parameter types of the function being called.
+        param_types: Vec<Type>,
+    },
 }
 
 /// A value in MIR — either a constant, a local reference, or a binary operation.
@@ -196,6 +209,8 @@ pub enum Value {
     },
     /// The unit value.
     Unit,
+    /// A reference to a named function, yielding a function pointer.
+    FuncRef(String),
 }
 
 /// How a basic block transfers control flow.

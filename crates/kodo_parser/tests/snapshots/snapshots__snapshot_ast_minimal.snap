@@ -51,6 +51,10 @@ Module {
     ),
     type_decls: [],
     enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
     functions: [
         Function {
             id: NodeId(
@@ -61,6 +65,7 @@ Module {
                 end: 146,
             },
             name: "noop",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [],

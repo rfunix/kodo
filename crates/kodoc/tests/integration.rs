@@ -16,7 +16,8 @@ fn read_fixture(relative_path: &str) -> String {
         .unwrap_or_else(|e| panic!("could not read fixture {}: {e}", fixture_path.display()))
 }
 
-/// Runs the full pipeline (parse → type check → contracts → MIR) on a source string.
+/// Runs the full pipeline (parse → type check → contracts → desugar → trait rewriting → MIR)
+/// on a source string.
 /// Returns Ok(()) on success, Err(String) with the error message on failure.
 fn run_full_pipeline(source: &str) -> Result<(), String> {
     let module = kodo_parser::parse(source).map_err(|e| format!("parse error: {e}"))?;
@@ -37,10 +38,316 @@ fn run_full_pipeline(source: &str) -> Result<(), String> {
         kodo_contracts::verify_contracts(&contracts, kodo_contracts::ContractMode::Runtime)
             .map_err(|e| format!("contract error: {e}"))?;
     }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            kodo_contracts::verify_contracts(&contracts, kodo_contracts::ContractMode::Runtime)
+                .map_err(|e| format!("contract error: {e}"))?;
+        }
+    }
+
+    // Desugar pass
+    let mut module = module;
+    kodo_desugar::desugar_module(&mut module);
+
+    // Lift impl block methods to top-level functions with mangled names.
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let mut func = method.clone();
+            func.name = format!("{}_{}", impl_block.type_name, method.name);
+            for param in &mut func.params {
+                if param.name == "self" {
+                    param.ty = kodo_ast::TypeExpr::Named(impl_block.type_name.clone());
+                }
+            }
+            module.functions.push(func);
+        }
+    }
+
+    // Rewrite method calls using span-based resolutions from the type checker.
+    let method_resolutions = checker.method_resolutions().clone();
+    if !method_resolutions.is_empty() {
+        for func in &mut module.functions {
+            rewrite_method_calls_in_block(&mut func.body, &method_resolutions);
+        }
+    }
 
     kodo_mir::lowering::lower_module(&module).map_err(|e| format!("MIR error: {e}"))?;
 
     Ok(())
+}
+
+/// Rewrites method calls in a block by replacing `obj.method(args)` with
+/// `TypeName_method(obj, args)` where a method call was resolved during type checking.
+fn rewrite_method_calls_in_block(
+    block: &mut kodo_ast::Block,
+    resolutions: &std::collections::HashMap<u32, String>,
+) {
+    for stmt in &mut block.stmts {
+        match stmt {
+            kodo_ast::Stmt::Let { value, .. } | kodo_ast::Stmt::Assign { value, .. } => {
+                *value = rewrite_method_calls_in_expr(
+                    std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
+            }
+            kodo_ast::Stmt::Expr(expr) => {
+                *expr = rewrite_method_calls_in_expr(
+                    std::mem::replace(expr, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
+            }
+            kodo_ast::Stmt::Return { value, .. } => {
+                if let Some(v) = value {
+                    *v = rewrite_method_calls_in_expr(
+                        std::mem::replace(v, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                        resolutions,
+                    );
+                }
+            }
+            kodo_ast::Stmt::While {
+                condition, body, ..
+            } => {
+                *condition = rewrite_method_calls_in_expr(
+                    std::mem::replace(
+                        condition,
+                        kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
+                    ),
+                    resolutions,
+                );
+                rewrite_method_calls_in_block(body, resolutions);
+            }
+            kodo_ast::Stmt::For {
+                start, end, body, ..
+            } => {
+                *start = rewrite_method_calls_in_expr(
+                    std::mem::replace(start, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
+                *end = rewrite_method_calls_in_expr(
+                    std::mem::replace(end, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
+                rewrite_method_calls_in_block(body, resolutions);
+            }
+            kodo_ast::Stmt::IfLet {
+                value,
+                body,
+                else_body,
+                ..
+            } => {
+                *value = rewrite_method_calls_in_expr(
+                    std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
+                rewrite_method_calls_in_block(body, resolutions);
+                if let Some(eb) = else_body {
+                    rewrite_method_calls_in_block(eb, resolutions);
+                }
+            }
+            kodo_ast::Stmt::Spawn { body, .. } => {
+                rewrite_method_calls_in_block(body, resolutions);
+            }
+        }
+    }
+}
+
+/// Rewrites method calls in an expression using span-based resolutions.
+fn rewrite_method_calls_in_expr(
+    expr: kodo_ast::Expr,
+    resolutions: &std::collections::HashMap<u32, String>,
+) -> kodo_ast::Expr {
+    match expr {
+        kodo_ast::Expr::Call { callee, args, span } => {
+            if let kodo_ast::Expr::FieldAccess {
+                object,
+                field,
+                span: fa_span,
+            } = *callee
+            {
+                let object = rewrite_method_calls_in_expr(*object, resolutions);
+                let args: Vec<_> = args
+                    .into_iter()
+                    .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                    .collect();
+
+                if let Some(mangled) = resolutions.get(&span.start) {
+                    let mut new_args = vec![object];
+                    new_args.extend(args);
+                    return kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident(mangled.clone(), span)),
+                        args: new_args,
+                        span,
+                    };
+                }
+
+                kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::FieldAccess {
+                        object: Box::new(object),
+                        field,
+                        span: fa_span,
+                    }),
+                    args,
+                    span,
+                }
+            } else {
+                let callee = rewrite_method_calls_in_expr(*callee, resolutions);
+                let args: Vec<_> = args
+                    .into_iter()
+                    .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                    .collect();
+                kodo_ast::Expr::Call {
+                    callee: Box::new(callee),
+                    args,
+                    span,
+                }
+            }
+        }
+        kodo_ast::Expr::BinaryOp {
+            left,
+            op,
+            right,
+            span,
+        } => kodo_ast::Expr::BinaryOp {
+            left: Box::new(rewrite_method_calls_in_expr(*left, resolutions)),
+            op,
+            right: Box::new(rewrite_method_calls_in_expr(*right, resolutions)),
+            span,
+        },
+        kodo_ast::Expr::UnaryOp { op, operand, span } => kodo_ast::Expr::UnaryOp {
+            op,
+            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            span,
+        },
+        kodo_ast::Expr::If {
+            condition,
+            mut then_branch,
+            else_branch,
+            span,
+        } => {
+            let condition = rewrite_method_calls_in_expr(*condition, resolutions);
+            rewrite_method_calls_in_block(&mut then_branch, resolutions);
+            let else_branch = else_branch.map(|mut b| {
+                rewrite_method_calls_in_block(&mut b, resolutions);
+                b
+            });
+            kodo_ast::Expr::If {
+                condition: Box::new(condition),
+                then_branch,
+                else_branch,
+                span,
+            }
+        }
+        kodo_ast::Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => kodo_ast::Expr::FieldAccess {
+            object: Box::new(rewrite_method_calls_in_expr(*object, resolutions)),
+            field,
+            span,
+        },
+        kodo_ast::Expr::StructLit { name, fields, span } => kodo_ast::Expr::StructLit {
+            name,
+            fields: fields
+                .into_iter()
+                .map(|f| kodo_ast::FieldInit {
+                    name: f.name,
+                    value: rewrite_method_calls_in_expr(f.value, resolutions),
+                    span: f.span,
+                })
+                .collect(),
+            span,
+        },
+        kodo_ast::Expr::EnumVariantExpr {
+            enum_name,
+            variant,
+            args,
+            span,
+        } => kodo_ast::Expr::EnumVariantExpr {
+            enum_name,
+            variant,
+            args: args
+                .into_iter()
+                .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                .collect(),
+            span,
+        },
+        kodo_ast::Expr::Match { expr, arms, span } => kodo_ast::Expr::Match {
+            expr: Box::new(rewrite_method_calls_in_expr(*expr, resolutions)),
+            arms: arms
+                .into_iter()
+                .map(|arm| kodo_ast::MatchArm {
+                    pattern: arm.pattern,
+                    body: rewrite_method_calls_in_expr(arm.body, resolutions),
+                    span: arm.span,
+                })
+                .collect(),
+            span,
+        },
+        kodo_ast::Expr::Block(mut block) => {
+            rewrite_method_calls_in_block(&mut block, resolutions);
+            kodo_ast::Expr::Block(block)
+        }
+        kodo_ast::Expr::Closure {
+            params,
+            return_type,
+            body,
+            span,
+        } => kodo_ast::Expr::Closure {
+            params,
+            return_type,
+            body: Box::new(rewrite_method_calls_in_expr(*body, resolutions)),
+            span,
+        },
+        kodo_ast::Expr::NullCoalesce { left, right, span } => kodo_ast::Expr::NullCoalesce {
+            left: Box::new(rewrite_method_calls_in_expr(*left, resolutions)),
+            right: Box::new(rewrite_method_calls_in_expr(*right, resolutions)),
+            span,
+        },
+        kodo_ast::Expr::Try { operand, span } => kodo_ast::Expr::Try {
+            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            span,
+        },
+        kodo_ast::Expr::OptionalChain {
+            object,
+            field,
+            span,
+        } => kodo_ast::Expr::OptionalChain {
+            object: Box::new(rewrite_method_calls_in_expr(*object, resolutions)),
+            field,
+            span,
+        },
+        kodo_ast::Expr::Range {
+            start,
+            end,
+            inclusive,
+            span,
+        } => kodo_ast::Expr::Range {
+            start: Box::new(rewrite_method_calls_in_expr(*start, resolutions)),
+            end: Box::new(rewrite_method_calls_in_expr(*end, resolutions)),
+            inclusive,
+            span,
+        },
+        e @ (kodo_ast::Expr::IntLit(_, _)
+        | kodo_ast::Expr::FloatLit(_, _)
+        | kodo_ast::Expr::StringLit(_, _)
+        | kodo_ast::Expr::BoolLit(_, _)
+        | kodo_ast::Expr::Ident(_, _)) => e,
+        kodo_ast::Expr::Is {
+            operand,
+            type_name,
+            span,
+        } => kodo_ast::Expr::Is {
+            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            type_name,
+            span,
+        },
+        kodo_ast::Expr::Await { operand, span } => kodo_ast::Expr::Await {
+            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            span,
+        },
+    }
 }
 
 // ========== Valid fixtures: full pipeline must succeed ==========

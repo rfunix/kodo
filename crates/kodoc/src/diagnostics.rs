@@ -2,58 +2,116 @@
 //!
 //! Uses [`ariadne`] to render type errors and parse errors with coloured
 //! source spans, providing a high-quality developer experience.
+//!
+//! The unified [`render`] and [`render_json`] functions accept any type
+//! implementing [`kodo_ast::Diagnostic`], enabling consistent rendering
+//! across all compiler phases.
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
+use kodo_ast::Diagnostic;
 use serde::Serialize;
 
-/// Renders a [`kodo_types::TypeError`] with source spans using ariadne.
+/// Renders any diagnostic using ariadne.
 ///
-/// Falls back to plain `eprintln` if the error has no span.
-pub fn render_type_error(source: &str, filename: &str, error: &kodo_types::TypeError) {
-    if let Some(span) = error.span() {
-        let start = span.start as usize;
-        let end = span.end as usize;
-        let start = start.min(source.len());
-        let end = end.min(source.len()).max(start);
+/// Accepts any type implementing [`kodo_ast::Diagnostic`] and renders it
+/// with coloured source spans. Falls back to plain `eprintln` if the
+/// diagnostic has no span.
+pub fn render(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
+    if let Some(span) = diagnostic.span() {
+        let start = (span.start as usize).min(source.len());
+        let end = (span.end as usize).min(source.len()).max(start);
 
-        Report::build(ReportKind::Error, (filename, start..end))
-            .with_message(error.to_string())
-            .with_label(
-                Label::new((filename, start..end))
-                    .with_message(error.to_string())
-                    .with_color(Color::Red),
-            )
+        let kind = match diagnostic.severity() {
+            kodo_ast::Severity::Error => ReportKind::Error,
+            kodo_ast::Severity::Warning => ReportKind::Warning,
+            kodo_ast::Severity::Note => ReportKind::Advice,
+        };
+
+        let mut report = Report::build(kind, (filename, start..end))
+            .with_code(diagnostic.code())
+            .with_message(diagnostic.message());
+
+        // Add primary label.
+        report = report.with_label(
+            Label::new((filename, start..end))
+                .with_message(diagnostic.message())
+                .with_color(Color::Red),
+        );
+
+        // Add suggestion if available.
+        if let Some(suggestion) = diagnostic.suggestion() {
+            report = report.with_help(suggestion);
+        }
+
+        // Add additional labels from the diagnostic.
+        for label in diagnostic.labels() {
+            let ls = (label.span.start as usize).min(source.len());
+            let le = (label.span.end as usize).min(source.len()).max(ls);
+            // Skip labels that overlap exactly with the primary span.
+            if ls == start && le == end {
+                continue;
+            }
+            report = report.with_label(
+                Label::new((filename, ls..le))
+                    .with_message(&label.message)
+                    .with_color(Color::Blue),
+            );
+        }
+
+        report
             .finish()
             .eprint((filename, Source::from(source)))
             .ok();
     } else {
-        eprintln!("type error: {error}");
+        eprintln!("{}: {}", diagnostic.code(), diagnostic.message());
     }
+}
+
+/// Renders any diagnostic as structured JSON to stdout.
+///
+/// Accepts any type implementing [`kodo_ast::Diagnostic`] and produces
+/// a single-error JSON output suitable for consumption by AI agents.
+pub fn render_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
+    let json_diag = JsonDiagnostic {
+        code: diagnostic.code(),
+        severity: match diagnostic.severity() {
+            kodo_ast::Severity::Error => "error",
+            kodo_ast::Severity::Warning => "warning",
+            kodo_ast::Severity::Note => "note",
+        },
+        message: diagnostic.message(),
+        span: diagnostic
+            .span()
+            .map(|s| make_json_span(source, filename, s)),
+        suggestion: diagnostic.suggestion(),
+    };
+    let output = JsonOutput {
+        errors: vec![json_diag],
+        warnings: vec![],
+        status: "failed".to_string(),
+        meta: None,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output)
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+    );
+}
+
+/// Renders a [`kodo_types::TypeError`] with source spans using ariadne.
+///
+/// Falls back to plain `eprintln` if the error has no span.
+/// Delegates to the unified [`render`] function.
+pub fn render_type_error(source: &str, filename: &str, error: &kodo_types::TypeError) {
+    render(source, filename, error);
 }
 
 /// Renders a [`kodo_parser::ParseError`] with source spans using ariadne.
 ///
 /// Falls back to plain `eprintln` if the error has no span.
+/// Delegates to the unified [`render`] function.
 pub fn render_parse_error(source: &str, filename: &str, error: &kodo_parser::ParseError) {
-    if let Some(span) = error.span() {
-        let start = span.start as usize;
-        let end = span.end as usize;
-        let start = start.min(source.len());
-        let end = end.min(source.len()).max(start);
-
-        Report::build(ReportKind::Error, (filename, start..end))
-            .with_message(error.to_string())
-            .with_label(
-                Label::new((filename, start..end))
-                    .with_message(error.to_string())
-                    .with_color(Color::Red),
-            )
-            .finish()
-            .eprint((filename, Source::from(source)))
-            .ok();
-    } else {
-        eprintln!("parse error: {error}");
-    }
+    render(source, filename, error);
 }
 
 /// A structured span for JSON output.
@@ -129,48 +187,17 @@ fn make_json_span(source: &str, filename: &str, span: kodo_ast::Span) -> JsonSpa
 }
 
 /// Renders a [`kodo_parser::ParseError`] as JSON to stdout.
+///
+/// Delegates to the unified [`render_json`] function.
 pub fn render_parse_error_json(source: &str, filename: &str, error: &kodo_parser::ParseError) {
-    let diagnostic = JsonDiagnostic {
-        code: error.code(),
-        severity: "error",
-        message: error.to_string(),
-        span: error.span().map(|s| make_json_span(source, filename, s)),
-        suggestion: None,
-    };
-    let output = JsonOutput {
-        errors: vec![diagnostic],
-        warnings: vec![],
-        status: "failed".to_string(),
-        meta: None,
-    };
-    // In a binary crate, println is fine for structured output
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output)
-            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
-    );
+    render_json(source, filename, error);
 }
 
 /// Renders a [`kodo_types::TypeError`] as JSON to stdout.
+///
+/// Delegates to the unified [`render_json`] function.
 pub fn render_type_error_json(source: &str, filename: &str, error: &kodo_types::TypeError) {
-    let diagnostic = JsonDiagnostic {
-        code: error.code(),
-        severity: "error",
-        message: error.to_string(),
-        span: error.span().map(|s| make_json_span(source, filename, s)),
-        suggestion: None,
-    };
-    let output = JsonOutput {
-        errors: vec![diagnostic],
-        warnings: vec![],
-        status: "failed".to_string(),
-        meta: None,
-    };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output)
-            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
-    );
+    render_json(source, filename, error);
 }
 
 /// Renders a success JSON output to stdout.

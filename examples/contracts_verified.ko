@@ -1,0 +1,18 @@
+// Demonstrates contract verification with SMT support in Kodo.
+// When compiled with --contracts=static (and the smt feature),
+// the `requires { b != 0 }` contract is checked by Z3 at compile time.
+
+module contracts_verified {
+    meta { purpose: "Contract verification demo", version: "1.0.0" }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn kodo_main() {
+        let result: Int = safe_divide(10, 2)
+        print_int(result)
+    }
+}

@@ -1,0 +1,54 @@
+// Demonstrates Kōdo's Phase 17: Agent Traceability trust policies.
+//
+// Kōdo enforces two annotation-based policies:
+//   1. @confidence(X) where X < 0.8 requires @reviewed_by(human: "...")
+//   2. @security_sensitive requires at least one `requires` or `ensures` clause
+//
+// These policies ensure that low-confidence agent-generated code is
+// human-reviewed, and security-sensitive code has formal contracts.
+//
+// Compile and run:
+//   kodoc build examples/agent_traceability.ko -o agent_traceability
+//   ./agent_traceability
+
+module agent_traceability {
+    meta {
+        purpose: "Demonstrate agent traceability annotation policies",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // High confidence: no review required.
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    // Low confidence but human-reviewed: passes policy.
+    @authored_by(agent: "claude")
+    @confidence(0.5)
+    @reviewed_by(human: "rafael")
+    fn experimental_multiply(a: Int, b: Int) -> Int {
+        return a * b
+    }
+
+    // Security-sensitive function with a contract: passes policy.
+    @security_sensitive
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let sum: Int = add(3, 4)
+        print_int(sum)
+
+        let product: Int = experimental_multiply(5, 6)
+        print_int(product)
+
+        let quotient: Int = safe_divide(10, 2)
+        print_int(quotient)
+    }
+}

@@ -1,0 +1,23 @@
+// Closures — demonstrates closure expressions and direct closure calls.
+//
+// Closures are anonymous functions defined with `|params| body` syntax.
+// They can capture variables from the enclosing scope by value.
+//
+// Compile and run:
+//   kodoc build examples/closures.ko -o closures
+//   ./closures
+
+module closures {
+    meta {
+        purpose: "Demonstrate closures and direct closure calls"
+        version: "0.1.0"
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        let result: Int = double(21)
+        print_int(result)
+        return 0
+    }
+}

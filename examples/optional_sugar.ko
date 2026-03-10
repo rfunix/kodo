@@ -1,0 +1,20 @@
+module optional_sugar {
+    meta {
+        purpose: "Demonstrate optional sugar operators (?? and T?)"
+        version: "0.1.0"
+    }
+
+    fn get_value(opt: Option<Int>) -> Int {
+        return opt ?? 0
+    }
+
+    fn main() -> Int {
+        let some_val: Option<Int> = Option::Some(42)
+        let none_val: Option<Int> = Option::None
+
+        print_int(get_value(some_val))
+        print_int(get_value(none_val))
+
+        return 0
+    }
+}

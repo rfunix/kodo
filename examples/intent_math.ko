@@ -1,0 +1,36 @@
+module intent_math {
+    meta {
+        purpose: "Math intent demo",
+        version: "1.0.0"
+    }
+
+    intent math_module {
+        functions: [add, sub, mul, safe_div]
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn sub(a: Int, b: Int) -> Int {
+        return a - b
+    }
+
+    fn mul(a: Int, b: Int) -> Int {
+        return a * b
+    }
+
+    fn safe_div(a: Int, b: Int) -> Int {
+        if b == 0 {
+            return 0
+        }
+        return a / b
+    }
+
+    fn kodo_main() {
+        let result: Int = add(10, 20)
+        print_int(result)
+        let div_result: Int = safe_div(100, 5)
+        print_int(div_result)
+    }
+}

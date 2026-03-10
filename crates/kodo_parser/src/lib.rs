@@ -39,9 +39,10 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    Annotation, AnnotationArg, BinOp, Block, EnumDecl, EnumVariant, Expr, FieldDef, FieldInit,
-    Function, ImportDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Param, Pattern, Span, Stmt,
-    TypeDecl, TypeExpr, UnaryOp,
+    ActorDecl, Annotation, AnnotationArg, BinOp, Block, ClosureParam, EnumDecl, EnumVariant, Expr,
+    FieldDef, FieldInit, Function, ImplBlock, ImportDecl, IntentConfigEntry, IntentConfigValue,
+    IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Ownership, Param, Pattern, Span,
+    Stmt, TraitDecl, TraitMethod, TypeDecl, TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -87,6 +88,47 @@ impl ParseError {
             Self::UnexpectedToken { .. } => "E0100",
             Self::UnexpectedEof { .. } => "E0101",
             Self::LexError(_) => "E0001",
+        }
+    }
+}
+
+impl kodo_ast::Diagnostic for ParseError {
+    fn code(&self) -> &'static str {
+        self.code()
+    }
+
+    fn severity(&self) -> kodo_ast::Severity {
+        kodo_ast::Severity::Error
+    }
+
+    fn span(&self) -> Option<kodo_ast::Span> {
+        self.span()
+    }
+
+    fn message(&self) -> String {
+        self.to_string()
+    }
+
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            Self::UnexpectedToken { .. } => {
+                Some("check for missing delimiters or keywords".to_string())
+            }
+            Self::UnexpectedEof { expected } => {
+                Some(format!("the file ended before the parser found {expected}"))
+            }
+            Self::LexError(_) => Some("check for invalid characters in the source".to_string()),
+        }
+    }
+
+    fn labels(&self) -> Vec<kodo_ast::DiagnosticLabel> {
+        if let Some(span) = self.span() {
+            vec![kodo_ast::DiagnosticLabel {
+                span,
+                message: self.to_string(),
+            }]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -186,19 +228,36 @@ impl Parser {
             None
         };
 
-        // Parse type declarations and functions (with optional leading annotations)
+        // Parse type declarations, trait declarations, impl blocks, intents, and functions
         let mut type_decls = Vec::new();
         let mut enum_decls = Vec::new();
+        let mut trait_decls = Vec::new();
+        let mut impl_blocks = Vec::new();
+        let mut actor_decls = Vec::new();
+        let mut intent_decls = Vec::new();
         let mut functions = Vec::new();
         while self.check(&TokenKind::Fn)
             || self.check(&TokenKind::At)
             || self.check(&TokenKind::Struct)
             || self.check(&TokenKind::Enum)
+            || self.check(&TokenKind::Trait)
+            || self.check(&TokenKind::Impl)
+            || self.check(&TokenKind::Actor)
+            || self.check(&TokenKind::Async)
+            || self.check(&TokenKind::Intent)
         {
             if self.check(&TokenKind::Struct) {
                 type_decls.push(self.parse_struct_decl()?);
             } else if self.check(&TokenKind::Enum) {
                 enum_decls.push(self.parse_enum_decl()?);
+            } else if self.check(&TokenKind::Trait) {
+                trait_decls.push(self.parse_trait_decl()?);
+            } else if self.check(&TokenKind::Impl) {
+                impl_blocks.push(self.parse_impl_block()?);
+            } else if self.check(&TokenKind::Actor) {
+                actor_decls.push(self.parse_actor_decl()?);
+            } else if self.check(&TokenKind::Intent) {
+                intent_decls.push(self.parse_intent()?);
             } else {
                 functions.push(self.parse_annotated_function()?);
             }
@@ -215,6 +274,10 @@ impl Parser {
             meta,
             type_decls,
             enum_decls,
+            trait_decls,
+            impl_blocks,
+            actor_decls,
+            intent_decls,
             functions,
         })
     }
@@ -337,7 +400,15 @@ impl Parser {
     }
 
     /// Parses a function definition including signature, contracts, and body.
+    /// Handles both `fn name(...)` and `async fn name(...)`.
     fn parse_function(&mut self) -> Result<Function> {
+        // Check for optional `async` keyword before `fn`.
+        let is_async = if self.check(&TokenKind::Async) {
+            self.advance();
+            true
+        } else {
+            false
+        };
         let start = self.expect(&TokenKind::Fn)?.span;
         let name = self.parse_ident()?;
 
@@ -351,16 +422,7 @@ impl Parser {
             if !params.is_empty() {
                 self.expect(&TokenKind::Comma)?;
             }
-            let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
-            let param_name = self.parse_ident()?;
-            self.expect(&TokenKind::Colon)?;
-            let ty = self.parse_type()?;
-            let param_end = self.prev_span();
-            params.push(Param {
-                name: param_name,
-                ty,
-                span: param_start.merge(param_end),
-            });
+            params.push(self.parse_param()?);
         }
         self.expect(&TokenKind::RParen)?;
 
@@ -402,6 +464,7 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            is_async,
             generic_params,
             annotations: vec![],
             params,
@@ -409,6 +472,34 @@ impl Parser {
             requires,
             ensures,
             body,
+        })
+    }
+
+    /// Parses a single function parameter, including optional ownership
+    /// qualifier (`own` or `ref`): `[own|ref] name: Type`.
+    fn parse_param(&mut self) -> Result<Param> {
+        let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+
+        // Check for ownership qualifier
+        let ownership = if self.check(&TokenKind::Own) {
+            self.advance();
+            Ownership::Owned
+        } else if self.check(&TokenKind::Ref) {
+            self.advance();
+            Ownership::Ref
+        } else {
+            Ownership::Owned
+        };
+
+        let param_name = self.parse_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let ty = self.parse_type()?;
+        let param_end = self.prev_span();
+        Ok(Param {
+            name: param_name,
+            ty,
+            span: param_start.merge(param_end),
+            ownership,
         })
     }
 
@@ -507,6 +598,200 @@ impl Parser {
         })
     }
 
+    /// Parses a trait declaration: `trait Name { fn method(self) -> RetType ... }`
+    fn parse_trait_decl(&mut self) -> Result<TraitDecl> {
+        let start = self.expect(&TokenKind::Trait)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut methods = Vec::new();
+        while self.check(&TokenKind::Fn) {
+            let method_start = self.expect(&TokenKind::Fn)?.span;
+            let method_name = self.parse_ident()?;
+            self.expect(&TokenKind::LParen)?;
+
+            let mut params = Vec::new();
+            let mut has_self = false;
+            while !self.check(&TokenKind::RParen) {
+                if !params.is_empty() {
+                    self.expect(&TokenKind::Comma)?;
+                }
+                let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+                // Check for `self` keyword
+                if self.check(&TokenKind::SelfValue) {
+                    self.advance();
+                    has_self = true;
+                    let param_end = self.prev_span();
+                    params.push(Param {
+                        name: "self".to_string(),
+                        ty: TypeExpr::Named("Self".to_string()),
+                        span: param_start.merge(param_end),
+                        ownership: Ownership::Owned,
+                    });
+                } else {
+                    let param_name = self.parse_ident()?;
+                    self.expect(&TokenKind::Colon)?;
+                    let ty = self.parse_type()?;
+                    let param_end = self.prev_span();
+                    params.push(Param {
+                        name: param_name,
+                        ty,
+                        span: param_start.merge(param_end),
+                        ownership: Ownership::Owned,
+                    });
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+
+            // Parse optional return type
+            let return_type = if self.check(&TokenKind::Arrow) {
+                self.advance();
+                self.parse_type()?
+            } else {
+                TypeExpr::Unit
+            };
+
+            let method_end = self.prev_span();
+            methods.push(TraitMethod {
+                name: method_name,
+                params,
+                return_type,
+                has_self,
+                span: method_start.merge(method_end),
+            });
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(TraitDecl {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            methods,
+        })
+    }
+
+    /// Parses an impl block: `impl TraitName for TypeName { fn method(self) -> RetType { body } }`
+    fn parse_impl_block(&mut self) -> Result<ImplBlock> {
+        let start = self.expect(&TokenKind::Impl)?.span;
+        let trait_name = self.parse_ident()?;
+
+        // Expect the `for` keyword (reused from for-loop token)
+        self.expect(&TokenKind::For)?;
+        let type_name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut methods = Vec::new();
+        while self.check(&TokenKind::Fn) {
+            let mut func = self.parse_impl_method()?;
+            // Resolve `self` param type to the implementing type
+            for param in &mut func.params {
+                if param.name == "self" {
+                    param.ty = TypeExpr::Named(type_name.clone());
+                }
+            }
+            methods.push(func);
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(ImplBlock {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            trait_name,
+            type_name,
+            methods,
+        })
+    }
+
+    /// Parses a method inside an impl block. Similar to `parse_function` but
+    /// handles `self` as first parameter without requiring a type annotation.
+    fn parse_impl_method(&mut self) -> Result<Function> {
+        let start = self.expect(&TokenKind::Fn)?.span;
+        let name = self.parse_ident()?;
+
+        // Parse optional generic parameters
+        let generic_params = self.parse_optional_generic_params()?;
+
+        // Parse parameters (first may be `self`)
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while !self.check(&TokenKind::RParen) {
+            if !params.is_empty() {
+                self.expect(&TokenKind::Comma)?;
+            }
+            let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            // Check for `self` keyword
+            if self.check(&TokenKind::SelfValue) {
+                self.advance();
+                let param_end = self.prev_span();
+                params.push(Param {
+                    name: "self".to_string(),
+                    ty: TypeExpr::Named("Self".to_string()), // resolved later
+                    span: param_start.merge(param_end),
+                    ownership: Ownership::Owned,
+                });
+            } else {
+                let param_name = self.parse_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let ty = self.parse_type()?;
+                let param_end = self.prev_span();
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                    span: param_start.merge(param_end),
+                    ownership: Ownership::Owned,
+                });
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+
+        // Parse optional return type
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            self.parse_type()?
+        } else {
+            TypeExpr::Unit
+        };
+
+        // Parse contract clauses
+        let mut requires = Vec::new();
+        let mut ensures = Vec::new();
+        loop {
+            if self.check(&TokenKind::Requires) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                requires.push(expr);
+            } else if self.check(&TokenKind::Ensures) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                ensures.push(expr);
+            } else {
+                break;
+            }
+        }
+
+        // Parse body block
+        let body = self.parse_block()?;
+        let end = self.prev_span();
+
+        Ok(Function {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            is_async: false,
+            generic_params,
+            annotations: vec![],
+            params,
+            return_type,
+            requires,
+            ensures,
+            body,
+        })
+    }
+
     /// Parses a struct literal after the name has been consumed:
     /// `{ field: expr, ... }`
     fn parse_struct_literal(&mut self, name: String, start_span: Span) -> Result<Expr> {
@@ -586,7 +871,11 @@ impl Parser {
 
         // Literal patterns
         if let Some(
-            TokenKind::IntLit(_) | TokenKind::StringLit(_) | TokenKind::True | TokenKind::False,
+            TokenKind::IntLit(_)
+            | TokenKind::FloatLit(_)
+            | TokenKind::StringLit(_)
+            | TokenKind::True
+            | TokenKind::False,
         ) = self.peek_kind().cloned()
         {
             let expr = self.parse_primary_expr()?;
@@ -693,6 +982,20 @@ impl Parser {
             Some(TokenKind::Let) => self.parse_let_stmt(),
             Some(TokenKind::Return) => self.parse_return_stmt(),
             Some(TokenKind::While) => self.parse_while_stmt(),
+            Some(TokenKind::For) => self.parse_for_stmt(),
+            Some(TokenKind::If) => {
+                // Look ahead: `if let` is a statement, regular `if` is an expression.
+                if self
+                    .tokens
+                    .get(self.pos + 1)
+                    .is_some_and(|t| t.kind == TokenKind::Let)
+                {
+                    self.parse_if_let_stmt()
+                } else {
+                    self.parse_expr_or_assign_stmt()
+                }
+            }
+            Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
         }
     }
@@ -796,21 +1099,259 @@ impl Parser {
         })
     }
 
+    /// Parses a for loop: `for <ident> in <expr>..<expr> { <body> }` or
+    /// `for <ident> in <expr>..=<expr> { <body> }`.
+    fn parse_for_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::For)?.span;
+        let name = self.parse_ident()?;
+
+        // Expect the contextual keyword "in".
+        match self.peek() {
+            Some(token) if matches!(&token.kind, TokenKind::Ident(s) if s == "in") => {
+                self.advance();
+            }
+            Some(token) => {
+                let found = token.kind.clone();
+                let span = token.span;
+                return Err(ParseError::UnexpectedToken {
+                    expected: "in".to_string(),
+                    found,
+                    span,
+                });
+            }
+            None => {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "in".to_string(),
+                });
+            }
+        }
+
+        // Parse the range expression (start..end or start..=end).
+        let range_expr = self.parse_expr()?;
+        match range_expr {
+            Expr::Range {
+                start: range_start,
+                end: range_end,
+                inclusive,
+                ..
+            } => {
+                let body = self.parse_block()?;
+                let end_span = body.span;
+                Ok(Stmt::For {
+                    span: start.merge(end_span),
+                    name,
+                    start: *range_start,
+                    end: *range_end,
+                    inclusive,
+                    body,
+                })
+            }
+            other => {
+                let span = Self::expr_span(&other);
+                Err(ParseError::UnexpectedToken {
+                    expected: "range expression (e.g. 0..10 or 0..=10)".to_string(),
+                    found: TokenKind::Ident("expression".to_string()),
+                    span,
+                })
+            }
+        }
+    }
+
+    /// Parses an `if let` statement: `if let Pattern = expr { body } [else { else_body }]`.
+    fn parse_if_let_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::If)?.span;
+        self.expect(&TokenKind::Let)?;
+        let pattern = self.parse_pattern()?;
+        self.expect(&TokenKind::Eq)?;
+        let value = self.parse_expr()?;
+        let body = self.parse_block()?;
+
+        let else_body = if self.check(&TokenKind::Else) {
+            self.advance();
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+
+        let end = else_body.as_ref().map_or(body.span, |b| b.span);
+
+        Ok(Stmt::IfLet {
+            span: start.merge(end),
+            pattern,
+            value,
+            body,
+            else_body,
+        })
+    }
+
+    /// Parses a spawn statement: `spawn { body }`.
+    fn parse_spawn_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Spawn)?.span;
+        let body = self.parse_block()?;
+        let end = body.span;
+        Ok(Stmt::Spawn {
+            span: start.merge(end),
+            body,
+        })
+    }
+
+    /// Parses an intent declaration: `intent name { key: value, ... }`.
+    ///
+    /// Config values can be string literals, integer literals, float literals,
+    /// boolean literals, identifiers (function references), or lists.
+    fn parse_intent(&mut self) -> Result<IntentDecl> {
+        let start = self.expect(&TokenKind::Intent)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut config = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let entry_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let key = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let value = self.parse_intent_config_value()?;
+            let entry_end = self.prev_span();
+            config.push(IntentConfigEntry {
+                key,
+                value,
+                span: entry_start.merge(entry_end),
+            });
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(IntentDecl {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            config,
+        })
+    }
+
+    /// Parses a single intent configuration value.
+    fn parse_intent_config_value(&mut self) -> Result<IntentConfigValue> {
+        match self.peek_kind().cloned() {
+            Some(TokenKind::StringLit(s)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::StringLit(s, span))
+            }
+            Some(TokenKind::FloatLit(f)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::FloatLit(f, span))
+            }
+            Some(TokenKind::IntLit(n)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::IntLit(n, span))
+            }
+            Some(TokenKind::True) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::BoolLit(true, span))
+            }
+            Some(TokenKind::False) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::BoolLit(false, span))
+            }
+            Some(TokenKind::LBracket) => {
+                let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                let mut items = Vec::new();
+                while !self.check(&TokenKind::RBracket) {
+                    if !items.is_empty() {
+                        self.expect(&TokenKind::Comma)?;
+                    }
+                    items.push(self.parse_intent_config_value()?);
+                }
+                let end = self.expect(&TokenKind::RBracket)?.span;
+                Ok(IntentConfigValue::List(items, start.merge(end)))
+            }
+            Some(TokenKind::Ident(name)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(IntentConfigValue::FnRef(name, span))
+            }
+            Some(other) => {
+                let span = self.peek().map_or(Span::new(0, 0), |t| t.span);
+                Err(ParseError::UnexpectedToken {
+                    expected: "intent config value (string, int, float, bool, identifier, or list)"
+                        .to_string(),
+                    found: other,
+                    span,
+                })
+            }
+            None => Err(ParseError::UnexpectedEof {
+                expected: "intent config value".to_string(),
+            }),
+        }
+    }
+
+    /// Parses an actor declaration: `actor Name { fields... fn handler(self) { ... } ... }`
+    fn parse_actor_decl(&mut self) -> Result<ActorDecl> {
+        let start = self.expect(&TokenKind::Actor)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        // Parse fields first (like struct fields), then handler functions.
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Fn) {
+            let field_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+            let field_name = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let ty = self.parse_type()?;
+            let field_end = self.prev_span();
+            fields.push(FieldDef {
+                name: field_name,
+                ty,
+                span: field_start.merge(field_end),
+            });
+            // Optional comma
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+        }
+
+        // Parse handler functions.
+        let mut handlers = Vec::new();
+        while self.check(&TokenKind::Fn) {
+            let mut func = self.parse_impl_method()?;
+            // Resolve `self` param type to the actor type name.
+            for param in &mut func.params {
+                if param.name == "self" {
+                    param.ty = TypeExpr::Named(name.clone());
+                }
+            }
+            handlers.push(func);
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(ActorDecl {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            fields,
+            handlers,
+        })
+    }
+
     /// Returns `true` if the current token could start an expression.
     fn is_at_expr_start(&self) -> bool {
         matches!(
             self.peek_kind(),
             Some(
                 TokenKind::IntLit(_)
+                    | TokenKind::FloatLit(_)
                     | TokenKind::StringLit(_)
                     | TokenKind::True
                     | TokenKind::False
                     | TokenKind::Ident(_)
+                    | TokenKind::SelfValue
                     | TokenKind::If
                     | TokenKind::LBrace
                     | TokenKind::LParen
                     | TokenKind::Bang
                     | TokenKind::Minus
+                    | TokenKind::Pipe
+                    | TokenKind::PipePipe
             )
         )
     }
@@ -831,7 +1372,54 @@ impl Parser {
     /// Returns a [`ParseError`] if the token stream does not form a valid
     /// expression.
     pub fn parse_expr(&mut self) -> Result<Expr> {
-        self.parse_or_expr()
+        let left = self.parse_coalesce_expr()?;
+
+        // Check for range operators `..` or `..=` at the lowest precedence.
+        match self.peek_kind() {
+            Some(TokenKind::DotDotEq) => {
+                self.advance();
+                let right = self.parse_coalesce_expr()?;
+                let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+                Ok(Expr::Range {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: true,
+                    span,
+                })
+            }
+            Some(TokenKind::DotDot) => {
+                self.advance();
+                let right = self.parse_coalesce_expr()?;
+                let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+                Ok(Expr::Range {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: false,
+                    span,
+                })
+            }
+            _ => Ok(left),
+        }
+    }
+
+    /// Parses a null coalescing expression: `or_expr ( "??" or_expr )*`.
+    ///
+    /// `a ?? b` evaluates to `a` if it is `Some`, otherwise `b`.
+    fn parse_coalesce_expr(&mut self) -> Result<Expr> {
+        let mut left = self.parse_or_expr()?;
+
+        while self.check(&TokenKind::QuestionQuestion) {
+            self.advance();
+            let right = self.parse_or_expr()?;
+            let span = Self::expr_span(&left).merge(Self::expr_span(&right));
+            left = Expr::NullCoalesce {
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+
+        Ok(left)
     }
 
     /// Parses a logical-or expression: `and_expr ( "||" and_expr )*`.
@@ -1023,15 +1611,55 @@ impl Parser {
                     args,
                     span,
                 };
-            } else if self.check(&TokenKind::Dot) {
-                // Field access: expr.field
+            } else if self.check(&TokenKind::QuestionDot) {
+                // Optional chaining: expr?.field
                 self.advance();
                 let field = self.parse_ident()?;
                 let end = self.prev_span();
                 let span = Self::expr_span(&expr).merge(end);
-                expr = Expr::FieldAccess {
+                expr = Expr::OptionalChain {
                     object: Box::new(expr),
                     field,
+                    span,
+                };
+            } else if self.check(&TokenKind::QuestionMark) {
+                // Try operator: expr?
+                let end = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                let span = Self::expr_span(&expr).merge(end);
+                expr = Expr::Try {
+                    operand: Box::new(expr),
+                    span,
+                };
+            } else if self.check(&TokenKind::Dot) {
+                self.advance();
+                // Check for `.await` (await is a keyword, not an ident).
+                if self.check(&TokenKind::Await) {
+                    let end = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                    let span = Self::expr_span(&expr).merge(end);
+                    expr = Expr::Await {
+                        operand: Box::new(expr),
+                        span,
+                    };
+                } else {
+                    // Field access: expr.field
+                    let field = self.parse_ident()?;
+                    let end = self.prev_span();
+                    let span = Self::expr_span(&expr).merge(end);
+                    expr = Expr::FieldAccess {
+                        object: Box::new(expr),
+                        field,
+                        span,
+                    };
+                }
+            } else if self.check(&TokenKind::Is) {
+                // Type test: expr is VariantName
+                self.advance();
+                let type_name = self.parse_ident()?;
+                let end = self.prev_span();
+                let span = Self::expr_span(&expr).merge(end);
+                expr = Expr::Is {
+                    operand: Box::new(expr),
+                    type_name,
                     span,
                 };
             } else {
@@ -1052,6 +1680,10 @@ impl Parser {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
                 Ok(Expr::IntLit(n, span))
             }
+            Some(TokenKind::FloatLit(f)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::FloatLit(f, span))
+            }
             Some(TokenKind::StringLit(s)) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
                 Ok(Expr::StringLit(s, span))
@@ -1063,6 +1695,10 @@ impl Parser {
             Some(TokenKind::False) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
                 Ok(Expr::BoolLit(false, span))
+            }
+            Some(TokenKind::SelfValue) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                Ok(Expr::Ident("self".to_string(), span))
             }
             Some(TokenKind::Ident(name)) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
@@ -1107,6 +1743,8 @@ impl Parser {
                 self.expect(&TokenKind::RParen)?;
                 Ok(expr)
             }
+            Some(TokenKind::Pipe) => self.parse_closure(),
+            Some(TokenKind::PipePipe) => self.parse_empty_closure(),
             Some(other) => {
                 let span = self.peek().map_or(Span::new(0, 0), |t| t.span);
                 Err(ParseError::UnexpectedToken {
@@ -1154,6 +1792,80 @@ impl Parser {
         })
     }
 
+    /// Parses a closure expression: `|x: Int, y: Int| expr` or
+    /// `|x: Int| -> Int { body }`.
+    ///
+    /// Called when the current token is `Pipe` (`|`).
+    fn parse_closure(&mut self) -> Result<Expr> {
+        let start = self.expect(&TokenKind::Pipe)?.span;
+
+        // Parse closure parameters
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::Pipe) {
+            loop {
+                let param_span = self.peek().map_or(Span::new(0, 0), |t| t.span);
+                let name = self.parse_ident()?;
+                let ty = if self.check(&TokenKind::Colon) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                let end_span = self.prev_span();
+                params.push(ClosureParam {
+                    name,
+                    ty,
+                    span: param_span.merge(end_span),
+                });
+                if !self.check(&TokenKind::Comma) {
+                    break;
+                }
+                self.advance(); // consume comma
+            }
+        }
+        self.expect(&TokenKind::Pipe)?; // closing |
+
+        self.parse_closure_body(start, params)
+    }
+
+    /// Parses an empty closure expression: `|| expr` or `|| -> Int { body }`.
+    ///
+    /// Called when the current token is `PipePipe` (`||`), which represents
+    /// an empty parameter list closure. In primary position, `||` always
+    /// means an empty closure; as a binary operator it is handled in
+    /// `parse_or_expr` which never reaches here.
+    fn parse_empty_closure(&mut self) -> Result<Expr> {
+        let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+        self.parse_closure_body(start, vec![])
+    }
+
+    /// Parses the remainder of a closure after the parameters have been
+    /// consumed: an optional return type annotation and the body.
+    fn parse_closure_body(&mut self, start: Span, params: Vec<ClosureParam>) -> Result<Expr> {
+        // Optional return type
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Body: block or single expression
+        let body = if self.check(&TokenKind::LBrace) {
+            Expr::Block(self.parse_block()?)
+        } else {
+            self.parse_expr()?
+        };
+
+        let span = start.merge(Self::expr_span(&body));
+        Ok(Expr::Closure {
+            params,
+            return_type,
+            body: Box::new(body),
+            span,
+        })
+    }
+
     /// Parses optional generic type parameters: `<T, U, ...>`.
     ///
     /// Returns an empty vec if no `<` follows the name.
@@ -1171,11 +1883,17 @@ impl Parser {
         Ok(params)
     }
 
-    /// Parses a type expression: named types and generic types like `Option<Int>`.
+    /// Parses a type expression: named types, generic types like `Option<Int>`,
+    /// function types like `(Int, Int) -> Int`, and optional shorthand `T?`
+    /// (equivalent to `Option<T>`).
     fn parse_type(&mut self) -> Result<TypeExpr> {
+        // Check for function type: `(Type, ...) -> RetType`
+        if self.check(&TokenKind::LParen) {
+            return self.parse_function_type();
+        }
         let name = self.parse_ident()?;
         // Check for generic type arguments: Name<Type, Type, ...>
-        if self.check(&TokenKind::Lt) {
+        let base = if self.check(&TokenKind::Lt) {
             self.advance(); // consume '<'
             let mut args = vec![self.parse_type()?];
             while self.check(&TokenKind::Comma) {
@@ -1183,9 +1901,33 @@ impl Parser {
                 args.push(self.parse_type()?);
             }
             self.expect(&TokenKind::Gt)?;
-            return Ok(TypeExpr::Generic(name, args));
+            TypeExpr::Generic(name, args)
+        } else {
+            TypeExpr::Named(name)
+        };
+        // Check for optional shorthand: `T?` becomes `Option<T>`
+        if self.check(&TokenKind::QuestionMark) {
+            self.advance();
+            return Ok(TypeExpr::Optional(Box::new(base)));
         }
-        Ok(TypeExpr::Named(name))
+        Ok(base)
+    }
+
+    /// Parses a function type: `(Type, ...) -> RetType`.
+    fn parse_function_type(&mut self) -> Result<TypeExpr> {
+        self.expect(&TokenKind::LParen)?;
+        let mut param_types = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            param_types.push(self.parse_type()?);
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                param_types.push(self.parse_type()?);
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::Arrow)?;
+        let ret_type = self.parse_type()?;
+        Ok(TypeExpr::Function(param_types, Box::new(ret_type)))
     }
 
     /// Parses an identifier and returns its string value.
@@ -1216,6 +1958,7 @@ impl Parser {
     fn expr_span(expr: &Expr) -> Span {
         match expr {
             Expr::IntLit(_, span)
+            | Expr::FloatLit(_, span)
             | Expr::StringLit(_, span)
             | Expr::BoolLit(_, span)
             | Expr::Ident(_, span)
@@ -1226,7 +1969,14 @@ impl Parser {
             | Expr::FieldAccess { span, .. }
             | Expr::StructLit { span, .. }
             | Expr::EnumVariantExpr { span, .. }
-            | Expr::Match { span, .. } => *span,
+            | Expr::Match { span, .. }
+            | Expr::Try { span, .. }
+            | Expr::OptionalChain { span, .. }
+            | Expr::NullCoalesce { span, .. }
+            | Expr::Range { span, .. }
+            | Expr::Closure { span, .. }
+            | Expr::Is { span, .. }
+            | Expr::Await { span, .. } => *span,
             Expr::Block(block) => block.span,
         }
     }
@@ -2264,6 +3014,660 @@ mod tests {
         assert_eq!(
             decl.fields[0].ty,
             TypeExpr::Generic("Option".to_string(), vec![TypeExpr::Named("T".to_string())])
+        );
+    }
+
+    #[test]
+    fn parse_for_loop_exclusive() {
+        let source = r#"module test {
+            fn main() {
+                for i in 0..10 {
+                    print_int(i)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::For {
+                name,
+                start,
+                end,
+                inclusive,
+                body,
+                ..
+            } => {
+                assert_eq!(name, "i");
+                assert!(matches!(start, Expr::IntLit(0, _)));
+                assert!(matches!(end, Expr::IntLit(10, _)));
+                assert!(!inclusive);
+                assert_eq!(body.stmts.len(), 1);
+            }
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_loop_inclusive() {
+        let source = r#"module test {
+            fn main() {
+                for i in 0..=10 {
+                    print_int(i)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::For { inclusive, .. } => {
+                assert!(inclusive);
+            }
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_loop_missing_in() {
+        let source = r#"module test {
+            fn main() {
+                for i 0..10 {
+                }
+            }
+        }"#;
+
+        let result = parse(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_range_expression() {
+        let source = r#"module test {
+            fn main() {
+                let mut x: Int = 0
+                for i in 1..5 {
+                    x = x + i
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(&stmts[1], Stmt::For { .. }));
+    }
+
+    #[test]
+    fn parse_optional_type_shorthand() {
+        let source = r#"module test {
+            fn get_value(opt: Int?) -> Int {
+                return 0
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let param_ty = &module.functions[0].params[0].ty;
+        assert!(
+            matches!(param_ty, TypeExpr::Optional(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "Int"))
+        );
+    }
+
+    #[test]
+    fn parse_try_operator() {
+        let source = r#"module test {
+            fn do_thing() -> Int {
+                let x: Int = result?
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            assert!(matches!(value, Expr::Try { .. }));
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_optional_chain() {
+        let source = r#"module test {
+            fn get_x() -> Int {
+                let v: Int = opt?.x
+                return v
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            assert!(matches!(value, Expr::OptionalChain { field, .. } if field == "x"));
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_null_coalesce() {
+        let source = r#"module test {
+            fn get_value() -> Int {
+                let x: Int = opt ?? 0
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            assert!(matches!(value, Expr::NullCoalesce { .. }));
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_chained_null_coalesce() {
+        let source = r#"module test {
+            fn get_value() -> Int {
+                let x: Int = a ?? b ?? 0
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            // Should be left-associative: (a ?? b) ?? 0
+            assert!(
+                matches!(value, Expr::NullCoalesce { left, .. } if matches!(left.as_ref(), Expr::NullCoalesce { .. }))
+            );
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_closure_with_typed_params() {
+        let source = r#"module test {
+            fn main() {
+                let f = |x: Int, y: Int| x + y
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::Closure { params, .. } if params.len() == 2));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_closure_with_return_type() {
+        let source = r#"module test {
+            fn main() {
+                let f = |x: Int| -> Int { x * 2 }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(
+                    value,
+                    Expr::Closure {
+                        return_type: Some(TypeExpr::Named(_)),
+                        ..
+                    }
+                ));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_empty_closure() {
+        let source = r#"module test {
+            fn main() {
+                let f = || 42
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::Closure { params, .. } if params.is_empty()));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_function_type_annotation() {
+        let source = r#"module test {
+            fn apply(f: (Int) -> Int, x: Int) -> Int {
+                return f(x)
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.params.len(), 2);
+        assert_eq!(
+            func.params[0].ty,
+            TypeExpr::Function(
+                vec![TypeExpr::Named("Int".to_string())],
+                Box::new(TypeExpr::Named("Int".to_string()))
+            )
+        );
+    }
+
+    #[test]
+    fn parse_or_still_works_with_pipe() {
+        // Ensure || as logical OR still works in binary position
+        let source = r#"module test {
+            fn main() {
+                let x = true || false
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        match &stmts[0] {
+            Stmt::Let { value, .. } => {
+                assert!(matches!(value, Expr::BinaryOp { op: BinOp::Or, .. }));
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_trait_declaration() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Describable {
+                fn describe(self) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls.len(), 1);
+        assert_eq!(module.trait_decls[0].name, "Describable");
+        assert_eq!(module.trait_decls[0].methods.len(), 1);
+        assert_eq!(module.trait_decls[0].methods[0].name, "describe");
+        assert!(module.trait_decls[0].methods[0].has_self);
+        assert_eq!(
+            module.trait_decls[0].methods[0].return_type,
+            TypeExpr::Named("Int".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_trait_with_multiple_methods() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Shape {
+                fn area(self) -> Int
+                fn perimeter(self) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls[0].methods.len(), 2);
+        assert_eq!(module.trait_decls[0].methods[0].name, "area");
+        assert_eq!(module.trait_decls[0].methods[1].name, "perimeter");
+    }
+
+    #[test]
+    fn parse_impl_block() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            struct Point {
+                x: Int
+                y: Int
+            }
+            trait Describable {
+                fn describe(self) -> Int
+            }
+            impl Describable for Point {
+                fn describe(self) -> Int {
+                    return self.x + self.y
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.impl_blocks.len(), 1);
+        assert_eq!(module.impl_blocks[0].trait_name, "Describable");
+        assert_eq!(module.impl_blocks[0].type_name, "Point");
+        assert_eq!(module.impl_blocks[0].methods.len(), 1);
+        assert_eq!(module.impl_blocks[0].methods[0].name, "describe");
+        // Self param should be resolved to Point
+        assert_eq!(
+            module.impl_blocks[0].methods[0].params[0].ty,
+            TypeExpr::Named("Point".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_method_call_as_field_access_then_call() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            fn main() -> Int {
+                let x: Int = p.describe()
+                return 0
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            // p.describe() should parse as Call { callee: FieldAccess { object: p, field: "describe" }, args: [] }
+            assert!(matches!(value, Expr::Call { callee, args, .. }
+                if args.is_empty()
+                && matches!(callee.as_ref(), Expr::FieldAccess { field, .. } if field == "describe")
+            ));
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_trait_method_with_extra_params() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Adder {
+                fn add(self, other: Int) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let method = &module.trait_decls[0].methods[0];
+        assert_eq!(method.name, "add");
+        assert!(method.has_self);
+        assert_eq!(method.params.len(), 2);
+        assert_eq!(method.params[0].name, "self");
+        assert_eq!(method.params[1].name, "other");
+    }
+
+    #[test]
+    fn parse_if_let_statement() {
+        let source = r#"module test {
+            fn main() -> Int {
+                let opt: Option<Int> = Option::Some(42)
+                if let Option::Some(v) = opt {
+                    return v
+                } else {
+                    return 0
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        assert!(
+            matches!(&stmts[1], Stmt::IfLet { .. }),
+            "expected IfLet, got {:?}",
+            stmts[1]
+        );
+    }
+
+    #[test]
+    fn parse_if_let_without_else() {
+        let source = r#"module test {
+            fn main() {
+                let opt: Option<Int> = Option::Some(42)
+                if let Option::Some(v) = opt {
+                    return
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        if let Stmt::IfLet { else_body, .. } = &stmts[1] {
+            assert!(else_body.is_none());
+        } else {
+            panic!("expected IfLet");
+        }
+    }
+
+    #[test]
+    fn parse_is_expression() {
+        let source = r#"module test {
+            fn main() -> Bool {
+                let opt: Option<Int> = Option::Some(42)
+                return opt is Some
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+        if let Stmt::Return {
+            value: Some(expr), ..
+        } = &stmts[1]
+        {
+            assert!(
+                matches!(expr, Expr::Is { type_name, .. } if type_name == "Some"),
+                "expected Is expression, got {expr:?}"
+            );
+        } else {
+            panic!("expected Return with Is expression");
+        }
+    }
+
+    #[test]
+    fn parse_ownership_qualifiers() {
+        let source = r#"module test {
+            fn transfer(own x: Int, ref y: Int) -> Int {
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let params = &module.functions[0].params;
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "x");
+        assert_eq!(params[0].ownership, Ownership::Owned);
+        assert_eq!(params[1].name, "y");
+        assert_eq!(params[1].ownership, Ownership::Ref);
+    }
+
+    #[test]
+    fn parse_default_ownership_is_owned() {
+        let source = r#"module test {
+            fn foo(x: Int) -> Int {
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let params = &module.functions[0].params;
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].ownership, Ownership::Owned);
+    }
+
+    #[test]
+    fn parse_async_fn() {
+        let source = r#"module test {
+            async fn fetch(x: Int) -> Int {
+                return x
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions.len(), 1);
+        assert!(
+            module.functions[0].is_async,
+            "function should be marked async"
+        );
+        assert_eq!(module.functions[0].name, "fetch");
+    }
+
+    #[test]
+    fn parse_await_expression() {
+        let source = r#"module test {
+            async fn compute() -> Int {
+                let val: Int = foo().await
+                return val
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.functions[0].body;
+        if let Stmt::Let { value, .. } = &body.stmts[0] {
+            assert!(
+                matches!(value, Expr::Await { .. }),
+                "expected Await expression, got {value:?}"
+            );
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_spawn_stmt() {
+        let source = r#"module test {
+            fn main() {
+                spawn {
+                    let x: Int = 1
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.functions[0].body;
+        assert!(
+            matches!(&body.stmts[0], Stmt::Spawn { .. }),
+            "expected Spawn statement, got {:?}",
+            body.stmts[0]
+        );
+    }
+
+    #[test]
+    fn parse_actor_decl() {
+        let source = r#"module test {
+            actor Counter {
+                count: Int
+
+                fn increment(self) -> Int {
+                    return self.count + 1
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.actor_decls.len(), 1);
+        let actor = &module.actor_decls[0];
+        assert_eq!(actor.name, "Counter");
+        assert_eq!(actor.fields.len(), 1);
+        assert_eq!(actor.fields[0].name, "count");
+        assert_eq!(actor.handlers.len(), 1);
+        assert_eq!(actor.handlers[0].name, "increment");
+    }
+
+    #[test]
+    fn parse_intent_basic() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            intent console_app {
+                greeting: "hello"
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.intent_decls.len(), 1);
+        let intent = &module.intent_decls[0];
+        assert_eq!(intent.name, "console_app");
+        assert_eq!(intent.config.len(), 1);
+        assert_eq!(intent.config[0].key, "greeting");
+        assert!(
+            matches!(&intent.config[0].value, IntentConfigValue::StringLit(s, _) if s == "hello"),
+            "expected StringLit(\"hello\"), got {:?}",
+            intent.config[0].value
+        );
+    }
+
+    #[test]
+    fn parse_intent_with_list() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            intent math_module {
+                functions: [add, sub]
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.intent_decls.len(), 1);
+        let intent = &module.intent_decls[0];
+        assert_eq!(intent.name, "math_module");
+        assert_eq!(intent.config.len(), 1);
+        assert_eq!(intent.config[0].key, "functions");
+        if let IntentConfigValue::List(items, _) = &intent.config[0].value {
+            assert_eq!(items.len(), 2);
+            assert!(
+                matches!(&items[0], IntentConfigValue::FnRef(name, _) if name == "add"),
+                "expected FnRef(\"add\"), got {:?}",
+                items[0]
+            );
+            assert!(
+                matches!(&items[1], IntentConfigValue::FnRef(name, _) if name == "sub"),
+                "expected FnRef(\"sub\"), got {:?}",
+                items[1]
+            );
+        } else {
+            panic!(
+                "expected List config value, got {:?}",
+                intent.config[0].value
+            );
+        }
+    }
+
+    #[test]
+    fn parse_intent_bool_and_int_config() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            intent custom_intent {
+                enabled: true
+                max_retries: 3
+                verbose: false
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.intent_decls.len(), 1);
+        let intent = &module.intent_decls[0];
+        assert_eq!(intent.name, "custom_intent");
+        assert_eq!(intent.config.len(), 3);
+
+        assert_eq!(intent.config[0].key, "enabled");
+        assert!(
+            matches!(&intent.config[0].value, IntentConfigValue::BoolLit(true, _)),
+            "expected BoolLit(true), got {:?}",
+            intent.config[0].value
+        );
+
+        assert_eq!(intent.config[1].key, "max_retries");
+        assert!(
+            matches!(&intent.config[1].value, IntentConfigValue::IntLit(3, _)),
+            "expected IntLit(3), got {:?}",
+            intent.config[1].value
+        );
+
+        assert_eq!(intent.config[2].key, "verbose");
+        assert!(
+            matches!(
+                &intent.config[2].value,
+                IntentConfigValue::BoolLit(false, _)
+            ),
+            "expected BoolLit(false), got {:?}",
+            intent.config[2].value
         );
     }
 }

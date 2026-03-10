@@ -1,0 +1,16 @@
+[package]
+name = "kodo_desugar"
+version.workspace = true
+edition.workspace = true
+description = "Desugaring pass for the Kōdo compiler"
+
+[dependencies]
+kodo_ast = { workspace = true }
+
+[lints.rust]
+missing_docs = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+pedantic = { level = "warn", priority = -1 }

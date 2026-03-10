@@ -1,0 +1,15 @@
+module for_loop {
+    meta {
+        purpose: "Demonstrate for loop with ranges"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let mut sum: Int = 0
+        for i in 0..11 {
+            sum = sum + i
+        }
+        print_int(sum)
+        return 0
+    }
+}

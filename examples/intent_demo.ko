@@ -1,0 +1,10 @@
+module intent_demo {
+    meta {
+        purpose: "Demonstrates intent-driven programming in Kōdo",
+        version: "1.0.0"
+    }
+
+    intent console_app {
+        greeting: "Hello from intent-driven Kōdo!"
+    }
+}

@@ -1,0 +1,33 @@
+module intent_composed {
+    meta {
+        purpose: "Composed intents demo",
+        version: "1.0.0"
+    }
+
+    intent console_app {
+        greeting: "Welcome to Kōdo math!"
+        entry_point: "greet"
+    }
+
+    intent math_module {
+        functions: [add, mul]
+    }
+
+    fn greet() {
+        print_int(0)
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn mul(a: Int, b: Int) -> Int {
+        return a * b
+    }
+
+    fn kodo_main() {
+        greet()
+        let result: Int = add(3, mul(4, 5))
+        print_int(result)
+    }
+}

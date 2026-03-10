@@ -268,6 +268,9 @@ fn annotation_to_json_value(ann: &kodo_ast::Annotation) -> serde_json::Value {
 fn expr_to_json_value(expr: &kodo_ast::Expr) -> serde_json::Value {
     match expr {
         kodo_ast::Expr::IntLit(n, _) => serde_json::Value::Number((*n).into()),
+        kodo_ast::Expr::FloatLit(f, _) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         kodo_ast::Expr::StringLit(s, _) => serde_json::Value::String(s.clone()),
         kodo_ast::Expr::BoolLit(b, _) => serde_json::Value::Bool(*b),
         _ => serde_json::Value::Null,
@@ -312,6 +315,10 @@ mod tests {
             }),
             type_decls: vec![],
             enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
             functions: func_names
                 .iter()
                 .map(|name| Function {
@@ -324,6 +331,7 @@ mod tests {
                     return_type: TypeExpr::Unit,
                     requires: vec![],
                     ensures: vec![],
+                    is_async: false,
                     body: Block {
                         span: Span::new(0, 100),
                         stmts: vec![],

@@ -1,0 +1,28 @@
+module traits {
+    meta {
+        purpose: "Demonstrate traits and method calls"
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int
+        y: Int
+    }
+
+    trait Describable {
+        fn describe(self) -> Int
+    }
+
+    impl Describable for Point {
+        fn describe(self) -> Int {
+            return self.x + self.y
+        }
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 10, y: 20 }
+        let desc: Int = p.describe()
+        print_int(desc)
+        return 0
+    }
+}

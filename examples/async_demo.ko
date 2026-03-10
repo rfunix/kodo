@@ -1,0 +1,44 @@
+// Async Demo — Demonstrates async/await and spawn syntax.
+//
+// V1 concurrency is syntax-only: async functions compile to regular
+// synchronous code, await returns its operand directly, and spawn
+// executes its body inline (single-threaded cooperative runtime).
+//
+// This example verifies that the parser, type checker, and codegen
+// accept concurrency syntax without errors.
+
+module async_demo {
+    meta {
+        purpose: "Demonstrate async/await and spawn syntax (v1 syntax-only)",
+        version: "0.1.0",
+        author: "Kodo Team"
+    }
+
+    // An async function that returns an Int.
+    // In v1, it compiles to a regular synchronous function.
+    async fn compute_value(x: Int) -> Int {
+        let result: Int = x + 10
+        return result
+    }
+
+    // Another async function that calls and awaits the first.
+    // `.await` can only be used inside an `async fn`.
+    async fn run_computation() -> Int {
+        let val: Int = compute_value(32).await
+        return val
+    }
+
+    fn main() -> Int {
+        // Call the async function directly (in v1, it behaves like
+        // a regular function call).
+        let result: Int = run_computation()
+        print_int(result)
+
+        // Spawn executes its body inline in v1.
+        spawn {
+            print_int(100)
+        }
+
+        return 0
+    }
+}

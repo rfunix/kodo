@@ -51,6 +51,10 @@ Module {
     ),
     type_decls: [],
     enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
     functions: [
         Function {
             id: NodeId(
@@ -61,6 +65,7 @@ Module {
                 end: 350,
             },
             name: "arithmetic",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [],
@@ -218,6 +223,7 @@ Module {
                 end: 500,
             },
             name: "logic",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [
@@ -230,6 +236,7 @@ Module {
                         start: 365,
                         end: 371,
                     },
+                    ownership: Owned,
                 },
             ],
             return_type: Named(
@@ -380,6 +387,7 @@ Module {
                 end: 590,
             },
             name: "nesting",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [],
@@ -490,6 +498,7 @@ Module {
                 end: 813,
             },
             name: "control_flow",
+            is_async: false,
             generic_params: [],
             annotations: [],
             params: [
@@ -502,6 +511,7 @@ Module {
                         start: 612,
                         end: 618,
                     },
+                    ownership: Owned,
                 },
             ],
             return_type: Named(

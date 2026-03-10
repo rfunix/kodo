@@ -1,5 +1,6 @@
 // This file has intentional type errors for testing the type checker.
 // kodoc check should report errors on this file.
+// ERROR E0200
 
 module type_errors {
     meta {

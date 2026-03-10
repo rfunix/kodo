@@ -49,3 +49,10 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`option_demo.ko`](../examples/option_demo.ko) | Standard library `Option<T>` |
 | [`result_demo.ko`](../examples/result_demo.ko) | Standard library `Result<T, E>` |
 | [`multi_file/`](../examples/multi_file/) | Multi-file compilation with imports |
+| [`intent_demo.ko`](../examples/intent_demo.ko) | Intent-driven programming |
+| [`intent_math.ko`](../examples/intent_math.ko) | Math module intent resolver |
+| [`intent_composed.ko`](../examples/intent_composed.ko) | Composing multiple intents |
+| [`agent_traceability.ko`](../examples/agent_traceability.ko) | Agent annotations and trust policies |
+| [`closures_functional.ko`](../examples/closures_functional.ko) | Higher-order functions and indirect calls |
+| [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
+| [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |

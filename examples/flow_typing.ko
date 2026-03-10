@@ -1,0 +1,24 @@
+module flow_typing {
+    meta {
+        purpose: "Demonstrate flow typing and if let"
+        version: "0.1.0"
+    }
+
+    fn describe_option(opt: Option<Int>) -> Int {
+        if let Option::Some(value) = opt {
+            return value
+        } else {
+            return 0
+        }
+    }
+
+    fn main() -> Int {
+        let some_val: Option<Int> = Option::Some(42)
+        let none_val: Option<Int> = Option::None
+
+        print_int(describe_option(some_val))
+        print_int(describe_option(none_val))
+
+        return 0
+    }
+}

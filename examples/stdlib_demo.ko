@@ -1,0 +1,27 @@
+module stdlib_demo {
+    meta {
+        purpose: "Demonstrates Kōdo standard library math functions",
+        version: "1.0.0"
+    }
+
+    fn kodo_main() {
+        // abs: absolute value
+        let neg: Int = 0 - 42
+        let positive: Int = abs(neg)
+        print_int(positive)
+
+        // min and max
+        let smaller: Int = min(10, 20)
+        print_int(smaller)
+
+        let bigger: Int = max(10, 20)
+        print_int(bigger)
+
+        // clamp: constrain to range
+        let clamped: Int = clamp(100, 0, 50)
+        print_int(clamped)
+
+        let in_range: Int = clamp(25, 0, 50)
+        print_int(in_range)
+    }
+}

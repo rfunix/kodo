@@ -1,3 +1,4 @@
+// ERROR E0201
 module undefined_var {
     meta {
         purpose: "Uses an undefined variable",

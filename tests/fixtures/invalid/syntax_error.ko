@@ -1,2 +1,3 @@
+// ERROR E0101
 module broken {
     fn bad(

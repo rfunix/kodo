@@ -108,11 +108,47 @@ pub enum TokenKind {
     /// The `while` keyword.
     #[token("while")]
     While,
+    /// The `for` keyword.
+    #[token("for")]
+    For,
+    /// The `trait` keyword.
+    #[token("trait")]
+    Trait,
+    /// The `impl` keyword.
+    #[token("impl")]
+    Impl,
+    /// The `self` keyword.
+    #[token("self")]
+    SelfValue,
+    /// The `own` keyword — ownership qualifier.
+    #[token("own")]
+    Own,
+    /// The `ref` keyword — borrow qualifier.
+    #[token("ref")]
+    Ref,
+    /// The `is` keyword — type/variant test operator.
+    #[token("is")]
+    Is,
+    /// The `async` keyword.
+    #[token("async")]
+    Async,
+    /// The `await` keyword.
+    #[token("await")]
+    Await,
+    /// The `spawn` keyword.
+    #[token("spawn")]
+    Spawn,
+    /// The `actor` keyword.
+    #[token("actor")]
+    Actor,
 
     // --- Literals ---
     /// An integer literal.
-    #[regex(r"[0-9][0-9_]*", |lex| lex.slice().replace('_', "").parse::<i64>().ok())]
+    #[regex(r"[0-9][0-9_]*", priority = 2, callback = |lex| lex.slice().replace('_', "").parse::<i64>().ok())]
     IntLit(i64),
+    /// A float literal (e.g., `0.95`, `3.14`).
+    #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*", priority = 3, callback = |lex| lex.slice().replace('_', "").parse::<f64>().ok())]
+    FloatLit(f64),
     /// A string literal (double-quoted).
     #[regex(r#""[^"]*""#, |lex| {
         let s = lex.slice();
@@ -168,9 +204,21 @@ pub enum TokenKind {
     /// `||`
     #[token("||")]
     PipePipe,
+    /// `|`
+    #[token("|")]
+    Pipe,
     /// `!`
     #[token("!")]
     Bang,
+    /// `?.` — optional chaining operator (must precede `?` for logos priority).
+    #[token("?.")]
+    QuestionDot,
+    /// `??` — null coalescing operator (must precede `?` for logos priority).
+    #[token("??")]
+    QuestionQuestion,
+    /// `?` — try / error propagation / optional type operator.
+    #[token("?")]
+    QuestionMark,
     /// `->`
     #[token("->")]
     Arrow,
@@ -211,6 +259,12 @@ pub enum TokenKind {
     /// `;`
     #[token(";")]
     Semicolon,
+    /// `..=` — inclusive range operator (must precede `..` and `.` for logos priority).
+    #[token("..=")]
+    DotDotEq,
+    /// `..` — exclusive range operator (must precede `.` for logos priority).
+    #[token("..")]
+    DotDot,
     /// `.`
     #[token(".")]
     Dot,
@@ -377,6 +431,206 @@ mod tests {
                 &TokenKind::AmpAmp,
                 &TokenKind::PipePipe,
             ]
+        );
+    }
+
+    #[test]
+    fn tokenize_for_keyword() {
+        let tokens = tokenize("for").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::For);
+    }
+
+    #[test]
+    fn tokenize_dot_dot() {
+        let tokens = tokenize("0..10").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::IntLit(0));
+        assert_eq!(tokens[1].kind, TokenKind::DotDot);
+        assert_eq!(tokens[2].kind, TokenKind::IntLit(10));
+    }
+
+    #[test]
+    fn tokenize_dot_dot_eq() {
+        let tokens = tokenize("0..=10").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::IntLit(0));
+        assert_eq!(tokens[1].kind, TokenKind::DotDotEq);
+        assert_eq!(tokens[2].kind, TokenKind::IntLit(10));
+    }
+
+    #[test]
+    fn tokenize_dot_still_works() {
+        let tokens = tokenize("x.y").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert_eq!(tokens[1].kind, TokenKind::Dot);
+        assert!(matches!(tokens[2].kind, TokenKind::Ident(ref s) if s == "y"));
+    }
+
+    #[test]
+    fn tokenize_question_mark() {
+        let tokens = tokenize("x?").unwrap_or_default();
+        assert_eq!(tokens.len(), 2);
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert_eq!(tokens[1].kind, TokenKind::QuestionMark);
+    }
+
+    #[test]
+    fn tokenize_question_dot() {
+        let tokens = tokenize("x?.y").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert_eq!(tokens[1].kind, TokenKind::QuestionDot);
+        assert!(matches!(tokens[2].kind, TokenKind::Ident(ref s) if s == "y"));
+    }
+
+    #[test]
+    fn tokenize_question_question() {
+        let tokens = tokenize("x ?? 0").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert_eq!(tokens[1].kind, TokenKind::QuestionQuestion);
+        assert_eq!(tokens[2].kind, TokenKind::IntLit(0));
+    }
+
+    #[test]
+    fn tokenize_question_operators_priority() {
+        // Ensure ?? is lexed as one token, not two ?
+        let tokens = tokenize("??").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::QuestionQuestion);
+
+        // Ensure ?. is lexed as one token, not ? then .
+        let tokens = tokenize("?.").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::QuestionDot);
+    }
+
+    #[test]
+    fn tokenize_pipe() {
+        let tokens = tokenize("|x|").unwrap_or_default();
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::Pipe);
+        assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "x"));
+        assert_eq!(tokens[2].kind, TokenKind::Pipe);
+    }
+
+    #[test]
+    fn tokenize_pipe_vs_pipepipe() {
+        // Single | should be Pipe
+        let tokens = tokenize("| x |").unwrap_or_default();
+        assert_eq!(tokens[0].kind, TokenKind::Pipe);
+        assert_eq!(tokens[2].kind, TokenKind::Pipe);
+
+        // || should still be PipePipe
+        let tokens = tokenize("||").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::PipePipe);
+    }
+
+    #[test]
+    fn tokenize_trait_keyword() {
+        let tokens = tokenize("trait").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Trait);
+    }
+
+    #[test]
+    fn tokenize_impl_keyword() {
+        let tokens = tokenize("impl").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Impl);
+    }
+
+    #[test]
+    fn tokenize_self_keyword() {
+        let tokens = tokenize("self").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::SelfValue);
+    }
+
+    #[test]
+    fn tokenize_trait_impl_self_together() {
+        let tokens = tokenize("trait impl self").unwrap_or_default();
+        let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![&TokenKind::Trait, &TokenKind::Impl, &TokenKind::SelfValue]
+        );
+    }
+
+    #[test]
+    fn tokenize_async_keyword() {
+        let tokens = tokenize("async").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Async);
+    }
+
+    #[test]
+    fn tokenize_await_keyword() {
+        let tokens = tokenize("await").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Await);
+    }
+
+    #[test]
+    fn tokenize_spawn_keyword() {
+        let tokens = tokenize("spawn").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Spawn);
+    }
+
+    #[test]
+    fn tokenize_actor_keyword() {
+        let tokens = tokenize("actor").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Actor);
+    }
+
+    #[test]
+    fn tokenize_concurrency_keywords_together() {
+        let tokens = tokenize("async await spawn actor").unwrap_or_default();
+        let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                &TokenKind::Async,
+                &TokenKind::Await,
+                &TokenKind::Spawn,
+                &TokenKind::Actor,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_own_keyword() {
+        let tokens = tokenize("own").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Own);
+    }
+
+    #[test]
+    fn tokenize_ref_keyword() {
+        let tokens = tokenize("ref").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Ref);
+    }
+
+    #[test]
+    fn tokenize_is_keyword() {
+        let tokens = tokenize("is").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Is);
+    }
+
+    #[test]
+    fn tokenize_ownership_and_is_keywords_together() {
+        let tokens = tokenize("own ref is").unwrap_or_default();
+        let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![&TokenKind::Own, &TokenKind::Ref, &TokenKind::Is]
         );
     }
 }

@@ -1,0 +1,33 @@
+// Actor Demo — Demonstrates actor declaration syntax.
+//
+// V1 actors are syntax-only: they compile to structs with methods.
+// Handler functions are mangled as ActorName_handler and registered
+// as regular functions during type checking.
+//
+// This example verifies that the parser and type checker accept
+// actor declarations without errors.
+
+module actor_demo {
+    meta {
+        purpose: "Demonstrate actor declaration syntax (v1 syntax-only)",
+        version: "0.1.0",
+        author: "Kodo Team"
+    }
+
+    // An actor with state and a handler.
+    // In v1, this compiles to a struct + methods.
+    actor Counter {
+        count: Int
+
+        fn increment(self) -> Int {
+            return self.count + 1
+        }
+    }
+
+    fn main() -> Int {
+        let c: Counter = Counter { count: 0 }
+        let result: Int = Counter_increment(c)
+        print_int(result)
+        return 0
+    }
+}

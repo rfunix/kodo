@@ -1,0 +1,20 @@
+module async_real {
+    meta {
+        purpose: "Demonstrates real spawned tasks in Kōdo",
+        version: "1.0.0"
+    }
+
+    fn kodo_main() {
+        print_int(1)
+
+        spawn {
+            print_int(2)
+        }
+
+        spawn {
+            print_int(3)
+        }
+
+        print_int(4)
+    }
+}

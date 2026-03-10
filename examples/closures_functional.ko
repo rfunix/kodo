@@ -1,0 +1,25 @@
+module closures_functional {
+    meta {
+        purpose: "Demonstrates functional closures with indirect calls in Kōdo",
+        version: "1.0.0"
+    }
+
+    fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn apply(f: (Int) -> Int, x: Int) -> Int {
+        return f(x)
+    }
+
+    fn kodo_main() {
+        // Direct closure call
+        let inc = |x: Int| -> Int { x + 1 }
+        let result: Int = inc(41)
+        print_int(result)
+
+        // Higher-order function: pass a named function as argument
+        let doubled: Int = apply(double, 21)
+        print_int(doubled)
+    }
+}

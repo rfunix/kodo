@@ -127,6 +127,21 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Returns the square root".to_string(),
             param_count: 1,
         },
+        BuiltinFunction {
+            name: "kodo::math::min".to_string(),
+            description: "Returns the minimum of two integers".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::math::max".to_string(),
+            description: "Returns the maximum of two integers".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::math::clamp".to_string(),
+            description: "Clamps a value between a minimum and maximum".to_string(),
+            param_count: 3,
+        },
     ]
 }
 
@@ -152,7 +167,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 5);
+        assert_eq!(builtins.len(), 8);
     }
 
     #[test]

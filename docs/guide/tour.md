@@ -239,6 +239,113 @@ When Kōdo compiles a program, it emits a `.ko.cert.json` file alongside the bin
 
 This makes every compiled artifact traceable and auditable — an AI agent can verify what it compiled and why.
 
+## Higher-Order Functions
+
+Kōdo supports closures as values and passing functions as arguments:
+
+```
+fn double(x: Int) -> Int {
+    return x * 2
+}
+
+fn apply(f: (Int) -> Int, x: Int) -> Int {
+    return f(x)
+}
+
+fn main() {
+    let inc = |x: Int| -> Int { x + 1 }
+    print_int(inc(41))        // 42
+    print_int(apply(double, 21)) // 42
+}
+```
+
+Closures can capture variables from their enclosing scope. The compiler uses lambda lifting to compile them to top-level functions.
+
+## Standard Library Math
+
+The prelude includes math functions with contracts:
+
+```
+fn main() {
+    print_int(abs(-42))       // 42
+    print_int(min(10, 20))    // 10
+    print_int(max(10, 20))    // 20
+    print_int(clamp(50, 0, 25)) // 25
+}
+```
+
+## Intent-Driven Programming
+
+Kōdo's `intent` system lets you declare WHAT you want, and the compiler's resolvers generate the HOW:
+
+```
+module my_app {
+    meta {
+        purpose: "Intent-driven demo",
+        version: "0.1.0"
+    }
+
+    intent console_app {
+        greeting: "Hello from intent!"
+    }
+}
+```
+
+The `console_app` resolver generates a `kodo_main()` function that prints the greeting. Use `kodoc intent-explain` to see the generated code.
+
+Multiple intents can be composed in the same module, and generated code is verified by the type checker.
+
+## Agent Traceability
+
+Kōdo tracks WHO wrote each piece of code — human or AI:
+
+```
+@authored_by(agent: "claude-3.5")
+@confidence(0.95)
+fn safe_add(a: Int, b: Int) -> Int {
+    return a + b
+}
+
+@authored_by(agent: "gpt-4")
+@confidence(0.5)
+@reviewed_by(human: "rafael")
+fn risky_fn() -> Int {
+    return 42
+}
+```
+
+**Trust policies** are enforced by the compiler:
+- `@confidence` below 0.8 requires `@reviewed_by(human: "...")`
+- `@security_sensitive` functions must have `requires`/`ensures` contracts
+
+## Cooperative Concurrency
+
+`spawn` creates tasks that run after the main function:
+
+```
+fn main() {
+    print_int(1)
+    spawn { print_int(2) }
+    spawn { print_int(3) }
+    print_int(4)
+}
+// Output: 1, 4, 2, 3
+```
+
+Spawned tasks are deferred — they execute cooperatively after `kodo_main` returns.
+
+## LSP Server
+
+Kōdo includes a Language Server Protocol server for real-time integration with editors and AI agents:
+
+```bash
+kodoc lsp
+```
+
+Features:
+- Real-time diagnostics (lex → parse → type check errors as you type)
+- Hover information (function signatures, contracts, annotations)
+
 ## What's Next?
 
 Dive deeper into specific topics:

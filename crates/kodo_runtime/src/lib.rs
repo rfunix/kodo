@@ -55,6 +55,8 @@ pub unsafe extern "C" fn main(arg_count: i32, arg_values: *const *const i8) -> i
     unsafe {
         kodo_main();
     }
+    // Run any spawned tasks.
+    kodo_run_scheduler();
     0
 }
 
@@ -115,6 +117,102 @@ pub unsafe extern "C" fn kodo_contract_fail(ptr: *const u8, len: usize) {
     std::process::abort();
 }
 
+/// Returns the absolute value of an integer.
+#[no_mangle]
+pub extern "C" fn kodo_abs(n: i64) -> i64 {
+    n.wrapping_abs()
+}
+
+/// Returns the minimum of two integers.
+#[no_mangle]
+pub extern "C" fn kodo_min(a: i64, b: i64) -> i64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// Returns the maximum of two integers.
+#[no_mangle]
+pub extern "C" fn kodo_max(a: i64, b: i64) -> i64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// Clamps a value between a minimum and maximum.
+#[no_mangle]
+pub extern "C" fn kodo_clamp(val: i64, lo: i64, hi: i64) -> i64 {
+    if val < lo {
+        lo
+    } else if val > hi {
+        hi
+    } else {
+        val
+    }
+}
+
+/// Returns the length of a string (number of bytes).
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid bytes.
+#[no_mangle]
+pub extern "C" fn kodo_string_length(_ptr: *const u8, len: usize) -> i64 {
+    #[allow(clippy::cast_possible_wrap)]
+    let result = len as i64;
+    result
+}
+
+/// Task queue for the cooperative scheduler.
+///
+/// Stores function pointers to tasks that have been spawned.
+/// All tasks are executed when `kodo_run_scheduler` is called.
+static TASK_QUEUE: std::sync::Mutex<Vec<extern "C" fn()>> = std::sync::Mutex::new(Vec::new());
+
+/// Spawns a task by adding its function pointer to the task queue.
+///
+/// The task will be executed when the scheduler runs (at the end of `main`).
+#[no_mangle]
+pub extern "C" fn kodo_spawn_task(task: extern "C" fn()) {
+    if let Ok(mut queue) = TASK_QUEUE.lock() {
+        queue.push(task);
+    }
+}
+
+/// Runs all spawned tasks in FIFO order.
+///
+/// Called automatically by the runtime after `kodo_main` returns.
+/// Tasks may spawn additional tasks, which are executed in subsequent
+/// passes until the queue is empty.
+#[no_mangle]
+pub extern "C" fn kodo_run_scheduler() {
+    loop {
+        let tasks: Vec<extern "C" fn()> = {
+            if let Ok(mut queue) = TASK_QUEUE.lock() {
+                std::mem::take(&mut *queue)
+            } else {
+                break;
+            }
+        };
+        if tasks.is_empty() {
+            break;
+        }
+        for task in tasks {
+            task();
+        }
+    }
+}
+
+/// Legacy no-op spawn stub (kept for backwards compatibility).
+#[no_mangle]
+pub extern "C" fn kodo_spawn() {
+    // Legacy stub — new code uses kodo_spawn_task.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,9 +230,66 @@ mod tests {
     }
 
     #[test]
+    fn kodo_spawn_does_not_panic() {
+        kodo_spawn();
+    }
+
+    #[test]
     fn kodo_print_does_not_panic() {
         let msg = "no newline";
         // SAFETY: msg is a valid UTF-8 string slice.
         unsafe { kodo_print(msg.as_ptr(), msg.len()) };
+    }
+
+    #[test]
+    fn kodo_abs_works() {
+        assert_eq!(kodo_abs(42), 42);
+        assert_eq!(kodo_abs(-42), 42);
+        assert_eq!(kodo_abs(0), 0);
+    }
+
+    #[test]
+    fn kodo_min_works() {
+        assert_eq!(kodo_min(3, 7), 3);
+        assert_eq!(kodo_min(7, 3), 3);
+        assert_eq!(kodo_min(5, 5), 5);
+    }
+
+    #[test]
+    fn kodo_max_works() {
+        assert_eq!(kodo_max(3, 7), 7);
+        assert_eq!(kodo_max(7, 3), 7);
+        assert_eq!(kodo_max(5, 5), 5);
+    }
+
+    #[test]
+    fn kodo_clamp_works() {
+        assert_eq!(kodo_clamp(5, 1, 10), 5);
+        assert_eq!(kodo_clamp(-5, 1, 10), 1);
+        assert_eq!(kodo_clamp(15, 1, 10), 10);
+    }
+
+    #[test]
+    fn kodo_string_length_works() {
+        let s = "hello";
+        // SAFETY: s is a valid string slice.
+        assert_eq!(kodo_string_length(s.as_ptr(), s.len()), 5);
+    }
+
+    #[test]
+    fn kodo_spawn_task_and_scheduler() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static COUNTER: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn increment_counter() {
+            COUNTER.fetch_add(1, Ordering::SeqCst);
+        }
+
+        COUNTER.store(0, Ordering::SeqCst);
+        kodo_spawn_task(increment_counter);
+        kodo_spawn_task(increment_counter);
+        assert_eq!(COUNTER.load(Ordering::SeqCst), 0, "tasks not yet run");
+        kodo_run_scheduler();
+        assert_eq!(COUNTER.load(Ordering::SeqCst), 2, "both tasks ran");
     }
 }

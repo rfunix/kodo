@@ -438,6 +438,64 @@ fn declare_builtins(
         builtins.insert("kodo_contract_fail".to_string(), BuiltinInfo { func_id });
     }
 
+    // kodo_abs(n: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_abs", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("abs".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_min(a: i64, b: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_min", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("min".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_max(a: i64, b: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_max", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("max".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_spawn_task(fn_ptr: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // function pointer
+        let func_id = module
+            .declare_function("kodo_spawn_task", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_spawn_task".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_clamp(val: i64, lo: i64, hi: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_clamp", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("clamp".to_string(), BuiltinInfo { func_id });
+    }
+
     Ok(builtins)
 }
 
@@ -1001,6 +1059,63 @@ fn translate_instruction(
                 )));
             }
         }
+        Instruction::IndirectCall {
+            dest,
+            callee,
+            args,
+            return_type,
+            param_types,
+        } => {
+            // Build the signature for the indirect call.
+            let mut sig = Signature::new(CallConv::SystemV);
+            for pt in param_types {
+                sig.params.push(AbiParam::new(cranelift_type(pt)));
+            }
+            if !is_unit(return_type) {
+                sig.returns.push(AbiParam::new(cranelift_type(return_type)));
+            }
+            let sig_ref = builder.import_signature(sig);
+
+            // Translate the function pointer value.
+            let callee_val = translate_value(
+                callee,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+
+            // Translate arguments.
+            let mut arg_vals = Vec::with_capacity(args.len());
+            for arg in args {
+                arg_vals.push(translate_value(
+                    arg,
+                    builder,
+                    module,
+                    func_ids,
+                    builtins,
+                    var_map,
+                    struct_layouts,
+                )?);
+            }
+
+            let call = builder.ins().call_indirect(sig_ref, callee_val, &arg_vals);
+            let var = var_map.get(*dest)?;
+            if is_unit(return_type) {
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.def_var(var, zero);
+            } else {
+                let results = builder.inst_results(call);
+                if results.is_empty() {
+                    let zero = builder.ins().iconst(types::I64, 0);
+                    builder.def_var(var, zero);
+                } else {
+                    builder.def_var(var, results[0]);
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1158,6 +1273,20 @@ fn translate_value(
                 .load(types::I64, MemFlags::new(), field_addr, 0))
         }
         Value::Unit => Ok(builder.ins().iconst(types::I64, 0)),
+        Value::FuncRef(name) => {
+            // Resolve function pointer: look up in user functions, then builtins.
+            if let Some(&fid) = func_ids.get(name.as_str()) {
+                let fref = module.declare_func_in_func(fid, builder.func);
+                Ok(builder.ins().func_addr(types::I64, fref))
+            } else if let Some(bi) = builtins.get(name.as_str()) {
+                let fref = module.declare_func_in_func(bi.func_id, builder.func);
+                Ok(builder.ins().func_addr(types::I64, fref))
+            } else {
+                Err(CodegenError::Unsupported(format!(
+                    "function reference to unknown function: {name}"
+                )))
+            }
+        }
     }
 }
 
@@ -1847,5 +1976,110 @@ mod tests {
         assert!(!is_composite(&Type::Int));
         assert!(!is_composite(&Type::Bool));
         assert!(!is_composite(&Type::Unit));
+    }
+
+    #[test]
+    fn compile_indirect_call() {
+        // fn double(x: Int) -> Int { x * 2 }
+        // fn apply(f: funcptr, x: Int) -> Int { indirect_call f(x) }
+        let double = MirFunction {
+            name: "double".to_string(),
+            return_type: Type::Int,
+            param_count: 1,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Mul,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::IntConst(2)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let apply = MirFunction {
+            name: "apply".to_string(),
+            return_type: Type::Int,
+            param_count: 2,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    // Function pointer (stored as I64)
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::IndirectCall {
+                    dest: LocalId(2),
+                    callee: Value::Local(LocalId(0)),
+                    args: vec![Value::Local(LocalId(1))],
+                    return_type: Type::Int,
+                    param_types: vec![Type::Int],
+                }],
+                terminator: Terminator::Return(Value::Local(LocalId(2))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[double, apply], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "indirect call compilation failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_func_ref_value() {
+        // fn target() -> Int { 42 }
+        // fn get_ptr() -> Int { let p = func_ref(target); return 0 }
+        let target = MirFunction {
+            name: "target".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::IntConst(42)),
+            }],
+            entry: BlockId(0),
+        };
+        let get_ptr = MirFunction {
+            name: "get_ptr".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::FuncRef("target".to_string()),
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[target, get_ptr], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "func_ref compilation failed: {result:?}");
     }
 }

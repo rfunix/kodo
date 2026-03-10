@@ -138,6 +138,50 @@ Contracts are most useful for:
 - **Documenting assumptions**: making implicit requirements explicit
 - **Catching bugs early**: failing fast at the point of misuse rather than producing wrong results downstream
 
+## Static Verification with Z3
+
+Kōdo can verify contracts at **compile time** using the Z3 SMT solver. When enabled, the compiler translates contract expressions into Z3 formulas and attempts to prove them automatically.
+
+```bash
+kodoc build my_program.ko --contracts static
+```
+
+### Contract Modes
+
+| Mode | Behavior |
+|------|----------|
+| `runtime` (default) | Contracts checked at runtime — program aborts on violation |
+| `static` | Z3 attempts to prove contracts at compile time |
+| `both` | Z3 verification + runtime fallback for unproven contracts |
+| `none` | No contract checking (not recommended) |
+
+### How Static Verification Works
+
+1. The compiler translates `requires`/`ensures` expressions into Z3 formulas
+2. Z3 attempts to prove the formula within a timeout
+3. If Z3 **proves** the contract, no runtime check is generated (optimization)
+4. If Z3 **refutes** the contract, error E0302 is emitted with a counter-example
+5. If Z3 **times out**, the contract falls back to a runtime check
+
+### Supported Expressions
+
+Static verification supports:
+- Integer arithmetic (`+`, `-`, `*`, `/`, `%`)
+- Comparisons (`==`, `!=`, `<`, `>`, `<=`, `>=`)
+- Boolean logic (`&&`, `||`, `!`)
+
+### Example
+
+```
+fn safe_divide(a: Int, b: Int) -> Int
+    requires { b != 0 }
+{
+    return a / b
+}
+```
+
+With `--contracts static`, Z3 verifies that callers satisfy `b != 0`. The compilation certificate records which contracts were statically verified.
+
 ## Next Steps
 
 - [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling

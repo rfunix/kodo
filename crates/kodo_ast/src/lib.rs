@@ -145,8 +145,118 @@ pub struct Module {
     pub type_decls: Vec<TypeDecl>,
     /// User-defined enum type declarations.
     pub enum_decls: Vec<EnumDecl>,
+    /// Trait declarations.
+    pub trait_decls: Vec<TraitDecl>,
+    /// Impl blocks.
+    pub impl_blocks: Vec<ImplBlock>,
+    /// Actor declarations.
+    pub actor_decls: Vec<ActorDecl>,
+    /// Intent declarations.
+    pub intent_decls: Vec<IntentDecl>,
     /// Functions defined in this module.
     pub functions: Vec<Function>,
+}
+
+/// A trait declaration: `trait Name { fn method(self) -> Type }`
+#[derive(Debug, Clone)]
+pub struct TraitDecl {
+    /// Unique identifier.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// Trait name.
+    pub name: String,
+    /// Method signatures (no bodies).
+    pub methods: Vec<TraitMethod>,
+}
+
+/// A method signature within a trait declaration.
+#[derive(Debug, Clone)]
+pub struct TraitMethod {
+    /// Method name.
+    pub name: String,
+    /// Parameters (first is typically `self`).
+    pub params: Vec<Param>,
+    /// Return type.
+    pub return_type: TypeExpr,
+    /// Whether the first parameter is `self`.
+    pub has_self: bool,
+    /// Source span.
+    pub span: Span,
+}
+
+/// An impl block: `impl TraitName for TypeName { methods }`
+#[derive(Debug, Clone)]
+pub struct ImplBlock {
+    /// Unique identifier.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// The trait being implemented.
+    pub trait_name: String,
+    /// The type implementing the trait.
+    pub type_name: String,
+    /// Method implementations.
+    pub methods: Vec<Function>,
+}
+
+/// A value in an intent configuration block.
+#[derive(Debug, Clone)]
+pub enum IntentConfigValue {
+    /// A string literal value: `key: "value"`.
+    StringLit(String, Span),
+    /// An integer literal value: `key: 42`.
+    IntLit(i64, Span),
+    /// A boolean literal value: `key: true`.
+    BoolLit(bool, Span),
+    /// A float literal value: `key: 0.95`.
+    FloatLit(f64, Span),
+    /// A function reference: `key: my_function`.
+    FnRef(String, Span),
+    /// A list of values: `key: ["a", "b"]`.
+    List(Vec<IntentConfigValue>, Span),
+}
+
+/// A single configuration entry in an intent block: `key: value`.
+#[derive(Debug, Clone)]
+pub struct IntentConfigEntry {
+    /// The configuration key.
+    pub key: String,
+    /// The configuration value.
+    pub value: IntentConfigValue,
+    /// Source span of the entire entry.
+    pub span: Span,
+}
+
+/// An intent declaration: `intent name { key: value, ... }`.
+///
+/// Intents are Kōdo's most distinctive feature — they declare WHAT should
+/// happen, and the resolver maps them to concrete implementations.
+#[derive(Debug, Clone)]
+pub struct IntentDecl {
+    /// Unique identifier.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// The intent name (e.g., `console_app`, `math_module`).
+    pub name: String,
+    /// Configuration entries.
+    pub config: Vec<IntentConfigEntry>,
+}
+
+/// An actor declaration: `actor Name { state + handlers }`
+#[derive(Debug, Clone)]
+pub struct ActorDecl {
+    /// Unique identifier.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// Actor name.
+    pub name: String,
+    /// State fields (like struct fields).
+    pub fields: Vec<FieldDef>,
+    /// Handler functions.
+    pub handlers: Vec<Function>,
 }
 
 /// A user-defined struct type declaration: `struct Name<T> { field: Type, ... }`
@@ -279,6 +389,28 @@ pub enum TypeExpr {
     Function(Vec<TypeExpr>, Box<TypeExpr>),
     /// The unit type `()`.
     Unit,
+    /// Optional type shorthand: `T?` is equivalent to `Option<T>`.
+    Optional(Box<TypeExpr>),
+}
+
+/// A parameter in a closure expression.
+#[derive(Debug, Clone)]
+pub struct ClosureParam {
+    /// Parameter name.
+    pub name: String,
+    /// Optional type annotation (can be inferred from context).
+    pub ty: Option<TypeExpr>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// Ownership qualifier for a parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ownership {
+    /// Owned value (default) — caller transfers ownership.
+    Owned,
+    /// Borrowed reference — caller retains ownership.
+    Ref,
 }
 
 /// A function parameter.
@@ -290,6 +422,8 @@ pub struct Param {
     pub ty: TypeExpr,
     /// Source span.
     pub span: Span,
+    /// Ownership qualifier (`own` or `ref`).
+    pub ownership: Ownership,
 }
 
 /// An annotation on a function, e.g. `@confidence(0.95)`.
@@ -321,6 +455,8 @@ pub struct Function {
     pub span: Span,
     /// Function name.
     pub name: String,
+    /// Whether this is an async function.
+    pub is_async: bool,
     /// Generic type parameter names (empty for non-generic functions).
     pub generic_params: Vec<String>,
     /// Annotations (e.g. `@authored_by`, `@confidence`).
@@ -380,6 +516,21 @@ pub enum Stmt {
         /// Loop body.
         body: Block,
     },
+    /// A `for` loop: `for <name> in <start>..<end> { <body> }`
+    For {
+        /// Source span.
+        span: Span,
+        /// Loop variable name.
+        name: String,
+        /// Start of the range (inclusive).
+        start: Expr,
+        /// End of the range.
+        end: Expr,
+        /// Whether the range is inclusive (`..=`).
+        inclusive: bool,
+        /// Loop body.
+        body: Block,
+    },
     /// An assignment to an existing variable: `name = value`
     Assign {
         /// Source span.
@@ -389,6 +540,26 @@ pub enum Stmt {
         /// New value.
         value: Expr,
     },
+    /// An `if let` statement: `if let Pattern = expr { body } else { else_body }`
+    IfLet {
+        /// Source span.
+        span: Span,
+        /// The pattern to match.
+        pattern: Pattern,
+        /// The expression to match against.
+        value: Expr,
+        /// The body to execute if the pattern matches.
+        body: Block,
+        /// Optional else body.
+        else_body: Option<Block>,
+    },
+    /// Spawn a structured task: `spawn { body }`
+    Spawn {
+        /// Source span.
+        span: Span,
+        /// The task body.
+        body: Block,
+    },
 }
 
 /// An expression.
@@ -396,6 +567,8 @@ pub enum Stmt {
 pub enum Expr {
     /// Integer literal.
     IntLit(i64, Span),
+    /// Float literal (e.g., `0.95`, `3.14`).
+    FloatLit(f64, Span),
     /// String literal.
     StringLit(String, Span),
     /// Boolean literal.
@@ -480,6 +653,69 @@ pub enum Expr {
         /// Source span.
         span: Span,
     },
+    /// Try operator: `expr?` — propagates errors from Result types.
+    Try {
+        /// The expression to try.
+        operand: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
+    /// Optional chaining: `expr?.field` — accesses field if Some.
+    OptionalChain {
+        /// The optional expression.
+        object: Box<Expr>,
+        /// The field to access.
+        field: String,
+        /// Source span.
+        span: Span,
+    },
+    /// Null coalescing: `expr ?? default` — returns default if None.
+    NullCoalesce {
+        /// The optional expression.
+        left: Box<Expr>,
+        /// The default value.
+        right: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
+    /// A range expression: `start..end` or `start..=end`
+    Range {
+        /// Start of the range.
+        start: Box<Expr>,
+        /// End of the range.
+        end: Box<Expr>,
+        /// Whether the range is inclusive.
+        inclusive: bool,
+        /// Source span.
+        span: Span,
+    },
+    /// A closure expression: `|params| body` or `|params| -> RetType { body }`
+    Closure {
+        /// Closure parameters.
+        params: Vec<ClosureParam>,
+        /// Optional return type annotation.
+        return_type: Option<TypeExpr>,
+        /// Closure body (single expression or block).
+        body: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
+    /// Type test expression: `expr is TypeName`
+    Is {
+        /// The expression to test.
+        operand: Box<Expr>,
+        /// The type/variant to test against.
+        type_name: String,
+        /// Source span.
+        span: Span,
+    },
+    /// Await expression: `expr.await`
+    Await {
+        /// The future to await.
+        operand: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
     /// Block expression.
     Block(Block),
 }
@@ -522,6 +758,49 @@ pub enum BinOp {
     And,
     /// `||`
     Or,
+}
+
+/// Severity level for a diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    /// A fatal error that prevents compilation.
+    Error,
+    /// A non-fatal warning.
+    Warning,
+    /// An informational note.
+    Note,
+}
+
+/// A labeled span for richer error messages.
+#[derive(Debug, Clone)]
+pub struct DiagnosticLabel {
+    /// The source span to highlight.
+    pub span: Span,
+    /// The message to display at this span.
+    pub message: String,
+}
+
+/// Unified diagnostic trait for all compiler errors.
+///
+/// Every error type in the compiler should implement this trait
+/// to enable unified rendering and structured JSON output.
+pub trait Diagnostic: std::fmt::Display {
+    /// Returns the unique error code (e.g., "E0200").
+    fn code(&self) -> &'static str;
+    /// Returns the severity level.
+    fn severity(&self) -> Severity;
+    /// Returns the primary source span, if available.
+    fn span(&self) -> Option<Span>;
+    /// Returns the primary error message.
+    fn message(&self) -> String;
+    /// Returns an optional fix suggestion.
+    fn suggestion(&self) -> Option<String> {
+        None
+    }
+    /// Returns additional labeled spans for context.
+    fn labels(&self) -> Vec<DiagnosticLabel> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

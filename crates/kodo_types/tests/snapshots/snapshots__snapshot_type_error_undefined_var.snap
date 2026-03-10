@@ -1,6 +1,5 @@
 ---
 source: crates/kodo_types/tests/snapshots.rs
-assertion_line: 34
 expression: err.to_string()
 ---
-undefined type `x` at Span { start: 174, end: 175 }
+undefined type `x` at Span { start: 189, end: 190 }
