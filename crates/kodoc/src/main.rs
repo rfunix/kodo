@@ -399,6 +399,11 @@ fn run_build(
     };
     all_mir_functions.extend(mir_functions);
 
+    // Run MIR optimization passes (constant folding, DCE, copy propagation).
+    for func in &mut all_mir_functions {
+        kodo_mir::optimize::optimize_function(func);
+    }
+
     // Build module metadata for embedding in the binary.
     let metadata_json = build_module_metadata(&module);
 

@@ -28,6 +28,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod lowering;
+pub mod optimize;
 
 use kodo_types::Type;
 use thiserror::Error;
@@ -126,7 +127,7 @@ pub struct BasicBlock {
 }
 
 /// A single MIR instruction.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     /// Assign a value to a local: `local = value`
     Assign(LocalId, Value),
@@ -155,10 +156,12 @@ pub enum Instruction {
 }
 
 /// A value in MIR — either a constant, a local reference, or a binary operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// An integer constant.
     IntConst(i64),
+    /// A 64-bit floating-point constant.
+    FloatConst(f64),
     /// A boolean constant.
     BoolConst(bool),
     /// A string constant.
@@ -214,7 +217,7 @@ pub enum Value {
 }
 
 /// How a basic block transfers control flow.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Terminator {
     /// Return from the function with a value.
     Return(Value),

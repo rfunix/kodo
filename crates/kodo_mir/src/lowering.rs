@@ -59,14 +59,11 @@ pub struct MirBuilder {
     /// The name of the function being built (for error messages).
     fn_name: String,
     /// Counter for generating unique closure function names.
-    #[allow(dead_code)]
     closure_counter: u32,
     /// Lambda-lifted closure functions generated during lowering.
-    #[allow(dead_code)]
     generated_closures: Vec<MirFunction>,
     /// Maps variable names bound to closures to their generated function
     /// name and list of captured variable names.
-    #[allow(dead_code)]
     closure_registry: HashMap<String, (String, Vec<String>)>,
 }
 
@@ -687,7 +684,7 @@ impl MirBuilder {
         match expr {
             Expr::IntLit(n, _) => Ok(Value::IntConst(*n)),
             #[allow(clippy::cast_possible_wrap)]
-            Expr::FloatLit(f, _) => Ok(Value::IntConst(f.to_bits() as i64)),
+            Expr::FloatLit(f, _) => Ok(Value::FloatConst(*f)),
             Expr::BoolLit(b, _) => Ok(Value::BoolConst(*b)),
             Expr::StringLit(s, _) => Ok(Value::StringConst(s.clone())),
             Expr::Ident(name, _) => {
@@ -1342,8 +1339,12 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
         .iter()
         .filter(|f| f.generic_params.is_empty())
     {
-        let (func, closures) =
+        let (mut func, mut closures) =
             lower_function_with_closures(f, &struct_reg, &enum_reg, &fn_return_types)?;
+        crate::optimize::optimize_function(&mut func);
+        for c in &mut closures {
+            crate::optimize::optimize_function(c);
+        }
         mir_functions.push(func);
         mir_functions.extend(closures);
     }
@@ -1357,8 +1358,12 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             let ret_ty = resolve_type_with_enums(&renamed.return_type, renamed.span, &enum_ns)
                 .map_err(|e| MirError::TypeResolution(e.to_string()))?;
             fn_return_types.insert(mangled_name, ret_ty);
-            let (func, closures) =
+            let (mut func, mut closures) =
                 lower_function_with_closures(&renamed, &struct_reg, &enum_reg, &fn_return_types)?;
+            crate::optimize::optimize_function(&mut func);
+            for c in &mut closures {
+                crate::optimize::optimize_function(c);
+            }
             mir_functions.push(func);
             mir_functions.extend(closures);
         }
@@ -1369,7 +1374,8 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
         if func.requires.is_empty() || !func.generic_params.is_empty() {
             continue;
         }
-        let validator = generate_validator(func)?;
+        let mut validator = generate_validator(func)?;
+        crate::optimize::optimize_function(&mut validator);
         mir_functions.push(validator);
     }
 
@@ -1435,8 +1441,12 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         .iter()
         .filter(|f| f.generic_params.is_empty())
     {
-        let (func, closures) =
+        let (mut func, mut closures) =
             lower_function_with_closures(f, &struct_registry, &enum_registry, &fn_return_types)?;
+        crate::optimize::optimize_function(&mut func);
+        for c in &mut closures {
+            crate::optimize::optimize_function(c);
+        }
         mir_functions.push(func);
         mir_functions.extend(closures);
     }
@@ -1450,12 +1460,16 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             let ret_ty = resolve_type_with_enums(&renamed.return_type, renamed.span, &enum_names)
                 .map_err(|e| MirError::TypeResolution(e.to_string()))?;
             fn_return_types.insert(mangled_name, ret_ty);
-            let (func, closures) = lower_function_with_closures(
+            let (mut func, mut closures) = lower_function_with_closures(
                 &renamed,
                 &struct_registry,
                 &enum_registry,
                 &fn_return_types,
             )?;
+            crate::optimize::optimize_function(&mut func);
+            for c in &mut closures {
+                crate::optimize::optimize_function(c);
+            }
             mir_functions.push(func);
             mir_functions.extend(closures);
         }
@@ -1466,7 +1480,8 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         if func.requires.is_empty() || !func.generic_params.is_empty() {
             continue;
         }
-        let validator = generate_validator(func)?;
+        let mut validator = generate_validator(func)?;
+        crate::optimize::optimize_function(&mut validator);
         mir_functions.push(validator);
     }
 

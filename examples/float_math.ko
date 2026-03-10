@@ -1,0 +1,33 @@
+// Float64 Arithmetic — demonstrates floating-point operations in Kōdo.
+//
+// Compile and run:
+//   kodoc build examples/float_math.ko -o float_math
+//   ./float_math
+
+module float_math {
+    meta {
+        purpose: "Demonstrates Float64 arithmetic operations",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    fn main() {
+        // Basic arithmetic
+        let a: Float64 = 3.14
+        let b: Float64 = 2.0
+
+        let sum: Float64 = a + b
+        let diff: Float64 = a - b
+        let prod: Float64 = a * b
+        let quot: Float64 = a / b
+
+        println_float(sum)
+        println_float(diff)
+        println_float(prod)
+        println_float(quot)
+
+        // Negation
+        let neg: Float64 = -a
+        println_float(neg)
+    }
+}

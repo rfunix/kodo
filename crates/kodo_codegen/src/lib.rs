@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use cranelift_codegen::ir::condcodes::IntCC;
+use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
@@ -80,6 +80,8 @@ impl Default for CodegenOptions {
 /// Maps a Kōdo [`Type`] to a Cranelift IR type.
 fn cranelift_type(ty: &Type) -> types::Type {
     match ty {
+        Type::Float64 => types::F64,
+        Type::Float32 => types::F32,
         Type::Int32 | Type::Uint32 => types::I32,
         Type::Int16 | Type::Uint16 => types::I16,
         Type::Int8 | Type::Uint8 | Type::Bool | Type::Byte => types::I8,
@@ -368,7 +370,7 @@ const STRING_LEN_OFFSET: i32 = 8;
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
 ///
 /// Composite types (structs/enums) are passed by pointer:
-/// - Params: `AbiParam::new(I64)` (pointer to caller's stack slot)
+/// - Params: `AbiParam::new(types::I64)` (pointer to caller's stack slot)
 /// - Return: implicit `sret` pointer as first param (caller allocates buffer)
 fn build_signature(mir_fn: &MirFunction, call_conv: CallConv) -> Signature {
     let mut sig = Signature::new(call_conv);
@@ -443,6 +445,26 @@ fn declare_builtins(
             .declare_function("kodo_print_int", Linkage::Import, &sig)
             .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
         builtins.insert("print_int".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_print_float(value: f64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::F64));
+        let func_id = module
+            .declare_function("kodo_print_float", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("print_float".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_println_float(value: f64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::F64));
+        let func_id = module
+            .declare_function("kodo_println_float", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("println_float".to_string(), BuiltinInfo { func_id });
     }
 
     // kodo_contract_fail(ptr: i64, len: i64) -> void
@@ -953,6 +975,9 @@ impl VarMap {
         let declared = self.var_types.get(&id).copied().unwrap_or(types::I64);
         let actual = builder.func.dfg.value_type(val);
         let final_val = if declared == actual {
+            val
+        } else if declared.is_float() || actual.is_float() {
+            // Float types cannot use ireduce/uextend — assign directly.
             val
         } else if declared.bits() < actual.bits() {
             builder.ins().ireduce(declared, val)
@@ -2044,11 +2069,17 @@ fn infer_value_type(value: &Value, var_map: &VarMap) -> Option<Type> {
     match value {
         Value::StringConst(_) => Some(Type::String),
         Value::IntConst(_) => Some(Type::Int),
+        Value::FloatConst(_) => Some(Type::Float64),
         Value::BoolConst(_) => Some(Type::Bool),
         Value::Local(id) => {
             if let Some((_, ref tag)) = var_map.stack_slots.get(id) {
                 if tag == "_String" {
                     return Some(Type::String);
+                }
+            }
+            if let Some(&cl_ty) = var_map.var_types.get(id) {
+                if cl_ty == types::F64 {
+                    return Some(Type::Float64);
                 }
             }
             None
@@ -2099,6 +2130,32 @@ fn translate_value(
                     );
                 }
             }
+            // Check if operands are Float64 — use floating-point instructions.
+            {
+                let lhs_ty = infer_value_type(lhs, var_map);
+                let rhs_ty = infer_value_type(rhs, var_map);
+                if lhs_ty == Some(Type::Float64) || rhs_ty == Some(Type::Float64) {
+                    let left = translate_value(
+                        lhs,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?;
+                    let right = translate_value(
+                        rhs,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?;
+                    return Ok(translate_float_binop(*op, left, right, builder));
+                }
+            }
             let left = translate_value(
                 lhs,
                 builder,
@@ -2142,7 +2199,12 @@ fn translate_value(
                 var_map,
                 struct_layouts,
             )?;
-            Ok(builder.ins().ineg(val))
+            let val_ty = builder.func.dfg.value_type(val);
+            if val_ty == types::F64 || val_ty == types::F32 {
+                Ok(builder.ins().fneg(val))
+            } else {
+                Ok(builder.ins().ineg(val))
+            }
         }
         Value::StructLit { .. } | Value::FieldGet { .. } | Value::EnumVariant { .. } => {
             // Struct/enum construction handled at the instruction level.
@@ -2362,6 +2424,52 @@ fn translate_binop(
             let (l, r) = normalize_bool_operands(left, right, builder);
             builder.ins().bor(l, r)
         }
+    }
+}
+
+/// Translates a floating-point binary operation to Cranelift IR.
+fn translate_float_binop(
+    op: BinOp,
+    left: cranelift_codegen::ir::Value,
+    right: cranelift_codegen::ir::Value,
+    builder: &mut FunctionBuilder,
+) -> cranelift_codegen::ir::Value {
+    match op {
+        BinOp::Add => builder.ins().fadd(left, right),
+        BinOp::Sub => builder.ins().fsub(left, right),
+        BinOp::Mul => builder.ins().fmul(left, right),
+        BinOp::Div => builder.ins().fdiv(left, right),
+        BinOp::Mod => {
+            let div = builder.ins().fdiv(left, right);
+            let floored = builder.ins().floor(div);
+            let product = builder.ins().fmul(floored, right);
+            builder.ins().fsub(left, product)
+        }
+        BinOp::Eq => {
+            let cmp = builder.ins().fcmp(FloatCC::Equal, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::Ne => {
+            let cmp = builder.ins().fcmp(FloatCC::NotEqual, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::Lt => {
+            let cmp = builder.ins().fcmp(FloatCC::LessThan, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::Gt => {
+            let cmp = builder.ins().fcmp(FloatCC::GreaterThan, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::Le => {
+            let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::Ge => {
+            let cmp = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, left, right);
+            builder.ins().uextend(types::I64, cmp)
+        }
+        BinOp::And | BinOp::Or => builder.ins().f64const(0.0),
     }
 }
 
@@ -3828,5 +3936,85 @@ mod tests {
             None,
         );
         assert!(result.is_ok(), "string concat var + var failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_float64_return_constant() {
+        let func = MirFunction {
+            name: "float_const".to_string(),
+            return_type: Type::Float64,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::FloatConst(3.14)),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "Float64 constant return failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_float64_addition() {
+        let func = MirFunction {
+            name: "float_add".to_string(),
+            return_type: Type::Float64,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Add,
+                    Box::new(Value::FloatConst(1.5)),
+                    Box::new(Value::FloatConst(2.5)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "Float64 addition failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_float64_comparison() {
+        let func = MirFunction {
+            name: "float_cmp".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Lt,
+                    Box::new(Value::FloatConst(1.0)),
+                    Box::new(Value::FloatConst(2.0)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "Float64 comparison failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_float64_negation() {
+        let func = MirFunction {
+            name: "float_neg".to_string(),
+            return_type: Type::Float64,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Neg(Box::new(Value::FloatConst(1.5)))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "Float64 negation failed: {result:?}");
     }
 }

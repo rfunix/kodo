@@ -101,6 +101,25 @@ pub extern "C" fn kodo_print_int(n: i64) {
     let _ = handle.flush();
 }
 
+/// Prints a float to stdout without a newline.
+#[no_mangle]
+pub extern "C" fn kodo_print_float(value: f64) {
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    let _ = write!(handle, "{value}");
+    let _ = handle.flush();
+}
+
+/// Prints a float to stdout followed by a newline.
+#[no_mangle]
+pub extern "C" fn kodo_println_float(value: f64) {
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    let _ = write!(handle, "{value}");
+    let _ = handle.write_all(b"\n");
+    let _ = handle.flush();
+}
+
 /// Called when a contract (`requires`/`ensures`) check fails at runtime.
 ///
 /// Prints an error message to stderr and aborts the process.

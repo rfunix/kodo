@@ -1236,6 +1236,14 @@ impl TypeChecker {
             "print_int".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
+        self.env.insert(
+            "print_float".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "println_float".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
+        );
         // Math builtins
         self.env.insert(
             "abs".to_string(),
