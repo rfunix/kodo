@@ -36,4 +36,8 @@ module expressions {
             return 0
         }
     }
+
+    fn main() -> Int {
+        return 0
+    }
 }

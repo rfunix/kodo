@@ -862,7 +862,13 @@ impl MirBuilder {
                     }
                     _ => return Ok(Value::Unit),
                 };
-                let local_id = self.alloc_local(Type::Unknown, false);
+                // Look up the field type from the struct registry.
+                let field_ty = self
+                    .struct_registry
+                    .get(&struct_name)
+                    .and_then(|fields| fields.iter().find(|(n, _)| n == field))
+                    .map_or(Type::Unknown, |(_, ty)| ty.clone());
+                let local_id = self.alloc_local(field_ty, false);
                 self.emit(Instruction::Assign(
                     local_id,
                     Value::FieldGet {
@@ -1258,6 +1264,43 @@ fn generate_validator(function: &Function) -> Result<MirFunction> {
     })
 }
 
+/// Registers return types for builtin functions so that MIR locals receiving
+/// their results get the correct type (e.g. `Type::String` for `Int_to_string`).
+fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
+    // Builtins that return String.
+    for name in &[
+        "Int_to_string",
+        "Float64_to_string",
+        "String_trim",
+        "String_to_upper",
+        "String_to_lower",
+        "String_substring",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::String);
+    }
+    // Builtins that return Int.
+    for name in &[
+        "String_length",
+        "String_contains",
+        "String_starts_with",
+        "String_ends_with",
+        "abs",
+        "min",
+        "max",
+        "clamp",
+        "list_length",
+        "list_contains",
+        "map_length",
+        "map_contains_key",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+}
+
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
 /// using pre-built registries from the type checker (including monomorphized generics).
 ///
@@ -1291,6 +1334,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             .map_err(|e| MirError::TypeResolution(e.to_string()))?;
         fn_return_types.insert(func.name.clone(), ret_ty);
     }
+    register_builtin_return_types(&mut fn_return_types);
 
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
@@ -1383,6 +1427,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             .map_err(|e| MirError::TypeResolution(e.to_string()))?;
         fn_return_types.insert(func.name.clone(), ret_ty);
     }
+    register_builtin_return_types(&mut fn_return_types);
 
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module

@@ -109,9 +109,15 @@ fn compute_struct_layout(fields: &[(String, Type)]) -> StructLayout {
     let mut field_offsets = Vec::with_capacity(fields.len());
 
     for (name, ty) in fields {
+        // String fields are stored as (ptr: i64, len: i64) = 16 bytes.
+        let (size, align) = if matches!(ty, Type::String) {
+            (STRING_LAYOUT_SIZE, 8u32)
+        } else {
+            let cl_ty = cranelift_type(ty);
+            let s = cl_ty.bytes();
+            (s, s)
+        };
         let cl_ty = cranelift_type(ty);
-        let size = cl_ty.bytes();
-        let align = size; // Natural alignment
 
         // Align offset.
         offset = (offset + align - 1) & !(align - 1);
@@ -343,10 +349,21 @@ pub fn compile_function(function: &MirFunction, options: &CodegenOptions) -> Res
     compile_module(std::slice::from_ref(function), options, None)
 }
 
-/// Returns `true` if the type is a struct or enum (composite types passed by pointer).
+/// Returns `true` if the type is a struct, enum, or String (composite types passed by pointer).
+///
+/// `Type::String` is treated as composite because at the ABI level it is a
+/// 16-byte `(ptr: i64, len: i64)` pair — the same layout used by runtime
+/// builtins like `kodo_println`.
 fn is_composite(ty: &Type) -> bool {
-    matches!(ty, Type::Struct(_) | Type::Enum(_))
+    matches!(ty, Type::Struct(_) | Type::Enum(_) | Type::String)
 }
+
+/// Size in bytes of a String stack slot: `(ptr: i64, len: i64)`.
+const STRING_LAYOUT_SIZE: u32 = 16;
+/// Byte offset of the pointer field inside a String stack slot.
+const STRING_PTR_OFFSET: i32 = 0;
+/// Byte offset of the length field inside a String stack slot.
+const STRING_LEN_OFFSET: i32 = 8;
 
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
 ///
@@ -944,7 +961,8 @@ fn emit_string_builtin_call(
 ) -> Result<bool> {
     let mut arg_vals = Vec::new();
 
-    // Expand each argument: StringConst → (ptr, len), others → single value.
+    // Expand each argument: StringConst → (ptr, len),
+    // String local (stack slot) → load (ptr, len), others → single value.
     for arg in args {
         if let Value::StringConst(s) = arg {
             let data_id = create_string_data(module, s)?;
@@ -954,6 +972,43 @@ fn emit_string_builtin_call(
             let len = builder.ins().iconst(types::I64, s.len() as i64);
             arg_vals.push(ptr);
             arg_vals.push(len);
+        } else if let Value::Local(local_id) = arg {
+            if let Some((slot, ref slot_name)) = var_map.stack_slots.get(local_id) {
+                if slot_name == "_String" {
+                    // Load ptr and len from the String stack slot.
+                    let ptr_addr = builder
+                        .ins()
+                        .stack_addr(types::I64, *slot, STRING_PTR_OFFSET);
+                    let ptr = builder.ins().load(types::I64, MemFlags::new(), ptr_addr, 0);
+                    let len_addr = builder
+                        .ins()
+                        .stack_addr(types::I64, *slot, STRING_LEN_OFFSET);
+                    let len = builder.ins().load(types::I64, MemFlags::new(), len_addr, 0);
+                    arg_vals.push(ptr);
+                    arg_vals.push(len);
+                } else {
+                    // Non-String composite: pass as single value.
+                    arg_vals.push(translate_value(
+                        arg,
+                        builder,
+                        module,
+                        func_ids,
+                        builtins,
+                        var_map,
+                        struct_layouts,
+                    )?);
+                }
+            } else {
+                arg_vals.push(translate_value(
+                    arg,
+                    builder,
+                    module,
+                    func_ids,
+                    builtins,
+                    var_map,
+                    struct_layouts,
+                )?);
+            }
         } else {
             arg_vals.push(translate_value(
                 arg,
@@ -1015,7 +1070,36 @@ fn emit_string_builtin_call(
         let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
         builder.ins().call(func_ref, &arg_vals);
 
-        // Load the returned pointer as the result value.
+        // If the dest has a String stack slot, store both ptr and len into it.
+        if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(&dest) {
+            if dest_name == "_String" {
+                let result_ptr = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+                let result_len = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), out_len_addr, 0);
+                let dest_ptr_addr =
+                    builder
+                        .ins()
+                        .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), result_ptr, dest_ptr_addr, 0);
+                let dest_len_addr =
+                    builder
+                        .ins()
+                        .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), result_len, dest_len_addr, 0);
+                let var = var_map.get(dest)?;
+                let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+                builder.def_var(var, addr);
+                return Ok(true);
+            }
+        }
+        // Fallback: store only the pointer as scalar.
         let result_ptr = builder
             .ins()
             .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
@@ -1122,6 +1206,21 @@ fn translate_function(
     let mut var_map = VarMap::new();
     for local in &mir_fn.locals {
         match &local.ty {
+            Type::String => {
+                // Allocate a 16-byte stack slot for String: (ptr: i64, len: i64).
+                let slot =
+                    builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                        STRING_LAYOUT_SIZE,
+                        0,
+                    ));
+                var_map
+                    .stack_slots
+                    .insert(local.id, (slot, "_String".to_string()));
+                let var = builder.declare_var(types::I64);
+                var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, types::I64);
+            }
             Type::Struct(ref name) => {
                 // Allocate a stack slot for struct types.
                 if let Some(layout) = struct_layouts.get(name) {
@@ -1185,6 +1284,7 @@ fn translate_function(
             // Copy it into our local stack slot so mutations don't affect caller.
             if let Some((slot, _)) = var_map.stack_slots.get(&local_id) {
                 let slot_size = match local_ty {
+                    Type::String => STRING_LAYOUT_SIZE,
                     Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
                     Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
                     _ => 8,
@@ -1290,6 +1390,32 @@ fn translate_instruction(
 ) -> Result<()> {
     match instr {
         Instruction::Assign(local_id, value) => {
+            // Handle StringConst assignment to a String stack slot.
+            if let Value::StringConst(s) = value {
+                if let Some((slot, ref slot_name)) = var_map.stack_slots.get(local_id) {
+                    if slot_name == "_String" {
+                        let data_id = create_string_data(module, s)?;
+                        let gv = module.declare_data_in_func(data_id, builder.func);
+                        let ptr = builder.ins().symbol_value(types::I64, gv);
+                        #[allow(clippy::cast_possible_wrap)]
+                        let len = builder.ins().iconst(types::I64, s.len() as i64);
+                        let base = builder
+                            .ins()
+                            .stack_addr(types::I64, *slot, STRING_PTR_OFFSET);
+                        builder.ins().store(MemFlags::new(), ptr, base, 0);
+                        let len_addr =
+                            builder
+                                .ins()
+                                .stack_addr(types::I64, *slot, STRING_LEN_OFFSET);
+                        builder.ins().store(MemFlags::new(), len, len_addr, 0);
+                        let var = var_map.get(*local_id)?;
+                        let addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                        builder.def_var(var, addr);
+                        return Ok(());
+                    }
+                }
+            }
+
             // Handle enum variant assignment: store discriminant + payload into stack slot.
             if let Value::EnumVariant {
                 discriminant, args, ..
@@ -1410,6 +1536,50 @@ fn translate_instruction(
                                     "unknown field {field_name} in struct {name}"
                                 ))
                             })?;
+                        // If the field value is a String (stack slot or const),
+                        // copy both ptr and len (16 bytes) into the struct.
+                        if let Value::StringConst(s) = field_val {
+                            let data_id = create_string_data(module, s)?;
+                            let gv = module.declare_data_in_func(data_id, builder.func);
+                            let ptr = builder.ins().symbol_value(types::I64, gv);
+                            #[allow(clippy::cast_possible_wrap)]
+                            let len = builder.ins().iconst(types::I64, s.len() as i64);
+                            #[allow(clippy::cast_possible_wrap)]
+                            let faddr = builder.ins().stack_addr(types::I64, *slot, *offset as i32);
+                            builder.ins().store(MemFlags::new(), ptr, faddr, 0);
+                            let faddr_len =
+                                builder.ins().iadd_imm(faddr, i64::from(STRING_LEN_OFFSET));
+                            builder.ins().store(MemFlags::new(), len, faddr_len, 0);
+                            continue;
+                        }
+                        if let Value::Local(src_id) = field_val {
+                            if let Some((src_slot, ref sn)) = var_map.stack_slots.get(src_id) {
+                                if sn == "_String" {
+                                    let sp = builder.ins().stack_addr(
+                                        types::I64,
+                                        *src_slot,
+                                        STRING_PTR_OFFSET,
+                                    );
+                                    let ptr =
+                                        builder.ins().load(types::I64, MemFlags::new(), sp, 0);
+                                    let sl = builder.ins().stack_addr(
+                                        types::I64,
+                                        *src_slot,
+                                        STRING_LEN_OFFSET,
+                                    );
+                                    let len =
+                                        builder.ins().load(types::I64, MemFlags::new(), sl, 0);
+                                    #[allow(clippy::cast_possible_wrap)]
+                                    let faddr =
+                                        builder.ins().stack_addr(types::I64, *slot, *offset as i32);
+                                    builder.ins().store(MemFlags::new(), ptr, faddr, 0);
+                                    let faddr_len =
+                                        builder.ins().iadd_imm(faddr, i64::from(STRING_LEN_OFFSET));
+                                    builder.ins().store(MemFlags::new(), len, faddr_len, 0);
+                                    continue;
+                                }
+                            }
+                        }
                         let val = translate_value(
                             field_val,
                             builder,
@@ -1471,6 +1641,32 @@ fn translate_instruction(
                     )?,
                 };
                 let field_addr = builder.ins().iadd_imm(obj_addr, i64::from(*offset));
+                // If the dest is a _String stack slot, copy both ptr and len (16 bytes).
+                if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(local_id) {
+                    if dest_name == "_String" {
+                        let ptr = builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), field_addr, 0);
+                        let len_addr = builder
+                            .ins()
+                            .iadd_imm(field_addr, i64::from(STRING_LEN_OFFSET));
+                        let len = builder.ins().load(types::I64, MemFlags::new(), len_addr, 0);
+                        let dp =
+                            builder
+                                .ins()
+                                .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+                        builder.ins().store(MemFlags::new(), ptr, dp, 0);
+                        let dl =
+                            builder
+                                .ins()
+                                .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+                        builder.ins().store(MemFlags::new(), len, dl, 0);
+                        let var = var_map.get(*local_id)?;
+                        let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+                        builder.def_var(var, addr);
+                        return Ok(());
+                    }
+                }
                 let loaded = builder.ins().load(*cl_ty, MemFlags::new(), field_addr, 0);
                 let var = var_map.get(*local_id)?;
                 builder.def_var(var, loaded);
@@ -1488,11 +1684,15 @@ fn translate_instruction(
                     let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
                     // Copy 8-byte chunks. Find slot size from struct/enum layouts.
                     let src_slot_name = &var_map.stack_slots[src_id].1;
-                    let slot_size = struct_layouts
-                        .get(src_slot_name)
-                        .map(|l| l.total_size)
-                        .or_else(|| enum_layouts.get(src_slot_name).map(|l| l.total_size))
-                        .unwrap_or(8);
+                    let slot_size = if src_slot_name == "_String" {
+                        STRING_LAYOUT_SIZE
+                    } else {
+                        struct_layouts
+                            .get(src_slot_name)
+                            .map(|l| l.total_size)
+                            .or_else(|| enum_layouts.get(src_slot_name).map(|l| l.total_size))
+                            .unwrap_or(8)
+                    };
                     let num_words = slot_size.div_ceil(8);
                     for i in 0..num_words {
                         #[allow(clippy::cast_possible_wrap)]
@@ -1951,21 +2151,39 @@ fn translate_terminator(
                         var_map,
                         struct_layouts,
                     )?;
-                    let slot_size = match &mir_fn.return_type {
-                        Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
-                        Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
-                        _ => 8,
-                    };
-                    let num_words = slot_size.div_ceil(8);
-                    for w in 0..num_words {
+                    // For StringConst return value, store ptr+len directly into sret.
+                    if let Value::StringConst(s) = value {
+                        let data_id = create_string_data(module, s)?;
+                        let gv = module.declare_data_in_func(data_id, builder.func);
+                        let ptr = builder.ins().symbol_value(types::I64, gv);
                         #[allow(clippy::cast_possible_wrap)]
-                        let off = (w * 8) as i32;
-                        let src_field = builder.ins().iadd_imm(src_addr, i64::from(off));
-                        let val = builder
+                        let len = builder.ins().iconst(types::I64, s.len() as i64);
+                        builder
                             .ins()
-                            .load(types::I64, MemFlags::new(), src_field, 0);
-                        let dest_field = builder.ins().iadd_imm(sret_ptr, i64::from(off));
-                        builder.ins().store(MemFlags::new(), val, dest_field, 0);
+                            .store(MemFlags::new(), ptr, sret_ptr, STRING_PTR_OFFSET);
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), len, sret_ptr, STRING_LEN_OFFSET);
+                    } else {
+                        let slot_size = match &mir_fn.return_type {
+                            Type::String => STRING_LAYOUT_SIZE,
+                            Type::Struct(name) => {
+                                struct_layouts.get(name).map_or(8, |l| l.total_size)
+                            }
+                            Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
+                            _ => 8,
+                        };
+                        let num_words = slot_size.div_ceil(8);
+                        for w in 0..num_words {
+                            #[allow(clippy::cast_possible_wrap)]
+                            let off = (w * 8) as i32;
+                            let src_field = builder.ins().iadd_imm(src_addr, i64::from(off));
+                            let val = builder
+                                .ins()
+                                .load(types::I64, MemFlags::new(), src_field, 0);
+                            let dest_field = builder.ins().iadd_imm(sret_ptr, i64::from(off));
+                            builder.ins().store(MemFlags::new(), val, dest_field, 0);
+                        }
                     }
                 }
                 builder.ins().return_(&[]);

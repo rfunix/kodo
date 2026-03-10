@@ -280,7 +280,14 @@ fn run_build(
         match resolver.resolve_all(&module.intent_decls) {
             Ok(resolved_intents) => {
                 for resolved in resolved_intents {
-                    module.functions.extend(resolved.generated_functions);
+                    // Skip generated functions that already exist in the module
+                    // (the intent serves as a declaration of intent, not a replacement).
+                    for func in resolved.generated_functions {
+                        let already_exists = module.functions.iter().any(|f| f.name == func.name);
+                        if !already_exists {
+                            module.functions.push(func);
+                        }
+                    }
                 }
             }
             Err(e) => {

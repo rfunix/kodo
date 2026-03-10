@@ -25,4 +25,8 @@ module contracts {
         }
         return value
     }
+
+    fn main() -> Int {
+        return 0
+    }
 }
