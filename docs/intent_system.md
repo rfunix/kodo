@@ -48,7 +48,16 @@ intent serve_http {
 6. If verification passes, code enters the compilation pipeline
 ```
 
-## Built-in Resolvers (Planned)
+## Built-in Resolvers
+
+### Implemented
+
+| Intent | Description |
+|--------|-------------|
+| `console_app` | Console application with greeting message |
+| `math_module` | Mathematical helper functions from declarations |
+
+### Planned
 
 | Intent | Description |
 |--------|-------------|

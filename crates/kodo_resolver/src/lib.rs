@@ -127,7 +127,7 @@ impl kodo_ast::Diagnostic for ResolverError {
     fn suggestion(&self) -> Option<String> {
         match self {
             Self::NoResolver { .. } => {
-                Some("available intents: console_app, math_module".to_string())
+                Some("available intents: console_app, math_module, serve_http".to_string())
             }
             Self::UnknownConfig { intent, .. } => {
                 let valid_keys = valid_config_keys(intent);
@@ -194,6 +194,7 @@ impl Resolver {
         let mut resolver = Self::new();
         resolver.register(Box::new(ConsoleAppStrategy));
         resolver.register(Box::new(MathModuleStrategy));
+        resolver.register(Box::new(ServeHttpStrategy));
         resolver
     }
 
@@ -252,6 +253,7 @@ fn valid_config_keys(intent: &str) -> Vec<&'static str> {
     match intent {
         "console_app" => vec!["greeting", "entry_point"],
         "math_module" => vec!["functions"],
+        "serve_http" => vec!["port", "routes"],
         _ => vec![],
     }
 }
@@ -262,6 +264,18 @@ fn get_string_config<'a>(intent: &'a IntentDecl, key: &str) -> Option<&'a str> {
         if entry.key == key {
             if let IntentConfigValue::StringLit(ref s, _) = entry.value {
                 return Some(s.as_str());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts an integer value from an intent config entry.
+fn get_int_config(intent: &IntentDecl, key: &str) -> Option<i64> {
+    for entry in &intent.config {
+        if entry.key == key {
+            if let IntentConfigValue::IntLit(n, _) = entry.value {
+                return Some(n);
             }
         }
     }
@@ -431,6 +445,116 @@ fn generate_math_function(name: &str, span: Span) -> Option<Function> {
             }],
         },
     })
+}
+
+/// Generates HTTP handler stubs for serving HTTP requests.
+///
+/// Config keys:
+/// - `port` (integer): The port to listen on.
+/// - `routes` (list): Route definitions (currently generates handler stubs).
+pub struct ServeHttpStrategy;
+
+impl ResolverStrategy for ServeHttpStrategy {
+    fn handles(&self) -> &[&str] {
+        &["serve_http"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["port", "routes"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+
+        // Extract port if present, default to 8080
+        let port = get_int_config(intent, "port").unwrap_or(8080);
+
+        // Generate a main function that prints server startup info
+        let startup_msg = format!("HTTP server starting on port {port}");
+        let println_call = Expr::Call {
+            callee: Box::new(Expr::Ident("println".to_string(), span)),
+            args: vec![Expr::StringLit(startup_msg.clone(), span)],
+            span,
+        };
+
+        let main_func = Function {
+            id: NodeId(0),
+            span,
+            name: "kodo_main".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Unit,
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span,
+                stmts: vec![Stmt::Expr(println_call)],
+            },
+        };
+
+        // Generate handler stubs from routes
+        let mut generated = vec![main_func];
+        let mut route_descriptions = Vec::new();
+
+        for entry in &intent.config {
+            if entry.key == "routes" {
+                if let IntentConfigValue::List(ref items, _) = entry.value {
+                    for item in items {
+                        if let IntentConfigValue::FnRef(ref handler_name, _) = item {
+                            let handler = generate_http_handler(handler_name, span);
+                            route_descriptions.push(format!("  - `{handler_name}()`"));
+                            generated.push(handler);
+                        }
+                    }
+                }
+            }
+        }
+
+        let description = if route_descriptions.is_empty() {
+            format!("Generated HTTP server on port {port} (no routes)")
+        } else {
+            format!(
+                "Generated HTTP server on port {port} with handlers:\n{}",
+                route_descriptions.join("\n")
+            )
+        };
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types: vec![],
+            description,
+        })
+    }
+}
+
+/// Generates an HTTP handler stub function.
+fn generate_http_handler(name: &str, span: Span) -> Function {
+    // Generate: fn handler_name() { println("Handling request: handler_name") }
+    let msg = format!("Handling request: {name}");
+    let println_call = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(msg, span)],
+        span,
+    };
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: name.to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Unit,
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(println_call)],
+        },
+    }
 }
 
 /// Formats generated code as a human-readable Kōdo source string.
@@ -656,5 +780,68 @@ mod tests {
         assert!(unknown_cfg
             .to_string()
             .contains("unknown configuration key"));
+    }
+
+    #[test]
+    fn serve_http_basic() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("serve_http", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("8080"));
+    }
+
+    #[test]
+    fn serve_http_custom_port() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "serve_http",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "port".to_string(),
+                value: IntentConfigValue::IntLit(3000, Span::new(0, 4)),
+                span: Span::new(0, 10),
+            }],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("3000"));
+    }
+
+    #[test]
+    fn serve_http_with_routes() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "serve_http",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "routes".to_string(),
+                value: IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::FnRef("health_check".to_string(), Span::new(0, 12)),
+                        IntentConfigValue::FnRef("handle_greet".to_string(), Span::new(0, 12)),
+                    ],
+                    Span::new(0, 30),
+                ),
+                span: Span::new(0, 40),
+            }],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // main + 2 handlers
+        assert_eq!(resolved.generated_functions.len(), 3);
+        assert_eq!(resolved.generated_functions[1].name, "health_check");
+        assert_eq!(resolved.generated_functions[2].name, "handle_greet");
+    }
+
+    #[test]
+    fn serve_http_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("serve_http", vec![string_entry("invalid_key", "value")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
     }
 }

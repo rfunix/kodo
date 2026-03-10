@@ -222,6 +222,144 @@ pub unsafe extern "C" fn kodo_string_ends_with(
     i64::from(haystack.ends_with(suffix))
 }
 
+/// Returns 1 if two strings are equal (same length and bytes), 0 otherwise.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_eq(
+    ptr1: *const u8,
+    len1: usize,
+    ptr2: *const u8,
+    len2: usize,
+) -> i64 {
+    if len1 != len2 {
+        return 0;
+    }
+    let s1 = unsafe { std::slice::from_raw_parts(ptr1, len1) };
+    let s2 = unsafe { std::slice::from_raw_parts(ptr2, len2) };
+    i64::from(s1 == s2)
+}
+
+/// Concatenates two strings, writing the result via out-parameters.
+///
+/// The caller is responsible for eventually freeing the allocated memory.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_concat(
+    ptr1: *const u8,
+    len1: usize,
+    ptr2: *const u8,
+    len2: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let s1 = unsafe { std::slice::from_raw_parts(ptr1, len1) };
+    let s2 = unsafe { std::slice::from_raw_parts(ptr2, len2) };
+    let mut result = Vec::with_capacity(len1 + len2);
+    result.extend_from_slice(s1);
+    result.extend_from_slice(s2);
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
+/// Returns the byte index of the first occurrence of needle in haystack, or -1 if not found.
+///
+/// # Safety
+///
+/// Both pointer/length pairs must point to valid UTF-8 bytes.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_index_of(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    needle_ptr: *const u8,
+    needle_len: usize,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let needle = unsafe { std::slice::from_raw_parts(needle_ptr, needle_len) };
+    if needle.is_empty() {
+        return 0;
+    }
+    if needle_len > hay_len {
+        return -1;
+    }
+    for i in 0..=(hay_len - needle_len) {
+        if haystack[i..i + needle_len] == *needle {
+            #[allow(clippy::cast_possible_wrap)]
+            return i as i64;
+        }
+    }
+    -1
+}
+
+/// Replaces all occurrences of a pattern in a string, writing the result via out-parameters.
+///
+/// The caller is responsible for eventually freeing the allocated memory.
+///
+/// # Safety
+///
+/// All pointer/length pairs must point to valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_string_replace(
+    hay_ptr: *const u8,
+    hay_len: usize,
+    pattern_ptr: *const u8,
+    pattern_len: usize,
+    replacement_ptr: *const u8,
+    replacement_len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let haystack = unsafe { std::slice::from_raw_parts(hay_ptr, hay_len) };
+    let pattern = unsafe { std::slice::from_raw_parts(pattern_ptr, pattern_len) };
+    let replacement = unsafe { std::slice::from_raw_parts(replacement_ptr, replacement_len) };
+
+    if pattern.is_empty() {
+        // Empty pattern: return the original string (no replacement)
+        let copy = haystack.to_vec().into_boxed_slice();
+        let result_len = copy.len();
+        let result_ptr = Box::into_raw(copy) as *const u8;
+        unsafe {
+            *out_ptr = result_ptr;
+            *out_len = result_len;
+        }
+        return;
+    }
+
+    let mut result = Vec::with_capacity(hay_len);
+    let mut i = 0;
+    while i < hay_len {
+        if i + pattern_len <= hay_len && haystack[i..i + pattern_len] == *pattern {
+            result.extend_from_slice(replacement);
+            i += pattern_len;
+        } else {
+            result.push(haystack[i]);
+            i += 1;
+        }
+    }
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
 /// Byte-level substring search.
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() {
@@ -719,7 +857,7 @@ pub unsafe extern "C" fn kodo_list_contains(list_ptr: i64, value: i64) -> i64 {
     0
 }
 
-/// Splits a string by a separator and returns a List<String>.
+/// Splits a string by a separator and returns a `List<String>`.
 ///
 /// Each resulting substring is allocated as a new (ptr, len) pair on the heap.
 /// The list contains pointers to these string values.
@@ -1415,5 +1553,194 @@ mod tests {
         unsafe { kodo_map_get(map, 50, &mut value, &mut is_some) };
         assert_eq!(is_some, 1);
         assert_eq!(value, 500);
+    }
+
+    #[test]
+    fn kodo_string_concat_works() {
+        let a = "hello ";
+        let b = "world";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: both are valid string slices.
+        unsafe {
+            kodo_string_concat(
+                a.as_ptr(),
+                a.len(),
+                b.as_ptr(),
+                b.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn kodo_string_concat_empty() {
+        let a = "";
+        let b = "world";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: both are valid string slices.
+        unsafe {
+            kodo_string_concat(
+                a.as_ptr(),
+                a.len(),
+                b.as_ptr(),
+                b.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "world");
+    }
+
+    #[test]
+    fn kodo_string_index_of_works() {
+        let hay = "hello world";
+        let needle = "world";
+        // SAFETY: both are valid string slices.
+        let result =
+            unsafe { kodo_string_index_of(hay.as_ptr(), hay.len(), needle.as_ptr(), needle.len()) };
+        assert_eq!(result, 6);
+    }
+
+    #[test]
+    fn kodo_string_index_of_not_found() {
+        let hay = "hello world";
+        let needle = "xyz";
+        // SAFETY: both are valid string slices.
+        let result =
+            unsafe { kodo_string_index_of(hay.as_ptr(), hay.len(), needle.as_ptr(), needle.len()) };
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn kodo_string_index_of_empty_needle() {
+        let hay = "hello";
+        let needle = "";
+        // SAFETY: both are valid string slices.
+        let result =
+            unsafe { kodo_string_index_of(hay.as_ptr(), hay.len(), needle.as_ptr(), needle.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_replace_works() {
+        let hay = "hello world";
+        let pattern = "world";
+        let replacement = "kodo";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: all are valid string slices.
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello kodo");
+    }
+
+    #[test]
+    fn kodo_string_replace_multiple() {
+        let hay = "aXbXc";
+        let pattern = "X";
+        let replacement = "YY";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: all are valid string slices.
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "aYYbYYc");
+    }
+
+    #[test]
+    fn kodo_string_replace_empty_pattern() {
+        let hay = "hello";
+        let pattern = "";
+        let replacement = "X";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: all are valid string slices.
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello");
+    }
+
+    #[test]
+    fn kodo_string_eq_equal_strings() {
+        let a = "hello";
+        let b = "hello";
+        // SAFETY: both are valid string slices.
+        let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn kodo_string_eq_different_same_length() {
+        let a = "hello";
+        let b = "world";
+        // SAFETY: both are valid string slices.
+        let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_eq_different_lengths() {
+        let a = "hi";
+        let b = "hello";
+        // SAFETY: both are valid string slices.
+        let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn kodo_string_eq_empty_strings() {
+        let a = "";
+        let b = "";
+        // SAFETY: both are valid (empty) string slices.
+        let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn kodo_string_eq_one_empty() {
+        let a = "hello";
+        let b = "";
+        // SAFETY: both are valid string slices.
+        let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
+        assert_eq!(result, 0);
     }
 }

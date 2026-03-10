@@ -1477,7 +1477,8 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
 mod tests {
     use super::*;
     use kodo_ast::{
-        BinOp, Block, Expr, Function, Module, NodeId, Ownership, Param, Span, Stmt, TypeExpr,
+        BinOp, Block, Expr, FieldDef, Function, Meta, MetaEntry, Module, NodeId, Ownership, Param,
+        Span, Stmt, TypeDecl, TypeExpr,
     };
 
     /// Helper to create a dummy span.
@@ -2548,5 +2549,122 @@ mod tests {
             })
         });
         assert!(has_any_call, "expected a call instruction for f(41)");
+    }
+
+    #[test]
+    fn test_builtin_return_types_registered() {
+        let mut types = HashMap::new();
+        register_builtin_return_types(&mut types);
+
+        // String-returning builtins
+        assert_eq!(types.get("Int_to_string"), Some(&Type::String));
+        assert_eq!(types.get("Float64_to_string"), Some(&Type::String));
+        assert_eq!(types.get("String_trim"), Some(&Type::String));
+        assert_eq!(types.get("String_to_upper"), Some(&Type::String));
+        assert_eq!(types.get("String_to_lower"), Some(&Type::String));
+        assert_eq!(types.get("String_substring"), Some(&Type::String));
+
+        // Int-returning builtins
+        assert_eq!(types.get("String_length"), Some(&Type::Int));
+        assert_eq!(types.get("abs"), Some(&Type::Int));
+        assert_eq!(types.get("min"), Some(&Type::Int));
+        assert_eq!(types.get("max"), Some(&Type::Int));
+        assert_eq!(types.get("clamp"), Some(&Type::Int));
+        assert_eq!(types.get("list_length"), Some(&Type::Int));
+        assert_eq!(types.get("map_length"), Some(&Type::Int));
+        assert_eq!(types.get("map_contains_key"), Some(&Type::Int));
+    }
+
+    #[test]
+    fn test_field_access_type_resolution() {
+        // Create a module with:
+        // struct Point { x: Int, y: Int }
+        // fn get_x(p: Point) -> Int { return p.x }
+        let module = Module {
+            id: NodeId(0),
+            name: "test".to_string(),
+            span: span(),
+            meta: Some(Meta {
+                id: NodeId(2),
+                span: span(),
+                entries: vec![
+                    MetaEntry {
+                        key: "purpose".to_string(),
+                        value: "test".to_string(),
+                        span: span(),
+                    },
+                    MetaEntry {
+                        key: "version".to_string(),
+                        value: "1.0.0".to_string(),
+                        span: span(),
+                    },
+                ],
+            }),
+            imports: vec![],
+            type_decls: vec![TypeDecl {
+                id: NodeId(1),
+                name: "Point".to_string(),
+                span: span(),
+                generic_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "x".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                    FieldDef {
+                        name: "y".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                ],
+            }],
+            enum_decls: vec![],
+            functions: vec![make_fn(
+                "get_x",
+                vec![Param {
+                    name: "p".to_string(),
+                    ty: TypeExpr::Named("Point".to_string()),
+                    ownership: Ownership::Owned,
+                    span: span(),
+                }],
+                Block {
+                    span: span(),
+                    stmts: vec![Stmt::Return {
+                        span: span(),
+                        value: Some(Expr::FieldAccess {
+                            object: Box::new(Expr::Ident("p".to_string(), span())),
+                            field: "x".to_string(),
+                            span: span(),
+                        }),
+                    }],
+                },
+                TypeExpr::Named("Int".to_string()),
+            )],
+            intent_decls: vec![],
+            impl_blocks: vec![],
+            trait_decls: vec![],
+            actor_decls: vec![],
+        };
+
+        let struct_registry = HashMap::from([(
+            "Point".to_string(),
+            vec![("x".to_string(), Type::Int), ("y".to_string(), Type::Int)],
+        )]);
+        let enum_registry: HashMap<String, Vec<(String, Vec<Type>)>> = HashMap::new();
+        let enum_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let result =
+            lower_module_with_type_info(&module, &struct_registry, &enum_registry, &enum_names);
+        assert!(result.is_ok(), "field access lowering failed: {result:?}");
+
+        let mir_functions = result.unwrap();
+        // Find the get_x function
+        let get_x = mir_functions
+            .iter()
+            .find(|f| f.name == "get_x")
+            .expect("get_x not found");
+        // Verify the return type is Int
+        assert_eq!(get_x.return_type, Type::Int);
     }
 }

@@ -1,0 +1,324 @@
+//! End-to-end tests that compile `.ko` files into binaries, execute them,
+//! and verify their output.
+//!
+//! These tests exercise the full pipeline: source → parse → typecheck →
+//! contracts → resolve → desugar → MIR → codegen → link → run.
+
+use std::path::Path;
+use std::process::Command;
+
+/// Returns the path to the `kodoc` binary built by cargo.
+fn get_kodoc_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_kodoc"))
+}
+
+/// Returns the workspace root directory.
+fn workspace_root() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root")
+        .to_path_buf()
+}
+
+/// Compiles a `.ko` source file to a binary and returns the output path.
+///
+/// Panics if compilation fails.
+fn compile_ko(source_path: &Path, output_name: &str) -> std::path::PathBuf {
+    let kodoc = get_kodoc_path();
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+    let output_path = output_dir.join(output_name);
+
+    let result = Command::new(&kodoc)
+        .arg("build")
+        .arg(source_path)
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        result.status.success(),
+        "kodoc build failed for {}:\nstdout: {}\nstderr: {}",
+        source_path.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    output_path
+}
+
+/// Runs a compiled binary and returns (exit_code, stdout, stderr).
+fn run_binary(binary_path: &Path) -> (i32, String, String) {
+    let result = Command::new(binary_path)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run binary {}: {e}", binary_path.display()));
+
+    let exit_code = result.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&result.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&result.stderr).to_string();
+
+    (exit_code, stdout, stderr)
+}
+
+/// Writes inline Kodo source to a temp file, compiles it, and returns the binary path.
+///
+/// Panics if compilation fails.
+fn compile_source(source: &str, test_name: &str) -> std::path::PathBuf {
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+
+    let source_path = output_dir.join(format!("{test_name}.ko"));
+    std::fs::write(&source_path, source).expect("could not write source file");
+
+    compile_ko(&source_path, test_name)
+}
+
+// ---------------------------------------------------------------------------
+// Tests using example files from the repository
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_hello_world_output() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/hello.ko"), "test_hello");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "hello world should exit with 0");
+    assert!(
+        stdout.contains("Hello"),
+        "hello world output should contain 'Hello', got: {stdout}"
+    );
+}
+
+#[test]
+fn test_structs_example() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/structs.ko"), "test_structs");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "structs example should exit with 0");
+    assert!(
+        stdout.contains("10"),
+        "structs output should contain '10' (p.x), got: {stdout}"
+    );
+    assert!(
+        stdout.contains("20"),
+        "structs output should contain '20' (p.y), got: {stdout}"
+    );
+}
+
+#[test]
+fn test_string_demo_example() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/string_demo.ko"), "test_string_demo");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "string_demo should exit with 0");
+    assert!(
+        stdout.contains("String operations demo complete"),
+        "string_demo output should contain demo message, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("5"),
+        "string_demo output should contain '5' (length of 'Hello'), got: {stdout}"
+    );
+}
+
+#[test]
+fn test_contracts_example_compiles_and_runs() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/contracts.ko"), "test_contracts");
+    let (exit_code, _stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "contracts example (with valid inputs) should exit with 0"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tests with inline source code
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_string_variable_println() {
+    let source = r#"module string_var_test {
+    meta {
+        purpose: "Test string variable println",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let s: String = "test output"
+        println(s)
+    }
+}"#;
+    let binary = compile_source(source, "test_string_var_println");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("test output"),
+        "should print the string variable, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_arithmetic_output() {
+    let source = r#"module arith_test {
+    meta {
+        purpose: "Test arithmetic output",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let x: Int = 2 + 3
+        print_int(x)
+    }
+}"#;
+    let binary = compile_source(source, "test_arithmetic_output");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(stdout.contains("5"), "should print 5, got: {stdout}");
+}
+
+#[test]
+fn test_contract_violation_nonzero_exit() {
+    let source = r#"module contract_test {
+    meta {
+        purpose: "Test contract violation",
+        version: "0.1.0"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let result: Int = safe_divide(10, 0)
+        print_int(result)
+    }
+}"#;
+    let binary = compile_source(source, "test_contract_violation");
+    let (exit_code, _stdout, _stderr) = run_binary(&binary);
+
+    assert_ne!(
+        exit_code, 0,
+        "contract violation should produce non-zero exit code"
+    );
+}
+
+#[test]
+fn test_multiple_print_int_calls() {
+    let source = r#"module multi_print {
+    meta {
+        purpose: "Test multiple print_int calls",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        print_int(1)
+        print_int(2)
+        print_int(3)
+    }
+}"#;
+    let binary = compile_source(source, "test_multi_print");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(stdout.contains("1"), "should contain '1', got: {stdout}");
+    assert!(stdout.contains("2"), "should contain '2', got: {stdout}");
+    assert!(stdout.contains("3"), "should contain '3', got: {stdout}");
+}
+
+#[test]
+fn test_if_else_branching() {
+    let source = r#"module if_else_test {
+    meta {
+        purpose: "Test if/else branching",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let x: Int = 10
+        if x > 5 {
+            println("greater")
+        } else {
+            println("smaller")
+        }
+    }
+}"#;
+    let binary = compile_source(source, "test_if_else");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("greater"),
+        "should print 'greater' since 10 > 5, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_function_call_and_return() {
+    let source = r#"module fn_call_test {
+    meta {
+        purpose: "Test function call and return value",
+        version: "0.1.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let result: Int = add(3, 7)
+        print_int(result)
+    }
+}"#;
+    let binary = compile_source(source, "test_fn_call");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("10"),
+        "should print 10 (3 + 7), got: {stdout}"
+    );
+}
+
+#[test]
+fn test_struct_field_access() {
+    let source = r#"module struct_field_test {
+    meta {
+        purpose: "Test struct creation and field access",
+        version: "0.1.0"
+    }
+
+    struct Pair {
+        first: Int,
+        second: Int
+    }
+
+    fn main() {
+        let p: Pair = Pair { first: 42, second: 99 }
+        print_int(p.first)
+        print_int(p.second)
+    }
+}"#;
+    let binary = compile_source(source, "test_struct_field");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "should exit with 0");
+    assert!(
+        stdout.contains("42"),
+        "should print 42 (p.first), got: {stdout}"
+    );
+    assert!(
+        stdout.contains("99"),
+        "should print 99 (p.second), got: {stdout}"
+    );
+}

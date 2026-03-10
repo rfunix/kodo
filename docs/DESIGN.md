@@ -349,11 +349,11 @@ kodo::ffi         — C FFI for interop
 - [x] Basic standard library (core, io, string)
 
 ### Phase 2 — Type System & Ownership
-- [ ] Generics
-- [ ] Traits and trait implementations
-- [ ] Ownership and borrow checker
-- [ ] Pattern matching
-- [ ] Error handling with Result/Option
+- [x] Generics
+- [x] Traits and trait implementations
+- [x] Ownership and borrow checker
+- [x] Pattern matching
+- [x] Error handling with Result/Option
 
 ### Phase 3 — Contracts
 - [x] `requires`/`ensures` parsing and AST representation
@@ -363,16 +363,16 @@ kodo::ffi         — C FFI for interop
 - [x] Contract-aware error messages (ariadne source-span rendering)
 
 ### Phase 4 — Intent System
-- [ ] Intent declaration parsing
+- [x] Intent declaration parsing
 - [ ] Built-in resolvers (http, db, json)
-- [ ] Custom resolver framework
-- [ ] Intent verification against contracts
-- [ ] Intent composition
+- [x] Custom resolver framework
+- [x] Intent verification against contracts
+- [x] Intent composition
 
 ### Phase 5 — Agent Features
-- [ ] `@authored_by`, `@confidence` annotations
-- [ ] Compiler policies (require review for low confidence)
-- [ ] Traceability report generation
+- [x] `@authored_by`, `@confidence` annotations
+- [x] Compiler policies (require review for low confidence)
+- [x] Traceability report generation
 - [ ] LSP server for agent integration
 - [ ] Agent-friendly error messages (structured JSON errors)
 

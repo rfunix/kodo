@@ -855,4 +855,446 @@ mod tests {
             panic!("expected Match expression");
         }
     }
+
+    #[test]
+    fn desugar_for_loop_inclusive_uses_le() {
+        let for_stmt = Stmt::For {
+            span: Span::new(0, 50),
+            name: "i".to_string(),
+            start: Expr::IntLit(0, Span::new(10, 11)),
+            end: Expr::IntLit(10, Span::new(14, 16)),
+            inclusive: true,
+            body: Block {
+                span: Span::new(20, 50),
+                stmts: vec![Stmt::Expr(Expr::Ident("i".to_string(), Span::new(25, 26)))],
+            },
+        };
+        let mut module = make_test_module(vec![for_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(
+            stmts.len(),
+            2,
+            "inclusive for should desugar into let + while"
+        );
+
+        // Verify the let binds the variable with mutable
+        if let Stmt::Let { name, mutable, .. } = &stmts[0] {
+            assert_eq!(name, "i");
+            assert!(*mutable, "loop variable should be mutable");
+        } else {
+            panic!("expected Let statement");
+        }
+
+        // Verify the while condition uses Le (<=)
+        if let Stmt::While {
+            condition, body, ..
+        } = &stmts[1]
+        {
+            if let Expr::BinaryOp { op, .. } = condition {
+                assert_eq!(*op, BinOp::Le, "inclusive range should use <= operator");
+            } else {
+                panic!("expected BinaryOp condition");
+            }
+            // Body should have the original stmt + increment = 2 stmts
+            assert_eq!(
+                body.stmts.len(),
+                2,
+                "body should have original stmt + increment"
+            );
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_for_loop_exclusive_uses_lt() {
+        let for_stmt = Stmt::For {
+            span: Span::new(0, 50),
+            name: "i".to_string(),
+            start: Expr::IntLit(0, Span::new(10, 11)),
+            end: Expr::IntLit(10, Span::new(14, 16)),
+            inclusive: false,
+            body: Block {
+                span: Span::new(20, 50),
+                stmts: vec![Stmt::Expr(Expr::Ident("i".to_string(), Span::new(25, 26)))],
+            },
+        };
+        let mut module = make_test_module(vec![for_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { op, .. } = condition {
+                assert_eq!(*op, BinOp::Lt, "exclusive range should use < operator");
+            } else {
+                panic!("expected BinaryOp condition");
+            }
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_nested_for_loops() {
+        let inner_for = Stmt::For {
+            span: Span::new(30, 50),
+            name: "j".to_string(),
+            start: Expr::IntLit(0, Span::new(35, 36)),
+            end: Expr::IntLit(3, Span::new(39, 40)),
+            inclusive: false,
+            body: Block {
+                span: Span::new(41, 49),
+                stmts: vec![],
+            },
+        };
+        let outer_for = Stmt::For {
+            span: Span::new(0, 55),
+            name: "i".to_string(),
+            start: Expr::IntLit(0, Span::new(10, 11)),
+            end: Expr::IntLit(5, Span::new(14, 15)),
+            inclusive: false,
+            body: Block {
+                span: Span::new(20, 55),
+                stmts: vec![inner_for],
+            },
+        };
+        let mut module = make_test_module(vec![outer_for]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        // Outer for desugars to let + while
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(stmts[0], Stmt::Let { .. }));
+
+        // The outer while body should contain the desugared inner for (let + while) + outer increment
+        if let Stmt::While { body, .. } = &stmts[1] {
+            // Inner for => let + while, plus outer increment => 3 stmts
+            assert_eq!(
+                body.stmts.len(),
+                3,
+                "outer body should have inner let + inner while + outer increment"
+            );
+            assert!(matches!(body.stmts[0], Stmt::Let { .. }), "inner let");
+            assert!(matches!(body.stmts[1], Stmt::While { .. }), "inner while");
+            assert!(
+                matches!(body.stmts[2], Stmt::Assign { .. }),
+                "outer increment"
+            );
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_null_coalesce_chain() {
+        let span = Span::new(0, 30);
+        // a ?? b ?? c => (a ?? b) ?? c => nested coalescing
+        let inner = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("a".to_string(), span)),
+            right: Box::new(Expr::Ident("b".to_string(), span)),
+            span,
+        };
+        let outer = Expr::NullCoalesce {
+            left: Box::new(inner),
+            right: Box::new(Expr::Ident("c".to_string(), span)),
+            span,
+        };
+        let stmt = Stmt::Expr(outer);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        // Outer match
+        if let Stmt::Expr(Expr::Match { arms, expr, .. }) = &stmts[0] {
+            assert_eq!(arms.len(), 2);
+            // The matched expression should itself be a Match (inner coalesce desugared)
+            assert!(
+                matches!(expr.as_ref(), Expr::Match { .. }),
+                "inner coalesce should also be desugared to Match"
+            );
+            // None arm should have the fallback "c"
+            if let Expr::Ident(name, _) = &arms[1].body {
+                assert_eq!(name, "c", "outer fallback should be c");
+            } else {
+                panic!("expected Ident 'c' in None arm");
+            }
+        } else {
+            panic!("expected Match expression");
+        }
+    }
+
+    #[test]
+    fn desugar_optional_chain_nested() {
+        let span = Span::new(0, 25);
+        // Nested optional chain: (obj?.field1)?.field2
+        let inner_chain = Expr::OptionalChain {
+            object: Box::new(Expr::Ident("obj".to_string(), span)),
+            field: "field1".to_string(),
+            span,
+        };
+        let outer_chain = Expr::OptionalChain {
+            object: Box::new(inner_chain),
+            field: "field2".to_string(),
+            span,
+        };
+        let stmt = Stmt::Expr(outer_chain);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        // Outer match
+        if let Stmt::Expr(Expr::Match { expr, arms, .. }) = &stmts[0] {
+            assert_eq!(arms.len(), 2);
+            // The matched expression should be the inner chain's desugared Match
+            assert!(
+                matches!(expr.as_ref(), Expr::Match { .. }),
+                "inner optional chain should be desugared to Match"
+            );
+            // Some arm should wrap field access in Option::Some
+            if let Expr::EnumVariantExpr { variant, args, .. } = &arms[0].body {
+                assert_eq!(variant, "Some");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(&args[0], Expr::FieldAccess { field, .. } if field == "field2"));
+            } else {
+                panic!("expected EnumVariantExpr in Some arm");
+            }
+        } else {
+            panic!("expected Match expression");
+        }
+    }
+
+    #[test]
+    fn desugar_empty_block_unchanged() {
+        // An empty function body should pass through unchanged
+        let mut module = make_test_module(vec![]);
+        desugar_module(&mut module);
+        assert!(
+            module.functions[0].body.stmts.is_empty(),
+            "empty block should remain empty after desugaring"
+        );
+    }
+
+    #[test]
+    fn desugar_mixed_sugar_in_one_function() {
+        let span = Span::new(0, 80);
+        // for loop + null coalesce in the same function body
+        let for_stmt = Stmt::For {
+            span,
+            name: "i".to_string(),
+            start: Expr::IntLit(0, span),
+            end: Expr::IntLit(5, span),
+            inclusive: false,
+            body: Block {
+                span,
+                stmts: vec![],
+            },
+        };
+        let coalesce_stmt = Stmt::Expr(Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("x".to_string(), span)),
+            right: Box::new(Expr::IntLit(0, span)),
+            span,
+        });
+        let mut module = make_test_module(vec![for_stmt, coalesce_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        // for => let + while (2 stmts), coalesce => match (1 stmt) = 3 total
+        assert_eq!(stmts.len(), 3, "should have let + while + match");
+        assert!(matches!(stmts[0], Stmt::Let { .. }));
+        assert!(matches!(stmts[1], Stmt::While { .. }));
+        assert!(matches!(stmts[2], Stmt::Expr(Expr::Match { .. })));
+    }
+
+    #[test]
+    fn desugar_for_loop_variable_names_distinct() {
+        let span = Span::new(0, 80);
+        // Two for loops with different variable names should produce distinct lets
+        let for1 = Stmt::For {
+            span,
+            name: "i".to_string(),
+            start: Expr::IntLit(0, span),
+            end: Expr::IntLit(5, span),
+            inclusive: false,
+            body: Block {
+                span,
+                stmts: vec![],
+            },
+        };
+        let for2 = Stmt::For {
+            span,
+            name: "j".to_string(),
+            start: Expr::IntLit(0, span),
+            end: Expr::IntLit(3, span),
+            inclusive: false,
+            body: Block {
+                span,
+                stmts: vec![],
+            },
+        };
+        let mut module = make_test_module(vec![for1, for2]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        // Each for => let + while = 4 stmts total
+        assert_eq!(stmts.len(), 4);
+        // First let should bind "i", second let should bind "j"
+        if let Stmt::Let { name, .. } = &stmts[0] {
+            assert_eq!(name, "i");
+        } else {
+            panic!("expected Let for i");
+        }
+        if let Stmt::Let { name, .. } = &stmts[2] {
+            assert_eq!(name, "j");
+        } else {
+            panic!("expected Let for j");
+        }
+    }
+
+    #[test]
+    fn desugar_module_with_multiple_functions() {
+        let span = Span::new(0, 100);
+        let mut id_gen = NodeIdGen::new();
+        let mut module = Module {
+            id: id_gen.next_id(),
+            span,
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: id_gen.next_id(),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![
+                kodo_ast::Function {
+                    id: id_gen.next_id(),
+                    span,
+                    name: "func_a".to_string(),
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    requires: vec![],
+                    ensures: vec![],
+                    body: Block {
+                        span,
+                        stmts: vec![Stmt::For {
+                            span,
+                            name: "i".to_string(),
+                            start: Expr::IntLit(0, span),
+                            end: Expr::IntLit(3, span),
+                            inclusive: false,
+                            body: Block {
+                                span,
+                                stmts: vec![],
+                            },
+                        }],
+                    },
+                },
+                kodo_ast::Function {
+                    id: id_gen.next_id(),
+                    span,
+                    name: "func_b".to_string(),
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    requires: vec![],
+                    ensures: vec![],
+                    body: Block {
+                        span,
+                        stmts: vec![Stmt::Expr(Expr::NullCoalesce {
+                            left: Box::new(Expr::Ident("x".to_string(), span)),
+                            right: Box::new(Expr::IntLit(0, span)),
+                            span,
+                        })],
+                    },
+                },
+            ],
+        };
+
+        desugar_module(&mut module);
+
+        // func_a: for loop => let + while
+        assert_eq!(
+            module.functions[0].body.stmts.len(),
+            2,
+            "func_a should have desugared for loop"
+        );
+        assert!(matches!(
+            module.functions[0].body.stmts[0],
+            Stmt::Let { .. }
+        ));
+        assert!(matches!(
+            module.functions[0].body.stmts[1],
+            Stmt::While { .. }
+        ));
+
+        // func_b: null coalesce => match
+        assert_eq!(
+            module.functions[1].body.stmts.len(),
+            1,
+            "func_b should have desugared coalesce"
+        );
+        assert!(matches!(
+            module.functions[1].body.stmts[0],
+            Stmt::Expr(Expr::Match { .. })
+        ));
+    }
+
+    #[test]
+    fn desugar_for_loop_body_with_early_return() {
+        let span = Span::new(0, 60);
+        let for_stmt = Stmt::For {
+            span,
+            name: "i".to_string(),
+            start: Expr::IntLit(0, span),
+            end: Expr::IntLit(10, span),
+            inclusive: false,
+            body: Block {
+                span,
+                stmts: vec![Stmt::Return {
+                    span,
+                    value: Some(Expr::Ident("i".to_string(), span)),
+                }],
+            },
+        };
+        let mut module = make_test_module(vec![for_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 2);
+
+        if let Stmt::While { body, .. } = &stmts[1] {
+            // Body should have: return stmt + increment = 2 stmts
+            assert_eq!(body.stmts.len(), 2);
+            // First stmt is the return
+            assert!(
+                matches!(&body.stmts[0], Stmt::Return { value: Some(_), .. }),
+                "return statement should be preserved in loop body"
+            );
+            // Second stmt is the increment
+            assert!(
+                matches!(&body.stmts[1], Stmt::Assign { .. }),
+                "increment should still be appended after return"
+            );
+        } else {
+            panic!("expected While statement");
+        }
+    }
 }

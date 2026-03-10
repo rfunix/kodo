@@ -16,6 +16,8 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Data Types and Pattern Matching](guide/data-types.md) — structs, enums, and `match` expressions
 - [Generics](guide/generics.md) — generic types and generic functions
 - [Error Handling](guide/error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling
+- [Traits](guide/traits.md) — trait definitions and static dispatch
+- [Pattern Matching](guide/pattern-matching.md) — exhaustive match on enums
 - [Contracts](guide/contracts.md) — `requires` and `ensures` for runtime verification
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
 - [Ownership](guide/ownership.md) — linear ownership with `own` and `ref`

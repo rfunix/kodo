@@ -793,6 +793,66 @@ fn declare_builtins(
         builtins.insert("String_split".to_string(), BuiltinInfo { func_id });
     }
 
+    // kodo_string_concat(ptr1, len1, ptr2, len2, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr1
+        sig.params.push(AbiParam::new(types::I64)); // len1
+        sig.params.push(AbiParam::new(types::I64)); // ptr2
+        sig.params.push(AbiParam::new(types::I64)); // len2
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_string_concat", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_concat".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_index_of(hay_ptr, hay_len, needle_ptr, needle_len) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // hay_ptr
+        sig.params.push(AbiParam::new(types::I64)); // hay_len
+        sig.params.push(AbiParam::new(types::I64)); // needle_ptr
+        sig.params.push(AbiParam::new(types::I64)); // needle_len
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_index_of", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_index_of".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_replace(hay_ptr, hay_len, pat_ptr, pat_len, rep_ptr, rep_len, out_ptr, out_len) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // hay_ptr
+        sig.params.push(AbiParam::new(types::I64)); // hay_len
+        sig.params.push(AbiParam::new(types::I64)); // pat_ptr
+        sig.params.push(AbiParam::new(types::I64)); // pat_len
+        sig.params.push(AbiParam::new(types::I64)); // rep_ptr
+        sig.params.push(AbiParam::new(types::I64)); // rep_len
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_string_replace", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_replace".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_string_eq(ptr1, len1, ptr2, len2) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr1
+        sig.params.push(AbiParam::new(types::I64)); // len1
+        sig.params.push(AbiParam::new(types::I64)); // ptr2
+        sig.params.push(AbiParam::new(types::I64)); // len2
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_string_eq", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("String_eq".to_string(), BuiltinInfo { func_id });
+    }
+
     // --- Map operations ---
 
     // kodo_map_new() -> i64
@@ -921,6 +981,9 @@ fn is_special_builtin(callee: &str) -> bool {
             | "String_to_lower"
             | "String_substring"
             | "String_split"
+            | "String_concat"
+            | "String_index_of"
+            | "String_replace"
             | "Int_to_string"
             | "Float64_to_string"
             | "file_exists"
@@ -939,6 +1002,8 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "String_to_upper"
             | "String_to_lower"
             | "String_substring"
+            | "String_concat"
+            | "String_replace"
             | "Int_to_string"
             | "Float64_to_string"
     )
@@ -1901,6 +1966,27 @@ fn create_string_data(module: &mut ObjectModule, s: &str) -> Result<cranelift_mo
     Ok(data_id)
 }
 
+/// Infers the Kōdo source type of a MIR [`Value`], if possible.
+///
+/// Used to detect String operands in binary operations so we can
+/// dispatch to `kodo_string_eq` instead of a raw pointer comparison.
+fn infer_value_type(value: &Value, var_map: &VarMap) -> Option<Type> {
+    match value {
+        Value::StringConst(_) => Some(Type::String),
+        Value::IntConst(_) => Some(Type::Int),
+        Value::BoolConst(_) => Some(Type::Bool),
+        Value::Local(id) => {
+            if let Some((_, ref tag)) = var_map.stack_slots.get(id) {
+                if tag == "_String" {
+                    return Some(Type::String);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Translates a MIR [`Value`] to a Cranelift IR value.
 ///
 /// The `func_ids` and `builtins` parameters are passed through for recursive
@@ -1932,6 +2018,16 @@ fn translate_value(
             Ok(builder.use_var(var))
         }
         Value::BinOp(op, lhs, rhs) => {
+            // Check if both operands are strings for Eq/Ne comparison.
+            if matches!(op, BinOp::Eq | BinOp::Ne) {
+                let lhs_ty = infer_value_type(lhs, var_map);
+                let rhs_ty = infer_value_type(rhs, var_map);
+                if lhs_ty == Some(Type::String) || rhs_ty == Some(Type::String) {
+                    return translate_string_comparison(
+                        *op, lhs, rhs, builder, module, builtins, var_map,
+                    );
+                }
+            }
             let left = translate_value(
                 lhs,
                 builder,
@@ -2065,6 +2161,84 @@ fn normalize_bool_operands(
         (builder.ins().uextend(rt, left), right)
     } else {
         (left, builder.ins().uextend(lt, right))
+    }
+}
+
+/// Emits a string comparison by calling `kodo_string_eq` with (ptr, len) pairs.
+///
+/// For `BinOp::Eq`, returns the result directly.
+/// For `BinOp::Ne`, inverts the result.
+fn translate_string_comparison(
+    op: BinOp,
+    lhs: &Value,
+    rhs: &Value,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+) -> Result<cranelift_codegen::ir::Value> {
+    // Expand LHS to (ptr, len)
+    let (lhs_ptr, lhs_len) = expand_string_value(lhs, builder, module, var_map)?;
+    // Expand RHS to (ptr, len)
+    let (rhs_ptr, rhs_len) = expand_string_value(rhs, builder, module, var_map)?;
+
+    // Call kodo_string_eq(ptr1, len1, ptr2, len2) -> i64
+    let eq_info = builtins
+        .get("String_eq")
+        .ok_or_else(|| CodegenError::Unsupported("String_eq builtin not found".to_string()))?;
+    let func_ref = module.declare_func_in_func(eq_info.func_id, builder.func);
+    let call = builder
+        .ins()
+        .call(func_ref, &[lhs_ptr, lhs_len, rhs_ptr, rhs_len]);
+    let result = builder.inst_results(call)[0];
+
+    match op {
+        BinOp::Ne => {
+            // Invert: result XOR 1
+            let one = builder.ins().iconst(types::I64, 1);
+            Ok(builder.ins().bxor(result, one))
+        }
+        _ => Ok(result),
+    }
+}
+
+/// Expands a MIR [`Value`] known to be a String into a `(ptr, len)` pair of Cranelift values.
+fn expand_string_value(
+    value: &Value,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    var_map: &VarMap,
+) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value)> {
+    match value {
+        Value::StringConst(s) => {
+            let data_id = create_string_data(module, s)?;
+            let gv = module.declare_data_in_func(data_id, builder.func);
+            let ptr = builder.ins().symbol_value(types::I64, gv);
+            #[allow(clippy::cast_possible_wrap)]
+            let len = builder.ins().iconst(types::I64, s.len() as i64);
+            Ok((ptr, len))
+        }
+        Value::Local(id) => {
+            if let Some((slot, ref tag)) = var_map.stack_slots.get(id) {
+                if tag == "_String" {
+                    let ptr = builder
+                        .ins()
+                        .stack_load(types::I64, *slot, STRING_PTR_OFFSET);
+                    let len = builder
+                        .ins()
+                        .stack_load(types::I64, *slot, STRING_LEN_OFFSET);
+                    return Ok((ptr, len));
+                }
+            }
+            // Fallback: treat the value as a pointer with unknown length
+            let var = var_map.get(*id)?;
+            let ptr = builder.use_var(var);
+            let len = builder.ins().iconst(types::I64, 0);
+            Ok((ptr, len))
+        }
+        _ => Err(CodegenError::Unsupported(
+            "cannot expand non-string value as string".to_string(),
+        )),
     }
 }
 
@@ -2883,5 +3057,571 @@ mod tests {
         };
         let result = compile_module(&[target, get_ptr], &CodegenOptions::default(), None);
         assert!(result.is_ok(), "func_ref compilation failed: {result:?}");
+    }
+
+    #[test]
+    fn test_is_composite_includes_string() {
+        assert!(is_composite(&Type::String));
+    }
+
+    #[test]
+    fn test_string_local_stack_slot() {
+        // fn test() { let s: String = "hello" }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::StringConst("hello".to_string()),
+                )],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "string local stack slot failed: {result:?}");
+    }
+
+    #[test]
+    fn test_string_param_composite() {
+        // fn test(s: String) { println(s) }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Unit,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(1),
+                    callee: "println".to_string(),
+                    args: vec![Value::Local(LocalId(0))],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "string param composite failed: {result:?}");
+    }
+
+    #[test]
+    fn test_string_const_assign() {
+        // fn test() { let s: String = "test"; println(s) }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Unit,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("test".to_string())),
+                    Instruction::Call {
+                        dest: LocalId(1),
+                        callee: "println".to_string(),
+                        args: vec![Value::Local(LocalId(0))],
+                    },
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "string const assign failed: {result:?}");
+    }
+
+    #[test]
+    fn test_string_builtin_expansion() {
+        // fn test() -> Int { let s: String = "hello"; return String_length(s) }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("hello".to_string())),
+                    Instruction::Call {
+                        dest: LocalId(1),
+                        callee: "String_length".to_string(),
+                        args: vec![Value::Local(LocalId(0))],
+                    },
+                ],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string builtin expansion failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_returning_builtin() {
+        // fn test() { let s: String = Int_to_string(42) }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "Int_to_string".to_string(),
+                    args: vec![Value::IntConst(42)],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string returning builtin failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_copy_between_locals() {
+        // fn test() { let a: String = "x"; let b: String = a }
+        let func = MirFunction {
+            name: "test".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("x".to_string())),
+                    Instruction::Assign(LocalId(1), Value::Local(LocalId(0))),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string copy between locals failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_sret_return() {
+        // fn make_greeting() -> String { return "hi" }
+        let func = MirFunction {
+            name: "make_greeting".to_string(),
+            return_type: Type::String,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::StringConst("hi".to_string()),
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "string sret return failed: {result:?}");
+    }
+
+    #[test]
+    fn test_string_in_struct() {
+        // struct Greeting { msg: String }
+        // fn make(s: String) -> Greeting { return Greeting { msg: s } }
+        let struct_defs = HashMap::from([(
+            "Greeting".to_string(),
+            vec![("msg".to_string(), Type::String)],
+        )]);
+        let func = MirFunction {
+            name: "make".to_string(),
+            return_type: Type::Struct("Greeting".to_string()),
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Struct("Greeting".to_string()),
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(1),
+                    Value::StructLit {
+                        name: "Greeting".to_string(),
+                        fields: vec![("msg".to_string(), Value::Local(LocalId(0)))],
+                    },
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &struct_defs,
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(result.is_ok(), "string in struct failed: {result:?}");
+    }
+
+    #[test]
+    fn test_nested_struct_with_string() {
+        // struct Inner { msg: String }
+        // struct Outer { inner: Inner }
+        // fn make_outer() -> Outer
+        let struct_defs = HashMap::from([
+            ("Inner".to_string(), vec![("msg".to_string(), Type::String)]),
+            (
+                "Outer".to_string(),
+                vec![("inner".to_string(), Type::Struct("Inner".to_string()))],
+            ),
+        ]);
+        let func = MirFunction {
+            name: "make_outer".to_string(),
+            return_type: Type::Struct("Outer".to_string()),
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Struct("Inner".to_string()),
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Struct("Outer".to_string()),
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(
+                        LocalId(0),
+                        Value::StructLit {
+                            name: "Inner".to_string(),
+                            fields: vec![(
+                                "msg".to_string(),
+                                Value::StringConst("hello".to_string()),
+                            )],
+                        },
+                    ),
+                    Instruction::Assign(
+                        LocalId(1),
+                        Value::StructLit {
+                            name: "Outer".to_string(),
+                            fields: vec![("inner".to_string(), Value::Local(LocalId(0)))],
+                        },
+                    ),
+                ],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &struct_defs,
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(
+            result.is_ok(),
+            "nested struct with string failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_string_return_paths() {
+        // fn choose(flag: Bool) -> String { if flag { return "yes" } else { return "no" } }
+        let func = MirFunction {
+            name: "choose".to_string(),
+            return_type: Type::String,
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Bool,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::Local(LocalId(0)),
+                        true_block: BlockId(1),
+                        false_block: BlockId(2),
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![Instruction::Assign(
+                        LocalId(1),
+                        Value::StringConst("yes".to_string()),
+                    )],
+                    terminator: Terminator::Return(Value::Local(LocalId(1))),
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![Instruction::Assign(
+                        LocalId(2),
+                        Value::StringConst("no".to_string()),
+                    )],
+                    terminator: Terminator::Return(Value::Local(LocalId(2))),
+                },
+            ],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "multiple string return paths failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_comparison_eq() {
+        // fn compare() -> Bool { return "a" == "b" }
+        // Tests string comparison at codegen level
+        let func = MirFunction {
+            name: "compare".to_string(),
+            return_type: Type::Bool,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("a".to_string())),
+                    Instruction::Assign(LocalId(1), Value::StringConst("b".to_string())),
+                ],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Eq,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::Local(LocalId(1))),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string comparison (Eq) should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_comparison_ne() {
+        // fn compare_ne() -> Bool { return "a" != "b" }
+        let func = MirFunction {
+            name: "compare_ne".to_string(),
+            return_type: Type::Bool,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("a".to_string())),
+                    Instruction::Assign(LocalId(1), Value::StringConst("b".to_string())),
+                ],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Ne,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::Local(LocalId(1))),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string comparison (Ne) should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_comparison_const_eq() {
+        // fn compare_const() -> Bool { return "hello" == "hello" }
+        // Uses StringConst directly in BinOp without local assignment
+        let func = MirFunction {
+            name: "compare_const".to_string(),
+            return_type: Type::Bool,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Eq,
+                    Box::new(Value::StringConst("hello".to_string())),
+                    Box::new(Value::StringConst("hello".to_string())),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string constant comparison should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_struct_with_multiple_string_fields() {
+        // struct Person { name: String, email: String }
+        let struct_defs = HashMap::from([(
+            "Person".to_string(),
+            vec![
+                ("name".to_string(), Type::String),
+                ("email".to_string(), Type::String),
+            ],
+        )]);
+        let func = MirFunction {
+            name: "make_person".to_string(),
+            return_type: Type::Struct("Person".to_string()),
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Struct("Person".to_string()),
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::StructLit {
+                        name: "Person".to_string(),
+                        fields: vec![
+                            ("name".to_string(), Value::StringConst("Alice".to_string())),
+                            (
+                                "email".to_string(),
+                                Value::StringConst("alice@example.com".to_string()),
+                            ),
+                        ],
+                    },
+                )],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_with_types(
+            &[func],
+            &struct_defs,
+            &HashMap::new(),
+            &CodegenOptions::default(),
+            None,
+        );
+        assert!(
+            result.is_ok(),
+            "struct with multiple string fields failed: {result:?}"
+        );
     }
 }

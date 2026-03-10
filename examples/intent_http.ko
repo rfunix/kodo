@@ -1,0 +1,10 @@
+module intent_http {
+    meta {
+        purpose: "Demonstrates HTTP server intent resolver",
+        version: "1.0.0"
+    }
+
+    intent serve_http {
+        port: 8080
+    }
+}

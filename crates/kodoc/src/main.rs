@@ -112,6 +112,16 @@ enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
+    /// Inspect metadata embedded in a compiled Kōdo binary.
+    Describe {
+        /// The compiled binary to inspect.
+        #[arg()]
+        binary: PathBuf,
+
+        /// Output as raw JSON instead of human-readable format.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 fn main() {
@@ -144,6 +154,7 @@ fn main() {
         Command::Lsp => run_lsp(),
         Command::ConfidenceReport { file, json } => run_confidence_report(&file, json),
         Command::Fix { file, dry_run } => run_fix(&file, dry_run),
+        Command::Describe { binary, json } => run_describe(&binary, json),
     };
 
     std::process::exit(exit_code);
@@ -470,6 +481,167 @@ fn run_build(
         Err(e) => {
             eprintln!("link error: {e}");
             1
+        }
+    }
+}
+
+/// Reads and displays module metadata from a compiled Kōdo binary.
+fn run_describe(binary: &PathBuf, json_output: bool) -> i32 {
+    let data = match std::fs::read(binary) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: could not read binary `{}`: {e}", binary.display());
+            return 1;
+        }
+    };
+
+    let file = match object::File::parse(&*data) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: could not parse binary `{}`: {e}", binary.display());
+            return 1;
+        }
+    };
+
+    let meta_bytes = find_kodo_meta(&file, &data);
+
+    match meta_bytes {
+        Some(json_str) => {
+            if json_output {
+                println!("{json_str}");
+            } else {
+                print_metadata_human(&json_str);
+            }
+            0
+        }
+        None => {
+            eprintln!("error: no Kōdo metadata found in `{}`", binary.display());
+            eprintln!("hint: was this binary compiled with kodoc?");
+            1
+        }
+    }
+}
+
+/// Finds the `kodo_meta` content in the binary by looking for the exported data symbols.
+fn find_kodo_meta(file: &object::File, _data: &[u8]) -> Option<String> {
+    use object::{Object, ObjectSection, ObjectSymbol};
+
+    // Try to find kodo_meta and kodo_meta_len symbols
+    let mut meta_addr = None;
+    let mut meta_len_addr = None;
+
+    for symbol in file.symbols() {
+        let name = symbol.name().unwrap_or("");
+        // On macOS, symbols have a leading underscore
+        let clean_name = name.strip_prefix('_').unwrap_or(name);
+        match clean_name {
+            "kodo_meta" => meta_addr = Some((symbol.address(), symbol.size())),
+            "kodo_meta_len" => meta_len_addr = Some((symbol.address(), symbol.size())),
+            _ => {}
+        }
+    }
+
+    let (meta_address, meta_symbol_size) = meta_addr?;
+    let (len_address, _) = meta_len_addr?;
+
+    // Find the section containing the metadata length
+    for section in file.sections() {
+        let section_addr = section.address();
+        let section_data = section.data().ok()?;
+
+        // Check if kodo_meta_len is in this section
+        if len_address >= section_addr && len_address < section_addr + section_data.len() as u64 {
+            let len_offset = (len_address - section_addr) as usize;
+            if len_offset + 8 <= section_data.len() {
+                let len_bytes: [u8; 8] =
+                    section_data[len_offset..len_offset + 8].try_into().ok()?;
+                let meta_len = u64::from_le_bytes(len_bytes) as usize;
+
+                // Now find kodo_meta data in same section
+                if meta_address >= section_addr
+                    && meta_address < section_addr + section_data.len() as u64
+                {
+                    let meta_offset = (meta_address - section_addr) as usize;
+                    if meta_offset + meta_len <= section_data.len() {
+                        let meta_str =
+                            std::str::from_utf8(&section_data[meta_offset..meta_offset + meta_len])
+                                .ok()?;
+                        return Some(meta_str.to_string());
+                    }
+                }
+
+                // Meta might be in a different section
+                for other_section in file.sections() {
+                    let other_addr = other_section.address();
+                    let other_data = other_section.data().ok()?;
+                    if meta_address >= other_addr
+                        && meta_address < other_addr + other_data.len() as u64
+                    {
+                        let meta_offset = (meta_address - other_addr) as usize;
+                        if meta_offset + meta_len <= other_data.len() {
+                            let meta_str = std::str::from_utf8(
+                                &other_data[meta_offset..meta_offset + meta_len],
+                            )
+                            .ok()?;
+                            return Some(meta_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: try using symbol size directly
+    if meta_symbol_size > 0 {
+        for section in file.sections() {
+            let section_addr = section.address();
+            let section_data = section.data().ok()?;
+            if meta_address >= section_addr
+                && meta_address < section_addr + section_data.len() as u64
+            {
+                let meta_offset = (meta_address - section_addr) as usize;
+                let meta_len = meta_symbol_size as usize;
+                if meta_offset + meta_len <= section_data.len() {
+                    let meta_str =
+                        std::str::from_utf8(&section_data[meta_offset..meta_offset + meta_len])
+                            .ok()?;
+                    return Some(meta_str.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Prints metadata in a human-readable format.
+fn print_metadata_human(json_str: &str) {
+    match serde_json::from_str::<serde_json::Value>(json_str) {
+        Ok(value) => {
+            println!("Kōdo Module Metadata");
+            println!("{}", "=".repeat(40));
+            if let Some(obj) = value.as_object() {
+                for (key, val) in obj {
+                    match val {
+                        serde_json::Value::String(s) => println!("  {key}: {s}"),
+                        serde_json::Value::Array(arr) => {
+                            println!("  {key}:");
+                            for item in arr {
+                                if let serde_json::Value::String(s) = item {
+                                    println!("    - {s}");
+                                } else {
+                                    println!("    - {item}");
+                                }
+                            }
+                        }
+                        other => println!("  {key}: {other}"),
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            // If not valid JSON, just print raw
+            println!("{json_str}");
         }
     }
 }

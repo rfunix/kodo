@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-475%20passing-brightgreen" alt="Tests: 475 passing">
+  <img src="https://img.shields.io/badge/tests-549%20passing-brightgreen" alt="Tests: 549 passing">
 </p>
 
 ---

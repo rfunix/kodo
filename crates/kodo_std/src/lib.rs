@@ -187,6 +187,24 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Returns a substring from start to end byte index".to_string(),
             param_count: 3,
         },
+        BuiltinFunction {
+            name: "kodo::string::concat".to_string(),
+            description: "Concatenates two strings".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::index_of".to_string(),
+            description:
+                "Returns the byte index of the first occurrence of a substring, or -1 if not found"
+                    .to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::string::replace".to_string(),
+            description: "Replaces all occurrences of a pattern with a replacement string"
+                .to_string(),
+            param_count: 2,
+        },
         // Int methods
         BuiltinFunction {
             name: "kodo::int::to_string".to_string(),
@@ -302,7 +320,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 33);
+        assert_eq!(builtins.len(), 36);
     }
 
     #[test]
