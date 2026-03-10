@@ -70,6 +70,12 @@ fn run_full_pipeline(source: &str) -> Result<(), String> {
         for func in &mut module.functions {
             rewrite_method_calls_in_block(&mut func.body, &method_resolutions);
         }
+        // Also rewrite method calls inside actor handler bodies.
+        for actor_decl in &mut module.actor_decls {
+            for handler in &mut actor_decl.handlers {
+                rewrite_method_calls_in_block(&mut handler.body, &method_resolutions);
+            }
+        }
     }
 
     kodo_mir::lowering::lower_module(&module).map_err(|e| format!("MIR error: {e}"))?;

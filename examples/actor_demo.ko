@@ -1,21 +1,20 @@
 // Actor Demo — Demonstrates actor declaration syntax.
 //
-// V1 actors are syntax-only: they compile to structs with methods.
-// Handler functions are mangled as ActorName_handler and registered
-// as regular functions during type checking.
+// Actors allocate state on the heap via kodo_actor_new and
+// access fields through runtime calls. Handler functions are
+// mangled as ActorName_handler and dispatched via kodo_actor_send.
 //
-// This example verifies that the parser and type checker accept
-// actor declarations without errors.
+// This example verifies that actors compile and execute correctly
+// with the runtime-based actor model.
 
 module actor_demo {
     meta {
-        purpose: "Demonstrate actor declaration syntax (v1 syntax-only)",
+        purpose: "Demonstrate actor creation and field access",
         version: "0.1.0",
         author: "Kodo Team"
     }
 
     // An actor with state and a handler.
-    // In v1, this compiles to a struct + methods.
     actor Counter {
         count: Int
 
@@ -25,9 +24,13 @@ module actor_demo {
     }
 
     fn main() -> Int {
-        let c: Counter = Counter { count: 0 }
-        let result: Int = Counter_increment(c)
-        print_int(result)
+        // Create actor — allocates heap state via kodo_actor_new.
+        let c: Counter = Counter { count: 10 }
+
+        // Read field via kodo_actor_get_field.
+        let v: Int = c.count
+        print_int(v)
+
         return 0
     }
 }

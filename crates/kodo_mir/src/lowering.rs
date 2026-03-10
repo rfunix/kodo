@@ -14,10 +14,13 @@
 //! - **\[EC\]** *Engineering a Compiler* Ch. 5 — Intermediate representations
 //!   and the translation from AST to CFG-based IR.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kodo_ast::{Block, Expr, Function, Module, Stmt, UnaryOp};
 use kodo_types::{resolve_type, resolve_type_with_enums, Type};
+
+/// Size of a single actor field in bytes (i64 = 8 bytes).
+const ACTOR_FIELD_SIZE: i64 = 8;
 
 use crate::{
     BasicBlock, BlockId, Instruction, Local, LocalId, MirError, MirFunction, Result, Terminator,
@@ -65,6 +68,10 @@ pub struct MirBuilder {
     /// Maps variable names bound to closures to their generated function
     /// name and list of captured variable names.
     closure_registry: HashMap<String, (String, Vec<String>)>,
+    /// Names of actor types — used to distinguish actors from structs during
+    /// lowering so that actor-specific runtime calls are emitted instead of
+    /// regular struct operations.
+    actor_names: HashSet<String>,
 }
 
 impl MirBuilder {
@@ -87,6 +94,7 @@ impl MirBuilder {
             closure_counter: 0,
             generated_closures: Vec::new(),
             closure_registry: HashMap::new(),
+            actor_names: HashSet::new(),
         }
     }
 
@@ -131,6 +139,15 @@ impl MirBuilder {
             Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
             Value::EnumPayload { .. } | Value::FieldGet { .. } | Value::FuncRef(_) => Type::Unknown,
         }
+    }
+
+    /// Returns `true` if `callee_name` is a mangled actor handler name
+    /// (i.e. `"ActorName_HandlerName"` where `ActorName` is a known actor).
+    fn is_actor_handler(&self, callee_name: &str) -> bool {
+        self.actor_names.iter().any(|actor| {
+            callee_name.starts_with(actor.as_str())
+                && callee_name.as_bytes().get(actor.len()) == Some(&b'_')
+        })
     }
 
     /// Creates a new basic block and returns its identifier.
@@ -902,6 +919,28 @@ impl MirBuilder {
                     }
                 }
 
+                // Check if the callee is a mangled actor handler name
+                // (e.g. "Counter_increment"). If so, emit kodo_actor_send
+                // with the actor pointer, a function reference, and the
+                // first non-self argument.
+                if self.is_actor_handler(&callee_name) {
+                    // After method call rewriting, args are [self, ...rest].
+                    // self (args[0]) is the actor pointer.
+                    let actor_val = self.lower_expr(&args[0])?;
+                    let handler_arg = if args.len() > 1 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        Value::IntConst(0)
+                    };
+                    let dest = self.alloc_local(Type::Unit, false);
+                    self.emit(Instruction::Call {
+                        dest,
+                        callee: "kodo_actor_send".to_string(),
+                        args: vec![actor_val, Value::FuncRef(callee_name.clone()), handler_arg],
+                    });
+                    return Ok(Value::Local(dest));
+                }
+
                 for arg in args {
                     arg_values.push(self.lower_expr(arg)?);
                 }
@@ -993,42 +1032,97 @@ impl MirBuilder {
                     }
                     _ => return Ok(Value::Unit),
                 };
-                // Look up the field type from the struct registry.
-                let field_ty = self
-                    .struct_registry
-                    .get(&struct_name)
-                    .and_then(|fields| fields.iter().find(|(n, _)| n == field))
-                    .map_or(Type::Unknown, |(_, ty)| ty.clone());
-                let local_id = self.alloc_local(field_ty, false);
-                self.emit(Instruction::Assign(
-                    local_id,
-                    Value::FieldGet {
-                        object: Box::new(obj_val),
-                        field: field.clone(),
-                        struct_name,
-                    },
-                ));
-                Ok(Value::Local(local_id))
+                if self.actor_names.contains(&struct_name) {
+                    // Actor field access: emit `kodo_actor_get_field(actor_ptr, offset)`.
+                    let decl_fields = self
+                        .struct_registry
+                        .get(&struct_name)
+                        .cloned()
+                        .unwrap_or_default();
+                    let field_index = decl_fields
+                        .iter()
+                        .position(|(n, _)| n == field)
+                        .unwrap_or(0);
+                    #[allow(clippy::cast_possible_wrap)]
+                    let offset = (field_index as i64) * ACTOR_FIELD_SIZE;
+                    let dest = self.alloc_local(Type::Int, false);
+                    self.emit(Instruction::Call {
+                        dest,
+                        callee: "kodo_actor_get_field".to_string(),
+                        args: vec![obj_val, Value::IntConst(offset)],
+                    });
+                    Ok(Value::Local(dest))
+                } else {
+                    // Regular struct field access.
+                    let field_ty = self
+                        .struct_registry
+                        .get(&struct_name)
+                        .and_then(|fields| fields.iter().find(|(n, _)| n == field))
+                        .map_or(Type::Unknown, |(_, ty)| ty.clone());
+                    let local_id = self.alloc_local(field_ty, false);
+                    self.emit(Instruction::Assign(
+                        local_id,
+                        Value::FieldGet {
+                            object: Box::new(obj_val),
+                            field: field.clone(),
+                            struct_name,
+                        },
+                    ));
+                    Ok(Value::Local(local_id))
+                }
             }
             Expr::StructLit { name, fields, .. } => {
-                // Reorder fields to match declaration order.
-                let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
-                let mut ordered_fields = Vec::with_capacity(fields.len());
-                for (decl_name, _) in &decl_fields {
-                    if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
-                        let val = self.lower_expr(&init.value)?;
-                        ordered_fields.push((decl_name.clone(), val));
+                if self.actor_names.contains(name) {
+                    // Actor instantiation: allocate state via runtime call and
+                    // set each field using `kodo_actor_set_field`.
+                    let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
+                    #[allow(clippy::cast_possible_wrap)]
+                    let state_size = (decl_fields.len() as i64) * ACTOR_FIELD_SIZE;
+                    let actor_ptr = self.alloc_local(Type::Int, false);
+                    self.emit(Instruction::Call {
+                        dest: actor_ptr,
+                        callee: "kodo_actor_new".to_string(),
+                        args: vec![Value::IntConst(state_size)],
+                    });
+                    // Set each field in declaration order.
+                    for (idx, (decl_name, _)) in decl_fields.iter().enumerate() {
+                        if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
+                            let val = self.lower_expr(&init.value)?;
+                            #[allow(clippy::cast_possible_wrap)]
+                            let offset = (idx as i64) * ACTOR_FIELD_SIZE;
+                            let void_dest = self.alloc_local(Type::Unit, false);
+                            self.emit(Instruction::Call {
+                                dest: void_dest,
+                                callee: "kodo_actor_set_field".to_string(),
+                                args: vec![Value::Local(actor_ptr), Value::IntConst(offset), val],
+                            });
+                        }
                     }
+                    // Store the actor pointer with the actor's struct type so
+                    // later field access / handler calls can identify it.
+                    self.local_types
+                        .insert(actor_ptr, Type::Struct(name.clone()));
+                    Ok(Value::Local(actor_ptr))
+                } else {
+                    // Regular struct literal.
+                    let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
+                    let mut ordered_fields = Vec::with_capacity(fields.len());
+                    for (decl_name, _) in &decl_fields {
+                        if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
+                            let val = self.lower_expr(&init.value)?;
+                            ordered_fields.push((decl_name.clone(), val));
+                        }
+                    }
+                    let local_id = self.alloc_local(Type::Struct(name.clone()), false);
+                    self.emit(Instruction::Assign(
+                        local_id,
+                        Value::StructLit {
+                            name: name.clone(),
+                            fields: ordered_fields,
+                        },
+                    ));
+                    Ok(Value::Local(local_id))
                 }
-                let local_id = self.alloc_local(Type::Struct(name.clone()), false);
-                self.emit(Instruction::Assign(
-                    local_id,
-                    Value::StructLit {
-                        name: name.clone(),
-                        fields: ordered_fields,
-                    },
-                ));
-                Ok(Value::Local(local_id))
             }
             Expr::EnumVariantExpr {
                 enum_name,
@@ -1269,8 +1363,13 @@ fn lower_function_with_registries(
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>>,
     fn_return_types: &HashMap<String, Type>,
 ) -> Result<MirFunction> {
-    let (func, _closures) =
-        lower_function_with_closures(function, struct_registry, enum_registry, fn_return_types)?;
+    let (func, _closures) = lower_function_with_closures(
+        function,
+        struct_registry,
+        enum_registry,
+        fn_return_types,
+        &HashSet::new(),
+    )?;
     Ok(func)
 }
 
@@ -1281,8 +1380,10 @@ fn lower_function_with_closures(
     struct_registry: &HashMap<String, Vec<(String, Type)>>,
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>>,
     fn_return_types: &HashMap<String, Type>,
+    actor_names: &HashSet<String>,
 ) -> Result<(MirFunction, Vec<MirFunction>)> {
     let mut builder = MirBuilder::new();
+    builder.actor_names.clone_from(actor_names);
     builder.struct_registry.clone_from(struct_registry);
     builder.enum_registry.clone_from(enum_registry);
     builder.fn_return_types.clone_from(fn_return_types);
@@ -1436,6 +1537,13 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
             .entry((*name).to_string())
             .or_insert(Type::Int);
     }
+    // Actor runtime builtins.
+    fn_return_types
+        .entry("kodo_actor_new".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("kodo_actor_get_field".to_string())
+        .or_insert(Type::Int);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
@@ -1473,14 +1581,22 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     }
     register_builtin_return_types(&mut fn_return_types);
 
+    // Collect actor names so the builder can distinguish actors from structs.
+    let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
         .iter()
         .filter(|f| f.generic_params.is_empty())
     {
-        let (mut func, mut closures) =
-            lower_function_with_closures(f, &struct_reg, &enum_reg, &fn_return_types)?;
+        let (mut func, mut closures) = lower_function_with_closures(
+            f,
+            &struct_reg,
+            &enum_reg,
+            &fn_return_types,
+            &actor_names,
+        )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
             crate::optimize::optimize_function(c);
@@ -1498,8 +1614,13 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             let ret_ty = resolve_type_with_enums(&renamed.return_type, renamed.span, &enum_ns)
                 .map_err(|e| MirError::TypeResolution(e.to_string()))?;
             fn_return_types.insert(mangled_name, ret_ty);
-            let (mut func, mut closures) =
-                lower_function_with_closures(&renamed, &struct_reg, &enum_reg, &fn_return_types)?;
+            let (mut func, mut closures) = lower_function_with_closures(
+                &renamed,
+                &struct_reg,
+                &enum_reg,
+                &fn_return_types,
+                &actor_names,
+            )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
                 crate::optimize::optimize_function(c);
@@ -1531,6 +1652,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
 /// # Errors
 ///
 /// Returns the first [`MirError`] encountered during lowering.
+#[allow(clippy::too_many_lines)]
 pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
     // Build struct registry from type declarations.
     let mut struct_registry: HashMap<String, Vec<(String, Type)>> = HashMap::new();
@@ -1542,6 +1664,19 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             fields.push((field.name.clone(), ty));
         }
         struct_registry.insert(type_decl.name.clone(), fields);
+    }
+
+    // Register actor fields in the struct registry (mirrors what the type
+    // checker does) so that field access and struct literal lowering can
+    // resolve field names and offsets.
+    for actor_decl in &module.actor_decls {
+        let mut fields = Vec::new();
+        for field in &actor_decl.fields {
+            let ty = resolve_type(&field.ty, field.span)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            fields.push((field.name.clone(), ty));
+        }
+        struct_registry.insert(actor_decl.name.clone(), fields);
     }
 
     // Build enum registry from enum declarations.
@@ -1575,14 +1710,22 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
     }
     register_builtin_return_types(&mut fn_return_types);
 
+    // Collect actor names so the builder can distinguish actors from structs.
+    let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
         .iter()
         .filter(|f| f.generic_params.is_empty())
     {
-        let (mut func, mut closures) =
-            lower_function_with_closures(f, &struct_registry, &enum_registry, &fn_return_types)?;
+        let (mut func, mut closures) = lower_function_with_closures(
+            f,
+            &struct_registry,
+            &enum_registry,
+            &fn_return_types,
+            &actor_names,
+        )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
             crate::optimize::optimize_function(c);
@@ -1605,6 +1748,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
                 &struct_registry,
                 &enum_registry,
                 &fn_return_types,
+                &actor_names,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -1632,8 +1776,8 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
 mod tests {
     use super::*;
     use kodo_ast::{
-        BinOp, Block, Expr, FieldDef, Function, Meta, MetaEntry, Module, NodeId, Ownership, Param,
-        Span, Stmt, TypeDecl, TypeExpr,
+        ActorDecl, BinOp, Block, Expr, FieldDef, FieldInit, Function, Meta, MetaEntry, Module,
+        NodeId, Ownership, Param, Span, Stmt, TypeDecl, TypeExpr,
     };
 
     /// Helper to create a dummy span.
@@ -2845,9 +2989,14 @@ mod tests {
             },
             TypeExpr::Unit,
         );
-        let (mir, closures) =
-            lower_function_with_closures(&func, &HashMap::new(), &HashMap::new(), &HashMap::new())
-                .unwrap();
+        let (mir, closures) = lower_function_with_closures(
+            &func,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+        )
+        .unwrap();
         mir.validate().unwrap();
 
         // Should generate a __spawn_ function and call kodo_spawn_task.
@@ -2891,9 +3040,14 @@ mod tests {
             },
             TypeExpr::Unit,
         );
-        let (mir, closures) =
-            lower_function_with_closures(&func, &HashMap::new(), &HashMap::new(), &HashMap::new())
-                .unwrap();
+        let (mir, closures) = lower_function_with_closures(
+            &func,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+        )
+        .unwrap();
         mir.validate().unwrap();
 
         // Should generate a __spawn_ function that takes 1 param (env ptr).
@@ -2925,5 +3079,287 @@ mod tests {
                 .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "__env_load"))
         });
         assert!(has_env_load, "spawn fn should unpack env with __env_load");
+    }
+
+    /// Helper to build a module with a Counter actor and a main function.
+    fn make_actor_module(main_body: Block) -> Module {
+        Module {
+            id: NodeId(0),
+            span: span(),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(99),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: span(),
+                }],
+                span: span(),
+            }),
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![ActorDecl {
+                id: NodeId(1),
+                span: span(),
+                name: "Counter".to_string(),
+                fields: vec![FieldDef {
+                    name: "count".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                }],
+                handlers: vec![make_fn(
+                    "increment",
+                    vec![Param {
+                        name: "self".to_string(),
+                        ty: TypeExpr::Named("Counter".to_string()),
+                        ownership: Ownership::Owned,
+                        span: span(),
+                    }],
+                    Block {
+                        span: span(),
+                        stmts: vec![Stmt::Return {
+                            span: span(),
+                            value: Some(Expr::BinaryOp {
+                                left: Box::new(Expr::FieldAccess {
+                                    object: Box::new(Expr::Ident("self".to_string(), span())),
+                                    field: "count".to_string(),
+                                    span: span(),
+                                }),
+                                op: BinOp::Add,
+                                right: Box::new(Expr::IntLit(1, span())),
+                                span: span(),
+                            }),
+                        }],
+                    },
+                    TypeExpr::Named("Int".to_string()),
+                )],
+            }],
+            intent_decls: vec![],
+            functions: vec![make_fn("main", vec![], main_body, TypeExpr::Unit)],
+        }
+    }
+
+    #[test]
+    fn actor_instantiation_emits_actor_new_and_set_field() {
+        // let c = Counter { count: 42 }
+        let module = make_actor_module(Block {
+            span: span(),
+            stmts: vec![Stmt::Let {
+                span: span(),
+                mutable: false,
+                name: "c".to_string(),
+                ty: Some(TypeExpr::Named("Counter".to_string())),
+                value: Expr::StructLit {
+                    name: "Counter".to_string(),
+                    fields: vec![FieldInit {
+                        name: "count".to_string(),
+                        value: Expr::IntLit(42, span()),
+                        span: span(),
+                    }],
+                    span: span(),
+                },
+            }],
+        });
+
+        let mir_fns = lower_module(&module).unwrap();
+        let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
+
+        // Should have a kodo_actor_new call.
+        let has_actor_new = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_new"),
+            )
+        });
+        assert!(has_actor_new, "expected kodo_actor_new call");
+
+        // Should have a kodo_actor_set_field call.
+        let has_set_field = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_set_field"),
+            )
+        });
+        assert!(has_set_field, "expected kodo_actor_set_field call");
+
+        // Should NOT have a StructLit instruction (actors use runtime calls).
+        let has_struct_lit = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Assign(_, Value::StructLit { name, .. }) if name == "Counter")
+            })
+        });
+        assert!(!has_struct_lit, "actor should not produce StructLit MIR");
+    }
+
+    #[test]
+    fn actor_field_access_emits_get_field() {
+        // let c = Counter { count: 10 }
+        // let v: Int = c.count
+        let module = make_actor_module(Block {
+            span: span(),
+            stmts: vec![
+                Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "c".to_string(),
+                    ty: Some(TypeExpr::Named("Counter".to_string())),
+                    value: Expr::StructLit {
+                        name: "Counter".to_string(),
+                        fields: vec![FieldInit {
+                            name: "count".to_string(),
+                            value: Expr::IntLit(10, span()),
+                            span: span(),
+                        }],
+                        span: span(),
+                    },
+                },
+                Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "v".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("c".to_string(), span())),
+                        field: "count".to_string(),
+                        span: span(),
+                    },
+                },
+            ],
+        });
+
+        let mir_fns = lower_module(&module).unwrap();
+        let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
+
+        // Should have a kodo_actor_get_field call.
+        let has_get_field = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_get_field"),
+            )
+        });
+        assert!(has_get_field, "expected kodo_actor_get_field call");
+
+        // Should NOT have a FieldGet instruction (actors use runtime calls).
+        let has_field_get = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Assign(_, Value::FieldGet { struct_name, .. }) if struct_name == "Counter")
+            })
+        });
+        assert!(
+            !has_field_get,
+            "actor field access should not produce FieldGet MIR"
+        );
+    }
+
+    #[test]
+    fn actor_handler_call_emits_send() {
+        // let c = Counter { count: 0 }
+        // Counter_increment(c) — already rewritten from c.increment()
+        let module = make_actor_module(Block {
+            span: span(),
+            stmts: vec![
+                Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "c".to_string(),
+                    ty: Some(TypeExpr::Named("Counter".to_string())),
+                    value: Expr::StructLit {
+                        name: "Counter".to_string(),
+                        fields: vec![FieldInit {
+                            name: "count".to_string(),
+                            value: Expr::IntLit(0, span()),
+                            span: span(),
+                        }],
+                        span: span(),
+                    },
+                },
+                Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("Counter_increment".to_string(), span())),
+                    args: vec![Expr::Ident("c".to_string(), span())],
+                    span: span(),
+                }),
+            ],
+        });
+
+        let mir_fns = lower_module(&module).unwrap();
+        let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
+
+        // Should have a kodo_actor_send call.
+        let has_send = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_send"),
+            )
+        });
+        assert!(has_send, "expected kodo_actor_send call");
+
+        // The args to kodo_actor_send should include a FuncRef to the handler.
+        let has_func_ref = main.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| match i {
+                Instruction::Call { callee, args, .. } if callee == "kodo_actor_send" => args
+                    .iter()
+                    .any(|a| matches!(a, Value::FuncRef(name) if name == "Counter_increment")),
+                _ => false,
+            })
+        });
+        assert!(
+            has_func_ref,
+            "kodo_actor_send should contain FuncRef(Counter_increment)"
+        );
+    }
+
+    #[test]
+    fn actor_handler_lowered_as_function() {
+        // Verify that actor handlers are still lowered as standalone functions.
+        let module = make_actor_module(Block {
+            span: span(),
+            stmts: vec![],
+        });
+
+        let mir_fns = lower_module(&module).unwrap();
+
+        let handler = mir_fns.iter().find(|f| f.name == "Counter_increment");
+        assert!(
+            handler.is_some(),
+            "expected Counter_increment function in MIR output"
+        );
+    }
+
+    #[test]
+    fn actor_handler_field_access_uses_get_field() {
+        // The Counter_increment handler accesses self.count — verify it
+        // emits kodo_actor_get_field instead of FieldGet.
+        let module = make_actor_module(Block {
+            span: span(),
+            stmts: vec![],
+        });
+
+        let mir_fns = lower_module(&module).unwrap();
+        let handler = mir_fns
+            .iter()
+            .find(|f| f.name == "Counter_increment")
+            .unwrap();
+
+        let has_get_field = handler.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_get_field"),
+            )
+        });
+        assert!(
+            has_get_field,
+            "handler should use kodo_actor_get_field for self.count"
+        );
+    }
+
+    #[test]
+    fn is_actor_handler_helper() {
+        let mut builder = MirBuilder::new();
+        builder.actor_names.insert("Counter".to_string());
+        builder.actor_names.insert("Logger".to_string());
+
+        assert!(builder.is_actor_handler("Counter_increment"));
+        assert!(builder.is_actor_handler("Logger_log"));
+        assert!(!builder.is_actor_handler("Counter")); // no underscore suffix
+        assert!(!builder.is_actor_handler("print_int")); // not an actor
+        assert!(!builder.is_actor_handler("")); // empty string
     }
 }

@@ -333,6 +333,13 @@ fn run_build(
         for func in &mut module.functions {
             rewrite_method_calls_in_block(&mut func.body, &method_resolutions);
         }
+        // Also rewrite method calls inside actor handler bodies so that
+        // handler-to-handler calls and self-calls are properly mangled.
+        for actor_decl in &mut module.actor_decls {
+            for handler in &mut actor_decl.handlers {
+                rewrite_method_calls_in_block(&mut handler.body, &method_resolutions);
+            }
+        }
     }
 
     // Generate monomorphized function instances from generic functions.

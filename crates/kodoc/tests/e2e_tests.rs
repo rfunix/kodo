@@ -568,3 +568,37 @@ fn test_spawn_with_multiple_captures() {
         "spawned task should print 42 (10+32), got: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Actor runtime tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_actor_creation_and_field_access() {
+    let source = r#"module test {
+    meta { purpose: "test" }
+
+    actor Counter {
+        count: Int
+
+        fn increment(self) -> Int {
+            return self.count + 1
+        }
+    }
+
+    fn main() -> Int {
+        let c: Counter = Counter { count: 42 }
+        let v: Int = c.count
+        print_int(v)
+        return 0
+    }
+}"#;
+    let binary = compile_source(source, "test_actor_create");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "actor creation should exit with 0");
+    assert!(
+        stdout.contains("42"),
+        "actor field access should produce 42, got: {stdout}"
+    );
+}

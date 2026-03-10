@@ -1,0 +1,37 @@
+// Actors — Demonstrates actors with heap-allocated state and message passing.
+//
+// This example shows how actors work as objects with state:
+// - Actor state is allocated on the heap via kodo_actor_new
+// - Fields are accessed via kodo_actor_get_field / kodo_actor_set_field
+// - Messages are sent via kodo_actor_send (queued as tasks)
+//
+// The runtime's cooperative scheduler executes queued messages
+// after main() returns.
+
+module actors {
+    meta {
+        purpose: "Demonstrate actors with state and message passing",
+        version: "0.1.0",
+        author: "Kodo Team"
+    }
+
+    // A Counter actor with state and handlers.
+    actor Counter {
+        count: Int
+
+        fn increment(self) -> Int {
+            return self.count + 1
+        }
+    }
+
+    fn main() -> Int {
+        // Create a Counter with initial state (heap-allocated).
+        let c: Counter = Counter { count: 42 }
+
+        // Read a field via kodo_actor_get_field at the MIR level.
+        let v: Int = c.count
+        print_int(v)
+
+        return 0
+    }
+}
