@@ -16,5 +16,5 @@ workspace = true
 optional = true
 
 [features]
-default = []
+default = ["smt"]
 smt = ["dep:z3"]

@@ -391,10 +391,18 @@ pub fn verify_contracts(contracts: &[Contract], mode: ContractMode) -> Result<Ve
                             static_verified += 1;
                         }
                         SmtOutcome::Refuted(counter_example) => {
-                            failures.push(ContractError::StaticRefutation {
-                                counter_example,
-                                span: contract.span,
-                            });
+                            // In `Both` mode, a refuted contract falls back to
+                            // runtime — Z3 found a counter-example but the
+                            // contract may still hold at specific call sites.
+                            // In strict `Static` mode, a refutation is an error.
+                            if mode == ContractMode::Both {
+                                runtime_checks_needed += 1;
+                            } else {
+                                failures.push(ContractError::StaticRefutation {
+                                    counter_example,
+                                    span: contract.span,
+                                });
+                            }
                         }
                         SmtOutcome::Fallback => {
                             runtime_checks_needed += 1;
@@ -936,5 +944,211 @@ mod tests {
         let result = result.unwrap_or_else(|_| panic!("already checked"));
         assert_eq!(result.runtime_checks_needed, 1);
         assert_eq!(result.static_verified, 0);
+    }
+
+    // --- E2E SMT verification tests (require `smt` feature) ---
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_trivial_true_statically_proved() {
+        // `requires { true }` should be statically proved by Z3
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: bool_expr(true),
+            span: Span::new(0, 4),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_trivial_false_statically_refuted() {
+        // `requires { false }` should be statically refuted by Z3
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: bool_expr(false),
+            span: Span::new(0, 5),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 0);
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::StaticRefutation { .. }
+        ));
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_ne_zero_falls_back_to_runtime() {
+        // `requires { b != 0 }` cannot be proved without caller context,
+        // so Z3 refutes it (counter-example b=0). In Static mode this is
+        // reported as a refutation.
+        let ne = Expr::BinaryOp {
+            left: Box::new(ident_expr("b")),
+            op: BinOp::Ne,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: ne,
+            span: Span::new(0, 10),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // Z3 finds counter-example b=0, so it's a refutation
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::StaticRefutation { .. }
+        ));
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_unsupported_expr_falls_back_to_runtime() {
+        // Field access expressions cannot be translated to Z3, so they
+        // should fall back to runtime checks (Unknown → Fallback).
+        let field_access = Expr::FieldAccess {
+            object: Box::new(ident_expr("self")),
+            field: "count".to_string(),
+            span: Span::new(0, 10),
+        };
+        let gt = Expr::BinaryOp {
+            left: Box::new(field_access),
+            op: BinOp::Gt,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 15),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: gt,
+            span: Span::new(0, 15),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // SMT returns Unknown for unsupported expr → falls back to runtime
+        assert_eq!(result.runtime_checks_needed, 1);
+        assert_eq!(result.static_verified, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_both_mode_proves_tautology() {
+        // `ensures { true }` in Both mode should be statically proved
+        let contracts = vec![Contract {
+            kind: ContractKind::Ensures,
+            expr: bool_expr(true),
+            span: Span::new(0, 4),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Both);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_equality_tautology_proved() {
+        // `requires { x == x }` is a tautology — Z3 proves it
+        let eq = Expr::BinaryOp {
+            left: Box::new(ident_expr("x")),
+            op: BinOp::Eq,
+            right: Box::new(ident_expr("x")),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: eq,
+            span: Span::new(0, 10),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_mixed_contracts_proved_and_refuted() {
+        // Two contracts: `requires { true }` (provable) and `requires { false }` (refuted)
+        let contracts = vec![
+            Contract {
+                kind: ContractKind::Requires,
+                expr: bool_expr(true),
+                span: Span::new(0, 4),
+            },
+            Contract {
+                kind: ContractKind::Requires,
+                expr: bool_expr(false),
+                span: Span::new(5, 10),
+            },
+        ];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::StaticRefutation { .. }
+        ));
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_both_mode_refuted_falls_back_to_runtime() {
+        // In `Both` mode, a refuted contract falls back to runtime instead of
+        // being reported as a failure. This allows contracts like `requires { b != 0 }`
+        // to be checked at call sites at runtime.
+        let ne = Expr::BinaryOp {
+            left: Box::new(ident_expr("b")),
+            op: BinOp::Ne,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: ne,
+            span: Span::new(0, 10),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Both);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // In Both mode, refuted → runtime fallback (not a failure)
+        assert_eq!(result.runtime_checks_needed, 1);
+        assert_eq!(result.static_verified, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_function_with_contracts_static_mode() {
+        // Full pipeline: extract contracts from a function, verify statically
+        let func = make_function(vec![bool_expr(true)], vec![bool_expr(true)]);
+        let contracts = extract_contracts(&func);
+        assert_eq!(contracts.len(), 2);
+
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 2);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
     }
 }

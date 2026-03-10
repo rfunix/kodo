@@ -1,0 +1,53 @@
+// Demonstrates Z3 SMT-based static contract verification in Kodo.
+//
+// Run with: kodoc check --contracts=static examples/smt_verified.ko
+//
+// The Z3 solver proves the `requires { true }` contract at compile time,
+// eliminating the need for runtime checks. The `requires { divisor != 0 }`
+// contract cannot be proved without caller context (Z3 finds counter-example
+// divisor=0), so it falls back to a runtime check or is flagged as a
+// refutation in strict static mode.
+
+module smt_verified {
+    meta {
+        purpose: "End-to-end SMT contract verification"
+        version: "1.0.0"
+    }
+
+    // Z3 proves `requires { true }` statically — no runtime check needed.
+    fn always_valid(x: Int) -> Int
+        requires { true }
+    {
+        return x + 1
+    }
+
+    // Z3 proves `x == x` is a tautology — statically verified.
+    fn identity_check(x: Int) -> Int
+        requires { x == x }
+    {
+        return x
+    }
+
+    // The `requires { divisor != 0 }` contract protects against division
+    // by zero. Without caller context, Z3 cannot prove this universally
+    // (counter-example: divisor = 0), but it documents the precondition
+    // and enables runtime checking.
+    fn safe_divide(a: Int, divisor: Int) -> Int
+        requires { divisor != 0 }
+    {
+        return a / divisor
+    }
+
+    fn main() -> Int {
+        let a: Int = always_valid(41)
+        print_int(a)
+
+        let b: Int = identity_check(7)
+        print_int(b)
+
+        let c: Int = safe_divide(42, 6)
+        print_int(c)
+
+        return 0
+    }
+}

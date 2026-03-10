@@ -189,9 +189,12 @@ fn modify(data: mut Buffer) {
 
 ### Concurrency
 
+> **V1 Status:** Concurrency is syntax-only in v1. `async` functions, `spawn`, and `actor` blocks parse and type-check, but compile to synchronous code. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are not yet implemented. Full async runtime with cooperative scheduling is planned for v2.
+
 ```
 // Structured concurrency — no raw threads, no unstructured spawns
 // Async by default, sync is the special case
+// NOTE: This is the PLANNED v2 design. V1 compiles async/spawn synchronously.
 
 fn fetch_all(urls: List<String>) -> List<Result<String, NetError>> {
   // parallel maps over urls, structured — waits for all to complete
@@ -200,7 +203,7 @@ fn fetch_all(urls: List<String>) -> List<Result<String, NetError>> {
   })
 }
 
-// Channels for communication
+// Channels for communication (planned for v2)
 fn pipeline() {
   let (tx, rx) = Channel<Int>.new(buffer: 100)
 
@@ -306,7 +309,7 @@ Source (.ko)
     │                    Constant folding, DCE, copy propagation
     ▼
 [7. Code Generation] ── Binary
-    │                    Via Cranelift (dev) or LLVM (release)
+    │                    Via Cranelift (LLVM backend planned for v2)
     ▼
 [8. Linker] ──────────── Executable
 ```
@@ -333,21 +336,23 @@ Kōdo uses a built-in build tool (`ko`) that reads `project.ko.toml`.
 
 ## Standard Library Modules
 
+> **Note:** Modules marked with **(implemented)** are available in v1. Others are planned.
+
 ```
-kodo::core        — Primitives, Result, Option, basic traits
-kodo::collections — List, Map, Set, Queue, Stack
-kodo::string      — UTF-8 string operations
-kodo::io          — File I/O, stdin/stdout
-kodo::net         — TCP/UDP, DNS
-kodo::http        — HTTP client & server (intent-resolvable)
-kodo::json        — JSON serialization (intent-resolvable)
-kodo::db          — Database abstractions (intent-resolvable)
-kodo::crypto      — Hashing, encryption, signing
-kodo::time        — Time, Duration, Timezone
-kodo::math        — Math operations
-kodo::concurrency — Channels, parallel, structured tasks
-kodo::test        — Test framework, property-based testing
-kodo::ffi         — C FFI for interop
+kodo::core        — Primitives, Result, Option, basic traits (implemented)
+kodo::collections — List, Map (implemented); Set, Queue, Stack (planned)
+kodo::string      — UTF-8 string operations (implemented)
+kodo::io          — File I/O, stdin/stdout (implemented)
+kodo::math        — abs, min, max, clamp (implemented)
+kodo::net         — TCP/UDP, DNS (planned)
+kodo::http        — HTTP client & server (planned; intent resolver exists)
+kodo::json        — JSON serialization (planned)
+kodo::db          — Database abstractions (planned)
+kodo::crypto      — Hashing, encryption, signing (planned)
+kodo::time        — Time, Duration, Timezone (planned)
+kodo::concurrency — Channels, parallel, structured tasks (planned for v2)
+kodo::test        — Test framework, property-based testing (planned)
+kodo::ffi         — C FFI for interop (planned)
 ```
 
 ---
@@ -373,13 +378,13 @@ kodo::ffi         — C FFI for interop
 ### Phase 3 — Contracts
 - [x] `requires`/`ensures` parsing and AST representation
 - [x] Runtime contract checking (`requires` + `ensures` inject runtime checks)
-- [ ] SMT solver integration (Z3) for static verification
+- [x] SMT solver integration (Z3) for static verification (feature-gated behind `smt`)
 - [ ] Module-level invariants
 - [x] Contract-aware error messages (ariadne source-span rendering)
 
 ### Phase 4 — Intent System
 - [x] Intent declaration parsing
-- [ ] Built-in resolvers (http, db, json)
+- [x] Built-in resolvers (console_app, math_module, serve_http)
 - [x] Custom resolver framework
 - [x] Intent verification against contracts
 - [x] Intent composition
@@ -388,11 +393,13 @@ kodo::ffi         — C FFI for interop
 - [x] `@authored_by`, `@confidence` annotations
 - [x] Compiler policies (require review for low confidence)
 - [x] Traceability report generation
-- [ ] LSP server for agent integration
-- [ ] Agent-friendly error messages (structured JSON errors)
+- [x] LSP server for agent integration (diagnostics, hover, goto-definition, completions, signature help, document symbols)
+- [x] Agent-friendly error messages (structured JSON errors with machine-applicable fix patches)
 
 ### Phase 6 — Production
-- [ ] LLVM backend for optimized builds
+- [ ] LLVM backend for optimized builds (currently Cranelift only)
+- [ ] Full async runtime (v1 concurrency is syntax-only — async/spawn/actor compile synchronously)
+- [ ] Channels and parallel execution
 - [ ] Cross-compilation targets
 - [ ] Package registry
 - [ ] Comprehensive standard library

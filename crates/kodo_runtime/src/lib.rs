@@ -286,6 +286,8 @@ pub unsafe extern "C" fn kodo_string_concat(
     result.extend_from_slice(s2);
     let boxed = result.into_boxed_slice();
     let result_len = boxed.len();
+    // SAFETY: Box::into_raw intentionally leaks the allocation so the caller
+    // can manage the memory via (ptr, len). Freed by `kodo_string_free`.
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -351,6 +353,7 @@ pub unsafe extern "C" fn kodo_string_replace(
         // Empty pattern: return the original string (no replacement)
         let copy = haystack.to_vec().into_boxed_slice();
         let result_len = copy.len();
+        // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
         let result_ptr = Box::into_raw(copy) as *const u8;
         unsafe {
             *out_ptr = result_ptr;
@@ -372,6 +375,7 @@ pub unsafe extern "C" fn kodo_string_replace(
     }
     let boxed = result.into_boxed_slice();
     let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -445,6 +449,7 @@ pub unsafe extern "C" fn kodo_string_to_upper(
     }
     let boxed = result.into_boxed_slice();
     let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -475,6 +480,7 @@ pub unsafe extern "C" fn kodo_string_to_lower(
     }
     let boxed = result.into_boxed_slice();
     let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -527,6 +533,7 @@ pub unsafe extern "C" fn kodo_int_to_string(
     let s = value.to_string();
     let boxed = s.into_boxed_str();
     let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -556,6 +563,7 @@ pub unsafe extern "C" fn kodo_float64_to_string(
     let s = value.to_string();
     let boxed = s.into_boxed_str();
     let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let result_ptr = Box::into_raw(boxed) as *const u8;
     unsafe {
         *out_ptr = result_ptr;
@@ -725,6 +733,7 @@ pub unsafe extern "C" fn kodo_file_write(
 unsafe fn write_string_out(s: String, out_ptr: *mut *const u8, out_len: *mut usize) {
     let bytes = s.into_bytes().into_boxed_slice();
     let len = bytes.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
     let ptr = Box::into_raw(bytes) as *const u8;
     // SAFETY: caller guarantees these are valid writable pointers.
     unsafe {
@@ -758,6 +767,7 @@ pub extern "C" fn kodo_list_new() -> i64 {
         len: 0,
         capacity: 0,
     });
+    // SAFETY: intentionally leaks so caller manages via opaque pointer. Freed by `kodo_list_free`.
     Box::into_raw(list) as i64
 }
 
@@ -906,6 +916,7 @@ pub unsafe extern "C" fn kodo_string_split(
         // Empty separator: return the whole string as a single element.
         #[allow(clippy::cast_possible_wrap)]
         let pair = Box::new([hay_ptr as i64, hay_len as i64]);
+        // SAFETY: intentionally leaks so the pair can be stored in the list.
         let pair_ptr = Box::into_raw(pair) as i64;
         // SAFETY: list is valid, just created above.
         unsafe { kodo_list_push(list, pair_ptr) };
@@ -926,6 +937,7 @@ pub unsafe extern "C" fn kodo_string_split(
             let sub_len = pos;
             #[allow(clippy::cast_possible_wrap)]
             let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            // SAFETY: intentionally leaks so the pair can be stored in the list.
             let pair_ptr = Box::into_raw(pair) as i64;
             // SAFETY: list is valid.
             unsafe { kodo_list_push(list, pair_ptr) };
@@ -936,6 +948,7 @@ pub unsafe extern "C" fn kodo_string_split(
             let sub_len = haystack.len() - start;
             #[allow(clippy::cast_possible_wrap)]
             let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            // SAFETY: intentionally leaks so the pair can be stored in the list.
             let pair_ptr = Box::into_raw(pair) as i64;
             // SAFETY: list is valid.
             unsafe { kodo_list_push(list, pair_ptr) };
@@ -988,12 +1001,14 @@ pub extern "C" fn kodo_map_new() -> i64 {
         MAP_INITIAL_CAPACITY
     ];
     let boxed = entries.into_boxed_slice();
+    // SAFETY: intentionally leaks the entries array; ownership moves to KodoMap.
     let entries_ptr = Box::into_raw(boxed).cast::<KodoMapEntry>();
     let map = Box::new(KodoMap {
         entries: entries_ptr,
         len: 0,
         capacity: MAP_INITIAL_CAPACITY,
     });
+    // SAFETY: intentionally leaks so caller manages via opaque pointer. Freed by `kodo_map_free`.
     Box::into_raw(map) as i64
 }
 
@@ -1054,6 +1069,7 @@ fn map_grow(map: &mut KodoMap) {
         new_cap
     ];
     let new_boxed = new_entries.into_boxed_slice();
+    // SAFETY: intentionally leaks the new entries array; ownership moves to KodoMap.
     let new_ptr = Box::into_raw(new_boxed).cast::<KodoMapEntry>();
 
     // Rehash existing entries.
@@ -1167,6 +1183,79 @@ pub unsafe extern "C" fn kodo_map_length(map_ptr: i64) -> i64 {
     #[allow(clippy::cast_possible_wrap)]
     let result = map.len as i64;
     result
+}
+
+/// Frees a heap-allocated string previously returned by runtime functions
+/// (e.g. `kodo_string_concat`, `kodo_string_replace`, `kodo_int_to_string`).
+///
+/// Does nothing if `ptr` is null or `len` is zero.
+///
+/// # Safety
+///
+/// `ptr` must have been allocated by `Box::into_raw` on a `Box<[u8]>` of
+/// exactly `len` bytes, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_free(ptr: *mut u8, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees ptr was allocated via Box::into_raw on a
+    // Box<[u8]> of exactly `len` bytes.
+    let _ = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) };
+}
+
+/// Frees a heap-allocated `KodoList` and its backing data array.
+///
+/// Does nothing if `list_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`, or zero.
+/// After calling this function, the list pointer must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_free(list_ptr: i64) {
+    if list_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new
+    // (i.e. Box::into_raw on a Box<KodoList>).
+    let list = unsafe { Box::from_raw(list_ptr as *mut KodoList) };
+    if !list.data.is_null() && list.capacity > 0 {
+        let layout = std::alloc::Layout::array::<i64>(list.capacity);
+        if let Ok(layout) = layout {
+            // SAFETY: list.data was allocated via std::alloc::alloc with this layout.
+            unsafe { std::alloc::dealloc(list.data.cast::<u8>(), layout) };
+        }
+    }
+    // list is dropped here, freeing the KodoList struct itself.
+}
+
+/// Frees a heap-allocated `KodoMap` and its backing entries array.
+///
+/// Does nothing if `map_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`, or zero.
+/// After calling this function, the map pointer must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
+    if map_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new
+    // (i.e. Box::into_raw on a Box<KodoMap>).
+    let map = unsafe { Box::from_raw(map_ptr as *mut KodoMap) };
+    if !map.entries.is_null() && map.capacity > 0 {
+        // SAFETY: entries was allocated as a Box<[KodoMapEntry]> with capacity elements.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                map.entries,
+                map.capacity,
+            ))
+        };
+    }
+    // map is dropped here, freeing the KodoMap struct itself.
 }
 
 #[cfg(test)]
@@ -1761,5 +1850,115 @@ mod tests {
         // SAFETY: both are valid string slices.
         let result = unsafe { kodo_string_eq(a.as_ptr(), a.len(), b.as_ptr(), b.len()) };
         assert_eq!(result, 0);
+    }
+
+    // --- Memory free tests ---
+
+    #[test]
+    fn kodo_string_free_null_does_not_crash() {
+        // SAFETY: null pointer is explicitly handled by kodo_string_free.
+        unsafe { kodo_string_free(std::ptr::null_mut(), 0) };
+        unsafe { kodo_string_free(std::ptr::null_mut(), 42) };
+    }
+
+    #[test]
+    fn kodo_string_free_valid_allocation() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: both are valid string slices, out pointers are valid.
+        unsafe {
+            kodo_string_concat(
+                "hello ".as_ptr(),
+                6,
+                "world".as_ptr(),
+                5,
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        assert_eq!(out_len, 11);
+        // SAFETY: out_ptr was allocated by kodo_string_concat.
+        unsafe { kodo_string_free(out_ptr as *mut u8, out_len) };
+    }
+
+    #[test]
+    fn kodo_string_free_roundtrip_int_to_string() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // SAFETY: out pointers are valid.
+        unsafe { kodo_int_to_string(12345, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "12345");
+        // SAFETY: out_ptr was allocated by kodo_int_to_string.
+        unsafe { kodo_string_free(out_ptr as *mut u8, out_len) };
+    }
+
+    #[test]
+    fn kodo_list_free_null_does_not_crash() {
+        // SAFETY: zero (null handle) is explicitly handled by kodo_list_free.
+        unsafe { kodo_list_free(0) };
+    }
+
+    #[test]
+    fn kodo_list_free_empty_list() {
+        let list = kodo_list_new();
+        assert_ne!(list, 0);
+        // SAFETY: list was returned by kodo_list_new.
+        unsafe { kodo_list_free(list) };
+    }
+
+    #[test]
+    fn kodo_list_free_with_elements() {
+        let list = kodo_list_new();
+        // SAFETY: list is valid.
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+        }
+        assert_eq!(unsafe { kodo_list_length(list) }, 3);
+        // SAFETY: list was returned by kodo_list_new.
+        unsafe { kodo_list_free(list) };
+    }
+
+    #[test]
+    fn kodo_map_free_null_does_not_crash() {
+        // SAFETY: zero (null handle) is explicitly handled by kodo_map_free.
+        unsafe { kodo_map_free(0) };
+    }
+
+    #[test]
+    fn kodo_map_free_empty_map() {
+        let map = kodo_map_new();
+        assert_ne!(map, 0);
+        // SAFETY: map was returned by kodo_map_new.
+        unsafe { kodo_map_free(map) };
+    }
+
+    #[test]
+    fn kodo_map_free_with_entries() {
+        let map = kodo_map_new();
+        // SAFETY: map is valid.
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 2, 200);
+            kodo_map_insert(map, 3, 300);
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 3);
+        // SAFETY: map was returned by kodo_map_new.
+        unsafe { kodo_map_free(map) };
+    }
+
+    #[test]
+    fn kodo_map_free_after_grow() {
+        let map = kodo_map_new();
+        // Insert enough entries to trigger at least one grow.
+        for i in 0..50 {
+            // SAFETY: map is valid.
+            unsafe { kodo_map_insert(map, i, i * 10) };
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 50);
+        // SAFETY: map was returned by kodo_map_new.
+        unsafe { kodo_map_free(map) };
     }
 }
