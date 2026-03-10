@@ -29,6 +29,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace -- -D warnings
 
@@ -42,6 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Z3 (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
+      - name: Install Z3 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install z3
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
@@ -55,6 +63,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91"
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv
@@ -66,6 +76,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
         env:
@@ -84,5 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --no-run
