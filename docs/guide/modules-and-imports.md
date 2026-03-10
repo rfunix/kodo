@@ -136,14 +136,31 @@ A dynamic array of elements, accessed via free functions:
 let nums: List<Int> = list_new()
 list_push(nums, 10)
 list_push(nums, 20)
-let len: Int = list_length(nums)       // 2
-let first: Int = list_get(nums, 0)     // 10
-let has: Bool = list_contains(nums, 10) // true
+list_push(nums, 30)
+let len: Int = list_length(nums)         // 3
+let first: Int = list_get(nums, 0)       // 10
+let has: Bool = list_contains(nums, 10)  // true
 ```
+
+#### Full List API
+
+| Function | Description |
+|----------|-------------|
+| `list_new()` | Create a new empty list |
+| `list_push(list, value)` | Append a value to the end |
+| `list_get(list, index)` | Get value at index |
+| `list_length(list)` | Number of elements |
+| `list_contains(list, value)` | Check if value exists |
+| `list_pop(list)` | Remove and return the last element |
+| `list_remove(list, index)` | Remove element at index |
+| `list_set(list, index, value)` | Set value at index |
+| `list_slice(list, start, end)` | Get a sub-list from start to end (exclusive) |
 
 ### Map\<K, V\>
 
-A key-value hash map:
+A key-value hash map. Maps support both `Int` and `String` keys:
+
+#### Int-keyed Maps
 
 ```
 let scores: Map<Int, Int> = map_new()
@@ -152,6 +169,29 @@ let val: Int = map_get(scores, 1)           // 100
 let has: Bool = map_contains_key(scores, 1)  // true
 let len: Int = map_length(scores)            // 1
 ```
+
+#### String-keyed Maps
+
+```
+let config: Map<String, Int> = map_string_new()
+map_string_insert(config, "port", 8080)
+map_string_insert(config, "timeout", 30)
+let port: Int = map_string_get(config, "port")            // 8080
+let has: Bool = map_string_contains(config, "timeout")     // true
+map_string_remove(config, "timeout")
+let len: Int = map_string_len(config)                      // 1
+```
+
+#### Full Map API
+
+| Function (Int keys) | Function (String keys) | Description |
+|---------------------|----------------------|-------------|
+| `map_new()` | `map_string_new()` | Create a new empty map |
+| `map_insert(m, k, v)` | `map_string_insert(m, k, v)` | Insert or update a key-value pair |
+| `map_get(m, k)` | `map_string_get(m, k)` | Get value by key |
+| `map_contains_key(m, k)` | `map_string_contains(m, k)` | Check if key exists |
+| `map_length(m)` | `map_string_len(m)` | Number of entries |
+| `map_remove(m, k)` | `map_string_remove(m, k)` | Remove a key-value pair |
 
 ### String.split()
 

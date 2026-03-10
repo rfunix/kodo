@@ -73,18 +73,22 @@ fn factorial(n: Int) -> Int {
 
 ## Types
 
-Kōdo currently supports three primitive types:
+Kōdo supports the following primitive types:
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `Int` | Integer numbers | `42`, `-7`, `0` |
+| `Int` | 64-bit integer | `42`, `-7`, `0` |
+| `Float64` | 64-bit floating point | `3.14`, `-0.5`, `1.0` |
 | `Bool` | Boolean values | `true`, `false` |
 | `String` | String literals | `"hello"` |
+
+The full type system also includes `Int8`, `Int16`, `Int32`, `Int64`, `Float32`, and `Byte` — see the [Language Specification](../DESIGN.md) for details.
 
 All variables must have explicit type annotations:
 
 ```
 let x: Int = 42
+let pi: Float64 = 3.14159
 let name: String = "Kōdo"
 let active: Bool = true
 ```
@@ -117,12 +121,14 @@ Reassignment requires the variable to have been declared with `mut`. The new val
 
 | Operator | Description | Example |
 |----------|-------------|---------|
-| `+` | Addition | `a + b` |
+| `+` | Addition (Int, Float64, or String concatenation) | `a + b`, `"hi" + name` |
 | `-` | Subtraction | `a - b` |
 | `*` | Multiplication | `a * b` |
 | `/` | Division | `a / b` |
 | `%` | Modulo | `a % b` |
 | `-` | Negation (unary) | `-x` |
+
+Arithmetic operators work on both `Int` and `Float64` values. The `+` operator also supports String concatenation — `"hello " + "world"` produces `"hello world"`.
 
 ### Comparison
 
@@ -211,18 +217,21 @@ fn abs(x: Int) -> Int {
 
 ## Builtin Functions
 
-Kōdo provides three builtin functions for output:
+Kōdo provides builtin functions for output:
 
 | Function | Parameter | Description |
 |----------|-----------|-------------|
 | `println(s)` | `String` | Print a string followed by a newline |
 | `print(s)` | `String` | Print a string without a newline |
 | `print_int(n)` | `Int` | Print an integer followed by a newline |
+| `print_float(f)` | `Float64` | Print a float without a newline |
+| `println_float(f)` | `Float64` | Print a float followed by a newline |
 
 ```
 fn main() {
     println("The answer is:")
     print_int(42)
+    println_float(3.14)
 }
 ```
 
@@ -277,6 +286,7 @@ module demo {
 ## Next Steps
 
 - [Data Types and Pattern Matching](data-types.md) — structs, enums, and `match` expressions
+- [Closures](closures.md) — closures, lambda lifting, and higher-order functions
 - [Generics](generics.md) — generic types and generic functions
 - [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>`
 - [Contracts](contracts.md) — add runtime verification to your functions

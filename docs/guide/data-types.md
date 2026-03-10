@@ -204,8 +204,48 @@ Output:
 21
 ```
 
+## Float64
+
+Kōdo supports 64-bit floating-point numbers with full arithmetic:
+
+```
+let pi: Float64 = 3.14159
+let radius: Float64 = 5.0
+let area: Float64 = pi * radius * radius
+
+println_float(area)
+```
+
+All arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), and negation (`-x`) operators work with `Float64` values.
+
+## String Operators
+
+Strings support concatenation with the `+` operator:
+
+```
+let greeting: String = "Hello, " + "world!"
+println(greeting)
+
+let name: String = "Kōdo"
+let msg: String = "Welcome to " + name
+println(msg)
+```
+
+Strings also support equality comparison with `==` and `!=`, which compares by content (not by pointer):
+
+```
+let a: String = "hello"
+let b: String = "hello"
+if a == b {
+    println("strings are equal")
+}
+```
+
+See [Modules and Imports](modules-and-imports.md) for the full list of string methods (`length`, `contains`, `split`, `trim`, `concat`, `index_of`, `replace`, etc.).
+
 ## Next Steps
 
+- [Closures](closures.md) — closures, lambda lifting, and higher-order functions
 - [Generics](generics.md) — parameterize your types with type variables
 - [Error Handling](error-handling.md) — use `Option<T>` and `Result<T, E>` for safe error handling
 - [Contracts](contracts.md) — add runtime verification to your functions

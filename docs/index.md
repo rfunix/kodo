@@ -16,6 +16,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Data Types and Pattern Matching](guide/data-types.md) — structs, enums, and `match` expressions
 - [Generics](guide/generics.md) — generic types and generic functions
 - [Error Handling](guide/error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling
+- [Closures](guide/closures.md) — closures, lambda lifting, and higher-order functions
 - [Traits](guide/traits.md) — trait definitions and static dispatch
 - [Pattern Matching](guide/pattern-matching.md) — exhaustive match on enums
 - [Contracts](guide/contracts.md) — `requires` and `ensures` for runtime verification
@@ -57,7 +58,11 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`intent_math.ko`](../examples/intent_math.ko) | Math module intent resolver |
 | [`intent_composed.ko`](../examples/intent_composed.ko) | Composing multiple intents |
 | [`agent_traceability.ko`](../examples/agent_traceability.ko) | Agent annotations and trust policies |
+| [`closures.ko`](../examples/closures.ko) | Closures and direct closure calls |
 | [`closures_functional.ko`](../examples/closures_functional.ko) | Higher-order functions and indirect calls |
+| [`float_math.ko`](../examples/float_math.ko) | Float64 arithmetic operations |
+| [`string_concat_operator.ko`](../examples/string_concat_operator.ko) | String concatenation with `+` operator |
+| [`intent_http.ko`](../examples/intent_http.ko) | HTTP intent resolver |
 | [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
 | [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |
 | [`ownership.ko`](../examples/ownership.ko) | Linear ownership with `own` and `ref` |

@@ -300,13 +300,28 @@ Source (.ko)
     │                    Intents → concrete code
     ▼
 [6. MIR Generation] ─── Mid-level IR
-    │                    Optimization, borrow checking
+    │                    CFG, basic blocks, local variables
+    ▼
+[6.5 MIR Optimizer] ─── Optimized MIR
+    │                    Constant folding, DCE, copy propagation
     ▼
 [7. Code Generation] ── Binary
     │                    Via Cranelift (dev) or LLVM (release)
     ▼
 [8. Linker] ──────────── Executable
 ```
+
+### MIR Optimization Passes
+
+After MIR generation and before code generation, the compiler runs three optimization passes on every function:
+
+1. **Constant Folding** — Evaluates expressions with constant operands at compile time. For example, `3 + 4` becomes `7`, `true && false` becomes `false`. Supports `Int`, `Float64`, and `Bool` operations. Float equality is intentionally not folded to avoid `clippy::float_cmp` issues.
+
+2. **Dead Code Elimination (DCE)** — Removes `Assign` instructions whose destination local is never read by any subsequent instruction or terminator. `Call` instructions are preserved even if unused (they may have side effects).
+
+3. **Copy Propagation** — When a local is assigned directly from another local (`_2 = _1`), subsequent uses of `_2` are replaced with `_1`. Resolves transitive copy chains (`_3 = _2`, `_2 = _1` → `_3` becomes `_1`).
+
+These passes follow standard compiler optimization techniques from **[EC]** Ch. 8–10 and **[Tiger]** Ch. 8.
 
 ### Implementation Language
 The Kōdo compiler (kodoc) is written in **Rust**.

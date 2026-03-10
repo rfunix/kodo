@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-549%20passing-brightgreen" alt="Tests: 549 passing">
+  <img src="https://img.shields.io/badge/tests-575%20passing-brightgreen" alt="Tests: 575 passing">
 </p>
 
 ---
@@ -207,7 +207,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 
 | Category | Features |
 |----------|----------|
-| **Type system** | `Int`, `Bool`, `String`, structs, enums, generics with monomorphization, no implicit conversions |
+| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, generics with monomorphization, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242) |
@@ -215,7 +215,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`), `List<T>`, `Map<K,V>`, File I/O |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), File I/O |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | Cooperative `spawn` with deferred task execution |
 | **Developer tools** | LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
@@ -267,7 +267,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 39 compilable programs:
+The [`examples/`](examples/) directory contains 41 compilable programs:
 
 ### Core Language
 
@@ -302,6 +302,8 @@ The [`examples/`](examples/) directory contains 39 compilable programs:
 |------|---------------------|
 | [`closures.ko`](examples/closures.ko) | Closures and direct closure calls |
 | [`closures_functional.ko`](examples/closures_functional.ko) | Higher-order functions and indirect calls |
+| [`float_math.ko`](examples/float_math.ko) | Float64 arithmetic operations |
+| [`string_concat_operator.ko`](examples/string_concat_operator.ko) | String concatenation with `+` operator |
 | [`stdlib_demo.ko`](examples/stdlib_demo.ko) | Standard library: `abs`, `min`, `max`, `clamp` |
 
 ### Contracts, Ownership & AI Traceability
@@ -324,6 +326,7 @@ The [`examples/`](examples/) directory contains 39 compilable programs:
 | [`intent_demo.ko`](examples/intent_demo.ko) | Intent-driven programming (`console_app`) |
 | [`intent_math.ko`](examples/intent_math.ko) | Math module intent resolver |
 | [`intent_composed.ko`](examples/intent_composed.ko) | Multiple intents composed in one module |
+| [`intent_http.ko`](examples/intent_http.ko) | HTTP intent resolver |
 
 ### Collections & I/O
 
@@ -380,6 +383,10 @@ Source (.ko)
 │  kodo_mir    │  Mid-level IR (CFG, basic blocks)
 └──────┬──────┘
        ▼
+┌─────────────────┐
+│  MIR Optimizer   │  Constant folding, DCE, copy propagation
+└──────┬──────────┘
+       ▼
 ┌──────────────┐
 │ kodo_codegen │  Native binary (Cranelift)
 └──────────────┘
@@ -401,6 +408,7 @@ Source (.ko)
 - [Contracts](docs/guide/contracts.md) — `requires` and `ensures`
 - [Ownership](docs/guide/ownership.md) — linear ownership with `own`/`ref`
 - [Agent Traceability](docs/guide/agent-traceability.md) — confidence propagation and trust policies
+- [Closures](docs/guide/closures.md) — closures, lambda lifting, and higher-order functions
 - [Modules and Imports](docs/guide/modules-and-imports.md) — multi-file programs and standard library
 - [Intent System](docs/intent_system.md) — intent-driven programming
 - [CLI Reference](docs/guide/cli-reference.md) — all `kodoc` commands and flags
