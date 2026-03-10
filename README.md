@@ -46,36 +46,62 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ### Contracts
 
-Kōdo embeds runtime contracts directly in the language. A `requires` block defines preconditions that are checked at runtime:
+Kōdo embeds runtime contracts directly in the language:
 
 ```
-module math {
-    meta {
-        purpose: "Safe math operations",
-        version: "0.1.0",
-        author: "Your Name"
-    }
+fn safe_divide(a: Int, b: Int) -> Int
+    requires { b != 0 }
+    ensures { result >= 0 }
+{
+    return a / b
+}
+```
 
-    fn safe_divide(a: Int, b: Int) -> Int
-        requires { b != 0 }
-    {
-        return a / b
-    }
+`requires` checks preconditions at function entry. `ensures` checks postconditions at every return point. If a contract is violated, the program aborts with a clear error message.
 
-    fn main() {
-        let result: Int = safe_divide(10, 2)
-        print_int(result)
+### Pattern Matching
+
+Define algebraic data types and destructure them with `match`:
+
+```
+enum Shape {
+    Circle(Int),
+    Rectangle(Int, Int)
+}
+
+fn area(s: Shape) -> Int {
+    match s {
+        Shape::Circle(r) => { return r * r * 3 }
+        Shape::Rectangle(w, h) => { return w * h }
     }
 }
 ```
 
-If a contract is violated, the program aborts with a clear error message.
+### Generics
+
+Types and functions can be parameterized:
+
+```
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+let a: Int = identity(42)
+```
+
+The standard library provides `Option<T>` and `Result<T, E>` in the prelude — available in every program without an import.
 
 ## Documentation
 
-- [Getting Started](docs/guide/getting-started.md) — install, build, run your first program
+- **[Documentation Index](docs/index.md)** — start here
+- [A Tour of Kōdo](docs/guide/tour.md) — quick walkthrough of all features
+- [Getting Started](docs/guide/getting-started.md) — install, build, run
 - [Language Basics](docs/guide/language-basics.md) — modules, functions, types, variables, control flow
-- [Contracts](docs/guide/contracts.md) — preconditions with `requires`
+- [Data Types and Pattern Matching](docs/guide/data-types.md) — structs, enums, and `match`
+- [Generics](docs/guide/generics.md) — generic types and functions
+- [Error Handling](docs/guide/error-handling.md) — `Option<T>` and `Result<T, E>`
+- [Contracts](docs/guide/contracts.md) — `requires` and `ensures`
+- [Modules and Imports](docs/guide/modules-and-imports.md) — multi-file programs and standard library
 - [CLI Reference](docs/guide/cli-reference.md) — all `kodoc` commands and flags
 
 ## Examples
@@ -85,32 +111,35 @@ The [`examples/`](examples/) directory contains compilable programs:
 | File | Description |
 |------|-------------|
 | `hello.ko` | Minimal hello world |
-| `fibonacci.ko` | Recursive Fibonacci with `print_int` |
-| `contracts_demo.ko` | Contracts passing and failing |
-| `contracts.ko` | `requires` and `ensures` syntax |
-| `expressions.ko` | Arithmetic, logic, and control flow |
+| `fibonacci.ko` | Recursive Fibonacci |
+| `while_loop.ko` | Loops and mutable variables |
+| `contracts_demo.ko` | Runtime contracts in action |
+| `structs.ko` | Struct definition and field access |
+| `struct_params.ko` | Structs as function parameters and return values |
+| `enums.ko` | Enum types and pattern matching |
+| `enum_params.ko` | Enums as function parameters |
+| `generics.ko` | Generic enum types |
+| `generic_fn.ko` | Generic functions |
+| `option_demo.ko` | Standard library `Option<T>` |
+| `result_demo.ko` | Standard library `Result<T, E>` |
+| `multi_file/` | Multi-file compilation with imports |
 
 ## What Works Today
 
-- Modules with `meta` blocks
+- Modules with mandatory `meta` blocks (self-describing)
 - Functions with typed parameters and return types
-- Types: `Int`, `Bool`, `String` (literals)
+- Types: `Int`, `Bool`, `String`, structs, enums
+- Generics with monomorphization (types and functions)
+- Pattern matching with `match` on enums
 - Operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`, unary `-`
-- `if`/`else`, `return`
+- Control flow: `if`/`else`, `while`, `return`
 - Variables: `let` (immutable), `let mut` (mutable)
-- Recursion and function calls
-- Runtime contracts: `requires { ... }`
-- Builtins: `println(String)`, `print(String)`, `print_int(Int)`
+- Runtime contracts: `requires` (preconditions) and `ensures` (postconditions)
+- Standard library prelude: `Option<T>`, `Result<T, E>`
+- Multi-file compilation with `import`
+- Compilation certificates (`.ko.cert.json`) with SHA-256 hashes
+- Structured JSON error output (`--json-errors`) for AI agent consumption
 - Compilation to native binaries via Cranelift
-
-## Known Limitations
-
-- No structs, enums, or user-defined types yet
-- No generics
-- No standard library beyond builtins
-- No module imports (single-file compilation only)
-- `ensures` clauses are parsed but do not inject runtime checks yet
-- Error messages are functional but not yet polished with source spans
 
 ## Contributing
 

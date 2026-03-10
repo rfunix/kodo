@@ -209,6 +209,54 @@ Primitives: `Int`, `Int8`-`Int64`, `Uint`, `Uint8`-`Uint64`, `Float32`, `Float64
 
 No null. `Option<T>` only. No exceptions. `Result<T, E>` only.
 
+## Task Completion Checklist — MANDATORY
+
+After completing ANY task (feature, bugfix, refactor, etc.), you MUST execute ALL of the following steps before considering the task done. This is NON-NEGOTIABLE.
+
+### 1. Tests
+
+- Write unit tests for every new function or changed behavior.
+- Write integration tests for new features (in `crates/kodoc/tests/`).
+- If adding a new language feature, create a `.ko` example in `examples/`.
+- Run `cargo test --workspace` and confirm ALL tests pass.
+
+### 2. Linters and Formatting
+
+- Run `cargo fmt --all -- --check` and fix any formatting issues.
+- Run `cargo clippy --workspace -- -D warnings` and fix ALL warnings (zero tolerance).
+- Never suppress warnings without a documented reason.
+
+### 3. Documentation
+
+- Update `docs/guide/` if any user-facing feature was added or changed.
+- Update `docs/index.md` if new guide pages were created.
+- Update `README.md` if the "What Works Today" section is affected.
+- Update `docs/error_index.md` if new error codes were added.
+- Ensure all new public items have `///` doc comments.
+- Update examples table in `README.md` if new `.ko` examples were added.
+
+### 4. Verification
+
+Run this exact sequence and confirm all pass:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
+```
+
+If any step fails, fix the issue before reporting the task as complete.
+
+### 5. Summary
+
+Report to the user:
+- What was changed (files modified/created)
+- Number of tests passing
+- Any documentation updated
+- Any new examples added
+
+**Do NOT skip these steps. Do NOT report a task as done without running all checks.**
+
 ## Development Workflow
 
 ```bash

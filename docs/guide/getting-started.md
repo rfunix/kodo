@@ -111,6 +111,8 @@ This is useful for fast feedback during development.
 
 ## Next Steps
 
-- [Language Basics](language-basics.md) — learn about types, variables, and control flow
-- [Contracts](contracts.md) — add runtime preconditions to your functions
+- [A Tour of Kōdo](tour.md) — a quick walkthrough of all language features
+- [Language Basics](language-basics.md) — types, variables, and control flow
+- [Data Types and Pattern Matching](data-types.md) — structs, enums, and `match`
+- [Contracts](contracts.md) — runtime preconditions and postconditions
 - [CLI Reference](cli-reference.md) — all available commands and flags

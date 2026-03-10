@@ -140,5 +140,6 @@ Contracts are most useful for:
 
 ## Next Steps
 
+- [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling
+- [Modules and Imports](modules-and-imports.md) — multi-file programs and the standard library
 - [CLI Reference](cli-reference.md) — all available commands and flags
-- [Language Basics](language-basics.md) — types, variables, and control flow

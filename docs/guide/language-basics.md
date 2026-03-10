@@ -276,5 +276,9 @@ module demo {
 
 ## Next Steps
 
-- [Contracts](contracts.md) — add runtime preconditions to your functions
+- [Data Types and Pattern Matching](data-types.md) — structs, enums, and `match` expressions
+- [Generics](generics.md) — generic types and generic functions
+- [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>`
+- [Contracts](contracts.md) — add runtime verification to your functions
+- [Modules and Imports](modules-and-imports.md) — multi-file programs and the standard library
 - [CLI Reference](cli-reference.md) — all available commands and flags
