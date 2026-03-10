@@ -45,7 +45,32 @@ module intent_demo {
 }
 ```
 
-No `main()`, no boilerplate. The `console_app` intent resolver reads your config and generates the entire entry point. AI agents are good at declaring intentions — compilers are good at implementing them correctly.
+No `main()`, no boilerplate. The `intent` block is not executable code — it's a **declaration of intent** with a key-value config. The compiler does the rest:
+
+```
+                          ┌─────────────────────────────┐
+  intent console_app {    │  1. Parser reads the block   │
+    greeting: "Hello!"    │     → IntentDecl AST node    │
+  }                       │                              │
+                          │  2. Resolver finds strategy   │
+                          │     → ConsoleAppStrategy     │
+                          │                              │
+                          │  3. Strategy generates code   │
+                          │     → fn kodo_main() {       │
+                          │         println("Hello!")    │
+                          │       }                      │
+                          │                              │
+                          │  4. Injected into module as   │
+                          │     if hand-written          │
+                          │     → type check → codegen   │
+                          └─────────────────────────────┘
+```
+
+Think of it as a **semantic macro at the compiler level**. Unlike textual macros (like C's `#define`), intent expansion happens at the AST level with full validation — invalid keys and type mismatches produce clear compiler errors, not cryptic failures.
+
+**Why this matters for AI agents:** an agent doesn't need to generate boilerplate. It declares intent (`"I want a console app that prints X"`) and the compiler guarantees the implementation is correct. Less generated code = fewer bugs.
+
+You can inspect what any intent generates: `kodoc intent-explain intent_demo.ko`
 
 Built-in resolvers: `console_app`, `math_module`. Intents are composable — use multiple in the same module.
 
@@ -146,7 +171,7 @@ Kōdo isn't just annotations — it's a full compiled language with native binar
 
 ### Prerequisites
 
-- [Rust toolchain](https://rustup.rs/) (1.75+)
+- [Rust toolchain](https://rustup.rs/) (1.85+)
 - A C linker (`cc`) — Xcode Command Line Tools on macOS or `build-essential` on Linux
 
 ### Build
