@@ -11,6 +11,8 @@ members = [
     "crates/kodo_codegen",
     "crates/kodo_std",
     "crates/kodo_runtime",
+    "crates/kodo_desugar",
+    "crates/kodo_lsp",
     "crates/kodoc",
     "tools/ko",
 ]
@@ -18,7 +20,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/kodo-lang/kodo"
 description = "The Kōdo programming language compiler — designed for AI agents, transparent for humans"
@@ -34,6 +36,8 @@ kodo_resolver = { path = "crates/kodo_resolver" }
 kodo_mir = { path = "crates/kodo_mir" }
 kodo_codegen = { path = "crates/kodo_codegen" }
 kodo_std = { path = "crates/kodo_std" }
+kodo_desugar = { path = "crates/kodo_desugar" }
+kodo_lsp = { path = "crates/kodo_lsp" }
 kodo_runtime = { path = "crates/kodo_runtime" }
 
 # Lexing
@@ -59,6 +63,10 @@ cranelift-object = "0.129.1"
 
 # SMT solver (optional)
 z3 = "0.19.13"
+
+# LSP
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
 
 # Testing
 insta = "1.46.3"
