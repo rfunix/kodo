@@ -22,7 +22,7 @@ AI agents are writing more and more production code. But the languages they writ
 
 Kōdo is the first compiled language **designed from scratch for AI agents to write, reason about, and maintain software** — while remaining fully transparent and auditable by humans. It's not a framework, a linter, or a set of conventions bolted onto an existing language. It's a new language where the problems of AI-generated code are solved **at the grammar level**.
 
-If your team uses AI agents to generate or maintain code, Kōdo gives you what no other language does: **mathematical proof that the code is correct, traceability of who wrote every function, and a compiler that understands intent**.
+If your team uses AI agents to generate or maintain code, Kōdo gives you what no other language does: **contract verification via SMT solver, compiler-enforced authorship tracking, and intent-driven code generation**.
 
 ### The Problem with AI + Existing Languages
 
