@@ -2618,4 +2618,117 @@ mod tests {
             "fail message should reference 'port', got: {msg}"
         );
     }
+
+    // -------------------------------------------------------------------
+    // Reference counting lowering tests (Phase 39)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn is_heap_type_string_returns_true() {
+        assert!(MirBuilder::is_heap_type(&Type::String));
+    }
+
+    #[test]
+    fn is_heap_type_struct_returns_true() {
+        assert!(MirBuilder::is_heap_type(&Type::Struct("Point".to_string())));
+    }
+
+    #[test]
+    fn is_heap_type_int_returns_false() {
+        assert!(!MirBuilder::is_heap_type(&Type::Int));
+    }
+
+    #[test]
+    fn is_heap_type_bool_returns_false() {
+        assert!(!MirBuilder::is_heap_type(&Type::Bool));
+    }
+
+    #[test]
+    fn is_heap_type_float64_returns_false() {
+        assert!(!MirBuilder::is_heap_type(&Type::Float64));
+    }
+
+    #[test]
+    fn is_heap_type_unit_returns_false() {
+        assert!(!MirBuilder::is_heap_type(&Type::Unit));
+    }
+
+    #[test]
+    fn decref_emitted_for_string_local_before_return() {
+        // fn main() -> Unit { let msg: String = "hello"; return }
+        let func = make_fn(
+            "main",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "msg".to_string(),
+                    ty: Some(TypeExpr::Named("String".to_string())),
+                    value: Expr::StringLit("hello".to_string(), span()),
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+
+        // There should be at least one DecRef instruction for the string local.
+        let has_decref = mir.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::DecRef(_)))
+        });
+        assert!(
+            has_decref,
+            "expected DecRef for heap-allocated String local before return"
+        );
+    }
+
+    #[test]
+    fn no_decref_for_int_local() {
+        // fn main() -> Unit { let x: Int = 42 }
+        let func = make_fn(
+            "main",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "x".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::IntLit(42, span()),
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+
+        // There should be no DecRef for an Int local.
+        let has_decref = mir.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::DecRef(_)))
+        });
+        assert!(
+            !has_decref,
+            "should NOT emit DecRef for primitive Int local"
+        );
+    }
+
+    #[test]
+    fn is_heap_type_generic_returns_true() {
+        assert!(MirBuilder::is_heap_type(&Type::Generic(
+            "List".to_string(),
+            vec![Type::Int]
+        )));
+    }
+
+    #[test]
+    fn is_heap_type_byte_returns_false() {
+        assert!(!MirBuilder::is_heap_type(&Type::Byte));
+    }
 }

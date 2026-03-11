@@ -110,6 +110,19 @@ impl TypeChecker {
                 }
                 self.infer_expr(operand)
             }
+
+            Expr::StringInterp { parts, .. } => {
+                // Type check each expression part — the overall type is String.
+                for part in parts {
+                    if let kodo_ast::StringPart::Expr(expr) = part {
+                        self.infer_expr(expr)?;
+                    }
+                }
+                Ok(Type::String)
+            }
+
+            Expr::TupleLit(elems, _) => self.infer_tuple_lit(elems),
+            Expr::TupleIndex { tuple, index, span } => self.infer_tuple_index(tuple, *index, *span),
         }
     }
 
@@ -484,6 +497,10 @@ impl TypeChecker {
                 Pattern::Literal(lit_expr) => {
                     self.infer_expr(lit_expr)?;
                 }
+                Pattern::Tuple(pats, _) => {
+                    self.introduce_pattern_bindings(&arm.pattern, &matched_ty);
+                    let _ = pats;
+                }
             }
 
             let arm_ty = self.infer_expr(&arm.body)?;
@@ -530,7 +547,9 @@ impl TypeChecker {
                 Stmt::Expr(expr) => {
                     last_ty = self.infer_expr(expr)?;
                 }
-                Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
+                Stmt::LetPattern { value, .. }
+                | Stmt::Let { value, .. }
+                | Stmt::Assign { value, .. } => {
                     self.infer_expr(value)?;
                     last_ty = Type::Unit;
                 }
@@ -552,6 +571,11 @@ impl TypeChecker {
                 } => {
                     self.infer_expr(start)?;
                     self.infer_expr(end)?;
+                    self.infer_block(body)?;
+                    last_ty = Type::Unit;
+                }
+                Stmt::ForIn { iterable, body, .. } => {
+                    self.infer_expr(iterable)?;
                     self.infer_block(body)?;
                     last_ty = Type::Unit;
                 }
@@ -592,6 +616,14 @@ impl TypeChecker {
     /// For variant patterns like `Option::Some(value)`, looks up the variant's
     /// field types in the enum registry and inserts each binding.
     pub(crate) fn introduce_pattern_bindings(&mut self, pattern: &Pattern, matched_ty: &Type) {
+        if let Pattern::Tuple(pats, _) = pattern {
+            if let Type::Tuple(elem_types) = matched_ty {
+                for (pat, ty) in pats.iter().zip(elem_types) {
+                    self.introduce_pattern_bindings(pat, ty);
+                }
+            }
+            return;
+        }
         if let Pattern::Variant {
             enum_name,
             variant,
@@ -599,6 +631,12 @@ impl TypeChecker {
             ..
         } = pattern
         {
+            // Simple identifier binding (e.g., `a` in `let (a, b) = ...`).
+            // Only bind as a variable if not matching against an enum type.
+            if enum_name.is_none() && bindings.is_empty() && !matches!(matched_ty, Type::Enum(_)) {
+                self.env.insert(variant.clone(), matched_ty.clone());
+                return;
+            }
             let matched_enum_name = if let Type::Enum(name) = matched_ty {
                 Some(name.as_str())
             } else {
@@ -627,6 +665,39 @@ impl TypeChecker {
 
     /// Checks a binary operation and returns the result type.
     ///
+    /// Infers the type of a tuple literal by inferring each element.
+    fn infer_tuple_lit(&mut self, elems: &[Expr]) -> crate::Result<Type> {
+        let mut elem_types = Vec::with_capacity(elems.len());
+        for elem in elems {
+            elem_types.push(self.infer_expr(elem)?);
+        }
+        Ok(Type::Tuple(elem_types))
+    }
+
+    /// Infers the type of a tuple index expression (e.g., `pair.0`).
+    fn infer_tuple_index(
+        &mut self,
+        tuple: &Expr,
+        index: usize,
+        span: kodo_ast::Span,
+    ) -> crate::Result<Type> {
+        let tuple_ty = self.infer_expr(tuple)?;
+        match &tuple_ty {
+            Type::Tuple(elems) => {
+                if index < elems.len() {
+                    Ok(elems[index].clone())
+                } else {
+                    Err(TypeError::TupleIndexOutOfBounds {
+                        index,
+                        length: elems.len(),
+                        span,
+                    })
+                }
+            }
+            _ => Ok(Type::Unknown),
+        }
+    }
+
     /// Arithmetic operators (`+`, `-`, `*`, `/`, `%`) require both operands
     /// to be the same numeric type and return that type. Comparison operators
     /// (`==`, `!=`, `<`, `>`, `<=`, `>=`) require matching numeric operands
@@ -919,6 +990,9 @@ impl TypeChecker {
                 Self::substitute_type_expr(param_type_expr, &subst, span, &self.enum_names)?;
             TypeEnv::check_eq(&expected, arg_ty, span)?;
         }
+
+        // Check trait bounds for each type parameter.
+        self.check_trait_bounds(&def.params, &def.bounds, &type_args, span)?;
 
         let mono_name = Self::mono_name(name, &type_args);
         self.fn_instances

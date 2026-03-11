@@ -93,6 +93,8 @@ pub enum Type {
     Generic(std::string::String, Vec<Type>),
     /// A function type: `(params) -> return_type`.
     Function(Vec<Type>, Box<Type>),
+    /// A tuple type, e.g. `(Int, String)`.
+    Tuple(Vec<Type>),
     /// An unresolved type (used during type checking).
     Unknown,
 }
@@ -185,6 +187,16 @@ impl std::fmt::Display for Type {
                     write!(f, "{p}")?;
                 }
                 write!(f, ") -> {ret}")
+            }
+            Self::Tuple(elems) => {
+                write!(f, "(")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                write!(f, ")")
             }
             Self::Unknown => write!(f, "?"),
         }

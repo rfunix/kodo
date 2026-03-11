@@ -150,6 +150,13 @@ pub fn resolve_type_with_enums(
             let resolved_ret = resolve_type_with_enums(ret, span, enum_names)?;
             Ok(Type::Function(resolved_params?, Box::new(resolved_ret)))
         }
+        kodo_ast::TypeExpr::Tuple(elems) => {
+            let resolved: std::result::Result<Vec<_>, _> = elems
+                .iter()
+                .map(|e| resolve_type_with_enums(e, span, enum_names))
+                .collect();
+            Ok(Type::Tuple(resolved?))
+        }
     }
 }
 
@@ -194,7 +201,10 @@ pub(crate) fn expr_span(expr: &kodo_ast::Expr) -> Span {
         | kodo_ast::Expr::Range { span, .. }
         | kodo_ast::Expr::Closure { span, .. }
         | kodo_ast::Expr::Is { span, .. }
-        | kodo_ast::Expr::Await { span, .. } => *span,
+        | kodo_ast::Expr::Await { span, .. }
+        | kodo_ast::Expr::StringInterp { span, .. }
+        | kodo_ast::Expr::TupleLit(_, span)
+        | kodo_ast::Expr::TupleIndex { span, .. } => *span,
         kodo_ast::Expr::Block(block) => block.span,
     }
 }
@@ -226,6 +236,8 @@ pub(crate) enum OwnershipState {
 pub(crate) struct GenericStructDef {
     /// Generic parameter names (e.g. `["T", "U"]`).
     pub(crate) params: Vec<String>,
+    /// Trait bounds per parameter (parallel with `params`).
+    pub(crate) bounds: Vec<Vec<String>>,
     /// Fields with types that may reference generic params.
     pub(crate) fields: Vec<(String, kodo_ast::TypeExpr)>,
 }
@@ -235,6 +247,8 @@ pub(crate) struct GenericStructDef {
 pub(crate) struct GenericFunctionDef {
     /// Generic parameter names (e.g. `["T"]`).
     pub(crate) params: Vec<String>,
+    /// Trait bounds per parameter (parallel with `params`).
+    pub(crate) bounds: Vec<Vec<String>>,
     /// Parameter type expressions (may reference generic params).
     pub(crate) param_types: Vec<kodo_ast::TypeExpr>,
     /// Return type expression.
@@ -246,6 +260,8 @@ pub(crate) struct GenericFunctionDef {
 pub(crate) struct GenericEnumDef {
     /// Generic parameter names.
     pub(crate) params: Vec<String>,
+    /// Trait bounds per parameter (parallel with `params`).
+    pub(crate) bounds: Vec<Vec<String>>,
     /// Variants with field type expressions.
     pub(crate) variants: Vec<(String, Vec<kodo_ast::TypeExpr>)>,
 }

@@ -18,6 +18,8 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Error Handling](guide/error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling
 - [Closures](guide/closures.md) — closures, lambda lifting, and higher-order functions
 - [Traits](guide/traits.md) — trait definitions and static dispatch
+- [Inherent Methods](guide/methods.md) — struct methods without traits
+- [String Interpolation](guide/string-interpolation.md) — f-strings with `{expression}` embedding
 - [Pattern Matching](guide/pattern-matching.md) — exhaustive match on enums
 - [Contracts](guide/contracts.md) — `requires` and `ensures` for runtime verification
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
@@ -88,3 +90,10 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`channel_string.ko`](../examples/channel_string.ko) | Generic typed channels |
 | [`refinement_smt.ko`](../examples/refinement_smt.ko) | SMT-verified refinement types |
 | [`struct_predicates.ko`](../examples/struct_predicates.ko) | Struct field predicates in contracts |
+| [`generic_bounds.ko`](../examples/generic_bounds.ko) | Generic trait bounds (`<T: Ord>`) |
+| [`sorted_list.ko`](../examples/sorted_list.ko) | Bounded generics with sorted collections |
+| [`methods.ko`](../examples/methods.ko) | Inherent impl blocks |
+| [`string_interpolation.ko`](../examples/string_interpolation.ko) | F-string interpolation |
+| [`memory_management.ko`](../examples/memory_management.ko) | Reference counting |
+| [`tuples.ko`](../examples/tuples.ko) | Tuple types, indexing, and destructuring |
+| [`for_in.ko`](../examples/for_in.ko) | For-in loops over collections |

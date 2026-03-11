@@ -858,6 +858,10 @@ fn format_type_expr(ty: &kodo_ast::TypeExpr) -> String {
         kodo_ast::TypeExpr::Optional(inner) => {
             format!("{}?", format_type_expr(inner))
         }
+        kodo_ast::TypeExpr::Tuple(elems) => {
+            let elems_str: Vec<String> = elems.iter().map(format_type_expr).collect();
+            format!("({})", elems_str.join(", "))
+        }
     }
 }
 

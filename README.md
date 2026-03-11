@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-824%2B%20passing-brightgreen" alt="Tests: 824+ passing">
+  <img src="https://img.shields.io/badge/tests-934%2B%20passing-brightgreen" alt="Tests: 934+ passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -208,14 +208,16 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 
 | Category | Features |
 |----------|----------|
-| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, generics with monomorphization, local type inference, no implicit conversions |
+| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), local type inference, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
-| **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242) |
+| **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), functional reference counting (automatic deallocation) |
 | **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
+| **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
+| **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
 | **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
@@ -268,7 +270,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 61 compilable programs:
+The [`examples/`](examples/) directory contains 63 compilable programs:
 
 ### Core Language
 
@@ -297,6 +299,10 @@ The [`examples/`](examples/) directory contains 61 compilable programs:
 | [`result_demo.ko`](examples/result_demo.ko) | `Result<T, E>` — explicit error handling |
 | [`flow_typing.ko`](examples/flow_typing.ko) | Flow-sensitive type narrowing |
 | [`traits.ko`](examples/traits.ko) | Trait definitions and static dispatch |
+| [`generic_bounds.ko`](examples/generic_bounds.ko) | Generic trait bounds (`<T: Ord>`) |
+| [`sorted_list.ko`](examples/sorted_list.ko) | Bounded generics with sorted collections |
+| [`methods.ko`](examples/methods.ko) | Inherent impl blocks — struct methods |
+| [`tuples.ko`](examples/tuples.ko) | Tuple types, literals, indexing, and destructuring |
 
 ### Functions & Closures
 
@@ -306,6 +312,7 @@ The [`examples/`](examples/) directory contains 61 compilable programs:
 | [`closures_functional.ko`](examples/closures_functional.ko) | Higher-order functions and indirect calls |
 | [`float_math.ko`](examples/float_math.ko) | Float64 arithmetic operations |
 | [`string_concat_operator.ko`](examples/string_concat_operator.ko) | String concatenation with `+` operator |
+| [`string_interpolation.ko`](examples/string_interpolation.ko) | F-string interpolation (`f"Hello {name}"`) |
 | [`stdlib_demo.ko`](examples/stdlib_demo.ko) | Standard library: `abs`, `min`, `max`, `clamp` |
 
 ### Contracts, Ownership & AI Traceability
@@ -324,6 +331,7 @@ The [`examples/`](examples/) directory contains 61 compilable programs:
 | [`refinement_types.ko`](examples/refinement_types.ko) | Refinement types with `requires` constraints |
 | [`refinement_smt.ko`](examples/refinement_smt.ko) | SMT-verified refinement types |
 | [`struct_predicates.ko`](examples/struct_predicates.ko) | Struct field predicates in contracts |
+| [`memory_management.ko`](examples/memory_management.ko) | Reference counting for heap-allocated values |
 
 ### Intent System
 
@@ -345,6 +353,7 @@ The [`examples/`](examples/) directory contains 61 compilable programs:
 | [`list_demo.ko`](examples/list_demo.ko) | `List<T>` — `list_new`, `list_push`, `list_get`, `list_length`, `list_contains` |
 | [`map_demo.ko`](examples/map_demo.ko) | `Map<K,V>` — `map_new`, `map_insert`, `map_get`, `map_contains_key`, `map_length` |
 | [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
+| [`for_in.ko`](examples/for_in.ko) | For-in loops over `List<T>` collections |
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
 | [`http_client.ko`](examples/http_client.ko) | HTTP GET and JSON parsing |
 | [`time_env.ko`](examples/time_env.ko) | Time functions and environment variables |

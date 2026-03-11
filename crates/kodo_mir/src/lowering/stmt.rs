@@ -52,10 +52,66 @@ impl MirBuilder {
                 ..
             } => self.lower_for_loop(name, start, end, *inclusive, body),
             Stmt::Assign { name, value, .. } => self.lower_assign_stmt(name, value),
-            // IfLet is desugared before MIR lowering.
-            Stmt::IfLet { .. } => Ok(Value::Unit),
+            Stmt::LetPattern { pattern, value, .. } => self.lower_let_pattern(pattern, value),
+            // ForIn and IfLet are desugared before MIR lowering.
+            Stmt::ForIn { .. } | Stmt::IfLet { .. } => Ok(Value::Unit),
             Stmt::Spawn { body, .. } => self.lower_spawn_stmt(body),
             Stmt::Parallel { body, .. } => self.lower_parallel_stmt(body),
+        }
+    }
+
+    /// Lowers a `let` binding with a destructuring pattern.
+    fn lower_let_pattern(&mut self, pattern: &kodo_ast::Pattern, value: &Expr) -> Result<Value> {
+        let val = self.lower_expr(value)?;
+        self.lower_tuple_pattern_bindings(pattern, &val);
+        Ok(Value::Unit)
+    }
+
+    /// Recursively binds tuple pattern variables to extracted tuple elements.
+    fn lower_tuple_pattern_bindings(&mut self, pattern: &kodo_ast::Pattern, val: &Value) {
+        match pattern {
+            kodo_ast::Pattern::Tuple(pats, _) => {
+                for (i, pat) in pats.iter().enumerate() {
+                    let elem_local = self.alloc_local(Type::Unknown, false);
+                    #[allow(clippy::cast_possible_truncation)]
+                    let field_idx = i as u32;
+                    self.emit(Instruction::Assign(
+                        elem_local,
+                        Value::EnumPayload {
+                            value: Box::new(val.clone()),
+                            field_index: field_idx,
+                        },
+                    ));
+                    self.lower_tuple_pattern_bindings(pat, &Value::Local(elem_local));
+                }
+            }
+            kodo_ast::Pattern::Variant {
+                enum_name: None,
+                variant: name,
+                bindings,
+                ..
+            } if bindings.is_empty() => {
+                // Simple identifier binding (e.g., `a` in `let (a, b) = ...`).
+                let bind_local = self.alloc_local(Type::Unknown, false);
+                self.name_map.insert(name.clone(), bind_local);
+                self.emit(Instruction::Assign(bind_local, val.clone()));
+            }
+            kodo_ast::Pattern::Variant { bindings, .. } => {
+                for (i, binding) in bindings.iter().enumerate() {
+                    let bind_local = self.alloc_local(Type::Unknown, false);
+                    self.name_map.insert(binding.clone(), bind_local);
+                    #[allow(clippy::cast_possible_truncation)]
+                    let field_idx = i as u32;
+                    self.emit(Instruction::Assign(
+                        bind_local,
+                        Value::EnumPayload {
+                            value: Box::new(val.clone()),
+                            field_index: field_idx,
+                        },
+                    ));
+                }
+            }
+            kodo_ast::Pattern::Wildcard(_) | kodo_ast::Pattern::Literal(_) => {}
         }
     }
 

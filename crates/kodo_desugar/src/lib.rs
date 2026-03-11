@@ -14,7 +14,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 
-use kodo_ast::{BinOp, Block, Expr, MatchArm, Module, Pattern, Stmt};
+use kodo_ast::{BinOp, Block, Expr, MatchArm, Module, Pattern, Stmt, StringPart};
 
 /// Desugars an entire module in-place.
 ///
@@ -88,6 +88,98 @@ fn desugar_for_stmt(
     new_stmts.push(while_stmt);
 }
 
+/// Desugars a `for-in` loop over a collection into indexed access with a `while` loop.
+///
+/// Transforms `for x in iterable { body }` into:
+/// ```text
+/// let mut __forin_idx_x = 0
+/// let __forin_len_x = len(iterable)
+/// while __forin_idx_x < __forin_len_x {
+///     let x = get(iterable, __forin_idx_x)
+///     body
+///     __forin_idx_x = __forin_idx_x + 1
+/// }
+/// ```
+fn desugar_for_in_stmt(
+    new_stmts: &mut Vec<Stmt>,
+    span: kodo_ast::Span,
+    name: &str,
+    iterable: Expr,
+    mut body: Block,
+) {
+    desugar_block(&mut body);
+    let iterable = desugar_expr(iterable);
+
+    let idx_name = format!("__forin_idx_{name}");
+    let let_idx = Stmt::Let {
+        span,
+        mutable: true,
+        name: idx_name.clone(),
+        ty: None,
+        value: Expr::IntLit(0, span),
+    };
+
+    let len_name = format!("__forin_len_{name}");
+    let let_len = Stmt::Let {
+        span,
+        mutable: false,
+        name: len_name.clone(),
+        ty: None,
+        value: Expr::Call {
+            callee: Box::new(Expr::Ident("len".to_string(), span)),
+            args: vec![iterable.clone()],
+            span,
+        },
+    };
+
+    let condition = Expr::BinaryOp {
+        left: Box::new(Expr::Ident(idx_name.clone(), span)),
+        op: BinOp::Lt,
+        right: Box::new(Expr::Ident(len_name, span)),
+        span,
+    };
+
+    let let_elem = Stmt::Let {
+        span,
+        mutable: false,
+        name: name.to_string(),
+        ty: None,
+        value: Expr::Call {
+            callee: Box::new(Expr::Ident("get".to_string(), span)),
+            args: vec![iterable, Expr::Ident(idx_name.clone(), span)],
+            span,
+        },
+    };
+
+    let increment = Stmt::Assign {
+        span,
+        name: idx_name.clone(),
+        value: Expr::BinaryOp {
+            left: Box::new(Expr::Ident(idx_name, span)),
+            op: BinOp::Add,
+            right: Box::new(Expr::IntLit(1, span)),
+            span,
+        },
+    };
+
+    let mut while_stmts = vec![let_elem];
+    while_stmts.extend(body.stmts);
+    while_stmts.push(increment);
+
+    let while_stmt = Stmt::While {
+        span,
+        condition,
+        body: Block {
+            span,
+            stmts: while_stmts,
+        },
+    };
+
+    new_stmts.push(let_idx);
+    new_stmts.push(let_len);
+    new_stmts.push(while_stmt);
+}
+
 /// Desugars an `if let` into a `match` expression.
 fn desugar_if_let_stmt(
     new_stmts: &mut Vec<Stmt>,
@@ -141,6 +233,12 @@ fn desugar_block(block: &mut Block) {
                 inclusive,
                 body,
             } => desugar_for_stmt(&mut new_stmts, span, &name, start, end, inclusive, body),
+            Stmt::ForIn {
+                span,
+                name,
+                iterable,
+                body,
+            } => desugar_for_in_stmt(&mut new_stmts, span, &name, iterable, body),
             Stmt::While {
                 span,
                 condition,
@@ -188,30 +286,50 @@ fn desugar_block(block: &mut Block) {
                 body,
                 else_body,
             } => desugar_if_let_stmt(&mut new_stmts, span, pattern, value, body, else_body),
+            Stmt::LetPattern {
+                span,
+                mutable,
+                pattern,
+                ty,
+                value,
+            } => {
+                let value = desugar_expr(value);
+                new_stmts.push(Stmt::LetPattern {
+                    span,
+                    mutable,
+                    pattern,
+                    ty,
+                    value,
+                });
+            }
             Stmt::Spawn { span, mut body } => {
-                // V1: spawn executes inline — just desugar the body.
                 desugar_block(&mut body);
                 new_stmts.push(Stmt::Spawn { span, body });
             }
             Stmt::Parallel { span, body } => {
-                let mut desugared = Vec::new();
-                for stmt in body {
-                    match stmt {
-                        Stmt::Spawn { span: s, mut body } => {
-                            desugar_block(&mut body);
-                            desugared.push(Stmt::Spawn { span: s, body });
-                        }
-                        other => desugared.push(other),
-                    }
-                }
-                new_stmts.push(Stmt::Parallel {
-                    span,
-                    body: desugared,
-                });
+                desugar_parallel_stmt(&mut new_stmts, span, body);
             }
         }
     }
     block.stmts = new_stmts;
+}
+
+/// Desugars a `parallel` block by recursively desugaring inner spawn blocks.
+fn desugar_parallel_stmt(new_stmts: &mut Vec<Stmt>, span: kodo_ast::Span, body: Vec<Stmt>) {
+    let mut desugared = Vec::new();
+    for stmt in body {
+        match stmt {
+            Stmt::Spawn { span: s, mut body } => {
+                desugar_block(&mut body);
+                desugared.push(Stmt::Spawn { span: s, body });
+            }
+            other => desugared.push(other),
+        }
+    }
+    new_stmts.push(Stmt::Parallel {
+        span,
+        body: desugared,
+    });
 }
 
 /// Desugars `expr ?? default` into a match on `Option`.
@@ -497,6 +615,18 @@ fn desugar_expr(expr: Expr) -> Expr {
             operand: Box::new(desugar_expr(*operand)),
             span,
         },
+        // StringInterp: `f"hello {name}!"` =>
+        // "hello " + to_string(name) + "!"
+        // where to_string is resolved via method call rewriting for non-String types.
+        Expr::StringInterp { parts, span } => desugar_string_interp(parts, span),
+        Expr::TupleLit(elems, span) => {
+            Expr::TupleLit(elems.into_iter().map(desugar_expr).collect(), span)
+        }
+        Expr::TupleIndex { tuple, index, span } => Expr::TupleIndex {
+            tuple: Box::new(desugar_expr(*tuple)),
+            index,
+            span,
+        },
         e @ (Expr::IntLit(_, _)
         | Expr::FloatLit(_, _)
         | Expr::StringLit(_, _)
@@ -504,6 +634,40 @@ fn desugar_expr(expr: Expr) -> Expr {
         | Expr::Ident(_, _)) => e,
         other => desugar_compound_expr(other),
     }
+}
+
+/// Desugars a string interpolation expression into a chain of string
+/// concatenation using `+`.
+///
+/// `f"hello {name}!"` becomes `"hello " + name + "!"`
+///
+/// Each expression part is concatenated directly. Non-string expressions must
+/// have `.to_string()` called explicitly within the `{...}` braces — this is
+/// consistent with Kodo's "no implicit conversions" principle.
+fn desugar_string_interp(parts: Vec<StringPart>, span: kodo_ast::Span) -> Expr {
+    let mut exprs: Vec<Expr> = Vec::with_capacity(parts.len());
+    for part in parts {
+        match part {
+            StringPart::Literal(s) => {
+                exprs.push(Expr::StringLit(s, span));
+            }
+            StringPart::Expr(expr) => {
+                exprs.push(desugar_expr(*expr));
+            }
+        }
+    }
+
+    // Build a left-associative chain of BinaryOp::Add
+    let mut result = exprs.remove(0);
+    for expr in exprs {
+        result = Expr::BinaryOp {
+            left: Box::new(result),
+            op: BinOp::Add,
+            right: Box::new(expr),
+            span,
+        };
+    }
+    result
 }
 
 #[cfg(test)]
@@ -1795,5 +1959,265 @@ mod tests {
         } else {
             panic!("expected UnaryOp expression");
         }
+    }
+
+    #[test]
+    fn desugar_string_interp_literal_only() {
+        let span = Span::new(0, 10);
+        let parts = vec![StringPart::Literal("hello".to_string())];
+        let result = super::desugar_string_interp(parts, span);
+        assert!(
+            matches!(result, Expr::StringLit(ref s, _) if s == "hello"),
+            "single literal part should produce StringLit, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn desugar_string_interp_with_expr() {
+        let span = Span::new(0, 20);
+        let parts = vec![
+            StringPart::Literal("hello ".to_string()),
+            StringPart::Expr(Box::new(Expr::Ident("name".to_string(), span))),
+            StringPart::Literal("!".to_string()),
+        ];
+        let result = super::desugar_string_interp(parts, span);
+        // Should be: ("hello " + name) + "!"
+        assert!(matches!(result, Expr::BinaryOp { op: BinOp::Add, .. }));
+    }
+
+    #[test]
+    fn desugar_string_interp_single_expr() {
+        let span = Span::new(0, 10);
+        let parts = vec![StringPart::Expr(Box::new(Expr::IntLit(42, span)))];
+        let result = super::desugar_string_interp(parts, span);
+        // Single expr part should produce the expression directly
+        assert!(
+            matches!(result, Expr::IntLit(42, _)),
+            "single expr part should produce the expression directly, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn desugar_string_interp_in_module() {
+        let span = Span::new(0, 30);
+        let mut id_gen = NodeIdGen::new();
+        let mut module = Module {
+            id: id_gen.next_id(),
+            span,
+            name: "test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![kodo_ast::Function {
+                id: id_gen.next_id(),
+                span,
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: kodo_ast::TypeExpr::Named("String".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span,
+                    stmts: vec![Stmt::Expr(Expr::StringInterp {
+                        parts: vec![
+                            StringPart::Literal("count: ".to_string()),
+                            StringPart::Expr(Box::new(Expr::IntLit(42, span))),
+                        ],
+                        span,
+                    })],
+                },
+            }],
+        };
+        desugar_module(&mut module);
+        let body = &module.functions[0].body.stmts;
+        assert_eq!(body.len(), 1);
+        // After desugaring, the StringInterp should become a BinaryOp chain
+        assert!(
+            matches!(&body[0], Stmt::Expr(Expr::BinaryOp { .. })),
+            "StringInterp should be desugared to BinaryOp, got {:?}",
+            body[0]
+        );
+    }
+
+    #[test]
+    fn desugar_for_in_produces_while_loop() {
+        let for_in = Stmt::ForIn {
+            span: Span::new(0, 50),
+            name: "x".to_string(),
+            iterable: Expr::Ident("items".to_string(), Span::new(10, 15)),
+            body: Block {
+                span: Span::new(16, 50),
+                stmts: vec![Stmt::Expr(Expr::Ident("x".to_string(), Span::new(20, 21)))],
+            },
+        };
+
+        let mut block = Block {
+            span: Span::new(0, 50),
+            stmts: vec![for_in],
+        };
+        desugar_block(&mut block);
+
+        // Should produce: let __forin_idx_x = 0, let __forin_len_x = len(items), while ...
+        assert_eq!(block.stmts.len(), 3);
+        assert!(matches!(&block.stmts[0], Stmt::Let { name, .. } if name == "__forin_idx_x"));
+        assert!(matches!(&block.stmts[1], Stmt::Let { name, .. } if name == "__forin_len_x"));
+        assert!(matches!(&block.stmts[2], Stmt::While { .. }));
+    }
+
+    #[test]
+    fn desugar_for_in_while_body_has_let_and_increment() {
+        let for_in = Stmt::ForIn {
+            span: Span::new(0, 50),
+            name: "item".to_string(),
+            iterable: Expr::Ident("data".to_string(), Span::new(10, 14)),
+            body: Block {
+                span: Span::new(15, 50),
+                stmts: vec![Stmt::Expr(Expr::IntLit(42, Span::new(20, 22)))],
+            },
+        };
+
+        let mut block = Block {
+            span: Span::new(0, 50),
+            stmts: vec![for_in],
+        };
+        desugar_block(&mut block);
+
+        if let Stmt::While { body, .. } = &block.stmts[2] {
+            // First stmt: let item = get(data, __forin_idx_item)
+            assert!(matches!(&body.stmts[0], Stmt::Let { name, .. } if name == "item"));
+            // Middle: original body
+            assert!(matches!(&body.stmts[1], Stmt::Expr(Expr::IntLit(42, _))));
+            // Last: __forin_idx_item = __forin_idx_item + 1
+            assert!(
+                matches!(&body.stmts[2], Stmt::Assign { name, .. } if name == "__forin_idx_item")
+            );
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_for_in_len_call() {
+        let for_in = Stmt::ForIn {
+            span: Span::new(0, 50),
+            name: "x".to_string(),
+            iterable: Expr::Ident("list".to_string(), Span::new(10, 14)),
+            body: Block {
+                span: Span::new(15, 50),
+                stmts: vec![],
+            },
+        };
+
+        let mut block = Block {
+            span: Span::new(0, 50),
+            stmts: vec![for_in],
+        };
+        desugar_block(&mut block);
+
+        // Check the len call
+        if let Stmt::Let { value, .. } = &block.stmts[1] {
+            if let Expr::Call { callee, args, .. } = value {
+                assert!(matches!(callee.as_ref(), Expr::Ident(n, _) if n == "len"));
+                assert_eq!(args.len(), 1);
+            } else {
+                panic!("expected Call expression for len");
+            }
+        } else {
+            panic!("expected Let statement for len");
+        }
+    }
+
+    #[test]
+    fn desugar_for_in_get_call() {
+        let for_in = Stmt::ForIn {
+            span: Span::new(0, 50),
+            name: "x".to_string(),
+            iterable: Expr::Ident("list".to_string(), Span::new(10, 14)),
+            body: Block {
+                span: Span::new(15, 50),
+                stmts: vec![],
+            },
+        };
+
+        let mut block = Block {
+            span: Span::new(0, 50),
+            stmts: vec![for_in],
+        };
+        desugar_block(&mut block);
+
+        if let Stmt::While { body, .. } = &block.stmts[2] {
+            if let Stmt::Let { value, .. } = &body.stmts[0] {
+                if let Expr::Call { callee, args, .. } = value {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(n, _) if n == "get"));
+                    assert_eq!(args.len(), 2);
+                } else {
+                    panic!("expected Call expression for get");
+                }
+            } else {
+                panic!("expected Let statement for element binding");
+            }
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_for_in_nested_in_function() {
+        let mut module = Module {
+            id: kodo_ast::NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![kodo_ast::Function {
+                id: kodo_ast::NodeId(1),
+                span: Span::new(0, 100),
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: kodo_ast::TypeExpr::Unit,
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span: Span::new(0, 100),
+                    stmts: vec![Stmt::ForIn {
+                        span: Span::new(5, 90),
+                        name: "x".to_string(),
+                        iterable: Expr::Ident("list".to_string(), Span::new(10, 14)),
+                        body: Block {
+                            span: Span::new(15, 90),
+                            stmts: vec![],
+                        },
+                    }],
+                },
+            }],
+        };
+
+        desugar_module(&mut module);
+
+        // After desugaring, the function body should have the while loop pattern
+        assert_eq!(module.functions[0].body.stmts.len(), 3);
+        assert!(matches!(
+            &module.functions[0].body.stmts[2],
+            Stmt::While { .. }
+        ));
     }
 }

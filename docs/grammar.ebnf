@@ -38,7 +38,8 @@ module_path     = IDENT ( "." IDENT )* ;
 type_decl       = "type" IDENT generic_params? "{" field_list "}" ;
 enum_decl       = "enum" IDENT generic_params? "{" variant_list "}" ;
 
-generic_params  = "<" IDENT ("," IDENT)* ">" ;
+generic_params  = "<" generic_param ("," generic_param)* ">" ;
+generic_param   = IDENT ( ":" IDENT ( "+" IDENT )* )? ;
 field_list      = ( field ("," field)* ","? )? ;
 field           = IDENT ":" type_expr ;
 variant_list    = ( variant ("," variant)* ","? )? ;
@@ -47,6 +48,8 @@ variant         = IDENT ( "(" type_expr ("," type_expr)* ")" )?
 
 type_expr       = IDENT generic_args?           (* named type: Int, List<T> *)
                 | "(" type_list? ")" "->" type_expr  (* function type *)
+                | "(" type_expr ("," type_expr)+ ")"  (* tuple type: (Int, String) *)
+                | "(" type_expr "," ")"           (* single-element tuple: (Int,) *)
                 | "(" ")" ;                      (* unit type *)
 
 generic_args    = "<" type_expr ("," type_expr)* ">" ;
@@ -81,16 +84,19 @@ statement       = let_stmt
                 | assign_stmt
                 | while_stmt
                 | for_stmt
+                | for_in_stmt
                 | return_stmt
                 | spawn_stmt
                 | expr_stmt ;
 
 spawn_stmt      = "spawn" block ;
 
-let_stmt        = "let" "mut"? IDENT (":" type_expr)? "=" expr ;
+let_stmt        = "let" "mut"? IDENT (":" type_expr)? "=" expr
+                | "let" "mut"? pattern (":" type_expr)? "=" expr ;
 assign_stmt     = IDENT "=" expr ;
 while_stmt      = "while" expr block ;
 for_stmt        = "for" IDENT "in" range_expr block ;
+for_in_stmt     = "for" IDENT "in" expr block ;
 return_stmt     = "return" expr? ;
 expr_stmt       = expr ;
 
@@ -121,7 +127,8 @@ unary_expr      = ( "!" | "-" ) unary_expr
 
 postfix_expr    = primary_expr ( call_suffix | field_suffix )* ;
 call_suffix     = "(" arg_list? ")" ;
-field_suffix    = "." IDENT ;
+field_suffix    = "." IDENT
+                | "." INT_LIT ;                   (* tuple index: pair.0 *)
 arg_list        = expr ("," expr)* ;
 
 primary_expr    = FLOAT_LIT
@@ -132,13 +139,16 @@ primary_expr    = FLOAT_LIT
                 | if_expr
                 | match_expr
                 | block
-                | "(" expr ")" ;
+                | "(" expr ")"                    (* grouping *)
+                | "(" expr ("," expr)+ ")"        (* tuple literal: (1, "hello") *)
+                | "(" expr "," ")" ;              (* single-element tuple: (42,) *)
 
 if_expr         = "if" expr block ( "else" ( if_expr | block ) )? ;
 
 match_expr      = "match" expr "{" match_arm ("," match_arm)* ","? "}" ;
 match_arm       = pattern "=>" expr ;
 pattern         = IDENT ( "(" pattern_list? ")" )?
+                | "(" pattern ("," pattern)+ ")"  (* tuple pattern: (a, b, c) *)
                 | INT_LIT
                 | STRING_LIT
                 | "_" ;

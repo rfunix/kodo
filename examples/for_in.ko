@@ -1,0 +1,30 @@
+// For-in loops over collections.
+// Phase 40b feature — iterate over List<T> elements.
+
+module for_in {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates for-in loops over collections"
+        author: "Kodo Team"
+    }
+
+    fn sum_list(items: List<Int>) -> Int {
+        let mut total: Int = 0
+        for x in items {
+            total = total + x
+        }
+        return total
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+        let result: Int = sum_list(nums)
+        print_int(result)
+        return 0
+    }
+}

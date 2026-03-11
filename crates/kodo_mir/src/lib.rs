@@ -370,4 +370,83 @@ mod tests {
             Instruction::DecRef(LocalId(0))
         );
     }
+
+    #[test]
+    fn test_incref_decref_equality() {
+        // IncRef/DecRef on the same local should be equal.
+        assert_eq!(
+            Instruction::IncRef(LocalId(5)),
+            Instruction::IncRef(LocalId(5))
+        );
+        assert_eq!(
+            Instruction::DecRef(LocalId(3)),
+            Instruction::DecRef(LocalId(3))
+        );
+        // Different locals should not be equal.
+        assert_ne!(
+            Instruction::IncRef(LocalId(0)),
+            Instruction::IncRef(LocalId(1))
+        );
+        assert_ne!(
+            Instruction::DecRef(LocalId(0)),
+            Instruction::DecRef(LocalId(1))
+        );
+        // IncRef != DecRef even on the same local.
+        assert_ne!(
+            Instruction::IncRef(LocalId(0)),
+            Instruction::DecRef(LocalId(0))
+        );
+    }
+
+    #[test]
+    fn test_incref_decref_clone() {
+        let inc = Instruction::IncRef(LocalId(7));
+        let cloned = inc.clone();
+        assert_eq!(inc, cloned);
+
+        let dec = Instruction::DecRef(LocalId(3));
+        let cloned_dec = dec.clone();
+        assert_eq!(dec, cloned_dec);
+    }
+
+    #[test]
+    fn test_multiple_rc_instructions_in_block() {
+        let func = MirFunction {
+            name: "multi_rc".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("a".to_string())),
+                    Instruction::Assign(LocalId(1), Value::StringConst("b".to_string())),
+                    Instruction::IncRef(LocalId(0)),
+                    Instruction::DecRef(LocalId(1)),
+                    Instruction::DecRef(LocalId(0)),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        assert!(func.validate().is_ok());
+        // Count RC instructions.
+        let rc_count = func.blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::IncRef(_) | Instruction::DecRef(_)))
+            .count();
+        assert_eq!(rc_count, 3);
+    }
 }

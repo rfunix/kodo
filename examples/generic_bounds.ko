@@ -1,0 +1,47 @@
+module generic_bounds {
+    meta {
+        purpose: "Demonstrates trait bounds on generic type parameters"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    trait Comparable {
+        fn compare(self) -> Int
+    }
+
+    struct User {
+        name: String,
+        age: Int,
+    }
+
+    impl Printable for User {
+        fn display(self) -> String {
+            return "User"
+        }
+    }
+
+    impl Comparable for User {
+        fn compare(self) -> Int {
+            return 0
+        }
+    }
+
+    fn show<T: Printable>(item: T) -> Int {
+        return 0
+    }
+
+    fn process<T: Printable + Comparable>(item: T) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let u: User = User { name: "Alice", age: 30 }
+        let r1: Int = show(u)
+        let u2: User = User { name: "Bob", age: 25 }
+        let r2: Int = process(u2)
+        return 0
+    }
+}

@@ -1,0 +1,38 @@
+module sorted_list {
+    meta {
+        purpose: "Demonstrates trait bounds for a sorted container concept"
+        version: "1.0.0"
+    }
+
+    trait Orderable {
+        fn sort_key(self) -> Int
+    }
+
+    struct Item {
+        priority: Int,
+        label: String,
+    }
+
+    impl Orderable for Item {
+        fn sort_key(self) -> Int {
+            return 0
+        }
+    }
+
+    enum BoundedOption<T: Orderable> {
+        Some(T),
+        None,
+    }
+
+    fn find_max<T: Orderable>(a: T, b: T) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let a: Item = Item { priority: 10, label: "high" }
+        let b: Item = Item { priority: 5, label: "low" }
+        let result: Int = find_max(a, b)
+        let wrapped: BoundedOption<Item> = BoundedOption::Some(Item { priority: 1, label: "x" })
+        return 0
+    }
+}

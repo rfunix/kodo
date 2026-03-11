@@ -11,8 +11,26 @@
 //! - Limitation v1: does not preserve comments
 
 use kodo_ast::{
-    BinOp, Block, EnumDecl, Expr, Function, Module, Pattern, Stmt, TypeDecl, TypeExpr, UnaryOp,
+    BinOp, Block, EnumDecl, Expr, Function, GenericParam, Module, Pattern, Stmt, TypeDecl,
+    TypeExpr, UnaryOp,
 };
+
+/// Formats generic parameters with optional trait bounds.
+///
+/// Produces `T` for unbounded params and `T: Ord + Display` for bounded ones.
+fn format_generic_params(params: &[GenericParam]) -> String {
+    params
+        .iter()
+        .map(|p| {
+            if p.bounds.is_empty() {
+                p.name.clone()
+            } else {
+                format!("{}: {}", p.name, p.bounds.join(" + "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Formats a module into canonical Kōdo source.
 pub fn format_module(module: &Module) -> String {
@@ -85,7 +103,7 @@ fn format_struct(out: &mut String, td: &TypeDecl, level: usize) {
     out.push_str(&format!("struct {}", td.name));
     if !td.generic_params.is_empty() {
         out.push('<');
-        out.push_str(&td.generic_params.join(", "));
+        out.push_str(&format_generic_params(&td.generic_params));
         out.push('>');
     }
     out.push_str(" {\n");
@@ -106,7 +124,7 @@ fn format_enum(out: &mut String, ed: &EnumDecl, level: usize) {
     out.push_str(&format!("enum {}", ed.name));
     if !ed.generic_params.is_empty() {
         out.push('<');
-        out.push_str(&ed.generic_params.join(", "));
+        out.push_str(&format_generic_params(&ed.generic_params));
         out.push('>');
     }
     out.push_str(" {\n");
@@ -157,7 +175,11 @@ fn format_trait(out: &mut String, td: &kodo_ast::TraitDecl, level: usize) {
 
 fn format_impl_block(out: &mut String, ib: &kodo_ast::ImplBlock, level: usize) {
     indent(out, level);
-    out.push_str(&format!("impl {} for {} {{\n", ib.trait_name, ib.type_name));
+    if let Some(ref trait_name) = ib.trait_name {
+        out.push_str(&format!("impl {trait_name} for {} {{\n", ib.type_name));
+    } else {
+        out.push_str(&format!("impl {} {{\n", ib.type_name));
+    }
     for (i, method) in ib.methods.iter().enumerate() {
         format_impl_method(out, method, level + 1);
         if i < ib.methods.len() - 1 {
@@ -223,7 +245,7 @@ fn format_function(out: &mut String, func: &Function, level: usize) {
     out.push_str(&func.name);
     if !func.generic_params.is_empty() {
         out.push('<');
-        out.push_str(&func.generic_params.join(", "));
+        out.push_str(&format_generic_params(&func.generic_params));
         out.push('>');
     }
     out.push('(');
@@ -283,6 +305,24 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             }
             out.push_str(&format!(" = {}\n", format_expr(value)));
         }
+        Stmt::LetPattern {
+            mutable,
+            pattern,
+            ty,
+            value,
+            ..
+        } => {
+            indent(out, level);
+            out.push_str("let ");
+            if *mutable {
+                out.push_str("mut ");
+            }
+            out.push_str(&format_pattern(pattern));
+            if let Some(ty) = ty {
+                out.push_str(&format!(": {}", format_type_expr(ty)));
+            }
+            out.push_str(&format!(" = {}\n", format_expr(value)));
+        }
         Stmt::Assign { name, value, .. } => {
             indent(out, level);
             out.push_str(&format!("{name} = {}\n", format_expr(value)));
@@ -319,6 +359,18 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
                 format_expr(start),
                 format_expr(end)
             ));
+            format_block_inner(out, body, level + 1);
+            indent(out, level);
+            out.push_str("}\n");
+        }
+        Stmt::ForIn {
+            name,
+            iterable,
+            body,
+            ..
+        } => {
+            indent(out, level);
+            out.push_str(&format!("for {name} in {} {{\n", format_expr(iterable)));
             format_block_inner(out, body, level + 1);
             indent(out, level);
             out.push_str("}\n");
@@ -517,6 +569,28 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Await { operand, .. } => {
             format!("{}.await", format_expr(operand))
         }
+        Expr::StringInterp { parts, .. } => {
+            let mut s = String::from("f\"");
+            for part in parts {
+                match part {
+                    kodo_ast::StringPart::Literal(text) => s.push_str(text),
+                    kodo_ast::StringPart::Expr(expr) => {
+                        s.push('{');
+                        s.push_str(&format_expr(expr));
+                        s.push('}');
+                    }
+                }
+            }
+            s.push('"');
+            s
+        }
+        Expr::TupleLit(elems, _) => {
+            let elems_str: Vec<String> = elems.iter().map(format_expr).collect();
+            format!("({})", elems_str.join(", "))
+        }
+        Expr::TupleIndex { tuple, index, .. } => {
+            format!("{}.{index}", format_expr(tuple))
+        }
     }
 }
 
@@ -545,6 +619,10 @@ fn format_pattern(pattern: &Pattern) -> String {
         }
         Pattern::Wildcard(_) => "_".to_string(),
         Pattern::Literal(expr) => format_expr(expr),
+        Pattern::Tuple(pats, _) => {
+            let pats_str: Vec<String> = pats.iter().map(format_pattern).collect();
+            format!("({})", pats_str.join(", "))
+        }
     }
 }
 
@@ -561,5 +639,9 @@ fn format_type_expr(ty: &TypeExpr) -> String {
         }
         TypeExpr::Unit => "()".to_string(),
         TypeExpr::Optional(inner) => format!("{}?", format_type_expr(inner)),
+        TypeExpr::Tuple(elems) => {
+            let elems_str: Vec<String> = elems.iter().map(format_type_expr).collect();
+            format!("({})", elems_str.join(", "))
+        }
     }
 }

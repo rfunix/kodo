@@ -738,7 +738,8 @@ fn declare_channel_builtins(
     Ok(())
 }
 
-/// Declares reference counting builtins (inc, dec for handles and strings).
+/// Declares reference counting builtins (Phase 39: alloc, free, inc, dec,
+/// count for handles and inc/dec for strings).
 fn declare_rc_builtins(
     module: &mut ObjectModule,
     call_conv: CallConv,
@@ -752,8 +753,26 @@ fn declare_rc_builtins(
         }};
     }
 
+    // kodo_alloc(size: i64) -> i64 (returns user-data pointer)
+    {
+        let sig = sig_ret(call_conv, &[types::I64], types::I64);
+        let func_id = declare_builtin(module, "kodo_alloc", &sig)?;
+        builtins.insert("kodo_alloc".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_free(handle: i64) -> void
+    decl_void!("kodo_free", "kodo_free", types::I64);
+
     decl_void!("kodo_rc_inc", "kodo_rc_inc", types::I64);
     decl_void!("kodo_rc_dec", "kodo_rc_dec", types::I64);
+
+    // kodo_rc_count(handle: i64) -> i64
+    {
+        let sig = sig_ret(call_conv, &[types::I64], types::I64);
+        let func_id = declare_builtin(module, "kodo_rc_count", &sig)?;
+        builtins.insert("kodo_rc_count".to_string(), BuiltinInfo { func_id });
+    }
+
     decl_void!(
         "kodo_rc_inc_string",
         "kodo_rc_inc_string",

@@ -83,8 +83,45 @@ impl MirBuilder {
                 // (e.g., assigned to a variable, passed as argument).
                 Ok(Value::FuncRef(closure_name))
             }
+            Expr::TupleLit(elems, _) => {
+                let mut values = Vec::with_capacity(elems.len());
+                for elem in elems {
+                    values.push(self.lower_expr(elem)?);
+                }
+                // Store as an enum variant with discriminant 0 to reuse the
+                // existing composite value infrastructure.
+                let local_id = self.alloc_local(Type::Unknown, false);
+                self.emit(Instruction::Assign(
+                    local_id,
+                    Value::EnumVariant {
+                        enum_name: "__Tuple".to_string(),
+                        variant: "values".to_string(),
+                        discriminant: 0,
+                        args: values,
+                    },
+                ));
+                Ok(Value::Local(local_id))
+            }
+            Expr::TupleIndex { tuple, index, .. } => {
+                let tuple_val = self.lower_expr(tuple)?;
+                let local_id = self.alloc_local(Type::Unknown, false);
+                #[allow(clippy::cast_possible_truncation)]
+                let field_idx = *index as u32;
+                self.emit(Instruction::Assign(
+                    local_id,
+                    Value::EnumPayload {
+                        value: Box::new(tuple_val),
+                        field_index: field_idx,
+                    },
+                ));
+                Ok(Value::Local(local_id))
+            }
             // `Await` in v1: no real suspension — lower the inner expression.
             Expr::Await { operand, .. } => self.lower_expr(operand),
+
+            // StringInterp should be desugared before MIR lowering.
+            // If it appears here, it is a compiler bug — return an empty string.
+            Expr::StringInterp { .. } => Ok(Value::StringConst(String::new())),
         }
     }
 

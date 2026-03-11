@@ -391,7 +391,7 @@ fn run_build(
                 .generic_params
                 .iter()
                 .zip(type_args)
-                .map(|(param, ty)| (param.clone(), type_to_type_expr(ty)))
+                .map(|(param, ty)| (param.name.clone(), type_to_type_expr(ty)))
                 .collect();
             let mut mono_fn = generic_fn;
             mono_fn.name = mono_name.clone();
@@ -753,6 +753,16 @@ fn rewrite_method_calls_in_block(
                 );
                 rewrite_method_calls_in_block(body, resolutions);
             }
+            kodo_ast::Stmt::ForIn { iterable, body, .. } => {
+                *iterable = rewrite_method_calls_in_expr(
+                    std::mem::replace(
+                        iterable,
+                        kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
+                    ),
+                    resolutions,
+                );
+                rewrite_method_calls_in_block(body, resolutions);
+            }
             kodo_ast::Stmt::IfLet {
                 value,
                 body,
@@ -767,6 +777,12 @@ fn rewrite_method_calls_in_block(
                 if let Some(eb) = else_body {
                     rewrite_method_calls_in_block(eb, resolutions);
                 }
+            }
+            kodo_ast::Stmt::LetPattern { value, .. } => {
+                *value = rewrite_method_calls_in_expr(
+                    std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
             }
             kodo_ast::Stmt::Spawn { body, .. } => {
                 rewrite_method_calls_in_block(body, resolutions);
@@ -977,6 +993,30 @@ fn rewrite_method_calls_in_expr(
             operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
             span,
         },
+        kodo_ast::Expr::StringInterp { parts, span } => {
+            let parts = parts
+                .into_iter()
+                .map(|p| match p {
+                    kodo_ast::StringPart::Literal(s) => kodo_ast::StringPart::Literal(s),
+                    kodo_ast::StringPart::Expr(e) => kodo_ast::StringPart::Expr(Box::new(
+                        rewrite_method_calls_in_expr(*e, resolutions),
+                    )),
+                })
+                .collect();
+            kodo_ast::Expr::StringInterp { parts, span }
+        }
+        kodo_ast::Expr::TupleLit(elems, span) => kodo_ast::Expr::TupleLit(
+            elems
+                .into_iter()
+                .map(|e| rewrite_method_calls_in_expr(e, resolutions))
+                .collect(),
+            span,
+        ),
+        kodo_ast::Expr::TupleIndex { tuple, index, span } => kodo_ast::Expr::TupleIndex {
+            tuple: Box::new(rewrite_method_calls_in_expr(*tuple, resolutions)),
+            index,
+            span,
+        },
         // Leaf expressions — no sub-expressions to rewrite
         e @ (kodo_ast::Expr::IntLit(_, _)
         | kodo_ast::Expr::FloatLit(_, _)
@@ -1030,6 +1070,12 @@ fn substitute_type_expr_ast(
         kodo_ast::TypeExpr::Optional(inner) => {
             kodo_ast::TypeExpr::Optional(Box::new(substitute_type_expr_ast(inner, subst)))
         }
+        kodo_ast::TypeExpr::Tuple(elems) => kodo_ast::TypeExpr::Tuple(
+            elems
+                .iter()
+                .map(|e| substitute_type_expr_ast(e, subst))
+                .collect(),
+        ),
     }
 }
 

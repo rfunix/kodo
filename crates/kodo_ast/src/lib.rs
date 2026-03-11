@@ -187,16 +187,17 @@ pub struct TraitMethod {
     pub span: Span,
 }
 
-/// An impl block: `impl TraitName for TypeName { methods }`
+/// An impl block: `impl TraitName for TypeName { methods }` (trait impl)
+/// or `impl TypeName { methods }` (inherent impl).
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
     /// Unique identifier.
     pub id: NodeId,
     /// Source span.
     pub span: Span,
-    /// The trait being implemented.
-    pub trait_name: String,
-    /// The type implementing the trait.
+    /// The trait being implemented, or `None` for inherent impl blocks.
+    pub trait_name: Option<String>,
+    /// The type implementing the trait (or owning inherent methods).
     pub type_name: String,
     /// Method implementations.
     pub methods: Vec<Function>,
@@ -277,6 +278,25 @@ pub struct TypeAlias {
     pub constraint: Option<Expr>,
 }
 
+/// A generic type parameter with optional trait bounds.
+///
+/// Represents a type parameter like `T` or `T: Ord + Display` in generic
+/// declarations. Supports bounded quantification (System F<:) where concrete
+/// type arguments must implement all specified trait bounds.
+///
+/// # Academic Reference
+///
+/// - **\[TAPL\]** Ch. 26 — Bounded quantification (System F<:).
+#[derive(Debug, Clone)]
+pub struct GenericParam {
+    /// The name of the type parameter (e.g., "T").
+    pub name: String,
+    /// Trait bounds that the type parameter must satisfy (e.g., \["Ord", "Display"\]).
+    pub bounds: Vec<String>,
+    /// Source location.
+    pub span: Span,
+}
+
 /// A user-defined struct type declaration: `struct Name<T> { field: Type, ... }`
 #[derive(Debug, Clone)]
 pub struct TypeDecl {
@@ -286,8 +306,8 @@ pub struct TypeDecl {
     pub span: Span,
     /// The struct name.
     pub name: String,
-    /// Generic type parameter names (empty for non-generic structs).
-    pub generic_params: Vec<String>,
+    /// Generic type parameters (empty for non-generic structs).
+    pub generic_params: Vec<GenericParam>,
     /// Fields of the struct.
     pub fields: Vec<FieldDef>,
 }
@@ -323,8 +343,8 @@ pub struct EnumDecl {
     pub span: Span,
     /// The enum name.
     pub name: String,
-    /// Generic type parameter names (empty for non-generic enums).
-    pub generic_params: Vec<String>,
+    /// Generic type parameters (empty for non-generic enums).
+    pub generic_params: Vec<GenericParam>,
     /// Variants of the enum.
     pub variants: Vec<EnumVariant>,
 }
@@ -369,6 +389,8 @@ pub enum Pattern {
     Wildcard(Span),
     /// A literal pattern.
     Literal(Expr),
+    /// A tuple pattern: `(a, b)`.
+    Tuple(Vec<Pattern>, Span),
 }
 
 /// Metadata block declared with the `meta` keyword.
@@ -409,6 +431,8 @@ pub enum TypeExpr {
     Unit,
     /// Optional type shorthand: `T?` is equivalent to `Option<T>`.
     Optional(Box<TypeExpr>),
+    /// A tuple type, e.g. `(Int, String)`.
+    Tuple(Vec<TypeExpr>),
 }
 
 /// A parameter in a closure expression.
@@ -475,8 +499,8 @@ pub struct Function {
     pub name: String,
     /// Whether this is an async function.
     pub is_async: bool,
-    /// Generic type parameter names (empty for non-generic functions).
-    pub generic_params: Vec<String>,
+    /// Generic type parameters (empty for non-generic functions).
+    pub generic_params: Vec<GenericParam>,
     /// Annotations (e.g. `@authored_by`, `@confidence`).
     pub annotations: Vec<Annotation>,
     /// Parameters.
@@ -511,6 +535,19 @@ pub enum Stmt {
         mutable: bool,
         /// Variable name.
         name: String,
+        /// Optional type annotation.
+        ty: Option<TypeExpr>,
+        /// Initializer expression.
+        value: Expr,
+    },
+    /// A `let` binding with pattern destructuring: `let (a, b) = expr`
+    LetPattern {
+        /// Source span.
+        span: Span,
+        /// Whether the bindings are mutable.
+        mutable: bool,
+        /// The pattern to destructure.
+        pattern: Pattern,
         /// Optional type annotation.
         ty: Option<TypeExpr>,
         /// Initializer expression.
@@ -571,6 +608,20 @@ pub enum Stmt {
         /// Optional else body.
         else_body: Option<Block>,
     },
+    /// A `for-in` loop over a collection: `for x in collection { body }`
+    ///
+    /// Unlike [`Stmt::For`] which iterates over integer ranges, this variant
+    /// iterates over any iterable expression (currently `List<T>`).
+    ForIn {
+        /// Source span.
+        span: Span,
+        /// Loop variable name, bound to each element of the iterable.
+        name: String,
+        /// The iterable expression (must be `List<T>`).
+        iterable: Expr,
+        /// Loop body.
+        body: Block,
+    },
     /// Spawn a structured task: `spawn { body }`
     Spawn {
         /// Source span.
@@ -585,6 +636,18 @@ pub enum Stmt {
         /// The body containing spawn statements.
         body: Vec<Stmt>,
     },
+}
+
+/// A part of a string interpolation expression.
+///
+/// F-strings like `f"hello {name}!"` are split into a sequence of parts:
+/// literal text segments and interpolated expressions.
+#[derive(Debug, Clone)]
+pub enum StringPart {
+    /// A literal string segment (e.g., `"hello "` or `"!"`).
+    Literal(String),
+    /// An interpolated expression (e.g., `name` in `{name}`).
+    Expr(Box<Expr>),
 }
 
 /// An expression.
@@ -738,6 +801,27 @@ pub enum Expr {
     Await {
         /// The future to await.
         operand: Box<Expr>,
+        /// Source span.
+        span: Span,
+    },
+    /// String interpolation: `f"hello {name}!"`
+    ///
+    /// Desugared into a chain of string concatenation and `to_string()` calls
+    /// before MIR lowering.
+    StringInterp {
+        /// The parts of the interpolated string.
+        parts: Vec<StringPart>,
+        /// Source location.
+        span: Span,
+    },
+    /// Tuple literal expression, e.g. `(1, "hello")`.
+    TupleLit(Vec<Expr>, Span),
+    /// Tuple index expression, e.g. `tuple.0`.
+    TupleIndex {
+        /// The tuple expression.
+        tuple: Box<Expr>,
+        /// The zero-based field index.
+        index: usize,
         /// Source span.
         span: Span,
     },

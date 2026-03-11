@@ -40,9 +40,10 @@
 
 use kodo_ast::{
     ActorDecl, Annotation, AnnotationArg, BinOp, Block, ClosureParam, EnumDecl, EnumVariant, Expr,
-    FieldDef, FieldInit, Function, ImplBlock, ImportDecl, IntentConfigEntry, IntentConfigValue,
-    IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Ownership, Param, Pattern, Span,
-    Stmt, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr, UnaryOp,
+    FieldDef, FieldInit, Function, GenericParam, ImplBlock, ImportDecl, IntentConfigEntry,
+    IntentConfigValue, IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Ownership, Param,
+    Pattern, Span, Stmt, StringPart, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
+    UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -737,13 +738,20 @@ impl Parser {
     }
 
     /// Parses an impl block: `impl TraitName for TypeName { fn method(self) -> RetType { body } }`
+    /// or an inherent impl block: `impl TypeName { fn method(self) -> RetType { body } }`
     fn parse_impl_block(&mut self) -> Result<ImplBlock> {
         let start = self.expect(&TokenKind::Impl)?.span;
-        let trait_name = self.parse_ident()?;
+        let first_name = self.parse_ident()?;
 
-        // Expect the `for` keyword (reused from for-loop token)
-        self.expect(&TokenKind::For)?;
-        let type_name = self.parse_ident()?;
+        // Determine if this is a trait impl (`impl Trait for Type { ... }`)
+        // or an inherent impl (`impl Type { ... }`).
+        let (trait_name, type_name) = if self.check(&TokenKind::For) {
+            self.advance();
+            let type_name = self.parse_ident()?;
+            (Some(first_name), type_name)
+        } else {
+            (None, first_name)
+        };
         self.expect(&TokenKind::LBrace)?;
 
         let mut methods = Vec::new();
@@ -891,6 +899,71 @@ impl Parser {
         })
     }
 
+    /// Parses the raw content of an f-string into [`StringPart`] segments.
+    ///
+    /// Splits on `{` and `}` delimiters. Text outside braces becomes
+    /// [`StringPart::Literal`], and text inside braces is parsed as an
+    /// expression using a sub-parser.
+    fn parse_fstring_parts(raw: &str, span: Span) -> Result<Vec<StringPart>> {
+        let mut parts = Vec::new();
+        let mut chars = raw.chars().peekable();
+        let mut buf = String::new();
+
+        while let Some(&ch) = chars.peek() {
+            if ch == '{' {
+                // Flush any accumulated literal text
+                if !buf.is_empty() {
+                    parts.push(StringPart::Literal(std::mem::take(&mut buf)));
+                }
+                chars.next(); // consume '{'
+                let mut expr_str = String::new();
+                let mut depth = 1u32;
+                for c in chars.by_ref() {
+                    if c == '{' {
+                        depth += 1;
+                        expr_str.push(c);
+                    } else if c == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                        expr_str.push(c);
+                    } else {
+                        expr_str.push(c);
+                    }
+                }
+                if depth != 0 {
+                    return Err(ParseError::UnexpectedEof {
+                        expected: "closing `}` in f-string interpolation".to_string(),
+                    });
+                }
+                // Parse the expression text using a sub-parser
+                let tokens = kodo_lexer::tokenize(&expr_str).map_err(ParseError::LexError)?;
+                let mut sub_parser = Parser::new(tokens);
+                let expr = sub_parser.parse_expr()?;
+                parts.push(StringPart::Expr(Box::new(expr)));
+            } else {
+                buf.push(ch);
+                chars.next();
+            }
+        }
+
+        // Flush any trailing literal text
+        if !buf.is_empty() {
+            parts.push(StringPart::Literal(buf));
+        }
+
+        // If there are no parts at all (empty f-string), produce a single empty literal
+        if parts.is_empty() {
+            parts.push(StringPart::Literal(String::new()));
+        }
+
+        // Suppress unused variable warning — span is used for error context
+        let _ = span;
+
+        Ok(parts)
+    }
+
     /// Parses a match expression: `match expr { pattern => expr, ... }`
     fn parse_match_expr(&mut self) -> Result<Expr> {
         let start = self.expect(&TokenKind::Match)?.span;
@@ -927,6 +1000,24 @@ impl Parser {
 
     /// Parses a pattern in a match arm.
     fn parse_pattern(&mut self) -> Result<Pattern> {
+        // Tuple pattern: `(a, b, c)`
+        if self.check(&TokenKind::LParen) {
+            let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+            let mut patterns = Vec::new();
+            if !self.check(&TokenKind::RParen) {
+                patterns.push(self.parse_pattern()?);
+                while self.check(&TokenKind::Comma) {
+                    self.advance();
+                    if self.check(&TokenKind::RParen) {
+                        break;
+                    }
+                    patterns.push(self.parse_pattern()?);
+                }
+            }
+            let end = self.expect(&TokenKind::RParen)?.span;
+            return Ok(Pattern::Tuple(patterns, start.merge(end)));
+        }
+
         // Wildcard: `_`
         if let Some(TokenKind::Ident(name)) = self.peek_kind().cloned() {
             if name == "_" {
@@ -1079,6 +1170,31 @@ impl Parser {
             false
         };
 
+        // Check for tuple destructuring: `let (a, b) = expr`
+        if self.check(&TokenKind::LParen) {
+            let pattern = self.parse_pattern()?;
+
+            // Optional type annotation
+            let ty = if self.check(&TokenKind::Colon) {
+                self.advance();
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            self.expect(&TokenKind::Eq)?;
+            let value = self.parse_expr()?;
+            let end = Self::expr_span(&value);
+
+            return Ok(Stmt::LetPattern {
+                span: start.merge(end),
+                mutable,
+                pattern,
+                ty,
+                value,
+            });
+        }
+
         let name = self.parse_ident()?;
 
         // Optional type annotation
@@ -1166,8 +1282,12 @@ impl Parser {
         })
     }
 
-    /// Parses a for loop: `for <ident> in <expr>..<expr> { <body> }` or
-    /// `for <ident> in <expr>..=<expr> { <body> }`.
+    /// Parses a for loop: either a range-based `for <ident> in <expr>..<expr> { <body> }`
+    /// or a collection-based `for <ident> in <expr> { <body> }`.
+    ///
+    /// The parser distinguishes the two forms by checking whether the expression
+    /// after `in` is a range (`Expr::Range`) or any other expression. If a range
+    /// is found, we produce `Stmt::For`; otherwise, `Stmt::ForIn`.
     fn parse_for_stmt(&mut self) -> Result<Stmt> {
         let start = self.expect(&TokenKind::For)?.span;
         let name = self.parse_ident()?;
@@ -1193,9 +1313,10 @@ impl Parser {
             }
         }
 
-        // Parse the range expression (start..end or start..=end).
-        let range_expr = self.parse_expr()?;
-        match range_expr {
+        // Parse the expression after `in`. If it's a range, produce Stmt::For;
+        // otherwise, produce Stmt::ForIn for collection iteration.
+        let iter_expr = self.parse_expr()?;
+        match iter_expr {
             Expr::Range {
                 start: range_start,
                 end: range_end,
@@ -1213,12 +1334,14 @@ impl Parser {
                     body,
                 })
             }
-            other => {
-                let span = Self::expr_span(&other);
-                Err(ParseError::UnexpectedToken {
-                    expected: "range expression (e.g. 0..10 or 0..=10)".to_string(),
-                    found: TokenKind::Ident("expression".to_string()),
-                    span,
+            iterable => {
+                let body = self.parse_block()?;
+                let end_span = body.span;
+                Ok(Stmt::ForIn {
+                    span: start.merge(end_span),
+                    name,
+                    iterable,
+                    body,
                 })
             }
         }
@@ -1423,6 +1546,7 @@ impl Parser {
                 TokenKind::IntLit(_)
                     | TokenKind::FloatLit(_)
                     | TokenKind::StringLit(_)
+                    | TokenKind::FStringLit(_)
                     | TokenKind::True
                     | TokenKind::False
                     | TokenKind::Ident(_)
@@ -1722,6 +1846,17 @@ impl Parser {
                         operand: Box::new(expr),
                         span,
                     };
+                } else if let Some(TokenKind::IntLit(n)) = self.peek_kind().cloned() {
+                    // Tuple index: expr.0, expr.1, etc.
+                    let end = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                    let span = Self::expr_span(&expr).merge(end);
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                    let index = n as usize;
+                    expr = Expr::TupleIndex {
+                        tuple: Box::new(expr),
+                        index,
+                        span,
+                    };
                 } else {
                     // Field access: expr.field
                     let field = self.parse_ident()?;
@@ -1769,6 +1904,11 @@ impl Parser {
             Some(TokenKind::StringLit(s)) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
                 Ok(Expr::StringLit(s, span))
+            }
+            Some(TokenKind::FStringLit(raw)) => {
+                let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
+                let parts = Self::parse_fstring_parts(&raw, span)?;
+                Ok(Expr::StringInterp { parts, span })
             }
             Some(TokenKind::True) => {
                 let span = self.advance().map_or(Span::new(0, 0), |t| t.span);
@@ -1819,12 +1959,7 @@ impl Parser {
                 let block = self.parse_block()?;
                 Ok(Expr::Block(block))
             }
-            Some(TokenKind::LParen) => {
-                self.advance();
-                let expr = self.parse_expr()?;
-                self.expect(&TokenKind::RParen)?;
-                Ok(expr)
-            }
+            Some(TokenKind::LParen) => self.parse_paren_or_tuple_expr(),
             Some(TokenKind::Pipe) => self.parse_closure(),
             Some(TokenKind::PipePipe) => self.parse_empty_closure(),
             Some(other) => {
@@ -1838,6 +1973,38 @@ impl Parser {
             None => Err(ParseError::UnexpectedEof {
                 expected: "expression".to_string(),
             }),
+        }
+    }
+
+    /// Parses a parenthesized expression, which may be a grouping `(expr)`,
+    /// a tuple literal `(a, b)`, or an empty unit `()`.
+    fn parse_paren_or_tuple_expr(&mut self) -> Result<Expr> {
+        let start = self.advance().map_or(Span::new(0, 0), |t| t.span);
+        // Check for empty tuple: `()`
+        if self.check(&TokenKind::RParen) {
+            let end = self.advance().map_or(Span::new(0, 0), |t| t.span);
+            return Ok(Expr::Block(Block {
+                span: start.merge(end),
+                stmts: vec![],
+            }));
+        }
+        let first = self.parse_expr()?;
+        // If comma follows, it's a tuple literal.
+        if self.check(&TokenKind::Comma) {
+            let mut elements = vec![first];
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                if self.check(&TokenKind::RParen) {
+                    break;
+                }
+                elements.push(self.parse_expr()?);
+            }
+            let end = self.expect(&TokenKind::RParen)?.span;
+            Ok(Expr::TupleLit(elements, start.merge(end)))
+        } else {
+            // Grouping: `(expr)`
+            self.expect(&TokenKind::RParen)?;
+            Ok(first)
         }
     }
 
@@ -1948,30 +2115,59 @@ impl Parser {
         })
     }
 
-    /// Parses optional generic type parameters: `<T, U, ...>`.
+    /// Parses optional generic type parameters with optional trait bounds:
+    /// `<T, U>` or `<T: Ord + Display, U: Clone>`.
     ///
     /// Returns an empty vec if no `<` follows the name.
-    fn parse_optional_generic_params(&mut self) -> Result<Vec<String>> {
+    ///
+    /// # Grammar
+    ///
+    /// ```text
+    /// generic_params  = "<" generic_param ("," generic_param)* ">" ;
+    /// generic_param   = IDENT ( ":" IDENT ( "+" IDENT )* )? ;
+    /// ```
+    fn parse_optional_generic_params(&mut self) -> Result<Vec<GenericParam>> {
         if !self.check(&TokenKind::Lt) {
             return Ok(vec![]);
         }
         self.advance(); // consume '<'
-        let mut params = vec![self.parse_ident()?];
+        let mut params = vec![self.parse_generic_param()?];
         while self.check(&TokenKind::Comma) {
             self.advance();
-            params.push(self.parse_ident()?);
+            params.push(self.parse_generic_param()?);
         }
         self.expect(&TokenKind::Gt)?;
         Ok(params)
+    }
+
+    /// Parses a single generic parameter with optional trait bounds: `T` or `T: Ord + Display`.
+    fn parse_generic_param(&mut self) -> Result<GenericParam> {
+        let start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+        let name = self.parse_ident()?;
+        let mut bounds = Vec::new();
+        if self.check(&TokenKind::Colon) {
+            self.advance(); // consume ':'
+            bounds.push(self.parse_ident()?);
+            while self.check(&TokenKind::Plus) {
+                self.advance(); // consume '+'
+                bounds.push(self.parse_ident()?);
+            }
+        }
+        let end = self.prev_span();
+        Ok(GenericParam {
+            name,
+            bounds,
+            span: start.merge(end),
+        })
     }
 
     /// Parses a type expression: named types, generic types like `Option<Int>`,
     /// function types like `(Int, Int) -> Int`, and optional shorthand `T?`
     /// (equivalent to `Option<T>`).
     fn parse_type(&mut self) -> Result<TypeExpr> {
-        // Check for function type: `(Type, ...) -> RetType`
+        // Check for parenthesized type: function, tuple, or unit.
         if self.check(&TokenKind::LParen) {
-            return self.parse_function_type();
+            return self.parse_paren_type();
         }
         let name = self.parse_ident()?;
         // Check for generic type arguments: Name<Type, Type, ...>
@@ -1995,21 +2191,37 @@ impl Parser {
         Ok(base)
     }
 
-    /// Parses a function type: `(Type, ...) -> RetType`.
-    fn parse_function_type(&mut self) -> Result<TypeExpr> {
+    /// Parses a parenthesized type: function type `(Type, ...) -> RetType`,
+    /// tuple type `(Type, Type)`, or unit type `()`.
+    fn parse_paren_type(&mut self) -> Result<TypeExpr> {
         self.expect(&TokenKind::LParen)?;
-        let mut param_types = Vec::new();
+        let mut types = Vec::new();
+        let mut has_trailing_comma = false;
         if !self.check(&TokenKind::RParen) {
-            param_types.push(self.parse_type()?);
+            types.push(self.parse_type()?);
             while self.check(&TokenKind::Comma) {
                 self.advance();
-                param_types.push(self.parse_type()?);
+                has_trailing_comma = true;
+                if self.check(&TokenKind::RParen) {
+                    break;
+                }
+                types.push(self.parse_type()?);
+                has_trailing_comma = false;
             }
         }
         self.expect(&TokenKind::RParen)?;
-        self.expect(&TokenKind::Arrow)?;
-        let ret_type = self.parse_type()?;
-        Ok(TypeExpr::Function(param_types, Box::new(ret_type)))
+        if self.check(&TokenKind::Arrow) {
+            self.advance();
+            let ret_type = self.parse_type()?;
+            return Ok(TypeExpr::Function(types, Box::new(ret_type)));
+        }
+        if types.is_empty() {
+            return Ok(TypeExpr::Unit);
+        }
+        if types.len() > 1 || has_trailing_comma {
+            return Ok(TypeExpr::Tuple(types));
+        }
+        Ok(types.into_iter().next().unwrap_or(TypeExpr::Unit))
     }
 
     /// Parses an identifier and returns its string value.
@@ -2058,7 +2270,10 @@ impl Parser {
             | Expr::Range { span, .. }
             | Expr::Closure { span, .. }
             | Expr::Is { span, .. }
-            | Expr::Await { span, .. } => *span,
+            | Expr::Await { span, .. }
+            | Expr::StringInterp { span, .. }
+            | Expr::TupleLit(_, span)
+            | Expr::TupleIndex { span, .. } => *span,
             Expr::Block(block) => block.span,
         }
     }
@@ -2997,7 +3212,12 @@ mod tests {
         assert_eq!(module.type_decls.len(), 1);
         let decl = &module.type_decls[0];
         assert_eq!(decl.name, "Pair");
-        assert_eq!(decl.generic_params, vec!["T", "U"]);
+        let names: Vec<&str> = decl
+            .generic_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["T", "U"]);
         assert_eq!(decl.fields.len(), 2);
         assert_eq!(decl.fields[0].name, "first");
         assert_eq!(decl.fields[0].ty, TypeExpr::Named("T".to_string()));
@@ -3034,7 +3254,12 @@ mod tests {
         assert_eq!(module.enum_decls.len(), 1);
         let decl = &module.enum_decls[0];
         assert_eq!(decl.name, "Option");
-        assert_eq!(decl.generic_params, vec!["T"]);
+        let names: Vec<&str> = decl
+            .generic_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["T"]);
         assert_eq!(decl.variants.len(), 2);
         assert_eq!(decl.variants[0].name, "Some");
         assert_eq!(
@@ -3075,7 +3300,12 @@ mod tests {
         let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let decl = &module.enum_decls[0];
         assert_eq!(decl.name, "Result");
-        assert_eq!(decl.generic_params, vec!["T", "E"]);
+        let names: Vec<&str> = decl
+            .generic_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["T", "E"]);
         assert_eq!(decl.variants.len(), 2);
         assert_eq!(decl.variants[0].name, "Ok");
         assert_eq!(
@@ -3138,11 +3368,120 @@ mod tests {
 
         let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let decl = &module.type_decls[0];
-        assert_eq!(decl.generic_params, vec!["T"]);
+        let names: Vec<&str> = decl
+            .generic_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["T"]);
         assert_eq!(
             decl.fields[0].ty,
             TypeExpr::Generic("Option".to_string(), vec![TypeExpr::Named("T".to_string())])
         );
+    }
+
+    #[test]
+    fn parse_struct_with_single_bound() {
+        let source = r#"module test {
+            struct SortedList<T: Ord> {
+                items: List<T>,
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.name, "SortedList");
+        assert_eq!(decl.generic_params.len(), 1);
+        assert_eq!(decl.generic_params[0].name, "T");
+        assert_eq!(decl.generic_params[0].bounds, vec!["Ord"]);
+    }
+
+    #[test]
+    fn parse_struct_with_multiple_bounds() {
+        let source = r#"module test {
+            struct Display<T: Ord + Show> {
+                value: T,
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.generic_params[0].name, "T");
+        assert_eq!(decl.generic_params[0].bounds, vec!["Ord", "Show"]);
+    }
+
+    #[test]
+    fn parse_struct_with_mixed_bounds() {
+        let source = r#"module test {
+            struct Pair<T: Ord, U> {
+                first: T,
+                second: U,
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.generic_params.len(), 2);
+        assert_eq!(decl.generic_params[0].name, "T");
+        assert_eq!(decl.generic_params[0].bounds, vec!["Ord"]);
+        assert_eq!(decl.generic_params[1].name, "U");
+        assert!(decl.generic_params[1].bounds.is_empty());
+    }
+
+    #[test]
+    fn parse_enum_with_bounds() {
+        let source = r#"module test {
+            enum Bounded<T: Clone> {
+                Some(T),
+                None,
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.enum_decls[0];
+        assert_eq!(decl.generic_params[0].name, "T");
+        assert_eq!(decl.generic_params[0].bounds, vec!["Clone"]);
+    }
+
+    #[test]
+    fn parse_function_with_bounds() {
+        let source = r#"module test {
+            fn sort<T: Ord>(items: List<T>) -> List<T> {
+                return items
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.generic_params.len(), 1);
+        assert_eq!(func.generic_params[0].name, "T");
+        assert_eq!(func.generic_params[0].bounds, vec!["Ord"]);
+    }
+
+    #[test]
+    fn parse_function_with_multiple_bounded_params() {
+        let source = r#"module test {
+            fn compare<T: Ord + Display, U: Clone>(a: T, b: U) -> Bool {
+                return true
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let func = &module.functions[0];
+        assert_eq!(func.generic_params.len(), 2);
+        assert_eq!(func.generic_params[0].name, "T");
+        assert_eq!(func.generic_params[0].bounds, vec!["Ord", "Display"]);
+        assert_eq!(func.generic_params[1].name, "U");
+        assert_eq!(func.generic_params[1].bounds, vec!["Clone"]);
+    }
+
+    #[test]
+    fn parse_generic_params_no_bounds_preserves_old_behavior() {
+        let source = r#"module test {
+            struct Pair<T, U> {
+                first: T,
+                second: U,
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let decl = &module.type_decls[0];
+        assert_eq!(decl.generic_params.len(), 2);
+        assert!(decl.generic_params[0].bounds.is_empty());
+        assert!(decl.generic_params[1].bounds.is_empty());
     }
 
     #[test]
@@ -3470,7 +3809,10 @@ mod tests {
         }"#;
         let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
         assert_eq!(module.impl_blocks.len(), 1);
-        assert_eq!(module.impl_blocks[0].trait_name, "Describable");
+        assert_eq!(
+            module.impl_blocks[0].trait_name,
+            Some("Describable".to_string())
+        );
         assert_eq!(module.impl_blocks[0].type_name, "Point");
         assert_eq!(module.impl_blocks[0].methods.len(), 1);
         assert_eq!(module.impl_blocks[0].methods[0].name, "describe");
@@ -3479,6 +3821,76 @@ mod tests {
             module.impl_blocks[0].methods[0].params[0].ty,
             TypeExpr::Named("Point".to_string())
         );
+    }
+
+    #[test]
+    fn parse_inherent_impl_block() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            struct Point {
+                x: Int
+                y: Int
+            }
+            impl Point {
+                fn distance(self) -> Float64 {
+                    return 0.0
+                }
+                fn translate(self, dx: Int) -> Int {
+                    return self.x + dx
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.impl_blocks.len(), 1);
+        assert_eq!(module.impl_blocks[0].trait_name, None);
+        assert_eq!(module.impl_blocks[0].type_name, "Point");
+        assert_eq!(module.impl_blocks[0].methods.len(), 2);
+        assert_eq!(module.impl_blocks[0].methods[0].name, "distance");
+        assert_eq!(module.impl_blocks[0].methods[1].name, "translate");
+        // Self param should be resolved to Point
+        assert_eq!(
+            module.impl_blocks[0].methods[0].params[0].ty,
+            TypeExpr::Named("Point".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_inherent_and_trait_impl_same_type() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            struct Point {
+                x: Int
+                y: Int
+            }
+            trait Describable {
+                fn describe(self) -> Int
+            }
+            impl Point {
+                fn distance(self) -> Int {
+                    return self.x
+                }
+            }
+            impl Describable for Point {
+                fn describe(self) -> Int {
+                    return self.x + self.y
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.impl_blocks.len(), 2);
+        // First: inherent
+        assert_eq!(module.impl_blocks[0].trait_name, None);
+        assert_eq!(module.impl_blocks[0].type_name, "Point");
+        assert_eq!(module.impl_blocks[0].methods[0].name, "distance");
+        // Second: trait impl
+        assert_eq!(
+            module.impl_blocks[1].trait_name,
+            Some("Describable".to_string())
+        );
+        assert_eq!(module.impl_blocks[1].type_name, "Point");
+        assert_eq!(module.impl_blocks[1].methods[0].name, "describe");
     }
 
     #[test]
@@ -4016,6 +4428,533 @@ mod tests {
         fn snapshot_error_missing_brace() {
             let err = parse("module test { fn foo() }").unwrap_err();
             insta::assert_snapshot!(err.to_string());
+        }
+    }
+
+    #[test]
+    fn parse_fstring_simple() {
+        let module =
+            parse(r#"module test { fn main() -> String { return f"hello {name}!" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        assert_eq!(body.len(), 1);
+        if let Stmt::Return {
+            value: Some(expr), ..
+        } = &body[0]
+        {
+            if let Expr::StringInterp { parts, .. } = expr {
+                assert_eq!(parts.len(), 3);
+                assert!(matches!(&parts[0], StringPart::Literal(s) if s == "hello "));
+                assert!(matches!(&parts[1], StringPart::Expr(_)));
+                assert!(matches!(&parts[2], StringPart::Literal(s) if s == "!"));
+            } else {
+                panic!("expected StringInterp, got {expr:?}");
+            }
+        } else {
+            panic!("expected Return statement");
+        }
+    }
+
+    #[test]
+    fn parse_fstring_no_interpolation() {
+        let module =
+            parse(r#"module test { fn main() -> String { return f"just text" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::Return {
+            value: Some(Expr::StringInterp { parts, .. }),
+            ..
+        } = &body[0]
+        {
+            assert_eq!(parts.len(), 1);
+            assert!(matches!(&parts[0], StringPart::Literal(s) if s == "just text"));
+        } else {
+            panic!("expected StringInterp");
+        }
+    }
+
+    #[test]
+    fn parse_fstring_multiple_exprs() {
+        let module =
+            parse(r#"module test { fn main() -> String { return f"{a} and {b}" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::Return {
+            value: Some(Expr::StringInterp { parts, .. }),
+            ..
+        } = &body[0]
+        {
+            assert_eq!(parts.len(), 3);
+            assert!(matches!(&parts[0], StringPart::Expr(_)));
+            assert!(matches!(&parts[1], StringPart::Literal(s) if s == " and "));
+            assert!(matches!(&parts[2], StringPart::Expr(_)));
+        } else {
+            panic!("expected StringInterp");
+        }
+    }
+
+    #[test]
+    fn parse_fstring_complex_expr() {
+        let module =
+            parse(r#"module test { fn main() -> String { return f"result: {x + 1}" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::Return {
+            value: Some(Expr::StringInterp { parts, .. }),
+            ..
+        } = &body[0]
+        {
+            assert_eq!(parts.len(), 2);
+            assert!(matches!(&parts[0], StringPart::Literal(s) if s == "result: "));
+            if let StringPart::Expr(expr) = &parts[1] {
+                assert!(matches!(expr.as_ref(), Expr::BinaryOp { .. }));
+            } else {
+                panic!("expected Expr part");
+            }
+        } else {
+            panic!("expected StringInterp");
+        }
+    }
+
+    #[test]
+    fn parse_fstring_empty() {
+        let module = parse(r#"module test { fn main() -> String { return f"" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::Return {
+            value: Some(Expr::StringInterp { parts, .. }),
+            ..
+        } = &body[0]
+        {
+            assert_eq!(parts.len(), 1);
+            assert!(matches!(&parts[0], StringPart::Literal(s) if s.is_empty()));
+        } else {
+            panic!("expected StringInterp");
+        }
+    }
+
+    #[test]
+    fn parse_fstring_adjacent_exprs() {
+        let module = parse(r#"module test { fn main() -> String { return f"{a}{b}" } }"#).unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::Return {
+            value: Some(Expr::StringInterp { parts, .. }),
+            ..
+        } = &body[0]
+        {
+            assert_eq!(parts.len(), 2);
+            assert!(matches!(&parts[0], StringPart::Expr(_)));
+            assert!(matches!(&parts[1], StringPart::Expr(_)));
+        } else {
+            panic!("expected StringInterp");
+        }
+    }
+
+    #[test]
+    fn parse_for_in_with_ident_iterable() {
+        let source = r#"module test {
+            fn main() {
+                for x in items {
+                    print_int(x)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn {
+                name,
+                iterable,
+                body,
+                ..
+            } => {
+                assert_eq!(name, "x");
+                assert!(matches!(iterable, Expr::Ident(n, _) if n == "items"));
+                assert_eq!(body.stmts.len(), 1);
+            }
+            other => panic!("expected ForIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_with_call_iterable() {
+        let source = r#"module test {
+            fn main() {
+                for x in get_list() {
+                    print_int(x)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { name, iterable, .. } => {
+                assert_eq!(name, "x");
+                assert!(matches!(iterable, Expr::Call { .. }));
+            }
+            other => panic!("expected ForIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_nested_body() {
+        let source = r#"module test {
+            fn main() {
+                for item in collection {
+                    let y: Int = 1
+                    print_int(y)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { body, .. } => {
+                assert_eq!(body.stmts.len(), 2);
+            }
+            other => panic!("expected ForIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_does_not_break_range_for() {
+        let source = r#"module test {
+            fn main() {
+                for i in 0..10 {
+                    print_int(i)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(&stmts[0], Stmt::For { .. }));
+    }
+
+    #[test]
+    fn parse_for_in_inclusive_range_still_works() {
+        let source = r#"module test {
+            fn main() {
+                for i in 0..=10 {
+                    print_int(i)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(
+            &stmts[0],
+            Stmt::For {
+                inclusive: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_for_in_field_access_iterable() {
+        let source = r#"module test {
+            fn main() {
+                for x in data.items {
+                    print_int(x)
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { iterable, .. } => {
+                assert!(matches!(iterable, Expr::FieldAccess { .. }));
+            }
+            other => panic!("expected ForIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_in_empty_body() {
+        let source = r#"module test {
+            fn main() {
+                for x in items {
+                }
+            }
+        }"#;
+
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::ForIn { body, .. } => {
+                assert!(body.stmts.is_empty());
+            }
+            other => panic!("expected ForIn, got {other:?}"),
+        }
+    }
+
+    // ========== Tuple tests ==========
+
+    #[test]
+    fn parse_tuple_type_pair() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(t: (Int, String)) {}
+            }"#,
+        )
+        .unwrap();
+        let param_ty = &module.functions[0].params[0].ty;
+        match param_ty {
+            TypeExpr::Tuple(elems) => {
+                assert_eq!(elems.len(), 2);
+                assert_eq!(elems[0], TypeExpr::Named("Int".to_string()));
+                assert_eq!(elems[1], TypeExpr::Named("String".to_string()));
+            }
+            other => panic!("expected Tuple, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tuple_type_single_trailing_comma() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(t: (Int,)) {}
+            }"#,
+        )
+        .unwrap();
+        let param_ty = &module.functions[0].params[0].ty;
+        match param_ty {
+            TypeExpr::Tuple(elems) => {
+                assert_eq!(elems.len(), 1);
+                assert_eq!(elems[0], TypeExpr::Named("Int".to_string()));
+            }
+            other => panic!("expected single-element Tuple, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tuple_type_triple() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(t: (Int, Bool, String)) {}
+            }"#,
+        )
+        .unwrap();
+        let param_ty = &module.functions[0].params[0].ty;
+        match param_ty {
+            TypeExpr::Tuple(elems) => assert_eq!(elems.len(), 3),
+            other => panic!("expected Tuple, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tuple_literal() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let t = (1, 2, 3)
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        if let Stmt::Let { value, .. } = &body.stmts[0] {
+            match value {
+                Expr::TupleLit(elems, _) => assert_eq!(elems.len(), 3),
+                other => panic!("expected TupleLit, got {other:?}"),
+            }
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_tuple_literal_two_elements() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let t = (42, true)
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        if let Stmt::Let { value, .. } = &body.stmts[0] {
+            match value {
+                Expr::TupleLit(elems, _) => {
+                    assert_eq!(elems.len(), 2);
+                    assert!(matches!(elems[0], Expr::IntLit(42, _)));
+                    assert!(matches!(elems[1], Expr::BoolLit(true, _)));
+                }
+                other => panic!("expected TupleLit, got {other:?}"),
+            }
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_tuple_index() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let t = (1, 2)
+                    let a = t.0
+                    let b = t.1
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        if let Stmt::Let { value, .. } = &body.stmts[1] {
+            match value {
+                Expr::TupleIndex { index, .. } => assert_eq!(*index, 0),
+                other => panic!("expected TupleIndex, got {other:?}"),
+            }
+        } else {
+            panic!("expected Let statement");
+        }
+        if let Stmt::Let { value, .. } = &body.stmts[2] {
+            match value {
+                Expr::TupleIndex { index, .. } => assert_eq!(*index, 1),
+                other => panic!("expected TupleIndex, got {other:?}"),
+            }
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn parse_tuple_pattern_in_let() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let (a, b) = (1, 2)
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        match &body.stmts[0] {
+            Stmt::LetPattern { pattern, .. } => {
+                if let Pattern::Tuple(pats, _) = pattern {
+                    assert_eq!(pats.len(), 2);
+                } else {
+                    panic!("expected Tuple pattern, got {pattern:?}");
+                }
+            }
+            other => panic!("expected LetPattern, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tuple_pattern_triple() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let (a, b, c) = (1, 2, 3)
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        match &body.stmts[0] {
+            Stmt::LetPattern { pattern, .. } => {
+                if let Pattern::Tuple(pats, _) = pattern {
+                    assert_eq!(pats.len(), 3);
+                } else {
+                    panic!("expected Tuple pattern");
+                }
+            }
+            other => panic!("expected LetPattern, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_function_type_still_works() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(f: (Int, Int) -> Bool) {}
+            }"#,
+        )
+        .unwrap();
+        let param_ty = &module.functions[0].params[0].ty;
+        match param_ty {
+            TypeExpr::Function(params, ret) => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(**ret, TypeExpr::Named("Bool".to_string()));
+            }
+            other => panic!("expected Function type, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_paren_grouping_not_tuple() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    let x = (42)
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body;
+        if let Stmt::Let { value, .. } = &body.stmts[0] {
+            assert!(
+                matches!(value, Expr::IntLit(42, _)),
+                "expected IntLit(42), got {value:?}"
+            );
+        } else {
+            panic!("expected Let");
+        }
+    }
+
+    #[test]
+    fn parse_tuple_as_return_type() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() -> (Int, String) {
+                    return (1, "hello")
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            module.functions[0].return_type,
+            TypeExpr::Tuple(_)
+        ));
+    }
+
+    #[test]
+    fn parse_nested_tuple_type() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(t: (Int, (Bool, String))) {}
+            }"#,
+        )
+        .unwrap();
+        let param_ty = &module.functions[0].params[0].ty;
+        match param_ty {
+            TypeExpr::Tuple(elems) => {
+                assert_eq!(elems.len(), 2);
+                assert!(matches!(&elems[1], TypeExpr::Tuple(inner) if inner.len() == 2));
+            }
+            other => panic!("expected Tuple, got {other:?}"),
         }
     }
 }

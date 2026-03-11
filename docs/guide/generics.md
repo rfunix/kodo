@@ -97,6 +97,58 @@ let b: Int = identity(99)
 
 The compiler generates a specialized `identity` for `Int` at compile time.
 
+## Trait Bounds
+
+You can constrain generic type parameters to require specific trait implementations. This is called **bounded quantification** (System F<:) and ensures that only types satisfying the required interface can be used.
+
+### Single Bound
+
+```
+fn display<T: Printable>(item: T) -> String {
+    return item.display()
+}
+```
+
+The `T: Printable` means "any type `T` that implements the `Printable` trait". If you try to call `display` with a type that does not implement `Printable`, the compiler will reject it with error E0232.
+
+### Multiple Bounds
+
+Use `+` to require multiple traits:
+
+```
+fn process<T: Printable + Comparable>(item: T) -> Int {
+    return item.compare()
+}
+```
+
+Here `T` must implement both `Printable` and `Comparable`.
+
+### Bounds on Structs and Enums
+
+Structs and enums can also have trait bounds on their type parameters:
+
+```
+enum SortedOption<T: Orderable> {
+    Some(T),
+    None
+}
+```
+
+Any type used as the argument to `SortedOption` must implement `Orderable`.
+
+### Mixed Bounded and Unbounded Parameters
+
+You can mix bounded and unbounded parameters:
+
+```
+struct Pair<T: Ord, U> {
+    first: T,
+    second: U,
+}
+```
+
+Here `T` must implement `Ord`, but `U` can be any type.
+
 ## How Monomorphization Works
 
 When you write `Option<Int>`, the compiler doesn't create a single generic implementation that works for all types. Instead, it creates a **separate, concrete** type called `Option__Int` with `Int` substituted everywhere `T` appeared.

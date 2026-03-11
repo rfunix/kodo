@@ -1,11 +1,12 @@
 //! Basic MIR optimization passes.
 //!
-//! This module implements four optimization passes that run after MIR lowering:
+//! This module implements five optimization passes that run after MIR lowering:
 //!
 //! 1. **Function inlining** — Inlines small, non-recursive function calls.
 //! 2. **Constant folding** — Evaluates compile-time constant expressions.
 //! 3. **Dead code elimination** — Removes unused local assignments.
 //! 4. **Copy propagation** — Replaces copies with their source values.
+//! 5. **RC pair elimination** — Removes redundant `IncRef`/`DecRef` pairs.
 //!
 //! ## Academic References
 //!
@@ -28,6 +29,7 @@ use crate::{BasicBlock, Instruction, Local, LocalId, MirFunction, Terminator, Va
 /// 1. Constant folding
 /// 2. Dead code elimination
 /// 3. Copy propagation
+/// 4. RC pair elimination
 ///
 /// This variant does **not** perform function inlining. Use
 /// [`optimize_all`] to run the full pipeline including inlining.
@@ -35,6 +37,7 @@ pub fn optimize_function(func: &mut MirFunction) {
     constant_fold(func);
     dead_code_eliminate(func);
     copy_propagate(func);
+    eliminate_rc_pairs(func);
 }
 
 /// Applies all optimization passes — including function inlining — to a
@@ -65,6 +68,7 @@ pub fn optimize_all(functions: &mut [MirFunction]) {
         constant_fold(func);
         dead_code_eliminate(func);
         copy_propagate(func);
+        eliminate_rc_pairs(func);
     }
 }
 
@@ -715,6 +719,49 @@ fn substitute_value(value: &mut Value, copies: &HashMap<LocalId, LocalId>) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pass 4: RC Pair Elimination
+// ---------------------------------------------------------------------------
+
+/// Removes redundant adjacent `IncRef(x)` / `DecRef(x)` pairs (in either
+/// order) within a basic block.
+///
+/// An `IncRef(x)` immediately followed by `DecRef(x)` — or `DecRef(x)`
+/// immediately followed by `IncRef(x)` — is a no-op from a reference
+/// counting perspective and can be safely eliminated.
+///
+/// This is a peephole optimization that runs after copy propagation so
+/// that copy-resolved locals are already substituted.
+pub fn eliminate_rc_pairs(func: &mut MirFunction) {
+    for block in &mut func.blocks {
+        let mut new_instructions: Vec<Instruction> = Vec::with_capacity(block.instructions.len());
+        let mut skip_next = false;
+
+        for i in 0..block.instructions.len() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+
+            if i + 1 < block.instructions.len() {
+                let is_pair = match (&block.instructions[i], &block.instructions[i + 1]) {
+                    (Instruction::IncRef(a), Instruction::DecRef(b)) if a == b => true,
+                    (Instruction::DecRef(a), Instruction::IncRef(b)) if a == b => true,
+                    _ => false,
+                };
+                if is_pair {
+                    skip_next = true;
+                    continue;
+                }
+            }
+
+            new_instructions.push(block.instructions[i].clone());
+        }
+
+        block.instructions = new_instructions;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1226,6 +1273,176 @@ mod tests {
         assert!(
             has_five,
             "Inlined const_five should produce Assign(_, IntConst(5))"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // RC pair elimination tests
+    // -------------------------------------------------------------------
+
+    fn make_rc_function(instructions: Vec<Instruction>) -> MirFunction {
+        MirFunction {
+            name: "test_rc".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::String,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::String,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions,
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        }
+    }
+
+    #[test]
+    fn rc_pair_inc_dec_same_local_eliminated() {
+        let mut func = make_rc_function(vec![
+            Instruction::IncRef(LocalId(0)),
+            Instruction::DecRef(LocalId(0)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert!(
+            func.blocks[0].instructions.is_empty(),
+            "IncRef/DecRef pair on same local should be eliminated"
+        );
+    }
+
+    #[test]
+    fn rc_pair_dec_inc_same_local_eliminated() {
+        let mut func = make_rc_function(vec![
+            Instruction::DecRef(LocalId(0)),
+            Instruction::IncRef(LocalId(0)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert!(
+            func.blocks[0].instructions.is_empty(),
+            "DecRef/IncRef pair on same local should be eliminated"
+        );
+    }
+
+    #[test]
+    fn rc_pair_different_locals_preserved() {
+        let mut func = make_rc_function(vec![
+            Instruction::IncRef(LocalId(0)),
+            Instruction::DecRef(LocalId(1)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert_eq!(
+            func.blocks[0].instructions.len(),
+            2,
+            "IncRef/DecRef on different locals should NOT be eliminated"
+        );
+    }
+
+    #[test]
+    fn rc_pair_with_intervening_instruction_preserved() {
+        let mut func = make_rc_function(vec![
+            Instruction::IncRef(LocalId(0)),
+            Instruction::Assign(LocalId(1), Value::IntConst(42)),
+            Instruction::DecRef(LocalId(0)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert_eq!(
+            func.blocks[0].instructions.len(),
+            3,
+            "Non-adjacent IncRef/DecRef should NOT be eliminated"
+        );
+    }
+
+    #[test]
+    fn rc_pair_multiple_pairs_eliminated() {
+        let mut func = make_rc_function(vec![
+            Instruction::IncRef(LocalId(0)),
+            Instruction::DecRef(LocalId(0)),
+            Instruction::IncRef(LocalId(1)),
+            Instruction::DecRef(LocalId(1)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert!(
+            func.blocks[0].instructions.is_empty(),
+            "Multiple redundant RC pairs should all be eliminated"
+        );
+    }
+
+    #[test]
+    fn rc_pair_mixed_with_other_instructions() {
+        let mut func = make_rc_function(vec![
+            Instruction::Assign(LocalId(0), Value::StringConst("hello".to_string())),
+            Instruction::IncRef(LocalId(0)),
+            Instruction::DecRef(LocalId(0)),
+            Instruction::Assign(LocalId(1), Value::IntConst(10)),
+        ]);
+        eliminate_rc_pairs(&mut func);
+        assert_eq!(func.blocks[0].instructions.len(), 2);
+        assert!(matches!(
+            func.blocks[0].instructions[0],
+            Instruction::Assign(LocalId(0), _)
+        ));
+        assert!(matches!(
+            func.blocks[0].instructions[1],
+            Instruction::Assign(LocalId(1), _)
+        ));
+    }
+
+    #[test]
+    fn rc_pair_single_incref_preserved() {
+        let mut func = make_rc_function(vec![Instruction::IncRef(LocalId(0))]);
+        eliminate_rc_pairs(&mut func);
+        assert_eq!(func.blocks[0].instructions.len(), 1);
+    }
+
+    #[test]
+    fn rc_pair_single_decref_preserved() {
+        let mut func = make_rc_function(vec![Instruction::DecRef(LocalId(0))]);
+        eliminate_rc_pairs(&mut func);
+        assert_eq!(func.blocks[0].instructions.len(), 1);
+    }
+
+    #[test]
+    fn rc_pair_empty_block_no_crash() {
+        let mut func = make_rc_function(vec![]);
+        eliminate_rc_pairs(&mut func);
+        assert!(func.blocks[0].instructions.is_empty());
+    }
+
+    #[test]
+    fn rc_optimize_function_includes_rc_elimination() {
+        // Verify that optimize_function calls eliminate_rc_pairs.
+        let mut func = MirFunction {
+            name: "test_opt_rc".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::IncRef(LocalId(0)),
+                    Instruction::DecRef(LocalId(0)),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        optimize_function(&mut func);
+        assert!(
+            func.blocks[0].instructions.is_empty(),
+            "optimize_function should eliminate redundant RC pairs"
         );
     }
 }

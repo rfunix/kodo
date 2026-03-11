@@ -29,6 +29,13 @@ impl TypeChecker {
                 value,
                 ..
             } => self.check_let_stmt(*span, name, ty.as_ref(), value),
+            Stmt::LetPattern {
+                span,
+                pattern,
+                ty: _,
+                value,
+                ..
+            } => self.check_let_pattern_stmt(*span, pattern, value),
             Stmt::Return { span, value } => self.check_return_stmt(*span, value.as_ref()),
             Stmt::Expr(expr) => {
                 self.infer_expr(expr)?;
@@ -52,36 +59,21 @@ impl TypeChecker {
             } => self.check_for_stmt(*span, name, start, end, body),
             Stmt::Assign {
                 span, name, value, ..
-            } => {
-                let value_ty = self.infer_expr(value)?;
-                let existing_ty = self.env.lookup(name).cloned().ok_or_else(|| {
-                    let similar = self.find_similar_name(name);
-                    TypeError::Undefined {
-                        name: name.clone(),
-                        span: *span,
-                        similar,
-                    }
-                })?;
-                TypeEnv::check_eq(&existing_ty, &value_ty, *span)?;
-                Ok(())
-            }
+            } => self.check_assign_stmt(*span, name, value),
+            Stmt::ForIn {
+                span,
+                name,
+                iterable,
+                body,
+                ..
+            } => self.check_for_in_stmt(*span, name, iterable, body),
             Stmt::IfLet {
                 pattern,
                 value,
                 body,
                 else_body,
                 ..
-            } => {
-                let val_ty = self.infer_expr(value)?;
-                let scope = self.env.scope_level();
-                self.introduce_pattern_bindings(pattern, &val_ty);
-                self.check_block(body)?;
-                self.env.truncate(scope);
-                if let Some(else_block) = else_body {
-                    self.check_block(else_block)?;
-                }
-                Ok(())
-            }
+            } => self.check_if_let_stmt(pattern, value, body, else_body.as_ref()),
             Stmt::Spawn { body, .. } => {
                 self.check_block(body)?;
                 Ok(())
@@ -129,6 +121,18 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Checks a `let` statement with a destructuring pattern (e.g., `let (a, b) = expr`).
+    fn check_let_pattern_stmt(
+        &mut self,
+        _span: kodo_ast::Span,
+        pattern: &kodo_ast::Pattern,
+        value: &Expr,
+    ) -> crate::Result<()> {
+        let val_ty = self.infer_expr(value)?;
+        self.introduce_pattern_bindings(pattern, &val_ty);
+        Ok(())
+    }
+
     /// Checks a `return` statement: verifies value type matches function return type.
     fn check_return_stmt(
         &mut self,
@@ -147,6 +151,73 @@ impl TypeChecker {
                     span,
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// Checks an assignment statement: verifies target exists and types match.
+    fn check_assign_stmt(
+        &mut self,
+        span: kodo_ast::Span,
+        name: &str,
+        value: &Expr,
+    ) -> crate::Result<()> {
+        let value_ty = self.infer_expr(value)?;
+        let existing_ty = self.env.lookup(name).cloned().ok_or_else(|| {
+            let similar = self.find_similar_name(name);
+            TypeError::Undefined {
+                name: name.to_string(),
+                span,
+                similar,
+            }
+        })?;
+        TypeEnv::check_eq(&existing_ty, &value_ty, span)?;
+        Ok(())
+    }
+
+    /// Checks a `for .. in` loop: verifies iterable is `List<T>`, binds loop variable to `T`.
+    fn check_for_in_stmt(
+        &mut self,
+        _span: kodo_ast::Span,
+        name: &str,
+        iterable: &Expr,
+        body: &kodo_ast::Block,
+    ) -> crate::Result<()> {
+        let iter_ty = self.infer_expr(iterable)?;
+        let elem_ty = match &iter_ty {
+            Type::Generic(name_str, args) if name_str == "List" && args.len() == 1 => {
+                args[0].clone()
+            }
+            _ => {
+                return Err(TypeError::Mismatch {
+                    expected: "List<T>".to_string(),
+                    found: format!("{iter_ty}"),
+                    span: expr_span(iterable),
+                });
+            }
+        };
+        let scope = self.env.scope_level();
+        self.env.insert(name.to_string(), elem_ty);
+        self.check_block(body)?;
+        self.env.truncate(scope);
+        Ok(())
+    }
+
+    /// Checks an `if let` statement: infers value, binds pattern, checks branches.
+    fn check_if_let_stmt(
+        &mut self,
+        pattern: &kodo_ast::Pattern,
+        value: &Expr,
+        body: &kodo_ast::Block,
+        else_body: Option<&kodo_ast::Block>,
+    ) -> crate::Result<()> {
+        let val_ty = self.infer_expr(value)?;
+        let scope = self.env.scope_level();
+        self.introduce_pattern_bindings(pattern, &val_ty);
+        self.check_block(body)?;
+        self.env.truncate(scope);
+        if let Some(else_block) = else_body {
+            self.check_block(else_block)?;
         }
         Ok(())
     }

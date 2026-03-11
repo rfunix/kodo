@@ -133,6 +133,13 @@ impl TypeChecker {
                 let r = Self::substitute_type_expr(ret, subst, span, enum_names)?;
                 Ok(Type::Function(p?, Box::new(r)))
             }
+            kodo_ast::TypeExpr::Tuple(elems) => {
+                let resolved: std::result::Result<Vec<_>, _> = elems
+                    .iter()
+                    .map(|e| Self::substitute_type_expr(e, subst, span, enum_names))
+                    .collect();
+                Ok(Type::Tuple(resolved?))
+            }
         }
     }
 
@@ -147,6 +154,8 @@ impl TypeChecker {
         if self.mono_cache.contains(mono_name) {
             return Ok(());
         }
+        // Check trait bounds before monomorphizing.
+        self.check_trait_bounds(&def.params, &def.bounds, args, span)?;
         self.mono_cache.insert(mono_name.to_string());
 
         let subst: std::collections::HashMap<String, Type> = def
@@ -180,6 +189,8 @@ impl TypeChecker {
         if self.mono_cache.contains(mono_name) {
             return Ok(());
         }
+        // Check trait bounds before monomorphizing.
+        self.check_trait_bounds(&def.params, &def.bounds, args, span)?;
         self.mono_cache.insert(mono_name.to_string());
 
         let subst: std::collections::HashMap<String, Type> = def

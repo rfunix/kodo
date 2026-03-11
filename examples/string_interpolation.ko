@@ -1,0 +1,31 @@
+// String interpolation with f-strings.
+// Phase 38b feature.
+
+module string_interpolation {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates f-string interpolation"
+        author: "Kodo Team"
+    }
+
+    fn greet(name: String) -> String {
+        return f"Hello, {name}!"
+    }
+
+    fn format_point(x: Int, y: Int) -> String {
+        return f"Point({x}, {y})"
+    }
+
+    fn main() -> Int {
+        let msg: String = greet("World")
+        print(msg)
+
+        let desc: String = format_point(3, 4)
+        print(desc)
+
+        let count: Int = 42
+        print(f"The answer is {count}")
+
+        return 0
+    }
+}

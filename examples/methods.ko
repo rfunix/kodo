@@ -1,0 +1,52 @@
+// Inherent impl blocks — methods on structs without requiring a trait.
+// Phase 38a feature.
+
+module methods {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates inherent impl blocks for struct methods"
+        author: "Kodo Team"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int,
+    }
+
+    impl Point {
+        fn translate(self, dx: Int, dy: Int) -> Point {
+            return Point { x: self.x + dx, y: self.y + dy }
+        }
+
+        fn sum(self) -> Int {
+            return self.x + self.y
+        }
+    }
+
+    struct Counter {
+        value: Int,
+    }
+
+    impl Counter {
+        fn increment(self) -> Counter {
+            return Counter { value: self.value + 1 }
+        }
+
+        fn get(self) -> Int {
+            return self.value
+        }
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 3, y: 4 }
+        let moved: Point = p.translate(1, 2)
+        print_int(moved.sum())
+
+        let c: Counter = Counter { value: 0 }
+        let c2: Counter = c.increment()
+        let c3: Counter = c2.increment()
+        print_int(c3.get())
+
+        return 0
+    }
+}

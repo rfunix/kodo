@@ -85,6 +85,21 @@ impl MirBuilder {
             Expr::Closure { body, .. } => {
                 Self::collect_free_vars(body, params, free, seen);
             }
+            Expr::StringInterp { parts, .. } => {
+                for part in parts {
+                    if let kodo_ast::StringPart::Expr(expr) = part {
+                        Self::collect_free_vars(expr, params, free, seen);
+                    }
+                }
+            }
+            Expr::TupleLit(elems, _) => {
+                for elem in elems {
+                    Self::collect_free_vars(elem, params, free, seen);
+                }
+            }
+            Expr::TupleIndex { tuple, .. } => {
+                Self::collect_free_vars(tuple, params, free, seen);
+            }
             // Literals and other expressions have no free variables.
             Expr::IntLit(..)
             | Expr::FloatLit(..)
@@ -105,7 +120,9 @@ impl MirBuilder {
         seen: &mut std::collections::HashSet<String>,
     ) {
         match stmt {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
+            Stmt::Let { value, .. }
+            | Stmt::Assign { value, .. }
+            | Stmt::LetPattern { value, .. } => {
                 Self::collect_free_vars(value, params, free, seen);
             }
             Stmt::Return { value, .. } => {
@@ -129,6 +146,13 @@ impl MirBuilder {
             } => {
                 Self::collect_free_vars(start, params, free, seen);
                 Self::collect_free_vars(end, params, free, seen);
+                for s in &body.stmts {
+                    Self::collect_free_vars_in_stmt(s, params, free, seen);
+                }
+            }
+            // ForIn is desugared before MIR lowering.
+            Stmt::ForIn { iterable, body, .. } => {
+                Self::collect_free_vars(iterable, params, free, seen);
                 for s in &body.stmts {
                     Self::collect_free_vars_in_stmt(s, params, free, seen);
                 }

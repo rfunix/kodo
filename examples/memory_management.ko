@@ -1,0 +1,38 @@
+// Reference counting memory management.
+// Phase 39 feature — automatic deallocation when refcount reaches zero.
+
+module memory_management {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates reference counting for heap-allocated values"
+        author: "Kodo Team"
+    }
+
+    struct Node {
+        value: Int,
+    }
+
+    fn create_node(val: Int) -> Node {
+        return Node { value: val }
+    }
+
+    fn process(n: Node) -> Int {
+        return n.value
+    }
+
+    fn main() -> Int {
+        // Struct allocated on heap with RC header
+        let n1: Node = create_node(10)
+        let n2: Node = create_node(20)
+
+        // Passing by value — RC tracks references
+        let r1: Int = process(n1)
+        let r2: Int = process(n2)
+
+        // String concatenation allocates dynamically
+        let greeting: String = "Hello" + " " + "World"
+        print(greeting)
+
+        return r1 + r2
+    }
+}

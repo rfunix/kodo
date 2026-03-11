@@ -161,6 +161,12 @@ pub enum TokenKind {
         Some(s[1..s.len()-1].to_string())
     })]
     StringLit(String),
+    /// An f-string literal for string interpolation: `f"hello {name}!"`.
+    ///
+    /// The raw content between the quotes is preserved (including `{expr}` markers).
+    /// The parser is responsible for splitting this into literal and expression parts.
+    #[regex(r#"f"[^"]*""#, lex_fstring)]
+    FStringLit(String),
 
     // --- Identifiers ---
     /// An identifier.
@@ -287,6 +293,18 @@ pub enum TokenKind {
     /// A line comment starting with `//`.
     #[regex(r"//[^\n]*", allow_greedy = true)]
     LineComment,
+}
+
+/// Lexer callback for f-string literals.
+///
+/// Extracts the content between `f"` and `"`, preserving `{expr}` markers
+/// for the parser to process. Returns `Option<String>` as required by the
+/// logos callback interface.
+#[allow(clippy::unnecessary_wraps)]
+fn lex_fstring(lex: &mut logos::Lexer<'_, TokenKind>) -> Option<String> {
+    let s = lex.slice();
+    // Strip leading `f"` and trailing `"`
+    Some(s[2..s.len() - 1].to_string())
 }
 
 /// A token with its kind and source span.
@@ -646,6 +664,52 @@ mod tests {
             kinds,
             vec![&TokenKind::Own, &TokenKind::Ref, &TokenKind::Is]
         );
+    }
+
+    #[test]
+    fn tokenize_fstring_simple() {
+        let tokens = tokenize(r#"f"hello {name}!""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "hello {name}!"));
+    }
+
+    #[test]
+    fn tokenize_fstring_no_interpolation() {
+        let tokens = tokenize(r#"f"just text""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "just text"));
+    }
+
+    #[test]
+    fn tokenize_fstring_empty() {
+        let tokens = tokenize(r#"f"""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s.is_empty()));
+    }
+
+    #[test]
+    fn tokenize_fstring_multiple_exprs() {
+        let tokens = tokenize(r#"f"{a} and {b}""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "{a} and {b}"));
+    }
+
+    #[test]
+    fn tokenize_fstring_vs_string() {
+        // Regular string should still work
+        let tokens_str = tokenize(r#""hello""#).unwrap_or_default();
+        assert!(matches!(tokens_str[0].kind, TokenKind::StringLit(_)));
+
+        // f-string is different
+        let tokens_fstr = tokenize(r#"f"hello""#).unwrap_or_default();
+        assert!(matches!(tokens_fstr[0].kind, TokenKind::FStringLit(_)));
+    }
+
+    #[test]
+    fn tokenize_fstring_with_expr() {
+        let tokens = tokenize(r#"f"value: {x + 1}""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "value: {x + 1}"));
     }
 
     mod proptest_fuzz {

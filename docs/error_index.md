@@ -289,6 +289,22 @@ error[E0231]: missing trait method `to_string` for trait `Printable` at 5:1
    | ^^^^^^^^^^^^^^^^^^^^^^^^ add missing method: `fn to_string(self) -> String`
 ```
 
+### E0232: Trait Bound Not Satisfied
+A concrete type does not satisfy a trait bound required by a generic parameter.
+This implements bounded quantification (System F<:) — when a generic parameter
+declares trait bounds like `T: Ord + Display`, any concrete type argument must
+implement all specified traits.
+
+```
+error[E0232]: type `Int` does not implement trait `Hashable` required by generic parameter `T` at 10:12
+  --> src/main.ko:10:12
+   |
+10 |     lookup(42)
+   |            ^^ type `Int` does not implement trait `Hashable`
+   |
+   = help: implement trait `Hashable` for type `Int`, or use a type that already implements it
+```
+
 ### E0235: Method Not Found
 A method was called on a type that does not have it.
 
@@ -316,6 +332,17 @@ A borrowed reference cannot escape the scope that created it.
 
 ### E0242: Move of Borrowed Value
 A value cannot be moved while it is currently borrowed by another variable.
+
+### E0253: Tuple Index Out of Bounds
+A tuple index exceeds the number of elements in the tuple type.
+
+```
+error[E0253]: tuple index 3 is out of bounds for tuple of length 2
+  --> src/main.ko:6:20
+   |
+ 6 |     let x = pair.3
+   |                  ^ tuple has 2 elements, valid indices are 0..1
+```
 
 ### E0260: Low Confidence Without Review
 A function annotated with `@confidence(X)` where X < 0.8 is missing a `@reviewed_by(human: "...")` annotation. Agent-generated code with low confidence must be reviewed by a human.

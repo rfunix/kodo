@@ -128,7 +128,7 @@ pub(crate) fn translate_instruction(
             struct_layouts,
         ),
         Instruction::IncRef(local_id) => {
-            // Phase 1: call kodo_rc_inc with the handle value (no-op stub).
+            // Call kodo_rc_inc to increment the reference count.
             if let Ok(var) = var_map.get(*local_id) {
                 let handle_val = builder.use_var(var);
                 if let Some(bi) = builtins.get("kodo_rc_inc") {

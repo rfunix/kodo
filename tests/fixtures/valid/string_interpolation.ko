@@ -1,0 +1,11 @@
+module string_interpolation {
+    meta {
+        purpose: "Test f-string interpolation syntax",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn greet(name: String) -> String {
+        return f"Hello {name}!"
+    }
+}

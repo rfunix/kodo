@@ -175,7 +175,10 @@ pub fn expr_span(expr: &Expr) -> Span {
         | Expr::Range { span, .. }
         | Expr::Closure { span, .. }
         | Expr::Is { span, .. }
-        | Expr::Await { span, .. } => *span,
+        | Expr::Await { span, .. }
+        | Expr::StringInterp { span, .. }
+        | Expr::TupleLit(_, span)
+        | Expr::TupleIndex { span, .. } => *span,
         Expr::Block(block) => block.span,
     }
 }
@@ -336,6 +339,24 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
         // Await is not valid in contracts.
         Expr::Await { span, .. } => Err(ContractError::InvalidExpression {
             message: "await is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // String interpolation is not valid in contracts.
+        Expr::StringInterp { span, .. } => Err(ContractError::InvalidExpression {
+            message: "string interpolation is not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Tuple literals are not valid in contracts.
+        Expr::TupleLit(_, span) => Err(ContractError::InvalidExpression {
+            message: "tuple literals are not allowed in contract expressions".to_string(),
+            span: *span,
+        }),
+
+        // Tuple index is not valid in contracts.
+        Expr::TupleIndex { span, .. } => Err(ContractError::InvalidExpression {
+            message: "tuple index is not allowed in contract expressions".to_string(),
             span: *span,
         }),
     }

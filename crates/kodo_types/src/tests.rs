@@ -87,6 +87,15 @@ fn make_module(functions: Vec<Function>) -> Module {
     }
 }
 
+/// Creates a `GenericParam` with no bounds for test convenience.
+fn gp(name: &str) -> kodo_ast::GenericParam {
+    kodo_ast::GenericParam {
+        name: name.to_string(),
+        bounds: vec![],
+        span: Span::new(0, 0),
+    }
+}
+
 /// Helper to build a function with the given body statements.
 fn make_function(
     name: &str,
@@ -1037,7 +1046,7 @@ fn monomorphize_option_int_registers_in_enum_registry() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Option".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         variants: vec![
             kodo_ast::EnumVariant {
                 name: "Some".to_string(),
@@ -1092,7 +1101,7 @@ fn wrong_type_arg_count_error_e0221() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Option".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         variants: vec![
             kodo_ast::EnumVariant {
                 name: "Some".to_string(),
@@ -1142,7 +1151,7 @@ fn missing_type_args_error_e0223() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Option".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         variants: vec![
             kodo_ast::EnumVariant {
                 name: "Some".to_string(),
@@ -1186,7 +1195,7 @@ fn generic_enum_some_and_none_typecheck() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Option".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         variants: vec![
             kodo_ast::EnumVariant {
                 name: "Some".to_string(),
@@ -1252,7 +1261,7 @@ fn generic_enum_type_mismatch_in_some_fails() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Option".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         variants: vec![
             kodo_ast::EnumVariant {
                 name: "Some".to_string(),
@@ -1298,7 +1307,7 @@ fn generic_struct_monomorphizes_correctly() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Wrapper".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         fields: vec![kodo_ast::FieldDef {
             name: "value".to_string(),
             ty: TypeExpr::Named("T".to_string()),
@@ -1336,7 +1345,7 @@ fn wrong_type_arg_count_for_generic_struct() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Wrapper".to_string(),
-        generic_params: vec!["T".to_string()],
+        generic_params: vec![gp("T")],
         fields: vec![kodo_ast::FieldDef {
             name: "value".to_string(),
             ty: TypeExpr::Named("T".to_string()),
@@ -1578,7 +1587,7 @@ fn check_trait_and_impl_basic() {
         impl_blocks: vec![kodo_ast::ImplBlock {
             id: NodeId(3),
             span: Span::new(120, 180),
-            trait_name: "Summable".to_string(),
+            trait_name: Some("Summable".to_string()),
             type_name: "Point".to_string(),
             methods: vec![Function {
                 id: NodeId(4),
@@ -1679,7 +1688,7 @@ fn check_unknown_trait_error() {
         impl_blocks: vec![kodo_ast::ImplBlock {
             id: NodeId(1),
             span: Span::new(50, 80),
-            trait_name: "NonExistent".to_string(),
+            trait_name: Some("NonExistent".to_string()),
             type_name: "Int".to_string(),
             methods: vec![],
         }],
@@ -1743,7 +1752,7 @@ fn check_missing_trait_method_error() {
         impl_blocks: vec![kodo_ast::ImplBlock {
             id: NodeId(3),
             span: Span::new(80, 95),
-            trait_name: "Describable".to_string(),
+            trait_name: Some("Describable".to_string()),
             type_name: "Point".to_string(),
             methods: vec![],
         }],
@@ -1756,6 +1765,394 @@ fn check_missing_trait_method_error() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.code(), "E0231");
+}
+
+#[test]
+fn check_inherent_impl_registers_methods() {
+    let module = Module {
+        id: NodeId(0),
+        span: Span::new(0, 250),
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span: Span::new(0, 50),
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test".to_string(),
+                span: Span::new(10, 40),
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![kodo_ast::TypeDecl {
+            id: NodeId(1),
+            span: Span::new(50, 80),
+            name: "Point".to_string(),
+            generic_params: vec![],
+            fields: vec![
+                kodo_ast::FieldDef {
+                    name: "x".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    span: Span::new(55, 60),
+                },
+                kodo_ast::FieldDef {
+                    name: "y".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    span: Span::new(65, 70),
+                },
+            ],
+        }],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![kodo_ast::ImplBlock {
+            id: NodeId(2),
+            span: Span::new(80, 160),
+            trait_name: None,
+            type_name: "Point".to_string(),
+            methods: vec![Function {
+                id: NodeId(3),
+                span: Span::new(85, 155),
+                name: "sum".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![kodo_ast::Param {
+                    name: "self".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Point".to_string()),
+                    span: Span::new(90, 94),
+                    ownership: kodo_ast::Ownership::Owned,
+                }],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: kodo_ast::Block {
+                    span: Span::new(100, 155),
+                    stmts: vec![kodo_ast::Stmt::Return {
+                        span: Span::new(105, 150),
+                        value: Some(Expr::BinaryOp {
+                            left: Box::new(Expr::FieldAccess {
+                                object: Box::new(Expr::Ident(
+                                    "self".to_string(),
+                                    Span::new(112, 116),
+                                )),
+                                field: "x".to_string(),
+                                span: Span::new(112, 118),
+                            }),
+                            op: kodo_ast::BinOp::Add,
+                            right: Box::new(Expr::FieldAccess {
+                                object: Box::new(Expr::Ident(
+                                    "self".to_string(),
+                                    Span::new(121, 125),
+                                )),
+                                field: "y".to_string(),
+                                span: Span::new(121, 127),
+                            }),
+                            span: Span::new(112, 127),
+                        }),
+                    }],
+                },
+            }],
+        }],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        functions: vec![Function {
+            id: NodeId(4),
+            span: Span::new(160, 200),
+            name: "main".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: kodo_ast::Block {
+                span: Span::new(165, 200),
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: Span::new(170, 198),
+                    value: Some(Expr::IntLit(0, Span::new(177, 178))),
+                }],
+            },
+        }],
+    };
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "inherent impl should type check: {result:?}"
+    );
+
+    // Verify method lookup was registered
+    let lookup = checker.method_lookup();
+    assert!(
+        lookup.contains_key(&("Point".to_string(), "sum".to_string())),
+        "method lookup should contain Point.sum from inherent impl"
+    );
+}
+
+#[test]
+fn check_inherent_impl_no_trait_required() {
+    // Inherent impl should not require a trait to be defined.
+    let module = Module {
+        id: NodeId(0),
+        span: Span::new(0, 200),
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span: Span::new(0, 50),
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test".to_string(),
+                span: Span::new(10, 40),
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![kodo_ast::TypeDecl {
+            id: NodeId(1),
+            span: Span::new(50, 80),
+            name: "Point".to_string(),
+            generic_params: vec![],
+            fields: vec![kodo_ast::FieldDef {
+                name: "x".to_string(),
+                ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                span: Span::new(55, 60),
+            }],
+        }],
+        enum_decls: vec![],
+        trait_decls: vec![], // No traits defined
+        impl_blocks: vec![kodo_ast::ImplBlock {
+            id: NodeId(2),
+            span: Span::new(80, 140),
+            trait_name: None, // Inherent impl
+            type_name: "Point".to_string(),
+            methods: vec![Function {
+                id: NodeId(3),
+                span: Span::new(85, 135),
+                name: "get_x".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![kodo_ast::Param {
+                    name: "self".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Point".to_string()),
+                    span: Span::new(90, 94),
+                    ownership: kodo_ast::Ownership::Owned,
+                }],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: kodo_ast::Block {
+                    span: Span::new(100, 135),
+                    stmts: vec![kodo_ast::Stmt::Return {
+                        span: Span::new(105, 130),
+                        value: Some(Expr::FieldAccess {
+                            object: Box::new(Expr::Ident("self".to_string(), Span::new(112, 116))),
+                            field: "x".to_string(),
+                            span: Span::new(112, 118),
+                        }),
+                    }],
+                },
+            }],
+        }],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        functions: vec![Function {
+            id: NodeId(4),
+            span: Span::new(140, 180),
+            name: "main".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: kodo_ast::Block {
+                span: Span::new(145, 180),
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: Span::new(150, 178),
+                    value: Some(Expr::IntLit(0, Span::new(157, 158))),
+                }],
+            },
+        }],
+    };
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "inherent impl without traits should type check: {result:?}"
+    );
+
+    let lookup = checker.method_lookup();
+    assert!(
+        lookup.contains_key(&("Point".to_string(), "get_x".to_string())),
+        "method lookup should contain Point.get_x from inherent impl"
+    );
+}
+
+#[test]
+fn check_inherent_and_trait_impl_same_type() {
+    let module = Module {
+        id: NodeId(0),
+        span: Span::new(0, 300),
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span: Span::new(0, 50),
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test".to_string(),
+                span: Span::new(10, 40),
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![kodo_ast::TypeDecl {
+            id: NodeId(1),
+            span: Span::new(50, 80),
+            name: "Point".to_string(),
+            generic_params: vec![],
+            fields: vec![kodo_ast::FieldDef {
+                name: "x".to_string(),
+                ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                span: Span::new(55, 60),
+            }],
+        }],
+        enum_decls: vec![],
+        trait_decls: vec![kodo_ast::TraitDecl {
+            id: NodeId(2),
+            span: Span::new(80, 120),
+            name: "Summable".to_string(),
+            methods: vec![kodo_ast::TraitMethod {
+                name: "sum".to_string(),
+                params: vec![kodo_ast::Param {
+                    name: "self".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Self".to_string()),
+                    span: Span::new(90, 94),
+                    ownership: kodo_ast::Ownership::Owned,
+                }],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                has_self: true,
+                span: Span::new(85, 115),
+            }],
+        }],
+        impl_blocks: vec![
+            // Inherent impl
+            kodo_ast::ImplBlock {
+                id: NodeId(3),
+                span: Span::new(120, 170),
+                trait_name: None,
+                type_name: "Point".to_string(),
+                methods: vec![Function {
+                    id: NodeId(4),
+                    span: Span::new(125, 165),
+                    name: "get_x".to_string(),
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![kodo_ast::Param {
+                        name: "self".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Point".to_string()),
+                        span: Span::new(130, 134),
+                        ownership: kodo_ast::Ownership::Owned,
+                    }],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    requires: vec![],
+                    ensures: vec![],
+                    body: kodo_ast::Block {
+                        span: Span::new(140, 165),
+                        stmts: vec![kodo_ast::Stmt::Return {
+                            span: Span::new(145, 160),
+                            value: Some(Expr::FieldAccess {
+                                object: Box::new(Expr::Ident(
+                                    "self".to_string(),
+                                    Span::new(152, 156),
+                                )),
+                                field: "x".to_string(),
+                                span: Span::new(152, 158),
+                            }),
+                        }],
+                    },
+                }],
+            },
+            // Trait impl
+            kodo_ast::ImplBlock {
+                id: NodeId(5),
+                span: Span::new(170, 230),
+                trait_name: Some("Summable".to_string()),
+                type_name: "Point".to_string(),
+                methods: vec![Function {
+                    id: NodeId(6),
+                    span: Span::new(175, 225),
+                    name: "sum".to_string(),
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![kodo_ast::Param {
+                        name: "self".to_string(),
+                        ty: kodo_ast::TypeExpr::Named("Point".to_string()),
+                        span: Span::new(180, 184),
+                        ownership: kodo_ast::Ownership::Owned,
+                    }],
+                    return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    requires: vec![],
+                    ensures: vec![],
+                    body: kodo_ast::Block {
+                        span: Span::new(190, 225),
+                        stmts: vec![kodo_ast::Stmt::Return {
+                            span: Span::new(195, 220),
+                            value: Some(Expr::FieldAccess {
+                                object: Box::new(Expr::Ident(
+                                    "self".to_string(),
+                                    Span::new(202, 206),
+                                )),
+                                field: "x".to_string(),
+                                span: Span::new(202, 208),
+                            }),
+                        }],
+                    },
+                }],
+            },
+        ],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        functions: vec![Function {
+            id: NodeId(7),
+            span: Span::new(230, 270),
+            name: "main".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: kodo_ast::Block {
+                span: Span::new(235, 270),
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: Span::new(240, 268),
+                    value: Some(Expr::IntLit(0, Span::new(247, 248))),
+                }],
+            },
+        }],
+    };
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "inherent + trait impl on same type should type check: {result:?}"
+    );
+
+    let lookup = checker.method_lookup();
+    assert!(
+        lookup.contains_key(&("Point".to_string(), "get_x".to_string())),
+        "should contain inherent method Point.get_x"
+    );
+    assert!(
+        lookup.contains_key(&("Point".to_string(), "sum".to_string())),
+        "should contain trait method Point.sum"
+    );
 }
 
 #[test]
@@ -2735,4 +3132,594 @@ fn definition_spans_populated_after_check() {
         spans.contains_key("my_func"),
         "should have definition span for my_func"
     );
+}
+
+// ===== Phase 37: Trait Bound Tests =====
+
+#[test]
+fn trait_bound_satisfied_generic_fn() {
+    let source = r#"module test {
+    meta {
+        purpose: "test trait bounds"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    struct MyType {
+        value: Int,
+    }
+
+    impl Printable for MyType {
+        fn display(self) -> String {
+            return "hello"
+        }
+    }
+
+    fn show<T: Printable>(item: T) -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        let x: MyType = MyType { value: 1 }
+        return show(x)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "should pass: MyType implements Printable");
+}
+
+#[test]
+fn trait_bound_not_satisfied_generic_fn() {
+    let source = r#"module test {
+    meta {
+        purpose: "test trait bounds"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    struct MyType {
+        value: Int,
+    }
+
+    fn show<T: Printable>(item: T) -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        let x: MyType = MyType { value: 1 }
+        return show(x)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "should fail: MyType does not implement Printable"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0232");
+}
+
+#[test]
+fn trait_bound_multiple_bounds_all_satisfied() {
+    let source = r#"module test {
+    meta {
+        purpose: "test multiple trait bounds"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    trait Comparable {
+        fn compare(self) -> Int
+    }
+
+    struct MyType {
+        value: Int,
+    }
+
+    impl Printable for MyType {
+        fn display(self) -> String {
+            return "hello"
+        }
+    }
+
+    impl Comparable for MyType {
+        fn compare(self) -> Int {
+            return 0
+        }
+    }
+
+    fn process<T: Printable + Comparable>(item: T) -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        let x: MyType = MyType { value: 1 }
+        return process(x)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "should pass: MyType implements both Printable and Comparable"
+    );
+}
+
+#[test]
+fn trait_bound_multiple_bounds_one_missing() {
+    let source = r#"module test {
+    meta {
+        purpose: "test multiple trait bounds"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    trait Comparable {
+        fn compare(self) -> Int
+    }
+
+    struct MyType {
+        value: Int,
+    }
+
+    impl Printable for MyType {
+        fn display(self) -> String {
+            return "hello"
+        }
+    }
+
+    fn process<T: Printable + Comparable>(item: T) -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        let x: MyType = MyType { value: 1 }
+        return process(x)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should fail: MyType missing Comparable");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0232");
+}
+
+#[test]
+fn trait_bound_on_enum_generic_not_satisfied() {
+    let source = r#"module test {
+    meta {
+        purpose: "test enum generic bounds"
+        version: "1.0.0"
+    }
+
+    trait Sortable {
+        fn sort_key(self) -> Int
+    }
+
+    enum Wrapper<T: Sortable> {
+        Val(T),
+        Empty,
+    }
+
+    struct Item {
+        val: Int,
+    }
+
+    fn main() -> Int {
+        let w: Wrapper<Item> = Wrapper::Val(Item { val: 1 })
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "should fail: Item does not implement Sortable"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0232");
+}
+
+#[test]
+fn trait_bound_on_enum_generic_satisfied() {
+    let source = r#"module test {
+    meta {
+        purpose: "test enum generic bounds"
+        version: "1.0.0"
+    }
+
+    trait Sortable {
+        fn sort_key(self) -> Int
+    }
+
+    enum Wrapper<T: Sortable> {
+        Val(T),
+        Empty,
+    }
+
+    struct Item {
+        val: Int,
+    }
+
+    impl Sortable for Item {
+        fn sort_key(self) -> Int {
+            return 0
+        }
+    }
+
+    fn main() -> Int {
+        let w: Wrapper<Item> = Wrapper::Val(Item { val: 1 })
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "should pass: Item implements Sortable");
+}
+
+#[test]
+fn trait_bound_on_enum_generic() {
+    let source = r#"module test {
+    meta {
+        purpose: "test enum generic bounds"
+        version: "1.0.0"
+    }
+
+    trait Printable {
+        fn display(self) -> String
+    }
+
+    enum Container<T: Printable> {
+        Some(T),
+        None,
+    }
+
+    struct Msg {
+        text: String,
+    }
+
+    impl Printable for Msg {
+        fn display(self) -> String {
+            return "msg"
+        }
+    }
+
+    fn main() -> Int {
+        let c: Container<Msg> = Container::Some(Msg { text: "hi" })
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "should pass: Msg implements Printable");
+}
+
+#[test]
+fn trait_bound_no_bounds_still_works() {
+    let source = r#"module test {
+    meta {
+        purpose: "test no bounds"
+        version: "1.0.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        return identity(42)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "should pass: no bounds to check");
+}
+
+#[test]
+fn trait_bound_error_message_quality() {
+    let source = r#"module test {
+    meta {
+        purpose: "test error message"
+        version: "1.0.0"
+    }
+
+    trait Hashable {
+        fn hash(self) -> Int
+    }
+
+    fn lookup<T: Hashable>(key: T) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        return lookup(42)
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0232");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Hashable"),
+        "error should mention the trait name: {msg}"
+    );
+    assert!(
+        msg.contains("T"),
+        "error should mention the param name: {msg}"
+    );
+}
+
+#[test]
+fn trait_impl_set_populated() {
+    let source = r#"module test {
+    meta {
+        purpose: "test"
+        version: "1.0.0"
+    }
+
+    trait MyTrait {
+        fn method(self) -> Int
+    }
+
+    struct MyType {
+        x: Int,
+    }
+
+    impl MyTrait for MyType {
+        fn method(self) -> Int {
+            return 0
+        }
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let _ = checker.check_module(&module);
+    assert!(
+        checker.type_implements_trait("MyType", "MyTrait"),
+        "MyType should implement MyTrait after check_module"
+    );
+    assert!(
+        !checker.type_implements_trait("MyType", "NonExistent"),
+        "MyType should not implement NonExistent"
+    );
+}
+
+#[test]
+fn trait_bound_generic_param_struct() {
+    // Verify that GenericParam correctly carries bounds from parser
+    let source = r#"module test {
+        struct Container<T: Ord + Display, U: Clone> {
+            first: T,
+            second: U,
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let decl = &module.type_decls[0];
+    assert_eq!(decl.generic_params.len(), 2);
+    assert_eq!(decl.generic_params[0].name, "T");
+    assert_eq!(decl.generic_params[0].bounds, vec!["Ord", "Display"]);
+    assert_eq!(decl.generic_params[1].name, "U");
+    assert_eq!(decl.generic_params[1].bounds, vec!["Clone"]);
+}
+
+#[test]
+fn for_in_list_int_passes() {
+    let func = make_function(
+        "main",
+        vec![Param {
+            name: "items".to_string(),
+            ty: TypeExpr::Generic("List".to_string(), vec![TypeExpr::Named("Int".to_string())]),
+            span: Span::new(0, 20),
+            ownership: kodo_ast::Ownership::Owned,
+        }],
+        TypeExpr::Unit,
+        vec![Stmt::ForIn {
+            span: Span::new(0, 50),
+            name: "x".to_string(),
+            iterable: Expr::Ident("items".to_string(), Span::new(10, 15)),
+            body: Block {
+                span: Span::new(16, 50),
+                stmts: vec![],
+            },
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn for_in_non_list_fails() {
+    let func = make_function(
+        "main",
+        vec![Param {
+            name: "x".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            span: Span::new(0, 10),
+            ownership: kodo_ast::Ownership::Owned,
+        }],
+        TypeExpr::Unit,
+        vec![Stmt::ForIn {
+            span: Span::new(0, 40),
+            name: "item".to_string(),
+            iterable: Expr::Ident("x".to_string(), Span::new(15, 16)),
+            body: Block {
+                span: Span::new(17, 40),
+                stmts: vec![],
+            },
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("type mismatch"));
+}
+
+#[test]
+fn for_in_list_string_binds_string() {
+    // for x in items { print(x) }  where items: List<String>
+    // x should be typed as String, and using it where Int is needed should fail.
+    let func = make_function(
+        "main",
+        vec![Param {
+            name: "items".to_string(),
+            ty: TypeExpr::Generic(
+                "List".to_string(),
+                vec![TypeExpr::Named("String".to_string())],
+            ),
+            span: Span::new(0, 20),
+            ownership: kodo_ast::Ownership::Owned,
+        }],
+        TypeExpr::Unit,
+        vec![Stmt::ForIn {
+            span: Span::new(0, 60),
+            name: "x".to_string(),
+            iterable: Expr::Ident("items".to_string(), Span::new(10, 15)),
+            body: Block {
+                span: Span::new(16, 60),
+                stmts: vec![Stmt::Let {
+                    span: Span::new(20, 40),
+                    mutable: false,
+                    name: "y".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::Ident("x".to_string(), Span::new(30, 31)),
+                }],
+            },
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should fail: x is String, not Int");
+}
+
+#[test]
+fn for_in_loop_variable_scoped() {
+    // x is only in scope within the for-in body, not after.
+    let func = make_function(
+        "main",
+        vec![Param {
+            name: "items".to_string(),
+            ty: TypeExpr::Generic("List".to_string(), vec![TypeExpr::Named("Int".to_string())]),
+            span: Span::new(0, 20),
+            ownership: kodo_ast::Ownership::Owned,
+        }],
+        TypeExpr::Unit,
+        vec![
+            Stmt::ForIn {
+                span: Span::new(0, 40),
+                name: "x".to_string(),
+                iterable: Expr::Ident("items".to_string(), Span::new(10, 15)),
+                body: Block {
+                    span: Span::new(16, 40),
+                    stmts: vec![],
+                },
+            },
+            // Using x after the loop should fail.
+            Stmt::Let {
+                span: Span::new(41, 55),
+                mutable: false,
+                name: "y".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(50, 51)),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "x should be out of scope after for-in");
+}
+
+// ========== Tuple type tests ==========
+
+#[test]
+fn tuple_type_display() {
+    assert_eq!(
+        Type::Tuple(vec![Type::Int, Type::String]).to_string(),
+        "(Int, String)"
+    );
+}
+
+#[test]
+fn tuple_type_equality() {
+    let a = Type::Tuple(vec![Type::Int, Type::Bool]);
+    let b = Type::Tuple(vec![Type::Int, Type::Bool]);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn tuple_type_inequality() {
+    let a = Type::Tuple(vec![Type::Int, Type::Bool]);
+    let b = Type::Tuple(vec![Type::Int, Type::String]);
+    assert_ne!(a, b);
+}
+
+#[test]
+fn tuple_type_check_eq_same() {
+    let ty = Type::Tuple(vec![Type::Int, Type::Bool]);
+    let result = TypeEnv::check_eq(&ty, &ty, Span::new(0, 1));
+    assert!(result.is_ok());
+}
+
+#[test]
+fn tuple_type_check_eq_different() {
+    let a = Type::Tuple(vec![Type::Int, Type::Bool]);
+    let b = Type::Tuple(vec![Type::Int, Type::String]);
+    let result = TypeEnv::check_eq(&a, &b, Span::new(0, 1));
+    assert!(result.is_err());
+}
+
+#[test]
+fn tuple_type_not_numeric() {
+    let ty = Type::Tuple(vec![Type::Int]);
+    assert!(!ty.is_numeric());
+}
+
+#[test]
+fn tuple_type_not_copy() {
+    let ty = Type::Tuple(vec![Type::Int, Type::String]);
+    assert!(!ty.is_copy());
+}
+
+#[test]
+fn tuple_index_out_of_bounds_error_has_code() {
+    let err = TypeError::TupleIndexOutOfBounds {
+        index: 3,
+        length: 2,
+        span: Span::new(0, 5),
+    };
+    assert_eq!(err.code(), "E0253");
+    assert!(err.span().is_some());
 }

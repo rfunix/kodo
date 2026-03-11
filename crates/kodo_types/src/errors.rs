@@ -230,6 +230,18 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A concrete type does not satisfy a trait bound on a generic parameter.
+    #[error("type `{concrete_type}` does not implement trait `{trait_name}` required by generic parameter `{param}` at {span:?}")]
+    TraitBoundNotSatisfied {
+        /// The concrete type that was provided.
+        concrete_type: String,
+        /// The trait that is required.
+        trait_name: String,
+        /// The generic parameter name.
+        param: String,
+        /// Source location.
+        span: Span,
+    },
     /// A method was called on a type that does not have it.
     #[error("no method `{method}` on type `{type_name}` at {span:?}")]
     MethodNotFound {
@@ -345,6 +357,16 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A tuple index is out of bounds.
+    #[error("tuple index {index} is out of bounds for tuple of length {length} at {span:?}")]
+    TupleIndexOutOfBounds {
+        /// The index that was used.
+        index: usize,
+        /// The actual tuple length.
+        length: usize,
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -376,6 +398,7 @@ impl TypeError {
             | Self::ClosureParamTypeMissing { span, .. }
             | Self::UnknownTrait { span, .. }
             | Self::MissingTraitMethod { span, .. }
+            | Self::TraitBoundNotSatisfied { span, .. }
             | Self::MethodNotFound { span, .. }
             | Self::AwaitOutsideAsync { span, .. }
             | Self::SpawnCaptureMutableRef { span, .. }
@@ -385,7 +408,8 @@ impl TypeError {
             | Self::SecuritySensitiveWithoutContract { span, .. }
             | Self::UseAfterMove { span, .. }
             | Self::BorrowEscapesScope { span, .. }
-            | Self::MoveWhileBorrowed { span, .. } => Some(*span),
+            | Self::MoveWhileBorrowed { span, .. }
+            | Self::TupleIndexOutOfBounds { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -418,6 +442,7 @@ impl TypeError {
             Self::ClosureParamTypeMissing { .. } => "E0227",
             Self::UnknownTrait { .. } => "E0230",
             Self::MissingTraitMethod { .. } => "E0231",
+            Self::TraitBoundNotSatisfied { .. } => "E0232",
             Self::MethodNotFound { .. } => "E0235",
             Self::AwaitOutsideAsync { .. } => "E0250",
             Self::SpawnCaptureMutableRef { .. } => "E0251",
@@ -429,6 +454,7 @@ impl TypeError {
             Self::UseAfterMove { .. } => "E0240",
             Self::BorrowEscapesScope { .. } => "E0241",
             Self::MoveWhileBorrowed { .. } => "E0242",
+            Self::TupleIndexOutOfBounds { .. } => "E0253",
         }
     }
 }
@@ -499,7 +525,8 @@ impl kodo_ast::Diagnostic for TypeError {
 /// and developers fix the issue.
 fn suggestion_for_error(err: &TypeError) -> Option<String> {
     suggestion_for_type_mismatch(err)
-        .or_else(|| suggestion_for_structural_error(err))
+        .or_else(|| suggestion_for_struct_enum_error(err))
+        .or_else(|| suggestion_for_trait_method_error(err))
         .or_else(|| suggestion_for_policy_error(err))
 }
 
@@ -559,12 +586,16 @@ fn suggestion_for_type_mismatch(err: &TypeError) -> Option<String> {
         TypeError::MoveWhileBorrowed { name, .. } => {
             Some(format!("drop the borrow of `{name}` before moving it"))
         }
+        TypeError::TupleIndexOutOfBounds { length, .. } => Some(format!(
+            "valid indices for this tuple are 0..{}",
+            length.saturating_sub(1)
+        )),
         _ => None,
     }
 }
 
-/// Suggestions for struct, enum, trait, and method-related errors.
-fn suggestion_for_structural_error(err: &TypeError) -> Option<String> {
+/// Suggestions for struct, enum, and field-related errors.
+fn suggestion_for_struct_enum_error(err: &TypeError) -> Option<String> {
     match err {
         TypeError::MissingMeta => {
             Some("add a `meta {{ purpose: \"...\" }}` block to your module".to_string())
@@ -629,6 +660,13 @@ fn suggestion_for_structural_error(err: &TypeError) -> Option<String> {
         TypeError::NonExhaustiveMatch { missing, .. } => {
             Some(format!("add match arms for: {}", missing.join(", ")))
         }
+        _ => None,
+    }
+}
+
+/// Suggestions for trait, method, and concurrency-related errors.
+fn suggestion_for_trait_method_error(err: &TypeError) -> Option<String> {
+    match err {
         TypeError::UnknownTrait { name, .. } => Some(format!(
             "define `trait {name} {{ ... }}` or check for typos"
         )),
@@ -636,6 +674,13 @@ fn suggestion_for_structural_error(err: &TypeError) -> Option<String> {
             method, trait_name, ..
         } => Some(format!(
             "add method `{method}` to the impl block for trait `{trait_name}`"
+        )),
+        TypeError::TraitBoundNotSatisfied {
+            concrete_type,
+            trait_name,
+            ..
+        } => Some(format!(
+            "implement trait `{trait_name}` for type `{concrete_type}`, or use a type that already implements it"
         )),
         TypeError::MethodNotFound {
             method,

@@ -90,6 +90,11 @@ pub struct TypeChecker {
     ///
     /// Used by the LSP for goto-definition. Built during `check_module`.
     pub(crate) definition_spans: std::collections::HashMap<String, Span>,
+    /// Trait implementations: maps type name to set of trait names it implements.
+    ///
+    /// Populated from `impl Trait for Type` blocks. Used for trait bound checking
+    /// during generic type instantiation (bounded quantification / System F<:).
+    pub(crate) trait_impl_set: std::collections::HashMap<String, std::collections::HashSet<String>>,
 }
 
 impl TypeChecker {
@@ -123,6 +128,7 @@ impl TypeChecker {
             imported_module_names: std::collections::HashSet::new(),
             type_alias_registry: std::collections::HashMap::new(),
             definition_spans: std::collections::HashMap::new(),
+            trait_impl_set: std::collections::HashMap::new(),
         };
         checker.register_builtins();
         checker
@@ -253,7 +259,16 @@ impl TypeChecker {
                 self.generic_structs.insert(
                     type_decl.name.clone(),
                     GenericStructDef {
-                        params: type_decl.generic_params.clone(),
+                        params: type_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                        bounds: type_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         fields: type_decl
                             .fields
                             .iter()
@@ -281,7 +296,16 @@ impl TypeChecker {
                 self.generic_enums.insert(
                     enum_decl.name.clone(),
                     GenericEnumDef {
-                        params: enum_decl.generic_params.clone(),
+                        params: enum_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                        bounds: enum_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         variants: enum_decl
                             .variants
                             .iter()
@@ -314,25 +338,34 @@ impl TypeChecker {
     /// Registers impl blocks: validates trait conformance and builds method lookup.
     fn register_impls(&mut self, module: &Module) -> crate::Result<()> {
         for impl_block in &module.impl_blocks {
-            let trait_methods = self
-                .trait_registry
-                .get(&impl_block.trait_name)
-                .ok_or_else(|| TypeError::UnknownTrait {
-                    name: impl_block.trait_name.clone(),
-                    span: impl_block.span,
-                })?
-                .clone();
-
-            for (method_name, _param_types, _ret_type) in &trait_methods {
-                let _found = impl_block
-                    .methods
-                    .iter()
-                    .find(|m| m.name == *method_name)
-                    .ok_or_else(|| TypeError::MissingTraitMethod {
-                        method: method_name.clone(),
-                        trait_name: impl_block.trait_name.clone(),
+            // For trait impls, validate the trait exists and all methods are implemented.
+            if let Some(ref trait_name) = impl_block.trait_name {
+                let trait_methods = self
+                    .trait_registry
+                    .get(trait_name)
+                    .ok_or_else(|| TypeError::UnknownTrait {
+                        name: trait_name.clone(),
                         span: impl_block.span,
-                    })?;
+                    })?
+                    .clone();
+
+                for (method_name, _param_types, _ret_type) in &trait_methods {
+                    let _found = impl_block
+                        .methods
+                        .iter()
+                        .find(|m| m.name == *method_name)
+                        .ok_or_else(|| TypeError::MissingTraitMethod {
+                            method: method_name.clone(),
+                            trait_name: trait_name.clone(),
+                            span: impl_block.span,
+                        })?;
+                }
+
+                // Record that this type implements this trait (for bound checking).
+                self.trait_impl_set
+                    .entry(impl_block.type_name.clone())
+                    .or_default()
+                    .insert(trait_name.clone());
             }
 
             for method in &impl_block.methods {
@@ -402,7 +435,12 @@ impl TypeChecker {
                 self.generic_functions.insert(
                     func.name.clone(),
                     GenericFunctionDef {
-                        params: func.generic_params.clone(),
+                        params: func.generic_params.iter().map(|p| p.name.clone()).collect(),
+                        bounds: func
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
                         return_type: func.return_type.clone(),
                     },
@@ -518,6 +556,8 @@ impl TypeChecker {
         }
 
         self.register_types_collecting(module, &mut errors);
+        self.register_traits_collecting(module, &mut errors);
+        self.register_impls_collecting(module, &mut errors);
         self.register_actors_collecting(module, &mut errors);
         self.register_signatures_collecting(module, &mut errors);
         self.check_bodies_collecting(module, &mut errors);
@@ -561,7 +601,16 @@ impl TypeChecker {
                 self.generic_structs.insert(
                     type_decl.name.clone(),
                     GenericStructDef {
-                        params: type_decl.generic_params.clone(),
+                        params: type_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                        bounds: type_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         fields: type_decl
                             .fields
                             .iter()
@@ -598,7 +647,16 @@ impl TypeChecker {
                 self.generic_enums.insert(
                     enum_decl.name.clone(),
                     GenericEnumDef {
-                        params: enum_decl.generic_params.clone(),
+                        params: enum_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect(),
+                        bounds: enum_decl
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         variants: enum_decl
                             .variants
                             .iter()
@@ -606,6 +664,106 @@ impl TypeChecker {
                             .collect(),
                     },
                 );
+            }
+        }
+    }
+
+    /// Registers trait declarations, collecting errors.
+    fn register_traits_collecting(&mut self, module: &Module, errors: &mut Vec<TypeError>) {
+        for trait_decl in &module.trait_decls {
+            let mut methods = Vec::new();
+            let mut trait_ok = true;
+            for method in &trait_decl.methods {
+                let param_types: std::result::Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_with_enums(&p.ty, p.span, &self.enum_names))
+                    .collect();
+                match param_types {
+                    Ok(pt) => {
+                        match resolve_type_with_enums(
+                            &method.return_type,
+                            method.span,
+                            &self.enum_names,
+                        ) {
+                            Ok(ret_type) => methods.push((method.name.clone(), pt, ret_type)),
+                            Err(e) => {
+                                errors.push(e);
+                                trait_ok = false;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        trait_ok = false;
+                    }
+                }
+            }
+            if trait_ok {
+                self.trait_registry.insert(trait_decl.name.clone(), methods);
+            }
+        }
+    }
+
+    /// Registers impl blocks, collecting errors. Populates `trait_impl_set`.
+    fn register_impls_collecting(&mut self, module: &Module, errors: &mut Vec<TypeError>) {
+        for impl_block in &module.impl_blocks {
+            // For trait impls, validate the trait exists and all methods are implemented.
+            if let Some(ref trait_name) = impl_block.trait_name {
+                let trait_methods = if let Some(m) = self.trait_registry.get(trait_name) {
+                    m.clone()
+                } else {
+                    errors.push(TypeError::UnknownTrait {
+                        name: trait_name.clone(),
+                        span: impl_block.span,
+                    });
+                    continue;
+                };
+
+                // Verify all trait methods are implemented.
+                let mut trait_ok = true;
+                for (method_name, _param_types, _ret_type) in &trait_methods {
+                    if !impl_block.methods.iter().any(|m| m.name == *method_name) {
+                        errors.push(TypeError::MissingTraitMethod {
+                            method: method_name.clone(),
+                            trait_name: trait_name.clone(),
+                            span: impl_block.span,
+                        });
+                        trait_ok = false;
+                    }
+                }
+
+                if trait_ok {
+                    // Record that this type implements this trait (for bound checking).
+                    self.trait_impl_set
+                        .entry(impl_block.type_name.clone())
+                        .or_default()
+                        .insert(trait_name.clone());
+                }
+            }
+
+            // Register each method with mangled name.
+            for method in &impl_block.methods {
+                let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                let param_types: std::result::Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                    .collect();
+                match param_types {
+                    Ok(pt) => match self.resolve_type_mono(&method.return_type, method.span) {
+                        Ok(ret_type) => {
+                            self.method_lookup.insert(
+                                (impl_block.type_name.clone(), method.name.clone()),
+                                (mangled_name.clone(), pt.clone(), ret_type.clone()),
+                            );
+                            self.env
+                                .insert(mangled_name, Type::Function(pt, Box::new(ret_type)));
+                        }
+                        Err(e) => errors.push(e),
+                    },
+                    Err(e) => errors.push(e),
+                }
             }
         }
     }
@@ -656,7 +814,12 @@ impl TypeChecker {
                 self.generic_functions.insert(
                     func.name.clone(),
                     GenericFunctionDef {
-                        params: func.generic_params.clone(),
+                        params: func.generic_params.iter().map(|p| p.name.clone()).collect(),
+                        bounds: func
+                            .generic_params
+                            .iter()
+                            .map(|p| p.bounds.clone())
+                            .collect(),
                         param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
                         return_type: func.return_type.clone(),
                     },
@@ -854,6 +1017,50 @@ impl TypeChecker {
         // requires source text, which we don't have here). The span start
         // provides enough context for the error message.
         source_start
+    }
+
+    /// Verifies that concrete type arguments satisfy all trait bounds on generic parameters.
+    ///
+    /// For each generic parameter with bounds (e.g., `T: Ord + Display`), checks that the
+    /// concrete type argument implements all required traits. This implements bounded
+    /// quantification (System F<:) from **\[TAPL\]** Ch. 26.
+    pub(crate) fn check_trait_bounds(
+        &self,
+        params: &[String],
+        bounds: &[Vec<String>],
+        type_args: &[Type],
+        span: Span,
+    ) -> crate::Result<()> {
+        for (i, param_name) in params.iter().enumerate() {
+            let param_bounds = bounds.get(i).map_or(&[] as &[_], Vec::as_slice);
+            if param_bounds.is_empty() {
+                continue;
+            }
+            let concrete_type = type_args.get(i).cloned().unwrap_or(Type::Unknown);
+            let type_name = concrete_type.to_string();
+            for required_trait in param_bounds {
+                if !self.type_implements_trait(&type_name, required_trait) {
+                    return Err(TypeError::TraitBoundNotSatisfied {
+                        concrete_type: type_name.clone(),
+                        trait_name: required_trait.clone(),
+                        param: param_name.clone(),
+                        span,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks whether a type implements a given trait.
+    ///
+    /// Returns `true` if the type has an `impl Trait for Type` registered.
+    /// This is used for trait bound checking during generic instantiation.
+    #[must_use]
+    pub fn type_implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        self.trait_impl_set
+            .get(type_name)
+            .is_some_and(|traits| traits.contains(trait_name))
     }
 }
 

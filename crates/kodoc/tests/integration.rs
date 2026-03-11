@@ -136,6 +136,16 @@ fn rewrite_method_calls_in_block(
                 );
                 rewrite_method_calls_in_block(body, resolutions);
             }
+            kodo_ast::Stmt::ForIn { iterable, body, .. } => {
+                *iterable = rewrite_method_calls_in_expr(
+                    std::mem::replace(
+                        iterable,
+                        kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
+                    ),
+                    resolutions,
+                );
+                rewrite_method_calls_in_block(body, resolutions);
+            }
             kodo_ast::Stmt::IfLet {
                 value,
                 body,
@@ -150,6 +160,12 @@ fn rewrite_method_calls_in_block(
                 if let Some(eb) = else_body {
                     rewrite_method_calls_in_block(eb, resolutions);
                 }
+            }
+            kodo_ast::Stmt::LetPattern { value, .. } => {
+                *value = rewrite_method_calls_in_expr(
+                    std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    resolutions,
+                );
             }
             kodo_ast::Stmt::Spawn { body, .. } => {
                 rewrite_method_calls_in_block(body, resolutions);
@@ -342,6 +358,18 @@ fn rewrite_method_calls_in_expr(
             inclusive,
             span,
         },
+        kodo_ast::Expr::TupleLit(elems, span) => kodo_ast::Expr::TupleLit(
+            elems
+                .into_iter()
+                .map(|e| rewrite_method_calls_in_expr(e, resolutions))
+                .collect(),
+            span,
+        ),
+        kodo_ast::Expr::TupleIndex { tuple, index, span } => kodo_ast::Expr::TupleIndex {
+            tuple: Box::new(rewrite_method_calls_in_expr(*tuple, resolutions)),
+            index,
+            span,
+        },
         e @ (kodo_ast::Expr::IntLit(_, _)
         | kodo_ast::Expr::FloatLit(_, _)
         | kodo_ast::Expr::StringLit(_, _)
@@ -360,6 +388,18 @@ fn rewrite_method_calls_in_expr(
             operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
             span,
         },
+        kodo_ast::Expr::StringInterp { parts, span } => {
+            let parts = parts
+                .into_iter()
+                .map(|p| match p {
+                    kodo_ast::StringPart::Literal(s) => kodo_ast::StringPart::Literal(s),
+                    kodo_ast::StringPart::Expr(e) => kodo_ast::StringPart::Expr(Box::new(
+                        rewrite_method_calls_in_expr(*e, resolutions),
+                    )),
+                })
+                .collect();
+            kodo_ast::Expr::StringInterp { parts, span }
+        }
     }
 }
 
@@ -386,6 +426,12 @@ fn pipeline_valid_expressions() {
 #[test]
 fn pipeline_valid_contracts() {
     let source = read_fixture("valid/contracts.ko");
+    run_full_pipeline(&source).unwrap();
+}
+
+#[test]
+fn pipeline_valid_string_interpolation() {
+    let source = read_fixture("valid/string_interpolation.ko");
     run_full_pipeline(&source).unwrap();
 }
 

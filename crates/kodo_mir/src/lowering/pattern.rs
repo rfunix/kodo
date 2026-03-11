@@ -72,6 +72,12 @@ impl MirBuilder {
                 kodo_ast::Pattern::Literal(lit_expr) => {
                     self.lower_literal_arm(&ctx, lit_expr, &arm.body, is_last)?;
                 }
+                kodo_ast::Pattern::Tuple(_, _) => {
+                    // Tuple patterns in match arms: lower body directly.
+                    let arm_val = self.lower_expr(&arm.body)?;
+                    self.emit(Instruction::Assign(ctx.result_local, arm_val));
+                    self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
+                }
             }
         }
 
