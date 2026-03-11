@@ -1,0 +1,28 @@
+module refinement_demo {
+    meta {
+        purpose: "Demonstrate refinement types with constraints"
+        version: "1.0"
+    }
+
+    // A port number must be between 1 and 65535
+    type Port = Int requires { self > 0 && self < 65535 }
+
+    // A percentage must be between 0 and 100
+    type Percentage = Int requires { self >= 0 && self <= 100 }
+
+    // Age must be non-negative
+    type Age = Int requires { self >= 0 }
+
+    // Simple alias without constraint
+    type Name = String
+
+    fn main() {
+        let port: Int = 8080
+        let pct: Int = 75
+        let age: Int = 30
+        println("Refinement types demo")
+        print_int(port)
+        print_int(pct)
+        print_int(age)
+    }
+}
