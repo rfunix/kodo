@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-676%2B%20passing-brightgreen" alt="Tests: 676+ passing">
+  <img src="https://img.shields.io/badge/tests-692%2B%20passing-brightgreen" alt="Tests: 692+ passing">
 </p>
 
 ---
@@ -267,7 +267,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 49 compilable programs:
+The [`examples/`](examples/) directory contains 50 compilable programs:
 
 ### Core Language
 
@@ -343,7 +343,7 @@ The [`examples/`](examples/) directory contains 49 compilable programs:
 
 ### Concurrency & Multi-File
 
-> **Note:** `spawn` with captured variables, `actor` with state/message passing, and `parallel` blocks are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously).
+> **Note:** `spawn` with captured variables, `actor` with state/message passing, `parallel` blocks, and `channels` are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously).
 
 | File | What it demonstrates |
 |------|---------------------|
@@ -354,6 +354,7 @@ The [`examples/`](examples/) directory contains 49 compilable programs:
 | [`actors.ko`](examples/actors.ko) | Actor state and message passing |
 | [`actor_demo.ko`](examples/actor_demo.ko) | Actor demonstration |
 | [`parallel_blocks.ko`](examples/parallel_blocks.ko) | Structured concurrency with `parallel` blocks |
+| [`channels.ko`](examples/channels.ko) | Inter-thread communication with channels |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---

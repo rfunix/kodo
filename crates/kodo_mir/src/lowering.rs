@@ -3734,9 +3734,9 @@ mod tests {
 
         // The MIR should have a kodo_contract_fail call for the refinement check.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
-            b.instructions.iter().any(|i| {
-                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
-            })
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
+            )
         });
         assert!(
             has_contract_fail,
@@ -3812,9 +3812,9 @@ mod tests {
 
         // No contract_fail call should exist for unconstrained aliases.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
-            b.instructions.iter().any(|i| {
-                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
-            })
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
+            )
         });
         assert!(
             !has_contract_fail,
@@ -3929,17 +3929,23 @@ mod tests {
         };
 
         let result = lower_module(&module);
-        assert!(result.is_ok(), "compound constraint lowering failed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "compound constraint lowering failed: {result:?}"
+        );
         let fns = result.unwrap();
         let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
 
         // Should have a contract_fail call.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
-            b.instructions.iter().any(|i| {
-                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
-            })
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
+            )
         });
-        assert!(has_contract_fail, "expected kodo_contract_fail for compound constraint");
+        assert!(
+            has_contract_fail,
+            "expected kodo_contract_fail for compound constraint"
+        );
 
         // Verify the fail message references the alias name "Port".
         let fail_msg = main_fn.blocks.iter().find_map(|b| {
@@ -3956,8 +3962,13 @@ mod tests {
         });
         assert!(fail_msg.is_some(), "expected a fail message");
         let msg = fail_msg.unwrap();
-        assert!(msg.contains("Port"), "fail message should reference 'Port', got: {msg}");
-        assert!(msg.contains("port"), "fail message should reference 'port', got: {msg}");
+        assert!(
+            msg.contains("Port"),
+            "fail message should reference 'Port', got: {msg}"
+        );
+        assert!(
+            msg.contains("port"),
+            "fail message should reference 'port', got: {msg}"
+        );
     }
-
 }
