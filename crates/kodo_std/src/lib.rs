@@ -359,6 +359,27 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Sets an environment variable".to_string(),
             param_count: 2,
         },
+        // Channels
+        BuiltinFunction {
+            name: "kodo::channel::new".to_string(),
+            description: "Creates a new channel and returns an opaque handle".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::send".to_string(),
+            description: "Sends an integer value through a channel".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::recv".to_string(),
+            description: "Receives a value from a channel (blocking)".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::free".to_string(),
+            description: "Frees a channel handle".to_string(),
+            param_count: 1,
+        },
     ]
 }
 
@@ -384,7 +405,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 48);
+        assert_eq!(builtins.len(), 52);
     }
 
     #[test]
@@ -446,6 +467,26 @@ mod tests {
         let map_new = builtins.iter().find(|f| f.name == "kodo::map::new");
         assert!(map_new.is_some());
         assert_eq!(map_new.unwrap().param_count, 0);
+    }
+
+    #[test]
+    fn channel_builtins_registered() {
+        let builtins = builtin_functions();
+        let ch_new = builtins.iter().find(|f| f.name == "kodo::channel::new");
+        assert!(ch_new.is_some());
+        assert_eq!(ch_new.unwrap().param_count, 0);
+
+        let ch_send = builtins.iter().find(|f| f.name == "kodo::channel::send");
+        assert!(ch_send.is_some());
+        assert_eq!(ch_send.unwrap().param_count, 2);
+
+        let ch_recv = builtins.iter().find(|f| f.name == "kodo::channel::recv");
+        assert!(ch_recv.is_some());
+        assert_eq!(ch_recv.unwrap().param_count, 1);
+
+        let ch_free = builtins.iter().find(|f| f.name == "kodo::channel::free");
+        assert!(ch_free.is_some());
+        assert_eq!(ch_free.unwrap().param_count, 1);
     }
 
     #[test]

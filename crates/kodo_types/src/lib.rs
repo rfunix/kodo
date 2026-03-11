@@ -1305,6 +1305,7 @@ impl TypeChecker {
         self.register_json_functions();
         self.register_time_functions();
         self.register_env_functions();
+        self.register_channel_functions();
     }
 
     /// Registers builtin methods for the `String` type.
@@ -1684,6 +1685,26 @@ impl TypeChecker {
         self.env.insert(
             "env_set".to_string(),
             Type::Function(vec![Type::String, Type::String], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers builtin functions for inter-thread channel communication.
+    fn register_channel_functions(&mut self) {
+        self.env.insert(
+            "channel_new".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "channel_send".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "channel_recv".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "channel_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
     }
 

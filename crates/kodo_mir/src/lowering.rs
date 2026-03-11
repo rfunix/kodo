@@ -1807,6 +1807,14 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     fn_return_types
         .entry("kodo_actor_get_field".to_string())
         .or_insert(Type::Int);
+
+    // Channel builtins.
+    fn_return_types
+        .entry("channel_new".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("channel_recv".to_string())
+        .or_insert(Type::Int);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
@@ -3657,4 +3665,299 @@ mod tests {
         assert!(!builder.is_actor_handler("print_int")); // not an actor
         assert!(!builder.is_actor_handler("")); // empty string
     }
+
+    #[test]
+    fn refinement_check_emitted_for_refined_alias() {
+        // Build a module with `type Port = Int requires { self > 0 }` and
+        // `let port: Port = 8080`. Verify the MIR contains a contract check.
+        let constraint = Expr::BinaryOp {
+            left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
+            op: kodo_ast::BinOp::Gt,
+            right: Box::new(Expr::IntLit(0, Span::new(0, 1))),
+            span: Span::new(0, 10),
+        };
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: NodeId(1),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_aliases: vec![kodo_ast::TypeAlias {
+                id: NodeId(2),
+                span: Span::new(0, 30),
+                name: "Port".to_string(),
+                base_type: TypeExpr::Named("Int".to_string()),
+                constraint: Some(constraint),
+            }],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![Function {
+                id: NodeId(3),
+                span: Span::new(0, 80),
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: TypeExpr::Unit,
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span: Span::new(0, 60),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(0, 20),
+                        mutable: false,
+                        name: "port".to_string(),
+                        ty: Some(TypeExpr::Named("Port".to_string())),
+                        value: Expr::IntLit(8080, Span::new(0, 4)),
+                    }],
+                },
+            }],
+        };
+
+        let result = lower_module(&module);
+        assert!(result.is_ok(), "refinement lowering failed: {result:?}");
+        let fns = result.unwrap();
+        let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
+
+        // The MIR should have a kodo_contract_fail call for the refinement check.
+        let has_contract_fail = main_fn.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
+            })
+        });
+        assert!(
+            has_contract_fail,
+            "expected kodo_contract_fail call for refinement check"
+        );
+
+        // Should have at least 3 blocks: entry (with branch), fail block, continue block.
+        assert!(
+            main_fn.blocks.len() >= 3,
+            "expected at least 3 blocks for refinement check, got {}",
+            main_fn.blocks.len()
+        );
+    }
+
+    #[test]
+    fn no_refinement_check_for_unconstrained_alias() {
+        // A type alias without a constraint should NOT emit any contract check.
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: NodeId(1),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_aliases: vec![kodo_ast::TypeAlias {
+                id: NodeId(2),
+                span: Span::new(0, 30),
+                name: "Name".to_string(),
+                base_type: TypeExpr::Named("String".to_string()),
+                constraint: None,
+            }],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![Function {
+                id: NodeId(3),
+                span: Span::new(0, 80),
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: TypeExpr::Unit,
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span: Span::new(0, 60),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(0, 20),
+                        mutable: false,
+                        name: "s".to_string(),
+                        ty: Some(TypeExpr::Named("Name".to_string())),
+                        value: Expr::StringLit("hello".to_string(), Span::new(0, 7)),
+                    }],
+                },
+            }],
+        };
+
+        let result = lower_module(&module);
+        assert!(result.is_ok(), "unconstrained alias lowering failed");
+        let fns = result.unwrap();
+        let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
+
+        // No contract_fail call should exist for unconstrained aliases.
+        let has_contract_fail = main_fn.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
+            })
+        });
+        assert!(
+            !has_contract_fail,
+            "should NOT emit contract_fail for unconstrained alias"
+        );
+    }
+
+    #[test]
+    fn substitute_self_replaces_ident() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
+            op: kodo_ast::BinOp::Gt,
+            right: Box::new(Expr::IntLit(0, Span::new(0, 1))),
+            span: Span::new(0, 10),
+        };
+        let substituted = MirBuilder::substitute_self_in_expr(&expr, "port");
+        match &substituted {
+            Expr::BinaryOp { left, .. } => match left.as_ref() {
+                Expr::Ident(name, _) => assert_eq!(name, "port"),
+                other => panic!("expected Ident, got {other:?}"),
+            },
+            other => panic!("expected BinaryOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn substitute_self_preserves_non_self_idents() {
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Ident("other".to_string(), Span::new(0, 5))),
+            op: kodo_ast::BinOp::Gt,
+            right: Box::new(Expr::IntLit(0, Span::new(0, 1))),
+            span: Span::new(0, 10),
+        };
+        let substituted = MirBuilder::substitute_self_in_expr(&expr, "port");
+        match &substituted {
+            Expr::BinaryOp { left, .. } => match left.as_ref() {
+                Expr::Ident(name, _) => assert_eq!(name, "other"),
+                other => panic!("expected Ident, got {other:?}"),
+            },
+            other => panic!("expected BinaryOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refinement_check_with_compound_constraint() {
+        // Test `type Port = Int requires { self > 0 && self < 65535 }`
+        let constraint = Expr::BinaryOp {
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
+                op: kodo_ast::BinOp::Gt,
+                right: Box::new(Expr::IntLit(0, Span::new(0, 1))),
+                span: Span::new(0, 10),
+            }),
+            op: kodo_ast::BinOp::And,
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
+                op: kodo_ast::BinOp::Lt,
+                right: Box::new(Expr::IntLit(65535, Span::new(0, 5))),
+                span: Span::new(0, 15),
+            }),
+            span: Span::new(0, 20),
+        };
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: NodeId(1),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_aliases: vec![kodo_ast::TypeAlias {
+                id: NodeId(2),
+                span: Span::new(0, 30),
+                name: "Port".to_string(),
+                base_type: TypeExpr::Named("Int".to_string()),
+                constraint: Some(constraint),
+            }],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![Function {
+                id: NodeId(3),
+                span: Span::new(0, 80),
+                name: "main".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: TypeExpr::Unit,
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span: Span::new(0, 60),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(0, 20),
+                        mutable: false,
+                        name: "port".to_string(),
+                        ty: Some(TypeExpr::Named("Port".to_string())),
+                        value: Expr::IntLit(8080, Span::new(0, 4)),
+                    }],
+                },
+            }],
+        };
+
+        let result = lower_module(&module);
+        assert!(result.is_ok(), "compound constraint lowering failed: {result:?}");
+        let fns = result.unwrap();
+        let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
+
+        // Should have a contract_fail call.
+        let has_contract_fail = main_fn.blocks.iter().any(|b| {
+            b.instructions.iter().any(|i| {
+                matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail")
+            })
+        });
+        assert!(has_contract_fail, "expected kodo_contract_fail for compound constraint");
+
+        // Verify the fail message references the alias name "Port".
+        let fail_msg = main_fn.blocks.iter().find_map(|b| {
+            b.instructions.iter().find_map(|i| {
+                if let Instruction::Call { callee, args, .. } = i {
+                    if callee == "kodo_contract_fail" {
+                        if let Some(Value::StringConst(msg)) = args.first() {
+                            return Some(msg.clone());
+                        }
+                    }
+                }
+                None
+            })
+        });
+        assert!(fail_msg.is_some(), "expected a fail message");
+        let msg = fail_msg.unwrap();
+        assert!(msg.contains("Port"), "fail message should reference 'Port', got: {msg}");
+        assert!(msg.contains("port"), "fail message should reference 'port', got: {msg}");
+    }
+
 }

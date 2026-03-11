@@ -1,0 +1,28 @@
+// Channels -- Demonstrates inter-thread communication using channels.
+
+module channels {
+    meta {
+        purpose: "Demonstrate channel-based communication between parallel tasks",
+        version: "1.0.0",
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let ch: Int = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch, 42)
+            }
+            spawn {
+                let v: Int = channel_recv(ch)
+                print_int(v)
+            }
+        }
+
+        channel_free(ch)
+
+        println("channel demo complete")
+        return 0
+    }
+}

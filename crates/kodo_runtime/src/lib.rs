@@ -707,6 +707,119 @@ pub extern "C" fn kodo_parallel_join(group: i64) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Channel support — inter-thread communication via `std::sync::mpsc`
+// ---------------------------------------------------------------------------
+
+/// A channel pair stored in the global registry.
+struct ChannelEntry {
+    /// The sending half (wrapped in `Arc<Mutex<…>>` so multiple threads can send).
+    sender: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Sender<i64>>>,
+    /// The receiving half (wrapped in `Arc<Mutex<…>>` so we can access it
+    /// without holding the registry lock, preventing deadlocks on recv).
+    receiver_arc: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<i64>>>,
+}
+
+/// Global registry of live channels, keyed by handle.
+static CHANNEL_REGISTRY: std::sync::Mutex<Vec<Option<ChannelEntry>>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Monotonically increasing counter for channel handles.
+static CHANNEL_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Creates a new channel and returns an opaque integer handle.
+///
+/// The handle can be passed to [`kodo_channel_send`], [`kodo_channel_recv`],
+/// and [`kodo_channel_free`].
+#[no_mangle]
+pub extern "C" fn kodo_channel_new() -> i64 {
+    let id = CHANNEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let entry = ChannelEntry {
+        sender: std::sync::Arc::new(std::sync::Mutex::new(tx)),
+        receiver_arc: std::sync::Arc::new(std::sync::Mutex::new(rx)),
+    };
+    if let Ok(mut registry) = CHANNEL_REGISTRY.lock() {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let idx = id as usize;
+        if registry.len() <= idx {
+            registry.resize_with(idx + 1, || None);
+        }
+        registry[idx] = Some(entry);
+    }
+    id
+}
+
+/// Sends `value` through the channel identified by `handle`.
+///
+/// If the handle is invalid or the receiver has been dropped the call is a
+/// silent no-op (matching the fire-and-forget semantics of Kōdo channels).
+#[no_mangle]
+pub extern "C" fn kodo_channel_send(handle: i64, value: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    // Clone the Arc-wrapped sender so we can drop the registry lock
+    // before actually sending — prevents deadlocks when a receiver on
+    // another thread needs registry access.
+    let tx_arc = {
+        let Ok(registry) = CHANNEL_REGISTRY.lock() else {
+            return;
+        };
+        match registry.get(idx).and_then(Option::as_ref) {
+            Some(entry) => std::sync::Arc::clone(&entry.sender),
+            None => return,
+        }
+    };
+    let guard = tx_arc.lock();
+    if let Ok(tx) = guard {
+        let _ = tx.send(value);
+    }
+}
+
+/// Receives a value from the channel identified by `handle` (blocking).
+///
+/// Returns the received `i64` value. If the channel is closed or the handle
+/// is invalid, returns `0`.
+///
+/// The implementation clones an `Arc`-wrapped receiver so that the global
+/// registry lock is released before blocking on `recv`, preventing deadlocks
+/// when senders on other threads need registry access.
+#[no_mangle]
+pub extern "C" fn kodo_channel_recv(handle: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    // Grab a clone of the Arc-wrapped receiver, then drop the registry lock
+    // so that senders can still acquire it while we block.
+    let rx_arc = {
+        let Ok(registry) = CHANNEL_REGISTRY.lock() else {
+            return 0;
+        };
+        match registry.get(idx).and_then(Option::as_ref) {
+            Some(entry) => std::sync::Arc::clone(&entry.receiver_arc),
+            None => return 0,
+        }
+    };
+    // Now block on recv without holding the registry lock.
+    let result = if let Ok(rx) = rx_arc.lock() {
+        rx.recv().unwrap_or(0)
+    } else {
+        0
+    };
+    result
+}
+
+/// Frees the channel identified by `handle`, dropping both sender and receiver.
+#[no_mangle]
+pub extern "C" fn kodo_channel_free(handle: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    if let Ok(mut registry) = CHANNEL_REGISTRY.lock() {
+        if let Some(slot) = registry.get_mut(idx) {
+            *slot = None;
+        }
+    }
+}
+
 /// Spawns a task by adding its function pointer to the task queue.
 ///
 /// The task will be executed when the scheduler runs (at the end of `main`).
@@ -3043,5 +3156,79 @@ mod tests {
         );
         kodo_parallel_join(g);
         assert_eq!(RESULT.load(Ordering::Relaxed), 42);
+    }
+
+    // --- Channel tests ---
+
+    #[test]
+    fn channel_new_returns_unique_ids() {
+        let id1 = kodo_channel_new();
+        let id2 = kodo_channel_new();
+        assert_ne!(id1, id2);
+        kodo_channel_free(id1);
+        kodo_channel_free(id2);
+    }
+
+    #[test]
+    fn channel_send_recv_single_value() {
+        let ch = kodo_channel_new();
+        kodo_channel_send(ch, 42);
+        let val = kodo_channel_recv(ch);
+        assert_eq!(val, 42);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_send_recv_multiple_values() {
+        let ch = kodo_channel_new();
+        kodo_channel_send(ch, 10);
+        kodo_channel_send(ch, 20);
+        kodo_channel_send(ch, 30);
+        assert_eq!(kodo_channel_recv(ch), 10);
+        assert_eq!(kodo_channel_recv(ch), 20);
+        assert_eq!(kodo_channel_recv(ch), 30);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_free_invalid_handle() {
+        // Freeing a non-existent handle should not panic.
+        kodo_channel_free(999_999);
+    }
+
+    #[test]
+    fn channel_send_invalid_handle() {
+        // Sending on a non-existent handle should not panic.
+        kodo_channel_send(999_999, 1);
+    }
+
+    #[test]
+    fn channel_in_parallel_context() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static RECEIVED: AtomicI64 = AtomicI64::new(0);
+        RECEIVED.store(0, Ordering::Relaxed);
+
+        let ch = kodo_channel_new();
+        // Send from the main thread, then spawn a receiver via std::thread.
+        kodo_channel_send(ch, 99);
+        let handle = std::thread::spawn(move || {
+            let v = kodo_channel_recv(ch);
+            RECEIVED.store(v, Ordering::Relaxed);
+        });
+        handle.join().ok();
+        assert_eq!(RECEIVED.load(Ordering::Relaxed), 99);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_cross_thread_send_recv() {
+        let ch = kodo_channel_new();
+        let sender = std::thread::spawn(move || {
+            kodo_channel_send(ch, 77);
+        });
+        sender.join().ok();
+        let val = kodo_channel_recv(ch);
+        assert_eq!(val, 77);
+        kodo_channel_free(ch);
     }
 }
