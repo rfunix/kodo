@@ -65,7 +65,7 @@ fn safe_divide(a: Int, b: Int) -> Int
 - Violações abortam com mensagem clara
 - **Validadores automáticos:** Para cada função com `requires`, o compilador gera uma função `validate_nome()` que avalia as precondições sem efeitos colaterais, permitindo que agentes validem entradas antes de chamar a função
 
-**Planejado:** Verificação estática via Z3 SMT solver quando decidível.
+**Implementado:** Verificação estática via Z3 SMT solver (feature `smt` habilitada por padrão), com fallback para runtime quando indecidível.
 
 **Impacto:** Agentes expressam invariantes formais. O compilador garante que são respeitados. Software é correto por construção.
 
@@ -190,7 +190,7 @@ Cada erro tem código único, localização precisa, e o campo meta do módulo. 
 
 **Impacto:** Feedback loop ultra-rápido. Agente lê erro → corrige → recompila, sem ambiguidade na interpretação de erros.
 
-### 3.8 Sistema de Intent (Planejado)
+### 3.8 Sistema de Intent (Implementado)
 
 A feature mais ambiciosa. Agentes declaram **o que** querem, o compilador gera **como**:
 
@@ -204,9 +204,9 @@ intent serve_http {
 }
 ```
 
-O resolver built-in geraria: servidor HTTP, routing, middleware, pools de conexão — tudo verificado contra os contratos das funções handler.
+O resolver built-in gera: servidor HTTP, routing, middleware — tudo verificado contra os contratos das funções handler.
 
-**Status:** Parsing existe, resolução não está implementada. É o próximo grande passo.
+**Status:** Implementado com 3 resolvers (`console_app`, `math_module`, `serve_http`). Intent blocks são expandidos para código concreto no nível do AST.
 
 ---
 
@@ -225,13 +225,19 @@ Source (.ko)
 [kodo_types]     → Typed AST (type checking, sem inference cross-module)
     │
     ▼
-[kodo_contracts] → Verified AST (runtime checks; Z3 SMT planejado)
+[kodo_contracts] → Verified AST (Z3 SMT static + runtime fallback)
     │
     ▼
-[kodo_resolver]  → Expanded AST (intents → código concreto; stub)
+[kodo_desugar]   → Desugared AST (for loops, optional sugar)
+    │
+    ▼
+[kodo_resolver]  → Expanded AST (intents → código concreto; 3 resolvers)
     │
     ▼
 [kodo_mir]       → Mid-level IR (CFG com basic blocks e terminators)
+    │
+    ▼
+[MIR Optimizer]  → Constant folding, DCE, copy propagation
     │
     ▼
 [kodo_codegen]   → Native binary (Cranelift → Mach-O/ELF)
@@ -240,44 +246,62 @@ Source (.ko)
 [kodo_runtime]   → Linked staticlib (entry point, builtins, --describe)
 ```
 
-**Workspace Rust com 11 crates**, sem dependências circulares. ~230 testes, zero clippy warnings.
+**Workspace Rust com 13 crates** (incluindo `kodo_runtime`, `kodo_desugar`, `kodo_lsp`), sem dependências circulares. 646+ testes, zero clippy warnings.
 
 ---
 
-## 5. O Que Funciona Hoje (MVP)
+## 5. O Que Funciona Hoje
 
-### Funcionando end-to-end (source → binary executável):
-- Funções com parâmetros tipados e tipos de retorno
-- Tipos: `Int`, `Bool`, `String` (literais)
-- Operadores: aritméticos, comparação, lógicos, unários
-- `if`/`else`, `return`, `while` loops
-- Variáveis: `let` (imutável), `let mut` (mutável), reassignment
-- Recursão e chamadas entre funções
-- Contratos `requires` e `ensures` com verificação em runtime
-- Builtins: `println`, `print`, `print_int`
-- Certificados de compilação encadeados
-- Binários auto-explicativos (`--describe`)
-- Trust chains com enforcement de políticas
-- Validadores automáticos (`validate_fn_name()`)
-- JSON error output estruturado
+### Linguagem — Funcionando end-to-end (source → binary executável):
+- **Tipos primitivos:** `Int`, `Int8`-`Int64`, `Uint`, `Uint8`-`Uint64`, `Float32`, `Float64`, `Bool`, `String`, `Byte`
+- **Structs e Enums:** Definição, instanciação, field access, passagem como parâmetro e retorno
+- **Generics:** Tipos e funções genéricas com monomorphization
+- **Traits:** Definição e static dispatch
+- **Pattern matching:** `match` exaustivo em enums com destructuring
+- **Closures:** Lambda lifting, capture analysis, higher-order functions, tipos `(Int) -> Int`
+- **Operadores:** Aritméticos (incluindo Float64), comparação, lógicos, unários, concatenação de strings via `+`
+- **Controle de fluxo:** `if`/`else`, `while`, `for`, `return`
+- **Variáveis:** `let` (imutável), `let mut` (mutável), reassignment
+- **Recursão** e chamadas entre funções
+- **Multi-file:** `import module_name`, chamadas qualificadas (`math.add(1, 2)`)
+- **Ownership:** Linear ownership (`own`/`ref`), Copy para primitivos, move semantics para compostos
 
-### Parcialmente implementado:
-- Anotações (`@name(args)`) — parsing completo, enforcement via trust policy
-- Intent blocks — parsing como stub, resolver não implementado
+### Contratos e Verificação:
+- **Contratos** `requires`/`ensures` como cidadãos de primeira classe na gramática
+- **Z3 SMT solver:** Verificação estática de contratos em compile time (feature `smt` habilitada por padrão)
+- **Fallback para runtime** quando verificação estática é indecidível
+- **Validadores automáticos** (`validate_fn_name()`) gerados pelo compilador
+
+### Concorrência:
+- **Spawn** com variáveis capturadas (env packing/unpacking)
+- **Actors** com state allocation, field access, message passing
+- **async/await:** Preview de sintaxe (compila sincronamente; runtime completo planejado para v2)
+
+### Standard Library:
+- **Math:** `abs`, `min`, `max`, `clamp`
+- **Strings:** `length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`, concatenação via `+`, comparação por conteúdo
+- **Float64:** Aritmética completa (`fadd`, `fsub`, `fmul`, `fdiv`, `fmod`), conversões `Float64_to_string`, `Float64_to_int`, `Int_to_float64`
+- **Collections:** `List<T>` (`push`, `get`, `pop`, `remove`, `set`, `slice`, `length`, `contains`), `Map<K,V>` com chaves Int e String
+- **File I/O:** `file_exists`, `file_read`, `file_write`
+- **HTTP+JSON:** `http_get`, `http_post` (via ureq), `json_parse`, `json_get_string`, `json_get_int`, `json_free` (via serde_json)
+
+### Ferramentas e Infraestrutura:
+- **Intent system:** 3 resolvers implementados (`console_app`, `math_module`, `serve_http`)
+- **MIR Optimizer:** Constant folding, dead code elimination, copy propagation
+- **LSP Server:** Diagnostics, hover, goto-definition, completion (incluindo struct fields e string methods), signature help com display de contratos, document symbols
+- **Certificados de compilação** encadeados com SHA-256
+- **Binários auto-explicativos** (`--describe` e `kodoc describe`)
+- **Trust chains** com enforcement de políticas (`@authored_by`, `@confidence`, `@reviewed_by`)
+- **JSON error output** estruturado com fix patches e sugestões Levenshtein
+- **`kodoc fix`** para correção automática de erros
+- **Memory management:** Free functions para String, List, Map; codegen emite cleanup antes de Return
 
 ### Planejado mas não implementado:
-- Structs e enums (tipos customizados)
-- Generics
-- Traits
-- Ownership system (`own`/`ref`/`mut` além de `mut` para variáveis)
-- Z3 SMT solver para verificação estática de contratos
-- Pattern matching
-- Closures e higher-order functions
-- Multi-file compilation e imports
-- Standard library
-- Otimizações de MIR (SSA, DCE, constant folding)
-- LLVM backend para builds otimizadas
-- Intent resolver strategies
+- Canais e execução paralela real (v2)
+- `async`/`await` runtime completo (v2)
+- LLVM backend para builds otimizadas (v2)
+- Refinement types (contratos como tipos)
+- Structured concurrency (`parallel { }` blocks)
 
 ---
 
@@ -340,7 +364,7 @@ module nome_do_modulo {
 - **Error reporting:** ariadne 0.6.0, thiserror
 - **Hashing:** sha2
 - **Serialização:** serde, serde_json
-- **SMT (planejado):** z3 0.19.13
+- **SMT:** z3 0.19.13 (habilitado por padrão)
 - **Testing:** insta (snapshots), proptest (property-based), criterion (benchmarks)
 - **Plataformas:** macOS (ARM64), Linux (x86_64)
 
@@ -359,7 +383,7 @@ module nome_do_modulo {
 | JSON errors para agentes | **Sim** | Parcial | Não | Parcial | Não | Não |
 | Zero ambiguidade (LL(1)) | **Sim** | Não | Parcial | Não | Não | Não |
 | Validadores automáticos | **Sim** | Não | Não | Não | Parcial | Parcial |
-| Intent system | **Planejado** | Não | Não | Não | Não | Não |
+| Intent system | **Sim** | Não | Não | Não | Não | Não |
 
 **Linguagens mais próximas conceitualmente:**
 - **Dafny** (Microsoft) — verificação formal, mas não focada em agentes
@@ -372,12 +396,12 @@ module nome_do_modulo {
 
 ## 10. Métricas do Projeto
 
-- **~230 testes** (unit, snapshot, property-based)
+- **646+ testes** (unit, snapshot, property-based, e2e)
 - **Zero clippy warnings** com pedantic mode
-- **11 crates** no workspace
-- **7 exemplos** que compilam e executam
-- **Pipeline completo** source → token → AST → typed AST → MIR → native binary
-- **4 programas de exemplo** executando end-to-end (hello, fibonacci, while_loop, contracts_demo)
+- **13 crates** no workspace
+- **46 exemplos** que compilam e executam
+- **Pipeline completo** source → token → AST → typed AST → contracts (Z3) → desugar → MIR → optimize → native binary
+- **LSP Server** com diagnostics, hover, goto-definition, completion, signature help
 
 ---
 
@@ -401,4 +425,4 @@ Use este documento como contexto e explore:
 
 ---
 
-*Documento gerado em 2026-03-09. Reflete o estado real do compilador com ~230 testes passando.*
+*Documento atualizado em 2026-03-10. Reflete o estado real do compilador com 646+ testes passando.*
