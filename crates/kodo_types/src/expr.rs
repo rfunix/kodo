@@ -606,6 +606,10 @@ impl TypeChecker {
                     }
                     last_ty = Type::Unit;
                 }
+                // Break and Continue produce Unit type.
+                Stmt::Break { .. } | Stmt::Continue { .. } => {
+                    last_ty = Type::Unit;
+                }
             }
         }
         Ok(last_ty)

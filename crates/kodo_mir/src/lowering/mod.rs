@@ -32,6 +32,15 @@ use crate::{
     Value,
 };
 
+/// Context for a loop, used to resolve `break` and `continue` targets.
+#[derive(Debug, Clone, Copy)]
+struct LoopContext {
+    /// The header block of the loop (continue jumps here).
+    header: BlockId,
+    /// The exit block of the loop (break jumps here).
+    exit: BlockId,
+}
+
 /// Builds MIR for a single function by maintaining locals, blocks, and a
 /// name-to-local mapping as the AST is traversed.
 ///
@@ -75,6 +84,11 @@ pub struct MirBuilder {
     closure_registry: HashMap<String, (String, Vec<String>)>,
     /// Number of function parameters (first N locals are params).
     param_count: usize,
+    /// Stack of loop contexts for break/continue lowering.
+    ///
+    /// Each entry holds the header block (continue target) and exit block
+    /// (break target) of the enclosing loop.
+    loop_stack: Vec<LoopContext>,
     /// Names of actor types — used to distinguish actors from structs during
     /// lowering so that actor-specific runtime calls are emitted instead of
     /// regular struct operations.
@@ -107,6 +121,7 @@ impl MirBuilder {
             closure_counter: 0,
             generated_closures: Vec::new(),
             closure_registry: HashMap::new(),
+            loop_stack: Vec::new(),
             actor_names: HashSet::new(),
             type_alias_registry: HashMap::new(),
         }
@@ -2730,5 +2745,125 @@ mod tests {
     #[test]
     fn is_heap_type_byte_returns_false() {
         assert!(!MirBuilder::is_heap_type(&Type::Byte));
+    }
+
+    #[test]
+    fn lower_break_in_while() {
+        let func = make_fn(
+            "break_while",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::While {
+                    span: span(),
+                    condition: Expr::BoolLit(true, span()),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Break { span: span() }],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        // The MIR should have multiple blocks including the loop exit.
+        assert!(mir.blocks.len() >= 3);
+        // At least one block should have a Goto terminator to the exit block.
+        let goto_count = mir
+            .blocks
+            .iter()
+            .filter(|b| matches!(b.terminator, Terminator::Goto(_)))
+            .count();
+        assert!(
+            goto_count >= 2,
+            "expected at least 2 Goto terminators for break"
+        );
+    }
+
+    #[test]
+    fn lower_continue_in_while() {
+        let func = make_fn(
+            "continue_while",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::While {
+                    span: span(),
+                    condition: Expr::BoolLit(true, span()),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Continue { span: span() }],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        assert!(mir.blocks.len() >= 3);
+        // Continue should generate a Goto back to the loop header.
+        let goto_count = mir
+            .blocks
+            .iter()
+            .filter(|b| matches!(b.terminator, Terminator::Goto(_)))
+            .count();
+        assert!(
+            goto_count >= 2,
+            "expected at least 2 Goto terminators for continue"
+        );
+    }
+
+    #[test]
+    fn lower_break_in_for_loop() {
+        let func = make_fn(
+            "break_for",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::For {
+                    span: span(),
+                    name: "i".to_string(),
+                    start: Expr::IntLit(0, span()),
+                    end: Expr::IntLit(10, span()),
+                    inclusive: false,
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Break { span: span() }],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        assert!(mir.blocks.len() >= 3);
+    }
+
+    #[test]
+    fn lower_nested_break_only_breaks_inner() {
+        let func = make_fn(
+            "nested_break",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::While {
+                    span: span(),
+                    condition: Expr::BoolLit(true, span()),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::While {
+                            span: span(),
+                            condition: Expr::BoolLit(true, span()),
+                            body: Block {
+                                span: span(),
+                                stmts: vec![Stmt::Break { span: span() }],
+                            },
+                        }],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        // Nested loops should produce more blocks.
+        assert!(mir.blocks.len() >= 5);
     }
 }

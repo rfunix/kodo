@@ -1,0 +1,51 @@
+module break_continue {
+    meta {
+        purpose: "Demonstrates break and continue in loops"
+    }
+
+    fn find_first_negative(items: List<Int>) -> Int {
+        let mut result: Int = 0
+        for item in items {
+            if item < 0 {
+                result = item
+                break
+            }
+        }
+        return result
+    }
+
+    fn sum_positive(items: List<Int>) -> Int {
+        let mut total: Int = 0
+        for item in items {
+            if item < 0 {
+                continue
+            }
+            total = total + item
+        }
+        return total
+    }
+
+    fn search_while(limit: Int) -> Int {
+        let mut i: Int = 0
+        while i < limit {
+            if i == 42 {
+                break
+            }
+            i = i + 1
+        }
+        return i
+    }
+
+    fn skip_evens(limit: Int) -> Int {
+        let mut total: Int = 0
+        let mut i: Int = 0
+        while i < limit {
+            i = i + 1
+            if i % 2 == 0 {
+                continue
+            }
+            total = total + i
+        }
+        return total
+    }
+}

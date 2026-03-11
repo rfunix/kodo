@@ -309,6 +309,10 @@ fn desugar_block(block: &mut Block) {
             Stmt::Parallel { span, body } => {
                 desugar_parallel_stmt(&mut new_stmts, span, body);
             }
+            // Break and Continue are pass-through — they are lowered in MIR.
+            stmt @ (Stmt::Break { .. } | Stmt::Continue { .. }) => {
+                new_stmts.push(stmt);
+            }
         }
     }
     block.stmts = new_stmts;
@@ -2219,5 +2223,56 @@ mod tests {
             &module.functions[0].body.stmts[2],
             Stmt::While { .. }
         ));
+    }
+
+    #[test]
+    fn desugar_break_passthrough() {
+        let mut block = Block {
+            span: Span::new(0, 20),
+            stmts: vec![Stmt::Break {
+                span: Span::new(5, 10),
+            }],
+        };
+        desugar_block(&mut block);
+        assert_eq!(block.stmts.len(), 1);
+        assert!(matches!(block.stmts[0], Stmt::Break { .. }));
+    }
+
+    #[test]
+    fn desugar_continue_passthrough() {
+        let mut block = Block {
+            span: Span::new(0, 20),
+            stmts: vec![Stmt::Continue {
+                span: Span::new(5, 13),
+            }],
+        };
+        desugar_block(&mut block);
+        assert_eq!(block.stmts.len(), 1);
+        assert!(matches!(block.stmts[0], Stmt::Continue { .. }));
+    }
+
+    #[test]
+    fn desugar_break_inside_while_passthrough() {
+        let mut block = Block {
+            span: Span::new(0, 50),
+            stmts: vec![Stmt::While {
+                span: Span::new(0, 50),
+                condition: Expr::BoolLit(true, Span::new(6, 10)),
+                body: Block {
+                    span: Span::new(11, 50),
+                    stmts: vec![Stmt::Break {
+                        span: Span::new(13, 18),
+                    }],
+                },
+            }],
+        };
+        desugar_block(&mut block);
+        assert_eq!(block.stmts.len(), 1);
+        if let Stmt::While { body, .. } = &block.stmts[0] {
+            assert_eq!(body.stmts.len(), 1);
+            assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+        } else {
+            panic!("expected While");
+        }
     }
 }

@@ -147,6 +147,12 @@ pub enum TokenKind {
     /// The `type` keyword (for type aliases and refinement types).
     #[token("type")]
     Type,
+    /// The `break` keyword — exits the innermost loop.
+    #[token("break")]
+    Break,
+    /// The `continue` keyword — skips to the next iteration of the innermost loop.
+    #[token("continue")]
+    Continue,
 
     // --- Literals ---
     /// An integer literal.
@@ -667,6 +673,39 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_break_keyword() {
+        let tokens = tokenize("break").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Break);
+    }
+
+    #[test]
+    fn tokenize_continue_keyword() {
+        let tokens = tokenize("continue").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Continue);
+    }
+
+    #[test]
+    fn tokenize_break_continue_together() {
+        let tokens = tokenize("break continue").unwrap_or_default();
+        let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
+        assert_eq!(kinds, vec![&TokenKind::Break, &TokenKind::Continue]);
+    }
+
+    #[test]
+    fn tokenize_break_in_while_context() {
+        let tokens = tokenize("while true { break }").unwrap_or_default();
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Break)));
+    }
+
+    #[test]
+    fn tokenize_continue_in_for_context() {
+        let tokens = tokenize("for i in 0..10 { continue }").unwrap_or_default();
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Continue)));
+    }
+
+    #[test]
     fn tokenize_fstring_simple() {
         let tokens = tokenize(r#"f"hello {name}!""#).unwrap_or_default();
         assert_eq!(tokens.len(), 1);
@@ -836,7 +875,7 @@ mod tests {
                                 "while", "for", "true", "false", "struct", "enum",
                                 "match", "import", "trait", "impl", "self",
                                 "own", "ref", "is", "async", "await", "spawn", "actor",
-                                "parallel"];
+                                "parallel", "break", "continue"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
                     let tokens = tokenize(&name).unwrap();
@@ -851,7 +890,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..27usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..29usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -867,6 +906,7 @@ mod tests {
                     ("own", TokenKind::Own), ("ref", TokenKind::Ref),
                     ("is", TokenKind::Is), ("async", TokenKind::Async),
                     ("parallel", TokenKind::Parallel),
+                    ("break", TokenKind::Break), ("continue", TokenKind::Continue),
                 ];
                 let (src, expected) = &keywords[idx % keywords.len()];
                 let tokens = tokenize(src).unwrap();

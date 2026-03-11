@@ -185,6 +185,8 @@ impl MirBuilder {
                     Self::collect_free_vars_in_stmt(s, params, free, seen);
                 }
             }
+            // Break and Continue have no free variables.
+            Stmt::Break { .. } | Stmt::Continue { .. } => {}
         }
     }
 

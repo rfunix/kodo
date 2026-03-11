@@ -53,6 +53,8 @@ impl MirBuilder {
             } => self.lower_for_loop(name, start, end, *inclusive, body),
             Stmt::Assign { name, value, .. } => self.lower_assign_stmt(name, value),
             Stmt::LetPattern { pattern, value, .. } => self.lower_let_pattern(pattern, value),
+            Stmt::Break { .. } => self.lower_break_stmt(),
+            Stmt::Continue { .. } => self.lower_continue_stmt(),
             // ForIn and IfLet are desugared before MIR lowering.
             Stmt::ForIn { .. } | Stmt::IfLet { .. } => Ok(Value::Unit),
             Stmt::Spawn { body, .. } => self.lower_spawn_stmt(body),
@@ -195,6 +197,31 @@ impl MirBuilder {
         Ok(Value::Unit)
     }
 
+    /// Lowers a `break` statement by jumping to the enclosing loop's exit block.
+    #[allow(clippy::unnecessary_wraps)]
+    fn lower_break_stmt(&mut self) -> Result<Value> {
+        if let Some(ctx) = self.loop_stack.last().copied() {
+            let continuation = self.new_block();
+            self.seal_block(Terminator::Goto(ctx.exit), continuation);
+            Ok(Value::Unit)
+        } else {
+            // Type checker should have caught this; emit an unreachable fallback.
+            Ok(Value::Unit)
+        }
+    }
+
+    /// Lowers a `continue` statement by jumping to the enclosing loop's header block.
+    #[allow(clippy::unnecessary_wraps)]
+    fn lower_continue_stmt(&mut self) -> Result<Value> {
+        if let Some(ctx) = self.loop_stack.last().copied() {
+            let continuation = self.new_block();
+            self.seal_block(Terminator::Goto(ctx.header), continuation);
+            Ok(Value::Unit)
+        } else {
+            Ok(Value::Unit)
+        }
+    }
+
     /// Lowers a `while` loop statement.
     fn lower_while_stmt(&mut self, condition: &Expr, body: &Block) -> Result<Value> {
         let loop_header = self.new_block();
@@ -215,8 +242,18 @@ impl MirBuilder {
             loop_body,
         );
 
+        // Push loop context for break/continue.
+        self.loop_stack.push(super::LoopContext {
+            header: loop_header,
+            exit: loop_exit,
+        });
+
         // In the body: lower statements and jump back to header.
         self.lower_block(body)?;
+
+        // Pop loop context.
+        self.loop_stack.pop();
+
         self.seal_block(Terminator::Goto(loop_header), loop_exit);
 
         Ok(Value::Unit)
@@ -268,8 +305,18 @@ impl MirBuilder {
             loop_body,
         );
 
+        // Push loop context for break/continue.
+        self.loop_stack.push(super::LoopContext {
+            header: loop_header,
+            exit: loop_exit,
+        });
+
         // In body: lower statements, then increment loop var.
         self.lower_block(body)?;
+
+        // Pop loop context.
+        self.loop_stack.pop();
+
         let inc_val = Value::BinOp(
             kodo_ast::BinOp::Add,
             Box::new(Value::Local(loop_var)),

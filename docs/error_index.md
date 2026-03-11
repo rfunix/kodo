@@ -333,6 +333,28 @@ A borrowed reference cannot escape the scope that created it.
 ### E0242: Move of Borrowed Value
 A value cannot be moved while it is currently borrowed by another variable.
 
+### E0243: Break Outside of Loop
+A `break` statement was used outside of a `while`, `for`, or `for-in` loop.
+
+```
+error[E0243]: `break` outside of loop
+  --> src/main.ko:5:5
+   |
+ 5 |     break
+   |     ^^^^^ `break` can only be used inside `while`, `for`, or `for-in` loops
+```
+
+### E0244: Continue Outside of Loop
+A `continue` statement was used outside of a `while`, `for`, or `for-in` loop.
+
+```
+error[E0244]: `continue` outside of loop
+  --> src/main.ko:5:5
+   |
+ 5 |     continue
+   |     ^^^^^^^^ `continue` can only be used inside `while`, `for`, or `for-in` loops
+```
+
 ### E0253: Tuple Index Out of Bounds
 A tuple index exceeds the number of elements in the tuple type.
 

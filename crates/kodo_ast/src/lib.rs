@@ -622,6 +622,16 @@ pub enum Stmt {
         /// Loop body.
         body: Block,
     },
+    /// A `break` statement — exits the innermost loop.
+    Break {
+        /// Source span.
+        span: Span,
+    },
+    /// A `continue` statement — skips to the next iteration of the innermost loop.
+    Continue {
+        /// Source span.
+        span: Span,
+    },
     /// Spawn a structured task: `spawn { body }`
     Spawn {
         /// Source span.

@@ -1152,6 +1152,8 @@ impl Parser {
                     self.parse_expr_or_assign_stmt()
                 }
             }
+            Some(TokenKind::Break) => self.parse_break_stmt(),
+            Some(TokenKind::Continue) => self.parse_continue_stmt(),
             Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
             Some(TokenKind::Parallel) => self.parse_parallel_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
@@ -1267,6 +1269,18 @@ impl Parser {
             name,
             value,
         })
+    }
+
+    /// Parses a `break` statement: `break`.
+    fn parse_break_stmt(&mut self) -> Result<Stmt> {
+        let token = self.expect(&TokenKind::Break)?;
+        Ok(Stmt::Break { span: token.span })
+    }
+
+    /// Parses a `continue` statement: `continue`.
+    fn parse_continue_stmt(&mut self) -> Result<Stmt> {
+        let token = self.expect(&TokenKind::Continue)?;
+        Ok(Stmt::Continue { span: token.span })
     }
 
     /// Parses a while loop: `while <condition> { <body> }`.
@@ -4955,6 +4969,160 @@ mod tests {
                 assert!(matches!(&elems[1], TypeExpr::Tuple(inner) if inner.len() == 2));
             }
             other => panic!("expected Tuple, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_break_in_while() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        break
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        assert_eq!(body.len(), 1);
+        if let Stmt::While { body, .. } = &body[0] {
+            assert_eq!(body.stmts.len(), 1);
+            assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn parse_continue_in_while() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        continue
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::While { body, .. } = &body[0] {
+            assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn parse_break_in_for() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    for i in 0..10 {
+                        break
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::For { body, .. } = &body[0] {
+            assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+        } else {
+            panic!("expected For");
+        }
+    }
+
+    #[test]
+    fn parse_continue_in_for() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    for i in 0..10 {
+                        continue
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::For { body, .. } = &body[0] {
+            assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+        } else {
+            panic!("expected For");
+        }
+    }
+
+    #[test]
+    fn parse_break_in_for_in() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo(items: List<Int>) {
+                    for x in items {
+                        break
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::ForIn { body, .. } = &body[0] {
+            assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+        } else {
+            panic!("expected ForIn");
+        }
+    }
+
+    #[test]
+    fn parse_break_has_span() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true { break }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::While { body, .. } = &body[0] {
+            if let Stmt::Break { span } = &body.stmts[0] {
+                assert!(span.start < span.end);
+            } else {
+                panic!("expected Break");
+            }
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn parse_break_and_continue_mixed() {
+        let module = parse(
+            r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        continue
+                        break
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = &module.functions[0].body.stmts;
+        if let Stmt::While { body, .. } = &body[0] {
+            assert_eq!(body.stmts.len(), 2);
+            assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+            assert!(matches!(body.stmts[1], Stmt::Break { .. }));
+        } else {
+            panic!("expected While");
         }
     }
 }

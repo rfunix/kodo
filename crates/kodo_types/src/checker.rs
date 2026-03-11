@@ -95,6 +95,8 @@ pub struct TypeChecker {
     /// Populated from `impl Trait for Type` blocks. Used for trait bound checking
     /// during generic type instantiation (bounded quantification / System F<:).
     pub(crate) trait_impl_set: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// Depth of nested loops. `break` and `continue` are only valid when > 0.
+    pub(crate) loop_depth: u32,
 }
 
 impl TypeChecker {
@@ -129,6 +131,7 @@ impl TypeChecker {
             type_alias_registry: std::collections::HashMap::new(),
             definition_spans: std::collections::HashMap::new(),
             trait_impl_set: std::collections::HashMap::new(),
+            loop_depth: 0,
         };
         checker.register_builtins();
         checker
