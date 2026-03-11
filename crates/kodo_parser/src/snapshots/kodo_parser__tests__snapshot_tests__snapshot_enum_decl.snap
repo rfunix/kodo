@@ -13,6 +13,7 @@ Module {
     name: "test",
     imports: [],
     meta: None,
+    type_aliases: [],
     type_decls: [],
     enum_decls: [
         EnumDecl {

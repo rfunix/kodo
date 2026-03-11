@@ -33,6 +33,7 @@ Module {
             ],
         },
     ),
+    type_aliases: [],
     type_decls: [],
     enum_decls: [],
     trait_decls: [],
