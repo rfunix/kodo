@@ -246,7 +246,7 @@ Source (.ko)
 [kodo_runtime]   → Linked staticlib (entry point, builtins, --describe)
 ```
 
-**Workspace Rust com 13 crates** (incluindo `kodo_runtime`, `kodo_desugar`, `kodo_lsp`), sem dependências circulares. 646+ testes, zero clippy warnings.
+**Workspace Rust com 13 crates** (incluindo `kodo_runtime`, `kodo_desugar`, `kodo_lsp`), sem dependências circulares. 676+ testes, zero clippy warnings.
 
 ---
 
@@ -396,10 +396,10 @@ module nome_do_modulo {
 
 ## 10. Métricas do Projeto
 
-- **646+ testes** (unit, snapshot, property-based, e2e)
+- **676+ testes** (unit, snapshot, property-based, e2e)
 - **Zero clippy warnings** com pedantic mode
 - **13 crates** no workspace
-- **46 exemplos** que compilam e executam
+- **49 exemplos** que compilam e executam
 - **Pipeline completo** source → token → AST → typed AST → contracts (Z3) → desugar → MIR → optimize → native binary
 - **LSP Server** com diagnostics, hover, goto-definition, completion, signature help
 
@@ -425,4 +425,4 @@ Use este documento como contexto e explore:
 
 ---
 
-*Documento atualizado em 2026-03-10. Reflete o estado real do compilador com 646+ testes passando.*
+*Documento atualizado em 2026-03-10. Reflete o estado real do compilador com 676+ testes passando.*

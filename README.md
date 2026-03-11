@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-646%2B%20passing-brightgreen" alt="Tests: 646+ passing">
+  <img src="https://img.shields.io/badge/tests-676%2B%20passing-brightgreen" alt="Tests: 676+ passing">
 </p>
 
 ---
@@ -267,7 +267,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 46 compilable programs:
+The [`examples/`](examples/) directory contains 49 compilable programs:
 
 ### Core Language
 
@@ -319,6 +319,7 @@ The [`examples/`](examples/) directory contains 46 compilable programs:
 | [`copy_semantics.ko`](examples/copy_semantics.ko) | Implicit Copy for primitives vs move for compounds |
 | [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
 | [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by`, `@security_sensitive` |
+| [`refinement_types.ko`](examples/refinement_types.ko) | Refinement types with `requires` constraints |
 
 ### Intent System
 
@@ -338,10 +339,11 @@ The [`examples/`](examples/) directory contains 46 compilable programs:
 | [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
 | [`http_client.ko`](examples/http_client.ko) | HTTP GET and JSON parsing |
+| [`time_env.ko`](examples/time_env.ko) | Time functions and environment variables |
 
 ### Concurrency & Multi-File
 
-> **Note:** `spawn` with captured variables and `actor` with state/message passing are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously). Channels and parallel execution are planned for v2.
+> **Note:** `spawn` with captured variables, `actor` with state/message passing, and `parallel` blocks are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously).
 
 | File | What it demonstrates |
 |------|---------------------|
@@ -351,6 +353,7 @@ The [`examples/`](examples/) directory contains 46 compilable programs:
 | [`concurrency_demo.ko`](examples/concurrency_demo.ko) | Concurrency patterns |
 | [`actors.ko`](examples/actors.ko) | Actor state and message passing |
 | [`actor_demo.ko`](examples/actor_demo.ko) | Actor demonstration |
+| [`parallel_blocks.ko`](examples/parallel_blocks.ko) | Structured concurrency with `parallel` blocks |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---
