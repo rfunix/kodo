@@ -36,8 +36,99 @@ pub fn desugar_module(module: &mut Module) {
     }
 }
 
+/// Desugars a `for` loop into `let mut` + `while` loop.
+fn desugar_for_stmt(
+    new_stmts: &mut Vec<Stmt>,
+    span: kodo_ast::Span,
+    name: &str,
+    start: Expr,
+    end: Expr,
+    inclusive: bool,
+    mut body: Block,
+) {
+    desugar_block(&mut body);
+    let start = desugar_expr(start);
+    let end = desugar_expr(end);
+
+    let let_stmt = Stmt::Let {
+        span,
+        mutable: true,
+        name: name.to_string(),
+        ty: None,
+        value: start,
+    };
+
+    let op = if inclusive { BinOp::Le } else { BinOp::Lt };
+    let condition = Expr::BinaryOp {
+        left: Box::new(Expr::Ident(name.to_string(), span)),
+        op,
+        right: Box::new(end),
+        span,
+    };
+
+    let increment = Stmt::Assign {
+        span,
+        name: name.to_string(),
+        value: Expr::BinaryOp {
+            left: Box::new(Expr::Ident(name.to_string(), span)),
+            op: BinOp::Add,
+            right: Box::new(Expr::IntLit(1, span)),
+            span,
+        },
+    };
+    body.stmts.push(increment);
+
+    let while_stmt = Stmt::While {
+        span,
+        condition,
+        body,
+    };
+
+    new_stmts.push(let_stmt);
+    new_stmts.push(while_stmt);
+}
+
+/// Desugars an `if let` into a `match` expression.
+fn desugar_if_let_stmt(
+    new_stmts: &mut Vec<Stmt>,
+    span: kodo_ast::Span,
+    pattern: Pattern,
+    value: Expr,
+    mut body: Block,
+    else_body: Option<Block>,
+) {
+    desugar_block(&mut body);
+    let value = desugar_expr(value);
+
+    let mut else_block = else_body.unwrap_or(Block {
+        span,
+        stmts: vec![],
+    });
+    desugar_block(&mut else_block);
+
+    let then_expr = Expr::Block(body);
+    let else_expr = Expr::Block(else_block);
+
+    let match_expr = Expr::Match {
+        expr: Box::new(value),
+        arms: vec![
+            MatchArm {
+                pattern,
+                body: then_expr,
+                span,
+            },
+            MatchArm {
+                pattern: Pattern::Wildcard(span),
+                body: else_expr,
+                span,
+            },
+        ],
+        span,
+    };
+    new_stmts.push(Stmt::Expr(match_expr));
+}
+
 /// Desugars all statements in a block.
-#[allow(clippy::too_many_lines)]
 fn desugar_block(block: &mut Block) {
     let mut new_stmts = Vec::new();
     for stmt in std::mem::take(&mut block.stmts) {
@@ -49,56 +140,7 @@ fn desugar_block(block: &mut Block) {
                 end,
                 inclusive,
                 body,
-            } => {
-                // Desugar: for i in start..end { body }
-                // Into:    let mut i = start; while i < end { body; i = i + 1 }
-                let mut desugared_body = body;
-                desugar_block(&mut desugared_body);
-
-                // Also desugar expressions in start/end
-                let start = desugar_expr(start);
-                let end = desugar_expr(end);
-
-                // let mut i = start
-                let let_stmt = Stmt::Let {
-                    span,
-                    mutable: true,
-                    name: name.clone(),
-                    ty: None,
-                    value: start,
-                };
-
-                // i < end (or i <= end for inclusive)
-                let op = if inclusive { BinOp::Le } else { BinOp::Lt };
-                let condition = Expr::BinaryOp {
-                    left: Box::new(Expr::Ident(name.clone(), span)),
-                    op,
-                    right: Box::new(end),
-                    span,
-                };
-
-                // i = i + 1 (appended to body)
-                let increment = Stmt::Assign {
-                    span,
-                    name: name.clone(),
-                    value: Expr::BinaryOp {
-                        left: Box::new(Expr::Ident(name.clone(), span)),
-                        op: BinOp::Add,
-                        right: Box::new(Expr::IntLit(1, span)),
-                        span,
-                    },
-                };
-                desugared_body.stmts.push(increment);
-
-                let while_stmt = Stmt::While {
-                    span,
-                    condition,
-                    body: desugared_body,
-                };
-
-                new_stmts.push(let_stmt);
-                new_stmts.push(while_stmt);
-            }
+            } => desugar_for_stmt(&mut new_stmts, span, &name, start, end, inclusive, body),
             Stmt::While {
                 span,
                 condition,
@@ -143,42 +185,9 @@ fn desugar_block(block: &mut Block) {
                 span,
                 pattern,
                 value,
-                mut body,
+                body,
                 else_body,
-            } => {
-                // Desugar: if let Pattern = expr { body } else { else_body }
-                // Into:    match expr { Pattern => { body }, _ => { else_body } }
-                desugar_block(&mut body);
-                let value = desugar_expr(value);
-
-                let mut else_block = else_body.unwrap_or(Block {
-                    span,
-                    stmts: vec![],
-                });
-                desugar_block(&mut else_block);
-
-                // Build a block expression for each arm body
-                let then_expr = Expr::Block(body);
-                let else_expr = Expr::Block(else_block);
-
-                let match_expr = Expr::Match {
-                    expr: Box::new(value),
-                    arms: vec![
-                        MatchArm {
-                            pattern,
-                            body: then_expr,
-                            span,
-                        },
-                        MatchArm {
-                            pattern: Pattern::Wildcard(span),
-                            body: else_expr,
-                            span,
-                        },
-                    ],
-                    span,
-                };
-                new_stmts.push(Stmt::Expr(match_expr));
-            }
+            } => desugar_if_let_stmt(&mut new_stmts, span, pattern, value, body, else_body),
             Stmt::Spawn { span, mut body } => {
                 // V1: spawn executes inline — just desugar the body.
                 desugar_block(&mut body);
@@ -205,139 +214,233 @@ fn desugar_block(block: &mut Block) {
     block.stmts = new_stmts;
 }
 
+/// Desugars `expr ?? default` into a match on `Option`.
+fn desugar_null_coalesce(left: Expr, right: Expr, span: kodo_ast::Span) -> Expr {
+    let left = desugar_expr(left);
+    let right = desugar_expr(right);
+    Expr::Match {
+        expr: Box::new(left),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Option".to_string()),
+                    variant: "Some".to_string(),
+                    bindings: vec!["__coalesce_val".to_string()],
+                    span,
+                },
+                body: Expr::Ident("__coalesce_val".to_string(), span),
+                span,
+            },
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Option".to_string()),
+                    variant: "None".to_string(),
+                    bindings: vec![],
+                    span,
+                },
+                body: right,
+                span,
+            },
+        ],
+        span,
+    }
+}
+
+/// Desugars `expr?` into a match on `Result`.
+fn desugar_try(operand: Expr, span: kodo_ast::Span) -> Expr {
+    let operand = desugar_expr(operand);
+    let return_err = Expr::Block(Block {
+        span,
+        stmts: vec![Stmt::Return {
+            span,
+            value: Some(Expr::EnumVariantExpr {
+                enum_name: "Result".to_string(),
+                variant: "Err".to_string(),
+                args: vec![Expr::Ident("__try_err".to_string(), span)],
+                span,
+            }),
+        }],
+    });
+    Expr::Match {
+        expr: Box::new(operand),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Result".to_string()),
+                    variant: "Ok".to_string(),
+                    bindings: vec!["__try_val".to_string()],
+                    span,
+                },
+                body: Expr::Ident("__try_val".to_string(), span),
+                span,
+            },
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Result".to_string()),
+                    variant: "Err".to_string(),
+                    bindings: vec!["__try_err".to_string()],
+                    span,
+                },
+                body: return_err,
+                span,
+            },
+        ],
+        span,
+    }
+}
+
+/// Desugars `expr?.field` into a match on `Option` with field access.
+fn desugar_optional_chain(object: Expr, field: String, span: kodo_ast::Span) -> Expr {
+    let object = desugar_expr(object);
+    Expr::Match {
+        expr: Box::new(object),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Option".to_string()),
+                    variant: "Some".to_string(),
+                    bindings: vec!["__chain_val".to_string()],
+                    span,
+                },
+                body: Expr::EnumVariantExpr {
+                    enum_name: "Option".to_string(),
+                    variant: "Some".to_string(),
+                    args: vec![Expr::FieldAccess {
+                        object: Box::new(Expr::Ident("__chain_val".to_string(), span)),
+                        field,
+                        span,
+                    }],
+                    span,
+                },
+                span,
+            },
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: Some("Option".to_string()),
+                    variant: "None".to_string(),
+                    bindings: vec![],
+                    span,
+                },
+                body: Expr::EnumVariantExpr {
+                    enum_name: "Option".to_string(),
+                    variant: "None".to_string(),
+                    args: vec![],
+                    span,
+                },
+                span,
+            },
+        ],
+        span,
+    }
+}
+
+/// Desugars `expr is VariantName` into a match that returns bool.
+fn desugar_is(operand: Expr, type_name: String, span: kodo_ast::Span) -> Expr {
+    let operand = desugar_expr(operand);
+    Expr::Match {
+        expr: Box::new(operand),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Variant {
+                    enum_name: None,
+                    variant: type_name,
+                    bindings: vec![],
+                    span,
+                },
+                body: Expr::BoolLit(true, span),
+                span,
+            },
+            MatchArm {
+                pattern: Pattern::Wildcard(span),
+                body: Expr::BoolLit(false, span),
+                span,
+            },
+        ],
+        span,
+    }
+}
+
+/// Desugars compound expressions that contain sub-expressions.
+fn desugar_compound_expr(expr: Expr) -> Expr {
+    match expr {
+        Expr::If {
+            condition,
+            mut then_branch,
+            else_branch,
+            span,
+        } => {
+            let condition = desugar_expr(*condition);
+            desugar_block(&mut then_branch);
+            let else_branch = else_branch.map(|mut b| {
+                desugar_block(&mut b);
+                b
+            });
+            Expr::If {
+                condition: Box::new(condition),
+                then_branch,
+                else_branch,
+                span,
+            }
+        }
+        Expr::StructLit { name, fields, span } => Expr::StructLit {
+            name,
+            fields: fields
+                .into_iter()
+                .map(|f| kodo_ast::FieldInit {
+                    name: f.name,
+                    value: desugar_expr(f.value),
+                    span: f.span,
+                })
+                .collect(),
+            span,
+        },
+        Expr::Match { expr, arms, span } => Expr::Match {
+            expr: Box::new(desugar_expr(*expr)),
+            arms: arms
+                .into_iter()
+                .map(|arm| MatchArm {
+                    pattern: arm.pattern,
+                    body: desugar_expr(arm.body),
+                    span: arm.span,
+                })
+                .collect(),
+            span,
+        },
+        Expr::Block(mut block) => {
+            desugar_block(&mut block);
+            Expr::Block(block)
+        }
+        Expr::Closure {
+            params,
+            return_type,
+            body,
+            span,
+        } => Expr::Closure {
+            params,
+            return_type,
+            body: Box::new(desugar_expr(*body)),
+            span,
+        },
+        other => other,
+    }
+}
+
 /// Recursively desugars an expression, transforming sugar operators
 /// (`??`, `?`, `?.`) into match expressions.
-#[allow(clippy::too_many_lines)]
 fn desugar_expr(expr: Expr) -> Expr {
     match expr {
-        // NullCoalesce: `expr ?? default` =>
-        // match expr { Option::Some(__val) => __val, Option::None => default }
-        Expr::NullCoalesce { left, right, span } => {
-            let left = desugar_expr(*left);
-            let right = desugar_expr(*right);
-            Expr::Match {
-                expr: Box::new(left),
-                arms: vec![
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Option".to_string()),
-                            variant: "Some".to_string(),
-                            bindings: vec!["__coalesce_val".to_string()],
-                            span,
-                        },
-                        body: Expr::Ident("__coalesce_val".to_string(), span),
-                        span,
-                    },
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Option".to_string()),
-                            variant: "None".to_string(),
-                            bindings: vec![],
-                            span,
-                        },
-                        body: right,
-                        span,
-                    },
-                ],
-                span,
-            }
-        }
-
-        // Try: `expr?` =>
-        // match expr { Result::Ok(__val) => __val, Result::Err(__e) => return Result::Err(__e) }
-        Expr::Try { operand, span } => {
-            let operand = desugar_expr(*operand);
-            let return_err = Expr::Block(Block {
-                span,
-                stmts: vec![Stmt::Return {
-                    span,
-                    value: Some(Expr::EnumVariantExpr {
-                        enum_name: "Result".to_string(),
-                        variant: "Err".to_string(),
-                        args: vec![Expr::Ident("__try_err".to_string(), span)],
-                        span,
-                    }),
-                }],
-            });
-            Expr::Match {
-                expr: Box::new(operand),
-                arms: vec![
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Result".to_string()),
-                            variant: "Ok".to_string(),
-                            bindings: vec!["__try_val".to_string()],
-                            span,
-                        },
-                        body: Expr::Ident("__try_val".to_string(), span),
-                        span,
-                    },
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Result".to_string()),
-                            variant: "Err".to_string(),
-                            bindings: vec!["__try_err".to_string()],
-                            span,
-                        },
-                        body: return_err,
-                        span,
-                    },
-                ],
-                span,
-            }
-        }
-
-        // OptionalChain: `expr?.field` =>
-        // match expr { Option::Some(__val) => Option::Some(__val.field), Option::None => Option::None }
+        Expr::NullCoalesce { left, right, span } => desugar_null_coalesce(*left, *right, span),
+        Expr::Try { operand, span } => desugar_try(*operand, span),
         Expr::OptionalChain {
             object,
             field,
             span,
-        } => {
-            let object = desugar_expr(*object);
-            Expr::Match {
-                expr: Box::new(object),
-                arms: vec![
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Option".to_string()),
-                            variant: "Some".to_string(),
-                            bindings: vec!["__chain_val".to_string()],
-                            span,
-                        },
-                        body: Expr::EnumVariantExpr {
-                            enum_name: "Option".to_string(),
-                            variant: "Some".to_string(),
-                            args: vec![Expr::FieldAccess {
-                                object: Box::new(Expr::Ident("__chain_val".to_string(), span)),
-                                field,
-                                span,
-                            }],
-                            span,
-                        },
-                        span,
-                    },
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: Some("Option".to_string()),
-                            variant: "None".to_string(),
-                            bindings: vec![],
-                            span,
-                        },
-                        body: Expr::EnumVariantExpr {
-                            enum_name: "Option".to_string(),
-                            variant: "None".to_string(),
-                            args: vec![],
-                            span,
-                        },
-                        span,
-                    },
-                ],
-                span,
-            }
-        }
-
-        // Recursively desugar sub-expressions
+        } => desugar_optional_chain(*object, field, span),
+        Expr::Is {
+            operand,
+            type_name,
+            span,
+        } => desugar_is(*operand, type_name, span),
         Expr::BinaryOp {
             left,
             op,
@@ -359,25 +462,6 @@ fn desugar_expr(expr: Expr) -> Expr {
             args: args.into_iter().map(desugar_expr).collect(),
             span,
         },
-        Expr::If {
-            condition,
-            mut then_branch,
-            else_branch,
-            span,
-        } => {
-            let condition = desugar_expr(*condition);
-            desugar_block(&mut then_branch);
-            let else_branch = else_branch.map(|mut b| {
-                desugar_block(&mut b);
-                b
-            });
-            Expr::If {
-                condition: Box::new(condition),
-                then_branch,
-                else_branch,
-                span,
-            }
-        }
         Expr::FieldAccess {
             object,
             field,
@@ -385,18 +469,6 @@ fn desugar_expr(expr: Expr) -> Expr {
         } => Expr::FieldAccess {
             object: Box::new(desugar_expr(*object)),
             field,
-            span,
-        },
-        Expr::StructLit { name, fields, span } => Expr::StructLit {
-            name,
-            fields: fields
-                .into_iter()
-                .map(|f| kodo_ast::FieldInit {
-                    name: f.name,
-                    value: desugar_expr(f.value),
-                    span: f.span,
-                })
-                .collect(),
             span,
         },
         Expr::EnumVariantExpr {
@@ -410,18 +482,6 @@ fn desugar_expr(expr: Expr) -> Expr {
             args: args.into_iter().map(desugar_expr).collect(),
             span,
         },
-        Expr::Match { expr, arms, span } => Expr::Match {
-            expr: Box::new(desugar_expr(*expr)),
-            arms: arms
-                .into_iter()
-                .map(|arm| MatchArm {
-                    pattern: arm.pattern,
-                    body: desugar_expr(arm.body),
-                    span: arm.span,
-                })
-                .collect(),
-            span,
-        },
         Expr::Range {
             start,
             end,
@@ -433,63 +493,16 @@ fn desugar_expr(expr: Expr) -> Expr {
             inclusive,
             span,
         },
-        Expr::Block(mut block) => {
-            desugar_block(&mut block);
-            Expr::Block(block)
-        }
-        // Closure desugaring: just desugar the body
-        Expr::Closure {
-            params,
-            return_type,
-            body,
-            span,
-        } => Expr::Closure {
-            params,
-            return_type,
-            body: Box::new(desugar_expr(*body)),
-            span,
-        },
-        // Is expression: `expr is VariantName` =>
-        // match expr { VariantName(_) => true, _ => false }
-        Expr::Is {
-            operand,
-            type_name,
-            span,
-        } => {
-            let operand = desugar_expr(*operand);
-            Expr::Match {
-                expr: Box::new(operand),
-                arms: vec![
-                    MatchArm {
-                        pattern: Pattern::Variant {
-                            enum_name: None,
-                            variant: type_name,
-                            bindings: vec![],
-                            span,
-                        },
-                        body: Expr::BoolLit(true, span),
-                        span,
-                    },
-                    MatchArm {
-                        pattern: Pattern::Wildcard(span),
-                        body: Expr::BoolLit(false, span),
-                        span,
-                    },
-                ],
-                span,
-            }
-        }
-        // Await: v1 just desugars operand (no actual suspension).
         Expr::Await { operand, span } => Expr::Await {
             operand: Box::new(desugar_expr(*operand)),
             span,
         },
-        // Leaf expressions — no sub-expressions to desugar
         e @ (Expr::IntLit(_, _)
         | Expr::FloatLit(_, _)
         | Expr::StringLit(_, _)
         | Expr::BoolLit(_, _)
         | Expr::Ident(_, _)) => e,
+        other => desugar_compound_expr(other),
     }
 }
 

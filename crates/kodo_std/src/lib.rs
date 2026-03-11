@@ -100,8 +100,22 @@ pub struct BuiltinFunction {
 
 /// Returns the list of builtin functions provided by the standard library.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn builtin_functions() -> Vec<BuiltinFunction> {
+    let mut fns = io_builtins();
+    fns.extend(math_builtins());
+    fns.extend(string_builtins());
+    fns.extend(numeric_conversion_builtins());
+    fns.extend(file_io_builtins());
+    fns.extend(collection_builtins());
+    fns.extend(network_builtins());
+    fns.extend(time_builtins());
+    fns.extend(env_builtins());
+    fns.extend(concurrency_builtins());
+    fns
+}
+
+/// I/O builtin functions.
+fn io_builtins() -> Vec<BuiltinFunction> {
     vec![
         // I/O
         BuiltinFunction {
@@ -119,7 +133,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Reads a line from standard input".to_string(),
             param_count: 0,
         },
-        // Math
+    ]
+}
+
+/// Math builtin functions.
+fn math_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::math::abs".to_string(),
             description: "Returns the absolute value".to_string(),
@@ -145,7 +164,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Clamps a value between a minimum and maximum".to_string(),
             param_count: 3,
         },
-        // String methods
+    ]
+}
+
+/// String builtin functions.
+fn string_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::string::length".to_string(),
             description: "Returns the length of a string in bytes".to_string(),
@@ -205,7 +229,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
                 .to_string(),
             param_count: 2,
         },
-        // Int methods
+    ]
+}
+
+/// Numeric conversion builtin functions (Int and Float64).
+fn numeric_conversion_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::int::to_string".to_string(),
             description: "Converts an integer to its string representation".to_string(),
@@ -227,7 +256,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Converts a float to an integer (truncates toward zero)".to_string(),
             param_count: 1,
         },
-        // File I/O
+    ]
+}
+
+/// File I/O builtin functions.
+fn file_io_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::io::file_exists".to_string(),
             description: "Checks if a file exists at the given path".to_string(),
@@ -243,7 +277,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Writes content to a file, returning Result<Unit, String>".to_string(),
             param_count: 2,
         },
-        // List operations
+    ]
+}
+
+/// Collection builtin functions (List and Map).
+fn collection_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::list::new".to_string(),
             description: "Creates a new empty list".to_string(),
@@ -295,7 +334,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Returns the number of entries in the map".to_string(),
             param_count: 1,
         },
-        // HTTP client
+    ]
+}
+
+/// Network builtin functions (HTTP and JSON).
+fn network_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::http::get".to_string(),
             description: "Performs an HTTP GET request and returns the response body".to_string(),
@@ -329,6 +373,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Frees a parsed JSON handle".to_string(),
             param_count: 1,
         },
+    ]
+}
+
+/// Time builtin functions.
+fn time_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::time::now".to_string(),
             description: "Returns the current Unix timestamp in seconds".to_string(),
@@ -349,6 +399,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Returns elapsed milliseconds since a start timestamp".to_string(),
             param_count: 1,
         },
+    ]
+}
+
+/// Environment builtin functions.
+fn env_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::env::get".to_string(),
             description: "Gets an environment variable value".to_string(),
@@ -359,7 +415,12 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Sets an environment variable".to_string(),
             param_count: 2,
         },
-        // Channels
+    ]
+}
+
+/// Concurrency builtin functions (channels, spawn, parallel).
+fn concurrency_builtins() -> Vec<BuiltinFunction> {
+    vec![
         BuiltinFunction {
             name: "kodo::channel::new".to_string(),
             description: "Creates a new generic channel and returns an opaque handle".to_string(),

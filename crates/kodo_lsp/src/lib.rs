@@ -573,52 +573,8 @@ fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Returns completion items for the current source.
-///
-/// Provides function names, struct/enum names, builtin functions,
-/// string method completions, and struct field completions.
-#[allow(clippy::too_many_lines)]
-fn completions_for_source(source: &str) -> Vec<CompletionItem> {
-    let mut items = Vec::new();
-
-    let Ok(module) = kodo_parser::parse(source) else {
-        return items;
-    };
-
-    let mut checker = kodo_types::TypeChecker::new();
-    let _ = checker.check_module(&module);
-
-    // Add function names.
-    for func in &module.functions {
-        items.push(CompletionItem {
-            label: func.name.clone(),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(format!("fn {}(...)", func.name)),
-            ..Default::default()
-        });
-    }
-
-    // Add struct names.
-    for type_decl in &module.type_decls {
-        items.push(CompletionItem {
-            label: type_decl.name.clone(),
-            kind: Some(CompletionItemKind::STRUCT),
-            detail: Some(format!("struct {}", type_decl.name)),
-            ..Default::default()
-        });
-    }
-
-    // Add enum names.
-    for enum_decl in &module.enum_decls {
-        items.push(CompletionItem {
-            label: enum_decl.name.clone(),
-            kind: Some(CompletionItemKind::ENUM),
-            detail: Some(format!("enum {}", enum_decl.name)),
-            ..Default::default()
-        });
-    }
-
-    // Add builtin functions.
+/// Adds builtin function completions to the list.
+fn add_builtin_completions(items: &mut Vec<CompletionItem>) {
     let builtins = [
         "println",
         "print",
@@ -649,8 +605,10 @@ fn completions_for_source(source: &str) -> Vec<CompletionItem> {
             ..Default::default()
         });
     }
+}
 
-    // Add string method completions (triggered by dot on String values).
+/// Adds string method completions to the list.
+fn add_string_method_completions(items: &mut Vec<CompletionItem>) {
     let string_methods = [
         ("length", "Returns the length of the string", "() -> Int"),
         (
@@ -695,8 +653,52 @@ fn completions_for_source(source: &str) -> Vec<CompletionItem> {
             ..Default::default()
         });
     }
+}
 
-    // Add struct field names for dot-completion.
+/// Returns completion items for the current source.
+///
+/// Provides function names, struct/enum names, builtin functions,
+/// string method completions, and struct field completions.
+fn completions_for_source(source: &str) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+
+    let Ok(module) = kodo_parser::parse(source) else {
+        return items;
+    };
+
+    let mut checker = kodo_types::TypeChecker::new();
+    let _ = checker.check_module(&module);
+
+    for func in &module.functions {
+        items.push(CompletionItem {
+            label: func.name.clone(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!("fn {}(...)", func.name)),
+            ..Default::default()
+        });
+    }
+
+    for type_decl in &module.type_decls {
+        items.push(CompletionItem {
+            label: type_decl.name.clone(),
+            kind: Some(CompletionItemKind::STRUCT),
+            detail: Some(format!("struct {}", type_decl.name)),
+            ..Default::default()
+        });
+    }
+
+    for enum_decl in &module.enum_decls {
+        items.push(CompletionItem {
+            label: enum_decl.name.clone(),
+            kind: Some(CompletionItemKind::ENUM),
+            detail: Some(format!("enum {}", enum_decl.name)),
+            ..Default::default()
+        });
+    }
+
+    add_builtin_completions(&mut items);
+    add_string_method_completions(&mut items);
+
     for type_decl in &module.type_decls {
         for field in &type_decl.fields {
             items.push(CompletionItem {

@@ -1,0 +1,578 @@
+//! Statement lowering — translates AST statements into MIR instructions.
+//!
+//! Handles `let` bindings, `return`, `while`, `for`, `assign`, `spawn`,
+//! and `parallel` statements. Each statement type may emit instructions,
+//! create new basic blocks, or lambda-lift nested functions.
+
+use kodo_ast::{Block, Expr, Stmt};
+use kodo_types::{resolve_type, Type};
+
+use super::MirBuilder;
+use crate::{BlockId, Instruction, LocalId, MirError, MirFunction, Result, Terminator, Value};
+
+impl MirBuilder {
+    /// Lowers a block of statements, returning the value of the last
+    /// expression statement (or `Value::Unit` if the block is empty or
+    /// ends with a non-expression statement).
+    pub(super) fn lower_block(&mut self, block: &Block) -> Result<Value> {
+        let mut last_value = Value::Unit;
+        for stmt in &block.stmts {
+            last_value = self.lower_stmt(stmt)?;
+        }
+        Ok(last_value)
+    }
+
+    /// Lowers a single statement and returns the resulting value.
+    ///
+    /// - `Let` bindings allocate a local and assign the initialiser.
+    /// - `Return` emits a return terminator (subsequent statements in
+    ///   the same block become unreachable, but we handle that simply
+    ///   by letting the caller continue — the block is already sealed).
+    /// - `Expr` statements lower the expression and discard the result.
+    pub(super) fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Value> {
+        match stmt {
+            Stmt::Let {
+                mutable,
+                name,
+                ty,
+                value,
+                ..
+            } => self.lower_let_stmt(*mutable, name, ty.as_ref(), value),
+            Stmt::Return { value, .. } => self.lower_return_stmt(value.as_ref()),
+            Stmt::Expr(expr) => self.lower_expr(expr),
+            Stmt::While {
+                condition, body, ..
+            } => self.lower_while_stmt(condition, body),
+            Stmt::For {
+                name,
+                start,
+                end,
+                inclusive,
+                body,
+                ..
+            } => self.lower_for_loop(name, start, end, *inclusive, body),
+            Stmt::Assign { name, value, .. } => self.lower_assign_stmt(name, value),
+            // IfLet is desugared before MIR lowering.
+            Stmt::IfLet { .. } => Ok(Value::Unit),
+            Stmt::Spawn { body, .. } => self.lower_spawn_stmt(body),
+            Stmt::Parallel { body, .. } => self.lower_parallel_stmt(body),
+        }
+    }
+
+    /// Lowers a `let` binding statement.
+    fn lower_let_stmt(
+        &mut self,
+        mutable: bool,
+        name: &str,
+        ty: Option<&kodo_ast::TypeExpr>,
+        value: &Expr,
+    ) -> Result<Value> {
+        // If the annotation is a type alias, resolve to the base type.
+        let resolved_ty = if let Some(type_expr) = ty {
+            if let kodo_ast::TypeExpr::Named(alias_name) = type_expr {
+                if let Some((base_ty, _)) = self.type_alias_registry.get(alias_name) {
+                    base_ty.clone()
+                } else {
+                    resolve_type(type_expr, kodo_ast::Span::new(0, 0))
+                        .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                }
+            } else {
+                resolve_type(type_expr, kodo_ast::Span::new(0, 0))
+                    .map_err(|e| MirError::TypeResolution(e.to_string()))?
+            }
+        } else {
+            Type::Unknown
+        };
+        // Check if the value is a closure — if so, we need to register
+        // the variable name in the closure registry after lowering.
+        let is_closure = matches!(value, Expr::Closure { .. });
+        let local_id = self.alloc_local(resolved_ty, mutable);
+        self.name_map.insert(name.to_string(), local_id);
+        let val = self.lower_expr(value)?;
+        self.emit(Instruction::Assign(local_id, val));
+
+        // If the value was a closure, the lift_closure method stored
+        // the closure info under the generated name. Find it and also
+        // register under the user-visible variable name.
+        if is_closure {
+            // The most recently generated closure name is the one we want.
+            if let Some(last_closure) = self.generated_closures.last() {
+                let closure_name = last_closure.name.clone();
+                if let Some(entry) = self.closure_registry.get(&closure_name).cloned() {
+                    self.closure_registry.insert(name.to_string(), entry);
+                }
+            }
+        }
+
+        // Emit a refinement check if the type annotation is a refined alias.
+        if let Some(kodo_ast::TypeExpr::Named(alias_name)) = ty {
+            if let Some((_base_ty, Some(constraint))) =
+                self.type_alias_registry.get(alias_name).cloned()
+            {
+                self.inject_refinement_check(name, &constraint, alias_name)?;
+            }
+        }
+
+        Ok(Value::Unit)
+    }
+
+    /// Lowers a `return` statement.
+    fn lower_return_stmt(&mut self, value: Option<&Expr>) -> Result<Value> {
+        let ret_val = match value {
+            Some(expr) => self.lower_expr(expr)?,
+            None => Value::Unit,
+        };
+        // Inject ensures checks before returning.
+        self.inject_ensures_checks(&ret_val)?;
+        // Emit DecRef for heap-allocated locals before returning.
+        let return_local = if let Value::Local(lid) = &ret_val {
+            Some(*lid)
+        } else {
+            None
+        };
+        let pc = self.param_count;
+        self.emit_decref_for_heap_locals(pc, return_local);
+        // Seal the current block with a Return terminator and
+        // create an unreachable continuation block.
+        let continuation = self.new_block();
+        self.seal_block(Terminator::Return(ret_val), continuation);
+        Ok(Value::Unit)
+    }
+
+    /// Lowers a `while` loop statement.
+    fn lower_while_stmt(&mut self, condition: &Expr, body: &Block) -> Result<Value> {
+        let loop_header = self.new_block();
+        let loop_body = self.new_block();
+        let loop_exit = self.new_block();
+
+        // Jump from current block to the loop header.
+        self.seal_block(Terminator::Goto(loop_header), loop_header);
+
+        // In the header: evaluate condition and branch.
+        let cond = self.lower_expr(condition)?;
+        self.seal_block(
+            Terminator::Branch {
+                condition: cond,
+                true_block: loop_body,
+                false_block: loop_exit,
+            },
+            loop_body,
+        );
+
+        // In the body: lower statements and jump back to header.
+        self.lower_block(body)?;
+        self.seal_block(Terminator::Goto(loop_header), loop_exit);
+
+        Ok(Value::Unit)
+    }
+
+    /// Lowers a `for` loop into MIR by desugaring into a while-style loop.
+    ///
+    /// The translation is:
+    /// ```text
+    /// let mut <name> = <start>
+    /// while <name> < <end> { <body>; <name> = <name> + 1 }
+    /// ```
+    /// For inclusive ranges, `<=` is used instead of `<`.
+    pub(super) fn lower_for_loop(
+        &mut self,
+        name: &str,
+        start: &Expr,
+        end: &Expr,
+        inclusive: bool,
+        body: &Block,
+    ) -> Result<Value> {
+        let start_val = self.lower_expr(start)?;
+        let loop_var = self.alloc_local(Type::Int, true);
+        self.name_map.insert(name.to_string(), loop_var);
+        self.emit(Instruction::Assign(loop_var, start_val));
+
+        let loop_header = self.new_block();
+        let loop_body = self.new_block();
+        let loop_exit = self.new_block();
+
+        // Jump to loop header.
+        self.seal_block(Terminator::Goto(loop_header), loop_header);
+
+        // In header: compare loop_var < end (or <= for inclusive).
+        let end_val = self.lower_expr(end)?;
+        let cmp_op = if inclusive {
+            kodo_ast::BinOp::Le
+        } else {
+            kodo_ast::BinOp::Lt
+        };
+        let cond = Value::BinOp(cmp_op, Box::new(Value::Local(loop_var)), Box::new(end_val));
+
+        self.seal_block(
+            Terminator::Branch {
+                condition: cond,
+                true_block: loop_body,
+                false_block: loop_exit,
+            },
+            loop_body,
+        );
+
+        // In body: lower statements, then increment loop var.
+        self.lower_block(body)?;
+        let inc_val = Value::BinOp(
+            kodo_ast::BinOp::Add,
+            Box::new(Value::Local(loop_var)),
+            Box::new(Value::IntConst(1)),
+        );
+        self.emit(Instruction::Assign(loop_var, inc_val));
+        self.seal_block(Terminator::Goto(loop_header), loop_exit);
+
+        Ok(Value::Unit)
+    }
+
+    /// Lowers an assignment statement.
+    fn lower_assign_stmt(&mut self, name: &str, value: &Expr) -> Result<Value> {
+        let local_id = self
+            .name_map
+            .get(name)
+            .copied()
+            .ok_or_else(|| MirError::UndefinedVariable(name.to_string()))?;
+        let val = self.lower_expr(value)?;
+        self.emit(Instruction::Assign(local_id, val));
+        Ok(Value::Unit)
+    }
+
+    /// Lowers a `spawn` statement by lambda-lifting the body and emitting
+    /// a runtime spawn call.
+    fn lower_spawn_stmt(&mut self, body: &Block) -> Result<Value> {
+        // Check for free variables in the spawn body.
+        let params = std::collections::HashSet::new();
+        let mut free_vars = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for s in &body.stmts {
+            Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
+        }
+        let captures: Vec<String> = free_vars
+            .into_iter()
+            .filter(|name| self.name_map.contains_key(name))
+            .collect();
+
+        let spawn_name = format!("__spawn_{}", self.closure_counter);
+        self.closure_counter += 1;
+
+        let mut spawn_builder = MirBuilder::new();
+        spawn_builder
+            .struct_registry
+            .clone_from(&self.struct_registry);
+        spawn_builder.enum_registry.clone_from(&self.enum_registry);
+        spawn_builder
+            .fn_return_types
+            .clone_from(&self.fn_return_types);
+        spawn_builder.fn_name.clone_from(&spawn_name);
+
+        if captures.is_empty() {
+            self.lower_spawn_without_captures(body, &spawn_name, spawn_builder)?;
+        } else {
+            self.lower_spawn_with_captures(body, &spawn_name, spawn_builder, &captures)?;
+        }
+
+        Ok(Value::Unit)
+    }
+
+    /// Lowers a spawn without captures — lambda-lifts into a zero-arg function.
+    fn lower_spawn_without_captures(
+        &mut self,
+        body: &Block,
+        spawn_name: &str,
+        mut spawn_builder: MirBuilder,
+    ) -> Result<()> {
+        let body_val = spawn_builder.lower_block(body)?;
+        let _ = body_val;
+        spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+
+        let mir_func = MirFunction {
+            name: spawn_name.to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: spawn_builder.locals,
+            blocks: spawn_builder.blocks,
+            entry: BlockId(0),
+        };
+
+        self.generated_closures
+            .extend(spawn_builder.generated_closures);
+        self.generated_closures.push(mir_func);
+        self.fn_return_types
+            .insert(spawn_name.to_string(), Type::Unit);
+
+        // Emit: kodo_spawn_task(FuncRef(spawn_name))
+        let dest = self.alloc_local(Type::Unit, false);
+        self.emit(Instruction::Call {
+            dest,
+            callee: "kodo_spawn_task".to_string(),
+            args: vec![Value::FuncRef(spawn_name.to_string())],
+        });
+
+        Ok(())
+    }
+
+    /// Lowers a spawn with captures — lambda-lifts into a function that takes
+    /// a single env-pointer argument and unpacks the captures.
+    fn lower_spawn_with_captures(
+        &mut self,
+        body: &Block,
+        spawn_name: &str,
+        mut spawn_builder: MirBuilder,
+        captures: &[String],
+    ) -> Result<()> {
+        // The spawned function receives one i64 param (env pointer).
+        let env_param = spawn_builder.alloc_local(Type::Int, false);
+        spawn_builder
+            .name_map
+            .insert("__env_ptr".to_string(), env_param);
+
+        // For each capture, emit an unpack instruction that loads
+        // the value from the env buffer at the correct offset.
+        for (idx, cap_name) in captures.iter().enumerate() {
+            let cap_ty = self
+                .name_map
+                .get(cap_name)
+                .and_then(|lid| self.local_types.get(lid))
+                .cloned()
+                .unwrap_or(Type::Int);
+            let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
+            spawn_builder.name_map.insert(cap_name.clone(), cap_local);
+            spawn_builder.local_types.insert(cap_local, cap_ty);
+            #[allow(clippy::cast_possible_wrap)]
+            let offset = (idx as i64) * 8;
+            spawn_builder.emit(Instruction::Call {
+                dest: cap_local,
+                callee: "__env_load".to_string(),
+                args: vec![Value::Local(env_param), Value::IntConst(offset)],
+            });
+        }
+
+        let param_count = 1; // just the env pointer
+
+        let body_val = spawn_builder.lower_block(body)?;
+        let _ = body_val;
+        spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+
+        let mir_func = MirFunction {
+            name: spawn_name.to_string(),
+            return_type: Type::Unit,
+            param_count,
+            locals: spawn_builder.locals,
+            blocks: spawn_builder.blocks,
+            entry: BlockId(0),
+        };
+
+        self.generated_closures
+            .extend(spawn_builder.generated_closures);
+        self.generated_closures.push(mir_func);
+        self.fn_return_types
+            .insert(spawn_name.to_string(), Type::Unit);
+
+        // In the caller: pack captures into an env buffer on the
+        // stack, then call kodo_spawn_task_with_env.
+        let env_local = self.alloc_local(Type::Int, false);
+        let mut pack_args = Vec::with_capacity(captures.len());
+        for cap_name in captures {
+            let cap_lid = self
+                .name_map
+                .get(cap_name)
+                .copied()
+                .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
+            pack_args.push(Value::Local(cap_lid));
+        }
+        self.emit(Instruction::Call {
+            dest: env_local,
+            callee: "__env_pack".to_string(),
+            args: pack_args,
+        });
+
+        // Emit: kodo_spawn_task_with_env(FuncRef, env_ptr, env_size)
+        #[allow(clippy::cast_possible_wrap)]
+        let env_size = (captures.len() as i64) * 8;
+        let dest = self.alloc_local(Type::Unit, false);
+        self.emit(Instruction::Call {
+            dest,
+            callee: "kodo_spawn_task_with_env".to_string(),
+            args: vec![
+                Value::FuncRef(spawn_name.to_string()),
+                Value::Local(env_local),
+                Value::IntConst(env_size),
+            ],
+        });
+
+        Ok(())
+    }
+
+    /// Lowers a `parallel` block: spawns each task asynchronously and awaits all.
+    fn lower_parallel_stmt(&mut self, body: &[Stmt]) -> Result<Value> {
+        let mut handles = Vec::new();
+        for stmt in body {
+            if let Stmt::Spawn {
+                body: spawn_body, ..
+            } = stmt
+            {
+                let handle = self.lower_parallel_spawn(spawn_body)?;
+                handles.push(handle);
+            }
+        }
+        // Emit kodo_await for each handle to guarantee structured
+        // concurrency: all tasks complete before leaving the block.
+        for handle in handles {
+            let await_dest = self.alloc_local(Type::Unit, false);
+            self.emit(Instruction::Call {
+                dest: await_dest,
+                callee: "kodo_await".to_string(),
+                args: vec![Value::Local(handle)],
+            });
+        }
+        Ok(Value::Unit)
+    }
+
+    /// Lambda-lifts a spawn body inside a parallel block and emits a
+    /// `kodo_spawn_async` call that returns a future handle.
+    ///
+    /// Returns the [`LocalId`] holding the handle so the caller can emit
+    /// a corresponding `kodo_await` after all spawns.
+    pub(super) fn lower_parallel_spawn(&mut self, body: &Block) -> Result<LocalId> {
+        let params = std::collections::HashSet::new();
+        let mut free_vars = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for s in &body.stmts {
+            Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
+        }
+        let captures: Vec<String> = free_vars
+            .into_iter()
+            .filter(|name| self.name_map.contains_key(name))
+            .collect();
+        let spawn_name = format!("__parallel_spawn_{}", self.closure_counter);
+        self.closure_counter += 1;
+        let mut spawn_builder = MirBuilder::new();
+        spawn_builder
+            .struct_registry
+            .clone_from(&self.struct_registry);
+        spawn_builder.enum_registry.clone_from(&self.enum_registry);
+        spawn_builder
+            .fn_return_types
+            .clone_from(&self.fn_return_types);
+        spawn_builder.fn_name.clone_from(&spawn_name);
+        if captures.is_empty() {
+            self.lower_parallel_spawn_no_captures(body, &spawn_name, spawn_builder)
+        } else {
+            self.lower_parallel_spawn_with_captures(body, &spawn_name, spawn_builder, &captures)
+        }
+    }
+
+    /// Parallel spawn without captures.
+    fn lower_parallel_spawn_no_captures(
+        &mut self,
+        body: &Block,
+        spawn_name: &str,
+        mut spawn_builder: MirBuilder,
+    ) -> Result<LocalId> {
+        let body_val = spawn_builder.lower_block(body)?;
+        let _ = body_val;
+        spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+        let mir_func = MirFunction {
+            name: spawn_name.to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: spawn_builder.locals,
+            blocks: spawn_builder.blocks,
+            entry: BlockId(0),
+        };
+        self.generated_closures
+            .extend(spawn_builder.generated_closures);
+        self.generated_closures.push(mir_func);
+        self.fn_return_types
+            .insert(spawn_name.to_string(), Type::Unit);
+        // kodo_spawn_async returns a handle (i64).
+        let handle = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Call {
+            dest: handle,
+            callee: "kodo_spawn_async".to_string(),
+            args: vec![
+                Value::FuncRef(spawn_name.to_string()),
+                Value::IntConst(0),
+                Value::IntConst(0),
+            ],
+        });
+        Ok(handle)
+    }
+
+    /// Parallel spawn with captures.
+    fn lower_parallel_spawn_with_captures(
+        &mut self,
+        body: &Block,
+        spawn_name: &str,
+        mut spawn_builder: MirBuilder,
+        captures: &[String],
+    ) -> Result<LocalId> {
+        let env_param = spawn_builder.alloc_local(Type::Int, false);
+        spawn_builder
+            .name_map
+            .insert("__env_ptr".to_string(), env_param);
+        for (idx, cap_name) in captures.iter().enumerate() {
+            let cap_ty = self
+                .name_map
+                .get(cap_name)
+                .and_then(|lid| self.local_types.get(lid))
+                .cloned()
+                .unwrap_or(Type::Int);
+            let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
+            spawn_builder.name_map.insert(cap_name.clone(), cap_local);
+            spawn_builder.local_types.insert(cap_local, cap_ty);
+            #[allow(clippy::cast_possible_wrap)]
+            let offset = (idx as i64) * 8;
+            spawn_builder.emit(Instruction::Call {
+                dest: cap_local,
+                callee: "__env_load".to_string(),
+                args: vec![Value::Local(env_param), Value::IntConst(offset)],
+            });
+        }
+        let param_count = 1;
+        let body_val = spawn_builder.lower_block(body)?;
+        let _ = body_val;
+        spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+        let mir_func = MirFunction {
+            name: spawn_name.to_string(),
+            return_type: Type::Unit,
+            param_count,
+            locals: spawn_builder.locals,
+            blocks: spawn_builder.blocks,
+            entry: BlockId(0),
+        };
+        self.generated_closures
+            .extend(spawn_builder.generated_closures);
+        self.generated_closures.push(mir_func);
+        self.fn_return_types
+            .insert(spawn_name.to_string(), Type::Unit);
+        let env_local = self.alloc_local(Type::Int, false);
+        let mut pack_args = Vec::with_capacity(captures.len());
+        for cap_name in captures {
+            let cap_lid = self
+                .name_map
+                .get(cap_name)
+                .copied()
+                .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
+            pack_args.push(Value::Local(cap_lid));
+        }
+        self.emit(Instruction::Call {
+            dest: env_local,
+            callee: "__env_pack".to_string(),
+            args: pack_args,
+        });
+        #[allow(clippy::cast_possible_wrap)]
+        let env_size = (captures.len() as i64) * 8;
+        let handle = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Call {
+            dest: handle,
+            callee: "kodo_spawn_async".to_string(),
+            args: vec![
+                Value::FuncRef(spawn_name.to_string()),
+                Value::Local(env_local),
+                Value::IntConst(env_size),
+            ],
+        });
+        Ok(handle)
+    }
+}

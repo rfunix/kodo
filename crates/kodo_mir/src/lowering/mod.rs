@@ -14,9 +14,14 @@
 //! - **\[EC\]** *Engineering a Compiler* Ch. 5 — Intermediate representations
 //!   and the translation from AST to CFG-based IR.
 
+mod control;
+mod expr;
+mod pattern;
+mod stmt;
+
 use std::collections::{HashMap, HashSet};
 
-use kodo_ast::{Block, Expr, Function, Module, Stmt, UnaryOp};
+use kodo_ast::{Function, Module};
 use kodo_types::{resolve_type, resolve_type_with_enums, Type};
 
 /// Size of a single actor field in bytes (i64 = 8 bytes).
@@ -229,1414 +234,6 @@ impl MirBuilder {
             terminator,
         };
         self.blocks.push(block);
-    }
-
-    /// Collects free variables in an expression that are defined in the
-    /// enclosing scope but not in the given set of local parameter names.
-    fn collect_free_vars(
-        expr: &Expr,
-        params: &std::collections::HashSet<String>,
-        free: &mut Vec<String>,
-        seen: &mut std::collections::HashSet<String>,
-    ) {
-        match expr {
-            Expr::Ident(name, _) => {
-                if !params.contains(name) && seen.insert(name.clone()) {
-                    free.push(name.clone());
-                }
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                Self::collect_free_vars(left, params, free, seen);
-                Self::collect_free_vars(right, params, free, seen);
-            }
-            Expr::UnaryOp { operand, .. }
-            | Expr::Is { operand, .. }
-            | Expr::Await { operand, .. } => {
-                Self::collect_free_vars(operand, params, free, seen);
-            }
-            Expr::Call { callee, args, .. } => {
-                Self::collect_free_vars(callee, params, free, seen);
-                for arg in args {
-                    Self::collect_free_vars(arg, params, free, seen);
-                }
-            }
-            Expr::If {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                Self::collect_free_vars(condition, params, free, seen);
-                for stmt in &then_branch.stmts {
-                    Self::collect_free_vars_in_stmt(stmt, params, free, seen);
-                }
-                if let Some(else_blk) = else_branch {
-                    for stmt in &else_blk.stmts {
-                        Self::collect_free_vars_in_stmt(stmt, params, free, seen);
-                    }
-                }
-            }
-            Expr::Block(block) => {
-                for stmt in &block.stmts {
-                    Self::collect_free_vars_in_stmt(stmt, params, free, seen);
-                }
-            }
-            Expr::FieldAccess { object, .. } => {
-                Self::collect_free_vars(object, params, free, seen);
-            }
-            Expr::StructLit { fields, .. } => {
-                for f in fields {
-                    Self::collect_free_vars(&f.value, params, free, seen);
-                }
-            }
-            Expr::EnumVariantExpr { args, .. } => {
-                for arg in args {
-                    Self::collect_free_vars(arg, params, free, seen);
-                }
-            }
-            Expr::Match { expr, arms, .. } => {
-                Self::collect_free_vars(expr, params, free, seen);
-                for arm in arms {
-                    Self::collect_free_vars(&arm.body, params, free, seen);
-                }
-            }
-            Expr::Closure { body, .. } => {
-                Self::collect_free_vars(body, params, free, seen);
-            }
-            // Literals and other expressions have no free variables.
-            Expr::IntLit(..)
-            | Expr::FloatLit(..)
-            | Expr::StringLit(..)
-            | Expr::BoolLit(..)
-            | Expr::Range { .. }
-            | Expr::Try { .. }
-            | Expr::OptionalChain { .. }
-            | Expr::NullCoalesce { .. } => {}
-        }
-    }
-
-    /// Collects free variables in a statement.
-    fn collect_free_vars_in_stmt(
-        stmt: &Stmt,
-        params: &std::collections::HashSet<String>,
-        free: &mut Vec<String>,
-        seen: &mut std::collections::HashSet<String>,
-    ) {
-        match stmt {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
-                Self::collect_free_vars(value, params, free, seen);
-            }
-            Stmt::Return { value, .. } => {
-                if let Some(expr) = value {
-                    Self::collect_free_vars(expr, params, free, seen);
-                }
-            }
-            Stmt::Expr(expr) => {
-                Self::collect_free_vars(expr, params, free, seen);
-            }
-            Stmt::While {
-                condition, body, ..
-            } => {
-                Self::collect_free_vars(condition, params, free, seen);
-                for s in &body.stmts {
-                    Self::collect_free_vars_in_stmt(s, params, free, seen);
-                }
-            }
-            Stmt::For {
-                start, end, body, ..
-            } => {
-                Self::collect_free_vars(start, params, free, seen);
-                Self::collect_free_vars(end, params, free, seen);
-                for s in &body.stmts {
-                    Self::collect_free_vars_in_stmt(s, params, free, seen);
-                }
-            }
-            // IfLet is desugared before MIR lowering.
-            Stmt::IfLet {
-                value,
-                body,
-                else_body,
-                ..
-            } => {
-                Self::collect_free_vars(value, params, free, seen);
-                for s in &body.stmts {
-                    Self::collect_free_vars_in_stmt(s, params, free, seen);
-                }
-                if let Some(eb) = else_body {
-                    for s in &eb.stmts {
-                        Self::collect_free_vars_in_stmt(s, params, free, seen);
-                    }
-                }
-            }
-            // Spawn is desugared before MIR lowering.
-            Stmt::Spawn { body, .. } => {
-                for s in &body.stmts {
-                    Self::collect_free_vars_in_stmt(s, params, free, seen);
-                }
-            }
-            Stmt::Parallel { body, .. } => {
-                for s in body {
-                    Self::collect_free_vars_in_stmt(s, params, free, seen);
-                }
-            }
-        }
-    }
-
-    /// Lambda-lifts a closure into a top-level [`MirFunction`].
-    ///
-    /// Generates a unique function name, prepends captured variables as
-    /// extra parameters, and lowers the closure body.
-    fn lift_closure(
-        &mut self,
-        closure_params: &[kodo_ast::ClosureParam],
-        return_type: Option<&kodo_ast::TypeExpr>,
-        body: &Expr,
-    ) -> Result<(String, Vec<String>)> {
-        let closure_name = format!("__closure_{}", self.closure_counter);
-        self.closure_counter += 1;
-
-        // Collect free variables (captures).
-        let param_names: std::collections::HashSet<String> =
-            closure_params.iter().map(|p| p.name.clone()).collect();
-        let mut free_vars = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        Self::collect_free_vars(body, &param_names, &mut free_vars, &mut seen);
-
-        // Only keep free vars that are actually defined in the enclosing scope.
-        let captures: Vec<String> = free_vars
-            .into_iter()
-            .filter(|name| self.name_map.contains_key(name))
-            .collect();
-
-        // Build enum names set for type resolution.
-        let enum_names: std::collections::HashSet<String> =
-            self.enum_registry.keys().cloned().collect();
-
-        // Create the MirFunction for the closure.
-        let mut closure_builder = MirBuilder::new();
-        closure_builder
-            .struct_registry
-            .clone_from(&self.struct_registry);
-        closure_builder
-            .enum_registry
-            .clone_from(&self.enum_registry);
-        closure_builder
-            .fn_return_types
-            .clone_from(&self.fn_return_types);
-        closure_builder.fn_name.clone_from(&closure_name);
-
-        // Allocate locals for captured variables (extra params).
-        for cap_name in &captures {
-            let cap_ty = self
-                .name_map
-                .get(cap_name)
-                .and_then(|lid| self.local_types.get(lid))
-                .cloned()
-                .unwrap_or(Type::Unknown);
-            let local_id = closure_builder.alloc_local(cap_ty, false);
-            closure_builder.name_map.insert(cap_name.clone(), local_id);
-        }
-
-        // Allocate locals for closure parameters.
-        for param in closure_params {
-            let ty = if let Some(type_expr) = &param.ty {
-                resolve_type_with_enums(type_expr, param.span, &enum_names)
-                    .map_err(|e| MirError::TypeResolution(e.to_string()))?
-            } else {
-                Type::Unknown
-            };
-            let local_id = closure_builder.alloc_local(ty, false);
-            closure_builder
-                .name_map
-                .insert(param.name.clone(), local_id);
-        }
-
-        let param_count = captures.len() + closure_params.len();
-
-        // Lower the closure body.
-        let body_val = closure_builder.lower_expr(body)?;
-
-        // Determine the return type: prefer an explicit annotation, then
-        // fall back to inferring from the body value.
-        let inferred_ret = if let Some(ret_expr) = return_type {
-            let enum_names: std::collections::HashSet<String> =
-                self.enum_registry.keys().cloned().collect();
-            resolve_type_with_enums(ret_expr, kodo_ast::Span::new(0, 0), &enum_names)
-                .map_err(|e| MirError::TypeResolution(e.to_string()))?
-        } else {
-            closure_builder.infer_value_type(&body_val)
-        };
-
-        closure_builder.seal_block_final(Terminator::Return(body_val));
-
-        let mir_func = MirFunction {
-            name: closure_name.clone(),
-            return_type: inferred_ret.clone(),
-            param_count,
-            locals: closure_builder.locals,
-            blocks: closure_builder.blocks,
-            entry: BlockId(0),
-        };
-
-        // Collect any nested closures generated during lowering.
-        self.generated_closures
-            .extend(closure_builder.generated_closures);
-        self.generated_closures.push(mir_func);
-
-        // Register the closure in fn_return_types so calls resolve.
-        self.fn_return_types
-            .insert(closure_name.clone(), inferred_ret);
-
-        Ok((closure_name, captures))
-    }
-
-    /// Lowers a block of statements, returning the value of the last
-    /// expression statement (or `Value::Unit` if the block is empty or
-    /// ends with a non-expression statement).
-    fn lower_block(&mut self, block: &Block) -> Result<Value> {
-        let mut last_value = Value::Unit;
-        for stmt in &block.stmts {
-            last_value = self.lower_stmt(stmt)?;
-        }
-        Ok(last_value)
-    }
-
-    /// Lowers a single statement and returns the resulting value.
-    ///
-    /// - `Let` bindings allocate a local and assign the initialiser.
-    /// - `Return` emits a return terminator (subsequent statements in
-    ///   the same block become unreachable, but we handle that simply
-    ///   by letting the caller continue — the block is already sealed).
-    /// - `Expr` statements lower the expression and discard the result.
-    #[allow(clippy::too_many_lines)]
-    fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Value> {
-        match stmt {
-            Stmt::Let {
-                mutable,
-                name,
-                ty,
-                value,
-                ..
-            } => {
-                // If the annotation is a type alias, resolve to the base type.
-                let resolved_ty = if let Some(type_expr) = ty {
-                    if let kodo_ast::TypeExpr::Named(alias_name) = type_expr {
-                        if let Some((base_ty, _)) = self.type_alias_registry.get(alias_name) {
-                            base_ty.clone()
-                        } else {
-                            resolve_type(type_expr, kodo_ast::Span::new(0, 0))
-                                .map_err(|e| MirError::TypeResolution(e.to_string()))?
-                        }
-                    } else {
-                        resolve_type(type_expr, kodo_ast::Span::new(0, 0))
-                            .map_err(|e| MirError::TypeResolution(e.to_string()))?
-                    }
-                } else {
-                    Type::Unknown
-                };
-                // Check if the value is a closure — if so, we need to register
-                // the variable name in the closure registry after lowering.
-                let is_closure = matches!(value, Expr::Closure { .. });
-                let local_id = self.alloc_local(resolved_ty, *mutable);
-                self.name_map.insert(name.clone(), local_id);
-                let val = self.lower_expr(value)?;
-                self.emit(Instruction::Assign(local_id, val));
-
-                // If the value was a closure, the lift_closure method stored
-                // the closure info under the generated name. Find it and also
-                // register under the user-visible variable name.
-                if is_closure {
-                    // The most recently generated closure name is the one we want.
-                    if let Some(last_closure) = self.generated_closures.last() {
-                        let closure_name = last_closure.name.clone();
-                        if let Some(entry) = self.closure_registry.get(&closure_name).cloned() {
-                            self.closure_registry.insert(name.clone(), entry);
-                        }
-                    }
-                }
-
-                // Emit a refinement check if the type annotation is a refined alias.
-                if let Some(kodo_ast::TypeExpr::Named(alias_name)) = ty {
-                    if let Some((_base_ty, Some(constraint))) =
-                        self.type_alias_registry.get(alias_name).cloned()
-                    {
-                        self.inject_refinement_check(name, &constraint, alias_name)?;
-                    }
-                }
-
-                Ok(Value::Unit)
-            }
-            Stmt::Return { value, .. } => {
-                let ret_val = match value {
-                    Some(expr) => self.lower_expr(expr)?,
-                    None => Value::Unit,
-                };
-                // Inject ensures checks before returning.
-                self.inject_ensures_checks(&ret_val)?;
-                // Emit DecRef for heap-allocated locals before returning.
-                let return_local = if let Value::Local(lid) = &ret_val {
-                    Some(*lid)
-                } else {
-                    None
-                };
-                let pc = self.param_count;
-                self.emit_decref_for_heap_locals(pc, return_local);
-                // Seal the current block with a Return terminator and
-                // create an unreachable continuation block.
-                let continuation = self.new_block();
-                self.seal_block(Terminator::Return(ret_val), continuation);
-                Ok(Value::Unit)
-            }
-            Stmt::Expr(expr) => self.lower_expr(expr),
-            Stmt::While {
-                condition, body, ..
-            } => {
-                let loop_header = self.new_block();
-                let loop_body = self.new_block();
-                let loop_exit = self.new_block();
-
-                // Jump from current block to the loop header.
-                self.seal_block(Terminator::Goto(loop_header), loop_header);
-
-                // In the header: evaluate condition and branch.
-                let cond = self.lower_expr(condition)?;
-                self.seal_block(
-                    Terminator::Branch {
-                        condition: cond,
-                        true_block: loop_body,
-                        false_block: loop_exit,
-                    },
-                    loop_body,
-                );
-
-                // In the body: lower statements and jump back to header.
-                self.lower_block(body)?;
-                self.seal_block(Terminator::Goto(loop_header), loop_exit);
-
-                Ok(Value::Unit)
-            }
-            Stmt::For {
-                name,
-                start,
-                end,
-                inclusive,
-                body,
-                ..
-            } => self.lower_for_loop(name, start, end, *inclusive, body),
-            Stmt::Assign { name, value, .. } => {
-                let local_id = self
-                    .name_map
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| MirError::UndefinedVariable(name.clone()))?;
-                let val = self.lower_expr(value)?;
-                self.emit(Instruction::Assign(local_id, val));
-                Ok(Value::Unit)
-            }
-            // IfLet is desugared before MIR lowering.
-            Stmt::IfLet { .. } => Ok(Value::Unit),
-            // Spawn: lambda-lift body into a task function and schedule it.
-            // When the body captures variables, we pack them into an
-            // environment buffer and use `kodo_spawn_task_with_env`.
-            Stmt::Spawn { body, .. } => {
-                // Check for free variables in the spawn body.
-                let params = std::collections::HashSet::new();
-                let mut free_vars = Vec::new();
-                let mut seen = std::collections::HashSet::new();
-                for s in &body.stmts {
-                    Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
-                }
-                let captures: Vec<String> = free_vars
-                    .into_iter()
-                    .filter(|name| self.name_map.contains_key(name))
-                    .collect();
-
-                let spawn_name = format!("__spawn_{}", self.closure_counter);
-                self.closure_counter += 1;
-
-                let mut spawn_builder = MirBuilder::new();
-                spawn_builder
-                    .struct_registry
-                    .clone_from(&self.struct_registry);
-                spawn_builder.enum_registry.clone_from(&self.enum_registry);
-                spawn_builder
-                    .fn_return_types
-                    .clone_from(&self.fn_return_types);
-                spawn_builder.fn_name.clone_from(&spawn_name);
-
-                if captures.is_empty() {
-                    // No captures — lambda-lift into a zero-arg function.
-                    let body_val = spawn_builder.lower_block(body)?;
-                    let _ = body_val;
-                    spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
-
-                    let mir_func = MirFunction {
-                        name: spawn_name.clone(),
-                        return_type: Type::Unit,
-                        param_count: 0,
-                        locals: spawn_builder.locals,
-                        blocks: spawn_builder.blocks,
-                        entry: BlockId(0),
-                    };
-
-                    self.generated_closures
-                        .extend(spawn_builder.generated_closures);
-                    self.generated_closures.push(mir_func);
-                    self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
-
-                    // Emit: kodo_spawn_task(FuncRef(spawn_name))
-                    let dest = self.alloc_local(Type::Unit, false);
-                    self.emit(Instruction::Call {
-                        dest,
-                        callee: "kodo_spawn_task".to_string(),
-                        args: vec![Value::FuncRef(spawn_name)],
-                    });
-                } else {
-                    // Has captures — lambda-lift into a function that takes a
-                    // single env-pointer argument and unpacks the captures.
-                    // The spawned function receives one i64 param (env pointer).
-                    let env_param = spawn_builder.alloc_local(Type::Int, false);
-                    spawn_builder
-                        .name_map
-                        .insert("__env_ptr".to_string(), env_param);
-
-                    // For each capture, emit an unpack instruction that loads
-                    // the value from the env buffer at the correct offset.
-                    // Each capture occupies 8 bytes (one i64 word).
-                    for (idx, cap_name) in captures.iter().enumerate() {
-                        let cap_ty = self
-                            .name_map
-                            .get(cap_name)
-                            .and_then(|lid| self.local_types.get(lid))
-                            .cloned()
-                            .unwrap_or(Type::Int);
-                        let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
-                        spawn_builder.name_map.insert(cap_name.clone(), cap_local);
-                        spawn_builder.local_types.insert(cap_local, cap_ty);
-                        // Emit: cap_local = env_ptr + offset (via BinOp)
-                        // We load the value: cap_local = *(env_ptr + idx*8)
-                        // Represented as: cap_local = __env_load(env_ptr, offset)
-                        // Using a Call to a synthetic builtin that codegen
-                        // will translate as a memory load.
-                        #[allow(clippy::cast_possible_wrap)]
-                        let offset = (idx as i64) * 8;
-                        spawn_builder.emit(Instruction::Call {
-                            dest: cap_local,
-                            callee: "__env_load".to_string(),
-                            args: vec![Value::Local(env_param), Value::IntConst(offset)],
-                        });
-                    }
-
-                    let param_count = 1; // just the env pointer
-
-                    let body_val = spawn_builder.lower_block(body)?;
-                    let _ = body_val;
-                    spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
-
-                    let mir_func = MirFunction {
-                        name: spawn_name.clone(),
-                        return_type: Type::Unit,
-                        param_count,
-                        locals: spawn_builder.locals,
-                        blocks: spawn_builder.blocks,
-                        entry: BlockId(0),
-                    };
-
-                    self.generated_closures
-                        .extend(spawn_builder.generated_closures);
-                    self.generated_closures.push(mir_func);
-                    self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
-
-                    // In the caller: pack captures into an env buffer on the
-                    // stack, then call kodo_spawn_task_with_env.
-                    // Emit: env_local = __env_pack(capture1, capture2, ...)
-                    let env_local = self.alloc_local(Type::Int, false);
-                    let mut pack_args = Vec::with_capacity(captures.len());
-                    for cap_name in &captures {
-                        let cap_lid = self
-                            .name_map
-                            .get(cap_name)
-                            .copied()
-                            .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
-                        pack_args.push(Value::Local(cap_lid));
-                    }
-                    self.emit(Instruction::Call {
-                        dest: env_local,
-                        callee: "__env_pack".to_string(),
-                        args: pack_args,
-                    });
-
-                    // Emit: kodo_spawn_task_with_env(FuncRef, env_ptr, env_size)
-                    #[allow(clippy::cast_possible_wrap)]
-                    let env_size = (captures.len() as i64) * 8;
-                    let dest = self.alloc_local(Type::Unit, false);
-                    self.emit(Instruction::Call {
-                        dest,
-                        callee: "kodo_spawn_task_with_env".to_string(),
-                        args: vec![
-                            Value::FuncRef(spawn_name),
-                            Value::Local(env_local),
-                            Value::IntConst(env_size),
-                        ],
-                    });
-                }
-
-                Ok(Value::Unit)
-            }
-            Stmt::Parallel { body, .. } => {
-                // Structured concurrency: spawn each task asynchronously,
-                // collect handles, then await all before the block exits.
-                let mut handles = Vec::new();
-                for stmt in body {
-                    if let Stmt::Spawn {
-                        body: spawn_body, ..
-                    } = stmt
-                    {
-                        let handle = self.lower_parallel_spawn(spawn_body)?;
-                        handles.push(handle);
-                    }
-                }
-                // Emit kodo_await for each handle to guarantee structured
-                // concurrency: all tasks complete before leaving the block.
-                for handle in handles {
-                    let await_dest = self.alloc_local(Type::Unit, false);
-                    self.emit(Instruction::Call {
-                        dest: await_dest,
-                        callee: "kodo_await".to_string(),
-                        args: vec![Value::Local(handle)],
-                    });
-                }
-                Ok(Value::Unit)
-            }
-        }
-    }
-
-    /// Lambda-lifts a spawn body inside a parallel block and emits a
-    /// `kodo_spawn_async` call that returns a future handle.
-    ///
-    /// Returns the [`LocalId`] holding the handle so the caller can emit
-    /// a corresponding `kodo_await` after all spawns.
-    #[allow(clippy::too_many_lines)]
-    fn lower_parallel_spawn(&mut self, body: &Block) -> Result<LocalId> {
-        let params = std::collections::HashSet::new();
-        let mut free_vars = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for s in &body.stmts {
-            Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
-        }
-        let captures: Vec<String> = free_vars
-            .into_iter()
-            .filter(|name| self.name_map.contains_key(name))
-            .collect();
-        let spawn_name = format!("__parallel_spawn_{}", self.closure_counter);
-        self.closure_counter += 1;
-        let mut spawn_builder = MirBuilder::new();
-        spawn_builder
-            .struct_registry
-            .clone_from(&self.struct_registry);
-        spawn_builder.enum_registry.clone_from(&self.enum_registry);
-        spawn_builder
-            .fn_return_types
-            .clone_from(&self.fn_return_types);
-        spawn_builder.fn_name.clone_from(&spawn_name);
-        if captures.is_empty() {
-            let body_val = spawn_builder.lower_block(body)?;
-            let _ = body_val;
-            spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
-            let mir_func = MirFunction {
-                name: spawn_name.clone(),
-                return_type: Type::Unit,
-                param_count: 0,
-                locals: spawn_builder.locals,
-                blocks: spawn_builder.blocks,
-                entry: BlockId(0),
-            };
-            self.generated_closures
-                .extend(spawn_builder.generated_closures);
-            self.generated_closures.push(mir_func);
-            self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
-            // kodo_spawn_async returns a handle (i64).
-            let handle = self.alloc_local(Type::Int, false);
-            self.emit(Instruction::Call {
-                dest: handle,
-                callee: "kodo_spawn_async".to_string(),
-                args: vec![
-                    Value::FuncRef(spawn_name),
-                    Value::IntConst(0),
-                    Value::IntConst(0),
-                ],
-            });
-            Ok(handle)
-        } else {
-            let env_param = spawn_builder.alloc_local(Type::Int, false);
-            spawn_builder
-                .name_map
-                .insert("__env_ptr".to_string(), env_param);
-            for (idx, cap_name) in captures.iter().enumerate() {
-                let cap_ty = self
-                    .name_map
-                    .get(cap_name)
-                    .and_then(|lid| self.local_types.get(lid))
-                    .cloned()
-                    .unwrap_or(Type::Int);
-                let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
-                spawn_builder.name_map.insert(cap_name.clone(), cap_local);
-                spawn_builder.local_types.insert(cap_local, cap_ty);
-                #[allow(clippy::cast_possible_wrap)]
-                let offset = (idx as i64) * 8;
-                spawn_builder.emit(Instruction::Call {
-                    dest: cap_local,
-                    callee: "__env_load".to_string(),
-                    args: vec![Value::Local(env_param), Value::IntConst(offset)],
-                });
-            }
-            let param_count = 1;
-            let body_val = spawn_builder.lower_block(body)?;
-            let _ = body_val;
-            spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
-            let mir_func = MirFunction {
-                name: spawn_name.clone(),
-                return_type: Type::Unit,
-                param_count,
-                locals: spawn_builder.locals,
-                blocks: spawn_builder.blocks,
-                entry: BlockId(0),
-            };
-            self.generated_closures
-                .extend(spawn_builder.generated_closures);
-            self.generated_closures.push(mir_func);
-            self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
-            let env_local = self.alloc_local(Type::Int, false);
-            let mut pack_args = Vec::with_capacity(captures.len());
-            for cap_name in &captures {
-                let cap_lid = self
-                    .name_map
-                    .get(cap_name)
-                    .copied()
-                    .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
-                pack_args.push(Value::Local(cap_lid));
-            }
-            self.emit(Instruction::Call {
-                dest: env_local,
-                callee: "__env_pack".to_string(),
-                args: pack_args,
-            });
-            #[allow(clippy::cast_possible_wrap)]
-            let env_size = (captures.len() as i64) * 8;
-            let handle = self.alloc_local(Type::Int, false);
-            self.emit(Instruction::Call {
-                dest: handle,
-                callee: "kodo_spawn_async".to_string(),
-                args: vec![
-                    Value::FuncRef(spawn_name),
-                    Value::Local(env_local),
-                    Value::IntConst(env_size),
-                ],
-            });
-            Ok(handle)
-        }
-    }
-
-    /// Lowers a `for` loop into MIR by desugaring into a while-style loop.
-    ///
-    /// The translation is:
-    /// ```text
-    /// let mut <name> = <start>
-    /// while <name> < <end> { <body>; <name> = <name> + 1 }
-    /// ```
-    /// For inclusive ranges, `<=` is used instead of `<`.
-    fn lower_for_loop(
-        &mut self,
-        name: &str,
-        start: &Expr,
-        end: &Expr,
-        inclusive: bool,
-        body: &Block,
-    ) -> Result<Value> {
-        let start_val = self.lower_expr(start)?;
-        let loop_var = self.alloc_local(Type::Int, true);
-        self.name_map.insert(name.to_string(), loop_var);
-        self.emit(Instruction::Assign(loop_var, start_val));
-
-        let loop_header = self.new_block();
-        let loop_body = self.new_block();
-        let loop_exit = self.new_block();
-
-        // Jump to loop header.
-        self.seal_block(Terminator::Goto(loop_header), loop_header);
-
-        // In header: compare loop_var < end (or <= for inclusive).
-        let end_val = self.lower_expr(end)?;
-        let cmp_op = if inclusive {
-            kodo_ast::BinOp::Le
-        } else {
-            kodo_ast::BinOp::Lt
-        };
-        let cond = Value::BinOp(cmp_op, Box::new(Value::Local(loop_var)), Box::new(end_val));
-
-        self.seal_block(
-            Terminator::Branch {
-                condition: cond,
-                true_block: loop_body,
-                false_block: loop_exit,
-            },
-            loop_body,
-        );
-
-        // In body: lower statements, then increment loop var.
-        self.lower_block(body)?;
-        let inc_val = Value::BinOp(
-            kodo_ast::BinOp::Add,
-            Box::new(Value::Local(loop_var)),
-            Box::new(Value::IntConst(1)),
-        );
-        self.emit(Instruction::Assign(loop_var, inc_val));
-        self.seal_block(Terminator::Goto(loop_header), loop_exit);
-
-        Ok(Value::Unit)
-    }
-
-    /// Injects ensures contract checks for the given return value.
-    ///
-    /// For each ensures expression, registers the return value as `"result"`
-    /// in the name map (so the ensures expression can reference it), evaluates
-    /// the condition, and generates a branch to a fail block if the condition
-    /// is false.
-    fn inject_ensures_checks(&mut self, ret_val: &Value) -> Result<()> {
-        if self.ensures.is_empty() {
-            return Ok(());
-        }
-
-        // Clone ensures to avoid borrow issues.
-        let ensures_exprs = self.ensures.clone();
-
-        // Store the return value in a local so ensures expressions can reference it.
-        let result_local = self.alloc_local(Type::Unknown, false);
-        self.emit(Instruction::Assign(result_local, ret_val.clone()));
-        let prev_result = self.name_map.insert("result".to_string(), result_local);
-
-        for (i, ens_expr) in ensures_exprs.iter().enumerate() {
-            let cond = self.lower_expr(ens_expr)?;
-            let fail_block = self.new_block();
-            let continue_block = self.new_block();
-            self.seal_block(
-                Terminator::Branch {
-                    condition: cond,
-                    true_block: continue_block,
-                    false_block: fail_block,
-                },
-                fail_block,
-            );
-            // In the fail block, call kodo_contract_fail with the message.
-            let msg = format!(
-                "ensures clause {} failed in function `{}`",
-                i + 1,
-                self.fn_name
-            );
-            let dest = self.alloc_local(Type::Unit, false);
-            self.emit(Instruction::Call {
-                dest,
-                callee: "kodo_contract_fail".to_string(),
-                args: vec![Value::StringConst(msg)],
-            });
-            self.seal_block(Terminator::Unreachable, continue_block);
-        }
-
-        // Restore previous "result" binding.
-        if let Some(prev) = prev_result {
-            self.name_map.insert("result".to_string(), prev);
-        } else {
-            self.name_map.remove("result");
-        }
-
-        Ok(())
-    }
-
-    /// Emits a runtime refinement check for a variable bound to a refined type alias.
-    ///
-    /// Substitutes `self` in the constraint expression with the variable name,
-    /// lowers the resulting condition, and emits a branch to a fail block that
-    /// calls `kodo_contract_fail` if the constraint is violated.
-    fn inject_refinement_check(
-        &mut self,
-        var_name: &str,
-        constraint: &kodo_ast::Expr,
-        alias_name: &str,
-    ) -> Result<()> {
-        let substituted = Self::substitute_self_in_expr(constraint, var_name);
-        let cond = self.lower_expr(&substituted)?;
-        let fail_block = self.new_block();
-        let continue_block = self.new_block();
-        self.seal_block(
-            Terminator::Branch {
-                condition: cond,
-                true_block: continue_block,
-                false_block: fail_block,
-            },
-            fail_block,
-        );
-        let msg = format!(
-            "refinement constraint failed: `{var_name}` does not satisfy type `{alias_name}`"
-        );
-        let dest = self.alloc_local(Type::Unit, false);
-        self.emit(Instruction::Call {
-            dest,
-            callee: "kodo_contract_fail".to_string(),
-            args: vec![Value::StringConst(msg)],
-        });
-        self.seal_block(Terminator::Unreachable, continue_block);
-        Ok(())
-    }
-
-    /// Replaces `Ident("self")` with `Ident(var_name)` recursively in an expression.
-    ///
-    /// Used by refinement type checks to bind the constraint's `self` keyword
-    /// to the actual variable being constrained.
-    fn substitute_self_in_expr(expr: &kodo_ast::Expr, var_name: &str) -> kodo_ast::Expr {
-        match expr {
-            Expr::Ident(name, span) if name == "self" => Expr::Ident(var_name.to_string(), *span),
-            Expr::BinaryOp {
-                left,
-                op,
-                right,
-                span,
-            } => Expr::BinaryOp {
-                left: Box::new(Self::substitute_self_in_expr(left, var_name)),
-                op: *op,
-                right: Box::new(Self::substitute_self_in_expr(right, var_name)),
-                span: *span,
-            },
-            Expr::UnaryOp { op, operand, span } => Expr::UnaryOp {
-                op: *op,
-                operand: Box::new(Self::substitute_self_in_expr(operand, var_name)),
-                span: *span,
-            },
-            Expr::FieldAccess {
-                object,
-                field,
-                span,
-            } => Expr::FieldAccess {
-                object: Box::new(Self::substitute_self_in_expr(object, var_name)),
-                field: field.clone(),
-                span: *span,
-            },
-            other => other.clone(),
-        }
-    }
-
-    /// Lowers an expression to a [`Value`].
-    ///
-    /// Compound expressions (calls, if/else) may emit instructions and
-    /// create new basic blocks as a side effect.
-    #[allow(clippy::too_many_lines)]
-    fn lower_expr(&mut self, expr: &Expr) -> Result<Value> {
-        match expr {
-            Expr::IntLit(n, _) => Ok(Value::IntConst(*n)),
-            #[allow(clippy::cast_possible_wrap)]
-            Expr::FloatLit(f, _) => Ok(Value::FloatConst(*f)),
-            Expr::BoolLit(b, _) => Ok(Value::BoolConst(*b)),
-            Expr::StringLit(s, _) => Ok(Value::StringConst(s.clone())),
-            Expr::Ident(name, _) => {
-                if let Some(local_id) = self.name_map.get(name).copied() {
-                    Ok(Value::Local(local_id))
-                } else if self.fn_return_types.contains_key(name) {
-                    // The identifier refers to a function — produce a function pointer.
-                    Ok(Value::FuncRef(name.clone()))
-                } else {
-                    Err(MirError::UndefinedVariable(name.clone()))
-                }
-            }
-            Expr::BinaryOp {
-                left, op, right, ..
-            } => {
-                let lhs = self.lower_expr(left)?;
-                let rhs = self.lower_expr(right)?;
-                Ok(Value::BinOp(*op, Box::new(lhs), Box::new(rhs)))
-            }
-            Expr::UnaryOp { op, operand, .. } => {
-                let inner = self.lower_expr(operand)?;
-                match op {
-                    UnaryOp::Not => Ok(Value::Not(Box::new(inner))),
-                    UnaryOp::Neg => Ok(Value::Neg(Box::new(inner))),
-                }
-            }
-            Expr::Call { callee, args, .. } => {
-                let callee_name = match callee.as_ref() {
-                    Expr::Ident(name, _) => name.clone(),
-                    _ => return Err(MirError::NonIdentCallee),
-                };
-                let mut arg_values = Vec::with_capacity(args.len());
-
-                // Check if the callee is a closure — prepend captures.
-                if let Some((closure_func, captures)) =
-                    self.closure_registry.get(&callee_name).cloned()
-                {
-                    for cap_name in &captures {
-                        let cap_local = self
-                            .name_map
-                            .get(cap_name)
-                            .copied()
-                            .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
-                        arg_values.push(Value::Local(cap_local));
-                    }
-                    for arg in args {
-                        arg_values.push(self.lower_expr(arg)?);
-                    }
-                    let ret_ty = self
-                        .fn_return_types
-                        .get(&closure_func)
-                        .cloned()
-                        .unwrap_or(Type::Unknown);
-                    let dest = self.alloc_local(ret_ty, false);
-                    self.emit(Instruction::Call {
-                        dest,
-                        callee: closure_func,
-                        args: arg_values,
-                    });
-                    return Ok(Value::Local(dest));
-                }
-
-                // Check if the callee is a local variable with a function type
-                // (i.e. a function pointer / higher-order function parameter).
-                if let Some(local_id) = self.name_map.get(&callee_name).copied() {
-                    if let Some(Type::Function(param_types, ret_type)) =
-                        self.local_types.get(&local_id).cloned()
-                    {
-                        for arg in args {
-                            arg_values.push(self.lower_expr(arg)?);
-                        }
-                        let dest = self.alloc_local(*ret_type.clone(), false);
-                        self.emit(Instruction::IndirectCall {
-                            dest,
-                            callee: Value::Local(local_id),
-                            args: arg_values,
-                            return_type: *ret_type,
-                            param_types,
-                        });
-                        return Ok(Value::Local(dest));
-                    }
-                }
-
-                // Check if the callee is a mangled actor handler name
-                // (e.g. "Counter_increment"). If so, emit kodo_actor_send
-                // with the actor pointer, a function reference, and the
-                // first non-self argument.
-                if self.is_actor_handler(&callee_name) {
-                    // After method call rewriting, args are [self, ...rest].
-                    // self (args[0]) is the actor pointer.
-                    let actor_val = self.lower_expr(&args[0])?;
-                    let handler_arg = if args.len() > 1 {
-                        self.lower_expr(&args[1])?
-                    } else {
-                        Value::IntConst(0)
-                    };
-                    let dest = self.alloc_local(Type::Unit, false);
-                    self.emit(Instruction::Call {
-                        dest,
-                        callee: "kodo_actor_send".to_string(),
-                        args: vec![actor_val, Value::FuncRef(callee_name.clone()), handler_arg],
-                    });
-                    return Ok(Value::Local(dest));
-                }
-
-                for arg in args {
-                    arg_values.push(self.lower_expr(arg)?);
-                }
-                // Resolve generic function calls: if callee_name is not in
-                // fn_return_types, try to find a monomorphized version.
-                let resolved_callee = if self.fn_return_types.contains_key(&callee_name) {
-                    callee_name
-                } else {
-                    let prefix = format!("{callee_name}__");
-                    self.fn_return_types
-                        .keys()
-                        .find(|k| k.starts_with(&prefix))
-                        .cloned()
-                        .unwrap_or(callee_name)
-                };
-                // Look up return type from fn_return_types so composite types
-                // get proper stack slot allocation in codegen.
-                let ret_ty = self
-                    .fn_return_types
-                    .get(&resolved_callee)
-                    .cloned()
-                    .unwrap_or(Type::Unknown);
-                let dest = self.alloc_local(ret_ty, false);
-                self.emit(Instruction::Call {
-                    dest,
-                    callee: resolved_callee,
-                    args: arg_values,
-                });
-                Ok(Value::Local(dest))
-            }
-            Expr::If {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                let cond = self.lower_expr(condition)?;
-
-                let then_block = self.new_block();
-                let else_block = self.new_block();
-                let merge_block = self.new_block();
-
-                // Seal the current block with a Branch terminator.
-                self.seal_block(
-                    Terminator::Branch {
-                        condition: cond,
-                        true_block: then_block,
-                        false_block: else_block,
-                    },
-                    then_block,
-                );
-
-                // Lower the then branch.
-                let then_val = self.lower_block(then_branch)?;
-                let then_result = self.alloc_local(Type::Unknown, false);
-                self.emit(Instruction::Assign(then_result, then_val));
-                self.seal_block(Terminator::Goto(merge_block), else_block);
-
-                // Lower the else branch (or produce Unit).
-                let else_val = if let Some(else_blk) = else_branch {
-                    self.lower_block(else_blk)?
-                } else {
-                    Value::Unit
-                };
-                let else_result = self.alloc_local(Type::Unknown, false);
-                self.emit(Instruction::Assign(else_result, else_val));
-                self.seal_block(Terminator::Goto(merge_block), merge_block);
-
-                // In the merge block, we return the then-branch result
-                // local. A proper phi-node / SSA pass would unify both
-                // values later; for now this is a simplification.
-                Ok(Value::Local(then_result))
-            }
-            Expr::Block(block) => self.lower_block(block),
-            Expr::FieldAccess { object, field, .. } => {
-                let obj_val = self.lower_expr(object)?;
-                // Resolve struct name from the object's type.
-                let struct_name = match object.as_ref() {
-                    Expr::Ident(name, _) => {
-                        let local_id = self
-                            .name_map
-                            .get(name)
-                            .copied()
-                            .ok_or_else(|| MirError::UndefinedVariable(name.clone()))?;
-                        match self.local_types.get(&local_id) {
-                            Some(Type::Struct(s)) => s.clone(),
-                            _ => return Ok(Value::Unit),
-                        }
-                    }
-                    _ => return Ok(Value::Unit),
-                };
-                if self.actor_names.contains(&struct_name) {
-                    // Actor field access: emit `kodo_actor_get_field(actor_ptr, offset)`.
-                    let decl_fields = self
-                        .struct_registry
-                        .get(&struct_name)
-                        .cloned()
-                        .unwrap_or_default();
-                    let field_index = decl_fields
-                        .iter()
-                        .position(|(n, _)| n == field)
-                        .unwrap_or(0);
-                    #[allow(clippy::cast_possible_wrap)]
-                    let offset = (field_index as i64) * ACTOR_FIELD_SIZE;
-                    let dest = self.alloc_local(Type::Int, false);
-                    self.emit(Instruction::Call {
-                        dest,
-                        callee: "kodo_actor_get_field".to_string(),
-                        args: vec![obj_val, Value::IntConst(offset)],
-                    });
-                    Ok(Value::Local(dest))
-                } else {
-                    // Regular struct field access.
-                    let field_ty = self
-                        .struct_registry
-                        .get(&struct_name)
-                        .and_then(|fields| fields.iter().find(|(n, _)| n == field))
-                        .map_or(Type::Unknown, |(_, ty)| ty.clone());
-                    let local_id = self.alloc_local(field_ty, false);
-                    self.emit(Instruction::Assign(
-                        local_id,
-                        Value::FieldGet {
-                            object: Box::new(obj_val),
-                            field: field.clone(),
-                            struct_name,
-                        },
-                    ));
-                    Ok(Value::Local(local_id))
-                }
-            }
-            Expr::StructLit { name, fields, .. } => {
-                if self.actor_names.contains(name) {
-                    // Actor instantiation: allocate state via runtime call and
-                    // set each field using `kodo_actor_set_field`.
-                    let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
-                    #[allow(clippy::cast_possible_wrap)]
-                    let state_size = (decl_fields.len() as i64) * ACTOR_FIELD_SIZE;
-                    let actor_ptr = self.alloc_local(Type::Int, false);
-                    self.emit(Instruction::Call {
-                        dest: actor_ptr,
-                        callee: "kodo_actor_new".to_string(),
-                        args: vec![Value::IntConst(state_size)],
-                    });
-                    // Set each field in declaration order.
-                    for (idx, (decl_name, _)) in decl_fields.iter().enumerate() {
-                        if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
-                            let val = self.lower_expr(&init.value)?;
-                            #[allow(clippy::cast_possible_wrap)]
-                            let offset = (idx as i64) * ACTOR_FIELD_SIZE;
-                            let void_dest = self.alloc_local(Type::Unit, false);
-                            self.emit(Instruction::Call {
-                                dest: void_dest,
-                                callee: "kodo_actor_set_field".to_string(),
-                                args: vec![Value::Local(actor_ptr), Value::IntConst(offset), val],
-                            });
-                        }
-                    }
-                    // Store the actor pointer with the actor's struct type so
-                    // later field access / handler calls can identify it.
-                    self.local_types
-                        .insert(actor_ptr, Type::Struct(name.clone()));
-                    Ok(Value::Local(actor_ptr))
-                } else {
-                    // Regular struct literal.
-                    let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
-                    let mut ordered_fields = Vec::with_capacity(fields.len());
-                    for (decl_name, _) in &decl_fields {
-                        if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
-                            let val = self.lower_expr(&init.value)?;
-                            ordered_fields.push((decl_name.clone(), val));
-                        }
-                    }
-                    let local_id = self.alloc_local(Type::Struct(name.clone()), false);
-                    self.emit(Instruction::Assign(
-                        local_id,
-                        Value::StructLit {
-                            name: name.clone(),
-                            fields: ordered_fields,
-                        },
-                    ));
-                    Ok(Value::Local(local_id))
-                }
-            }
-            Expr::EnumVariantExpr {
-                enum_name,
-                variant,
-                args,
-                ..
-            } => {
-                // Resolve the actual enum name — for generic enums, look up a
-                // monomorphized instance (e.g. "Option" → "Option__Int").
-                let resolved_name = if self.enum_registry.contains_key(enum_name) {
-                    enum_name.clone()
-                } else {
-                    // Find a monomorphized instance with matching prefix and variant.
-                    let prefix = format!("{enum_name}__");
-                    self.enum_registry
-                        .keys()
-                        .find(|k| {
-                            k.starts_with(&prefix)
-                                && self
-                                    .enum_registry
-                                    .get(*k)
-                                    .is_some_and(|vs| vs.iter().any(|(n, _)| n == variant))
-                        })
-                        .cloned()
-                        .unwrap_or_else(|| enum_name.clone())
-                };
-
-                // Find discriminant index for this variant.
-                let variants = self
-                    .enum_registry
-                    .get(&resolved_name)
-                    .cloned()
-                    .unwrap_or_default();
-                let discriminant = variants.iter().position(|(n, _)| n == variant).unwrap_or(0);
-                let mut arg_values = Vec::with_capacity(args.len());
-                for arg in args {
-                    arg_values.push(self.lower_expr(arg)?);
-                }
-                let local_id = self.alloc_local(Type::Enum(resolved_name.clone()), false);
-                #[allow(clippy::cast_possible_truncation)]
-                let disc_u8 = discriminant as u8;
-                self.emit(Instruction::Assign(
-                    local_id,
-                    Value::EnumVariant {
-                        enum_name: resolved_name,
-                        variant: variant.clone(),
-                        discriminant: disc_u8,
-                        args: arg_values,
-                    },
-                ));
-                Ok(Value::Local(local_id))
-            }
-            Expr::Match { expr, arms, .. } => {
-                // Lower the matched expression.
-                let matched_val = self.lower_expr(expr)?;
-                let matched_local = self.alloc_local(Type::Unknown, false);
-                self.emit(Instruction::Assign(matched_local, matched_val));
-
-                let merge_block = self.new_block();
-                let result_local = self.alloc_local(Type::Unknown, true);
-
-                // Generate a chain of branches testing discriminant.
-                for (i, arm) in arms.iter().enumerate() {
-                    let is_last = i + 1 == arms.len();
-                    match &arm.pattern {
-                        kodo_ast::Pattern::Variant {
-                            enum_name,
-                            variant,
-                            bindings,
-                            ..
-                        } => {
-                            // Resolve discriminant for this variant.
-                            // For generic enums, fall back to the matched local's
-                            // type which already carries the monomorphized name.
-                            let enum_name_resolved = enum_name
-                                .as_ref()
-                                .and_then(|en| {
-                                    self.enum_registry.get(en).or_else(|| {
-                                        // Try monomorphized prefix match.
-                                        let prefix = format!("{en}__");
-                                        self.enum_registry
-                                            .keys()
-                                            .find(|k| k.starts_with(&prefix))
-                                            .and_then(|k| self.enum_registry.get(k))
-                                    })
-                                })
-                                .or_else(|| {
-                                    if let Some(Type::Enum(en)) =
-                                        self.local_types.get(&matched_local)
-                                    {
-                                        self.enum_registry.get(en)
-                                    } else {
-                                        None
-                                    }
-                                });
-                            let disc_idx = enum_name_resolved
-                                .and_then(|vs| vs.iter().position(|(n, _)| n == variant))
-                                .unwrap_or(0);
-
-                            // Branch: compare discriminant.
-                            let arm_block = self.new_block();
-                            let next_block = if is_last {
-                                merge_block
-                            } else {
-                                self.new_block()
-                            };
-
-                            #[allow(clippy::cast_possible_wrap)]
-                            let cond = Value::BinOp(
-                                kodo_ast::BinOp::Eq,
-                                Box::new(Value::EnumDiscriminant(Box::new(Value::Local(
-                                    matched_local,
-                                )))),
-                                Box::new(Value::IntConst(disc_idx as i64)),
-                            );
-                            self.seal_block(
-                                Terminator::Branch {
-                                    condition: cond,
-                                    true_block: arm_block,
-                                    false_block: next_block,
-                                },
-                                arm_block,
-                            );
-
-                            // Bind pattern variables to payload fields.
-                            for (idx, binding) in bindings.iter().enumerate() {
-                                let bind_local = self.alloc_local(Type::Unknown, false);
-                                self.name_map.insert(binding.clone(), bind_local);
-                                #[allow(clippy::cast_possible_truncation)]
-                                let field_idx = idx as u32;
-                                self.emit(Instruction::Assign(
-                                    bind_local,
-                                    Value::EnumPayload {
-                                        value: Box::new(Value::Local(matched_local)),
-                                        field_index: field_idx,
-                                    },
-                                ));
-                            }
-
-                            // Lower arm body.
-                            let arm_val = self.lower_expr(&arm.body)?;
-                            self.emit(Instruction::Assign(result_local, arm_val));
-                            self.seal_block(Terminator::Goto(merge_block), next_block);
-                        }
-                        kodo_ast::Pattern::Wildcard(_) => {
-                            // Wildcard catches everything remaining.
-                            let arm_val = self.lower_expr(&arm.body)?;
-                            self.emit(Instruction::Assign(result_local, arm_val));
-                            self.seal_block(Terminator::Goto(merge_block), merge_block);
-                        }
-                        kodo_ast::Pattern::Literal(lit_expr) => {
-                            // Compare matched value against literal.
-                            let lit_val = self.lower_expr(lit_expr)?;
-                            let arm_block = self.new_block();
-                            let next_block = if is_last {
-                                merge_block
-                            } else {
-                                self.new_block()
-                            };
-                            let cond = Value::BinOp(
-                                kodo_ast::BinOp::Eq,
-                                Box::new(Value::Local(matched_local)),
-                                Box::new(lit_val),
-                            );
-                            self.seal_block(
-                                Terminator::Branch {
-                                    condition: cond,
-                                    true_block: arm_block,
-                                    false_block: next_block,
-                                },
-                                arm_block,
-                            );
-                            let arm_val = self.lower_expr(&arm.body)?;
-                            self.emit(Instruction::Assign(result_local, arm_val));
-                            self.seal_block(Terminator::Goto(merge_block), next_block);
-                        }
-                    }
-                }
-
-                Ok(Value::Local(result_local))
-            }
-
-            // Range and sugar expressions are not valid standalone expressions
-            // in MIR. Ranges are only used in for loops (desugared before MIR),
-            // sugar operators (?/?.//??) are desugared to match expressions
-            // before MIR.
-            Expr::Range { .. }
-            | Expr::Try { .. }
-            | Expr::OptionalChain { .. }
-            | Expr::NullCoalesce { .. }
-            | Expr::Is { .. } => Ok(Value::Unit),
-
-            // Lambda-lift closures into top-level functions.
-            Expr::Closure {
-                params,
-                return_type,
-                body,
-                ..
-            } => {
-                let (closure_name, captures) =
-                    self.lift_closure(params, return_type.as_ref(), body)?;
-
-                // Register this local's variable name → closure mapping.
-                // The caller (Let statement) will pick up the closure_registry
-                // entry using the variable name.
-                self.closure_registry
-                    .insert(closure_name.clone(), (closure_name.clone(), captures));
-
-                // Return a FuncRef so the closure can be used as a value
-                // (e.g., assigned to a variable, passed as argument).
-                Ok(Value::FuncRef(closure_name))
-            }
-
-            // `Await` in v1: no real suspension — lower the inner expression.
-            Expr::Await { operand, .. } => self.lower_expr(operand),
-        }
     }
 }
 
@@ -1982,17 +579,18 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     Ok(mir_functions)
 }
 
-/// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`].
-///
-/// For each function with `requires` contracts, an additional validator
-/// function (`validate_{name}`) is generated that evaluates the preconditions
-/// without side effects and returns `Bool`.
-///
-/// # Errors
-///
-/// Returns the first [`MirError`] encountered during lowering.
-#[allow(clippy::too_many_lines)]
-pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
+/// Builds all type registries needed for lowering a module: struct fields,
+/// enum variants, function return types, actor names, and type aliases.
+#[allow(clippy::type_complexity)]
+fn build_module_registries(
+    module: &Module,
+) -> Result<(
+    HashMap<String, Vec<(String, Type)>>,
+    HashMap<String, Vec<(String, Vec<Type>)>>,
+    HashMap<String, Type>,
+    HashSet<String>,
+    HashMap<String, (Type, Option<kodo_ast::Expr>)>,
+)> {
     // Build struct registry from type declarations.
     let mut struct_registry: HashMap<String, Vec<(String, Type)>> = HashMap::new();
     for type_decl in &module.type_decls {
@@ -2005,9 +603,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         struct_registry.insert(type_decl.name.clone(), fields);
     }
 
-    // Register actor fields in the struct registry (mirrors what the type
-    // checker does) so that field access and struct literal lowering can
-    // resolve field names and offsets.
+    // Register actor fields in the struct registry.
     for actor_decl in &module.actor_decls {
         let mut fields = Vec::new();
         for field in &actor_decl.fields {
@@ -2049,16 +645,40 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
     }
     register_builtin_return_types(&mut fn_return_types);
 
-    // Collect actor names so the builder can distinguish actors from structs.
+    // Collect actor names.
     let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
 
-    // Build type alias registry from module type aliases.
+    // Build type alias registry.
     let mut alias_reg: HashMap<String, (Type, Option<kodo_ast::Expr>)> = HashMap::new();
     for alias in &module.type_aliases {
         let base_ty = resolve_type(&alias.base_type, alias.span)
             .map_err(|e| MirError::TypeResolution(e.to_string()))?;
         alias_reg.insert(alias.name.clone(), (base_ty, alias.constraint.clone()));
     }
+
+    Ok((
+        struct_registry,
+        enum_registry,
+        fn_return_types,
+        actor_names,
+        alias_reg,
+    ))
+}
+
+/// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`].
+///
+/// For each function with `requires` contracts, an additional validator
+/// function (`validate_{name}`) is generated that evaluates the preconditions
+/// without side effects and returns `Bool`.
+///
+/// # Errors
+///
+/// Returns the first [`MirError`] encountered during lowering.
+pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
+    let (struct_registry, enum_registry, mut fn_return_types, actor_names, alias_reg) =
+        build_module_registries(module)?;
+
+    let enum_names: std::collections::HashSet<String> = enum_registry.keys().cloned().collect();
 
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
@@ -2388,7 +1008,7 @@ mod tests {
                         name: "a".to_string(),
                         ty: Some(TypeExpr::Named("Bool".to_string())),
                         value: Expr::UnaryOp {
-                            op: UnaryOp::Not,
+                            op: kodo_ast::UnaryOp::Not,
                             operand: Box::new(Expr::BoolLit(true, span())),
                             span: span(),
                         },
@@ -2399,7 +1019,7 @@ mod tests {
                         name: "b".to_string(),
                         ty: Some(TypeExpr::Named("Int".to_string())),
                         value: Expr::UnaryOp {
-                            op: UnaryOp::Neg,
+                            op: kodo_ast::UnaryOp::Neg,
                             operand: Box::new(Expr::IntLit(42, span())),
                             span: span(),
                         },
@@ -3186,13 +1806,6 @@ mod tests {
         );
         let mir = lower_function(&func).unwrap();
         mir.validate().unwrap();
-        // When the let has a Function type annotation, f should be called
-        // via IndirectCall since local_types maps f to Type::Function.
-        // Note: Closures registered in closure_registry are still called
-        // directly. The indirect call path applies when the variable is typed
-        // as a function but not in the closure registry.
-        // With the current implementation, closure registry takes priority,
-        // so this may use a direct Call instead.
         let has_any_call = mir.blocks.iter().any(|b| {
             b.instructions.iter().any(|i| {
                 matches!(
@@ -3230,9 +1843,6 @@ mod tests {
 
     #[test]
     fn test_field_access_type_resolution() {
-        // Create a module with:
-        // struct Point { x: Int, y: Int }
-        // fn get_x(p: Point) -> Int { return p.x }
         let module = Module {
             id: NodeId(0),
             name: "test".to_string(),
@@ -3508,7 +2118,6 @@ mod tests {
 
     #[test]
     fn actor_instantiation_emits_actor_new_and_set_field() {
-        // let c = Counter { count: 42 }
         let module = make_actor_module(Block {
             span: span(),
             stmts: vec![Stmt::Let {
@@ -3531,7 +2140,6 @@ mod tests {
         let mir_fns = lower_module(&module).unwrap();
         let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
 
-        // Should have a kodo_actor_new call.
         let has_actor_new = main.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_new"),
@@ -3539,7 +2147,6 @@ mod tests {
         });
         assert!(has_actor_new, "expected kodo_actor_new call");
 
-        // Should have a kodo_actor_set_field call.
         let has_set_field = main.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_set_field"),
@@ -3547,7 +2154,6 @@ mod tests {
         });
         assert!(has_set_field, "expected kodo_actor_set_field call");
 
-        // Should NOT have a StructLit instruction (actors use runtime calls).
         let has_struct_lit = main.blocks.iter().any(|b| {
             b.instructions.iter().any(|i| {
                 matches!(i, Instruction::Assign(_, Value::StructLit { name, .. }) if name == "Counter")
@@ -3558,8 +2164,6 @@ mod tests {
 
     #[test]
     fn actor_field_access_emits_get_field() {
-        // let c = Counter { count: 10 }
-        // let v: Int = c.count
         let module = make_actor_module(Block {
             span: span(),
             stmts: vec![
@@ -3595,7 +2199,6 @@ mod tests {
         let mir_fns = lower_module(&module).unwrap();
         let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
 
-        // Should have a kodo_actor_get_field call.
         let has_get_field = main.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_get_field"),
@@ -3603,7 +2206,6 @@ mod tests {
         });
         assert!(has_get_field, "expected kodo_actor_get_field call");
 
-        // Should NOT have a FieldGet instruction (actors use runtime calls).
         let has_field_get = main.blocks.iter().any(|b| {
             b.instructions.iter().any(|i| {
                 matches!(i, Instruction::Assign(_, Value::FieldGet { struct_name, .. }) if struct_name == "Counter")
@@ -3617,8 +2219,6 @@ mod tests {
 
     #[test]
     fn actor_handler_call_emits_send() {
-        // let c = Counter { count: 0 }
-        // Counter_increment(c) — already rewritten from c.increment()
         let module = make_actor_module(Block {
             span: span(),
             stmts: vec![
@@ -3648,7 +2248,6 @@ mod tests {
         let mir_fns = lower_module(&module).unwrap();
         let main = mir_fns.iter().find(|f| f.name == "main").unwrap();
 
-        // Should have a kodo_actor_send call.
         let has_send = main.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_actor_send"),
@@ -3656,7 +2255,6 @@ mod tests {
         });
         assert!(has_send, "expected kodo_actor_send call");
 
-        // The args to kodo_actor_send should include a FuncRef to the handler.
         let has_func_ref = main.blocks.iter().any(|b| {
             b.instructions.iter().any(|i| match i {
                 Instruction::Call { callee, args, .. } if callee == "kodo_actor_send" => args
@@ -3673,7 +2271,6 @@ mod tests {
 
     #[test]
     fn actor_handler_lowered_as_function() {
-        // Verify that actor handlers are still lowered as standalone functions.
         let module = make_actor_module(Block {
             span: span(),
             stmts: vec![],
@@ -3690,8 +2287,6 @@ mod tests {
 
     #[test]
     fn actor_handler_field_access_uses_get_field() {
-        // The Counter_increment handler accesses self.count — verify it
-        // emits kodo_actor_get_field instead of FieldGet.
         let module = make_actor_module(Block {
             span: span(),
             stmts: vec![],
@@ -3729,8 +2324,6 @@ mod tests {
 
     #[test]
     fn refinement_check_emitted_for_refined_alias() {
-        // Build a module with `type Port = Int requires { self > 0 }` and
-        // `let port: Port = 8080`. Verify the MIR contains a contract check.
         let constraint = Expr::BinaryOp {
             left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
             op: kodo_ast::BinOp::Gt,
@@ -3793,7 +2386,6 @@ mod tests {
         let fns = result.unwrap();
         let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
 
-        // The MIR should have a kodo_contract_fail call for the refinement check.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
@@ -3804,7 +2396,6 @@ mod tests {
             "expected kodo_contract_fail call for refinement check"
         );
 
-        // Should have at least 3 blocks: entry (with branch), fail block, continue block.
         assert!(
             main_fn.blocks.len() >= 3,
             "expected at least 3 blocks for refinement check, got {}",
@@ -3814,7 +2405,6 @@ mod tests {
 
     #[test]
     fn no_refinement_check_for_unconstrained_alias() {
-        // A type alias without a constraint should NOT emit any contract check.
         let module = Module {
             id: NodeId(0),
             span: Span::new(0, 100),
@@ -3871,7 +2461,6 @@ mod tests {
         let fns = result.unwrap();
         let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
 
-        // No contract_fail call should exist for unconstrained aliases.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
@@ -3921,7 +2510,6 @@ mod tests {
 
     #[test]
     fn refinement_check_with_compound_constraint() {
-        // Test `type Port = Int requires { self > 0 && self < 65535 }`
         let constraint = Expr::BinaryOp {
             left: Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Ident("self".to_string(), Span::new(0, 4))),
@@ -3997,7 +2585,6 @@ mod tests {
         let fns = result.unwrap();
         let main_fn = fns.iter().find(|f| f.name == "main").unwrap();
 
-        // Should have a contract_fail call.
         let has_contract_fail = main_fn.blocks.iter().any(|b| {
             b.instructions.iter().any(
                 |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
@@ -4008,7 +2595,6 @@ mod tests {
             "expected kodo_contract_fail for compound constraint"
         );
 
-        // Verify the fail message references the alias name "Port".
         let fail_msg = main_fn.blocks.iter().find_map(|b| {
             b.instructions.iter().find_map(|i| {
                 if let Instruction::Call { callee, args, .. } = i {
