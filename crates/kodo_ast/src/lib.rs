@@ -159,7 +159,10 @@ pub struct Module {
     pub functions: Vec<Function>,
 }
 
-/// A trait declaration: `trait Name { fn method(self) -> Type }`
+/// A trait declaration: `trait Name { type Item; fn method(self) -> Type }`
+///
+/// Supports associated types and default method implementations following
+/// **\[TAPL\]** Ch. 11 (bounded quantification with associated types).
 #[derive(Debug, Clone)]
 pub struct TraitDecl {
     /// Unique identifier.
@@ -168,11 +171,31 @@ pub struct TraitDecl {
     pub span: Span,
     /// Trait name.
     pub name: String,
-    /// Method signatures (no bodies).
+    /// Associated type declarations (e.g., `type Item` or `type Item: Ord`).
+    pub associated_types: Vec<AssociatedType>,
+    /// Method signatures (optionally with default bodies).
     pub methods: Vec<TraitMethod>,
 }
 
-/// A method signature within a trait declaration.
+/// An associated type declaration in a trait (e.g., `type Item` or `type Item: Ord + Display`).
+///
+/// Associated types allow traits to abstract over a type that implementors
+/// must specify, following bounded quantification principles from **\[TAPL\]** Ch. 26.
+#[derive(Debug, Clone)]
+pub struct AssociatedType {
+    /// The name of the associated type.
+    pub name: String,
+    /// Optional trait bounds on the associated type.
+    pub bounds: Vec<String>,
+    /// Source location.
+    pub span: Span,
+}
+
+/// A method signature within a trait declaration, optionally with a default body.
+///
+/// When `body` is `Some`, the method has a default implementation that
+/// implementors may override. When `body` is `None`, the method must be
+/// provided by every impl block.
 #[derive(Debug, Clone)]
 pub struct TraitMethod {
     /// Method name.
@@ -183,11 +206,13 @@ pub struct TraitMethod {
     pub return_type: TypeExpr,
     /// Whether the first parameter is `self`.
     pub has_self: bool,
+    /// Optional default method body. `Some` means a default implementation exists.
+    pub body: Option<Block>,
     /// Source span.
     pub span: Span,
 }
 
-/// An impl block: `impl TraitName for TypeName { methods }` (trait impl)
+/// An impl block: `impl TraitName for TypeName { type Item = Int; methods }` (trait impl)
 /// or `impl TypeName { methods }` (inherent impl).
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
@@ -199,6 +224,8 @@ pub struct ImplBlock {
     pub trait_name: Option<String>,
     /// The type implementing the trait (or owning inherent methods).
     pub type_name: String,
+    /// Associated type bindings (e.g., `type Item = Int`).
+    pub type_bindings: Vec<(String, TypeExpr)>,
     /// Method implementations.
     pub methods: Vec<Function>,
 }

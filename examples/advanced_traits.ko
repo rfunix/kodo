@@ -1,0 +1,63 @@
+module advanced_traits {
+    meta {
+        purpose: "Demonstrate associated types and default methods in traits"
+        version: "0.1.0"
+    }
+
+    struct Celsius {
+        value: Int
+    }
+
+    struct Fahrenheit {
+        value: Int
+    }
+
+    // Trait with an associated type and a default method.
+    trait Converter {
+        type Output
+
+        fn convert(self) -> Int
+
+        fn describe(self) -> Int {
+            return self.convert()
+        }
+    }
+
+    impl Converter for Celsius {
+        type Output = Fahrenheit
+
+        fn convert(self) -> Int {
+            return self.value * 9 / 5 + 32
+        }
+        // describe() is inherited from the default implementation
+    }
+
+    impl Converter for Fahrenheit {
+        type Output = Celsius
+
+        fn convert(self) -> Int {
+            return (self.value - 32) * 5 / 9
+        }
+
+        // Override the default method
+        fn describe(self) -> Int {
+            return self.convert() + 1
+        }
+    }
+
+    fn main() -> Int {
+        let c: Celsius = Celsius { value: 100 }
+        let f: Fahrenheit = Fahrenheit { value: 212 }
+
+        let c_to_f: Int = c.convert()
+        print_int(c_to_f)
+
+        let f_to_c: Int = f.convert()
+        print_int(f_to_c)
+
+        let desc: Int = c.describe()
+        print_int(desc)
+
+        return 0
+    }
+}

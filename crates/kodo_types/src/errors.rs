@@ -230,6 +230,28 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A required associated type from a trait is missing in an impl block.
+    #[error(
+        "missing associated type `{assoc_type}` in impl block for trait `{trait_name}` at {span:?}"
+    )]
+    MissingAssociatedType {
+        /// The missing associated type name.
+        assoc_type: String,
+        /// The trait name.
+        trait_name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// An associated type was provided in an impl block but is not declared in the trait.
+    #[error("unexpected associated type `{assoc_type}` in impl block for trait `{trait_name}` at {span:?}")]
+    UnexpectedAssociatedType {
+        /// The unexpected associated type name.
+        assoc_type: String,
+        /// The trait name.
+        trait_name: String,
+        /// Source location.
+        span: Span,
+    },
     /// A concrete type does not satisfy a trait bound on a generic parameter.
     #[error("type `{concrete_type}` does not implement trait `{trait_name}` required by generic parameter `{param}` at {span:?}")]
     TraitBoundNotSatisfied {
@@ -398,6 +420,8 @@ impl TypeError {
             | Self::ClosureParamTypeMissing { span, .. }
             | Self::UnknownTrait { span, .. }
             | Self::MissingTraitMethod { span, .. }
+            | Self::MissingAssociatedType { span, .. }
+            | Self::UnexpectedAssociatedType { span, .. }
             | Self::TraitBoundNotSatisfied { span, .. }
             | Self::MethodNotFound { span, .. }
             | Self::AwaitOutsideAsync { span, .. }
@@ -442,6 +466,8 @@ impl TypeError {
             Self::ClosureParamTypeMissing { .. } => "E0227",
             Self::UnknownTrait { .. } => "E0230",
             Self::MissingTraitMethod { .. } => "E0231",
+            Self::MissingAssociatedType { .. } => "E0233",
+            Self::UnexpectedAssociatedType { .. } => "E0234",
             Self::TraitBoundNotSatisfied { .. } => "E0232",
             Self::MethodNotFound { .. } => "E0235",
             Self::AwaitOutsideAsync { .. } => "E0250",
@@ -674,6 +700,20 @@ fn suggestion_for_trait_method_error(err: &TypeError) -> Option<String> {
             method, trait_name, ..
         } => Some(format!(
             "add method `{method}` to the impl block for trait `{trait_name}`"
+        )),
+        TypeError::MissingAssociatedType {
+            assoc_type,
+            trait_name,
+            ..
+        } => Some(format!(
+            "add `type {assoc_type} = ConcreteType` to the impl block for trait `{trait_name}`"
+        )),
+        TypeError::UnexpectedAssociatedType {
+            assoc_type,
+            trait_name,
+            ..
+        } => Some(format!(
+            "trait `{trait_name}` does not declare associated type `{assoc_type}` — remove it"
         )),
         TypeError::TraitBoundNotSatisfied {
             concrete_type,

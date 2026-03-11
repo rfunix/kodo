@@ -24,7 +24,10 @@ meta_entry      = IDENT ":" STRING_LIT ;
 
 declaration     = function_decl
                 | type_decl
+                | struct_decl
                 | enum_decl
+                | trait_decl
+                | impl_block
                 | intent_decl
                 | import_decl ;
 
@@ -54,6 +57,25 @@ type_expr       = IDENT generic_args?           (* named type: Int, List<T> *)
 
 generic_args    = "<" type_expr ("," type_expr)* ">" ;
 type_list       = type_expr ("," type_expr)* ;
+
+(* ===== Traits and Impl Blocks ===== *)
+
+trait_decl      = "trait" IDENT "{" trait_member* "}" ;
+trait_member    = assoc_type_decl
+                | trait_method_decl ;
+
+assoc_type_decl = "type" IDENT ( ":" type_bound )? ;
+type_bound      = IDENT ( "+" IDENT )* ;
+
+trait_method_decl = "fn" IDENT "(" param_list? ")" return_type? block?  ;
+                (* A method without a block is abstract; with a block is a default method. *)
+
+impl_block      = "impl" IDENT "for" IDENT "{" impl_member* "}" ;
+impl_member     = type_binding
+                | function_decl ;
+type_binding    = "type" IDENT "=" type_expr ;
+
+struct_decl     = "struct" IDENT "{" field_list "}" ;
 
 (* ===== Functions ===== *)
 

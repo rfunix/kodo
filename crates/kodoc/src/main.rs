@@ -344,6 +344,8 @@ fn run_build(
     kodo_desugar::desugar_module(&mut module);
 
     // Transform impl block methods into top-level functions with mangled names.
+    // Also inject default method bodies from traits when not overridden.
+    let default_methods = checker.trait_default_methods().clone();
     for impl_block in &module.impl_blocks {
         for method in &impl_block.methods {
             let mut func = method.clone();
@@ -355,6 +357,32 @@ fn run_build(
                 }
             }
             module.functions.push(func);
+        }
+        // Inject default methods from the trait that are not overridden.
+        if let Some(ref trait_name) = impl_block.trait_name {
+            if let Some(defaults) = default_methods.get(trait_name) {
+                for (name, trait_method) in defaults {
+                    let overridden = impl_block.methods.iter().any(|m| m.name == *name);
+                    if !overridden {
+                        if let Some(ref body) = trait_method.body {
+                            let func = kodo_ast::Function {
+                                id: kodo_ast::NodeId(0),
+                                name: format!("{}_{name}", impl_block.type_name),
+                                params: trait_method.params.clone(),
+                                return_type: trait_method.return_type.clone(),
+                                body: body.clone(),
+                                span: trait_method.span,
+                                is_async: false,
+                                annotations: Vec::new(),
+                                generic_params: Vec::new(),
+                                requires: Vec::new(),
+                                ensures: Vec::new(),
+                            };
+                            module.functions.push(func);
+                        }
+                    }
+                }
+            }
         }
     }
 

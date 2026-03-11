@@ -71,6 +71,19 @@ impl TypeChecker {
                 if let Some((base_ty, _constraint)) = self.type_alias_registry.get(name) {
                     return Ok(base_ty.clone());
                 }
+                // Resolve associated type names within impl block context.
+                // If we're inside `impl Trait for Type` and the name matches an
+                // associated type declared in the trait, resolve to the concrete binding.
+                if let Some((ref type_name, ref trait_name)) = self.current_impl_context {
+                    if let Some(bindings) = self
+                        .impl_type_bindings
+                        .get(&(type_name.clone(), trait_name.clone()))
+                    {
+                        if let Some(concrete_ty) = bindings.get(name) {
+                            return Ok(concrete_ty.clone());
+                        }
+                    }
+                }
                 resolve_type_with_enums(type_expr, span, &self.enum_names)
             }
             _ => resolve_type_with_enums(type_expr, span, &self.enum_names),

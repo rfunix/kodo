@@ -1,0 +1,50 @@
+module associated_types {
+    meta {
+        purpose: "Demonstrate associated types in trait declarations"
+        version: "0.1.0"
+    }
+
+    struct IntList {
+        length: Int
+    }
+
+    struct StringList {
+        length: Int
+    }
+
+    // Trait with an associated type.
+    trait Container {
+        type Item
+
+        fn size(self) -> Int
+    }
+
+    impl Container for IntList {
+        type Item = Int
+
+        fn size(self) -> Int {
+            return self.length
+        }
+    }
+
+    impl Container for StringList {
+        type Item = String
+
+        fn size(self) -> Int {
+            return self.length
+        }
+    }
+
+    fn main() -> Int {
+        let il: IntList = IntList { length: 5 }
+        let sl: StringList = StringList { length: 3 }
+
+        let s1: Int = il.size()
+        print_int(s1)
+
+        let s2: Int = sl.size()
+        print_int(s2)
+
+        return 0
+    }
+}

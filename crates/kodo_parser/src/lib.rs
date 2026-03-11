@@ -39,11 +39,11 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    ActorDecl, Annotation, AnnotationArg, BinOp, Block, ClosureParam, EnumDecl, EnumVariant, Expr,
-    FieldDef, FieldInit, Function, GenericParam, ImplBlock, ImportDecl, IntentConfigEntry,
-    IntentConfigValue, IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Ownership, Param,
-    Pattern, Span, Stmt, StringPart, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
-    UnaryOp,
+    ActorDecl, Annotation, AnnotationArg, AssociatedType, BinOp, Block, ClosureParam, EnumDecl,
+    EnumVariant, Expr, FieldDef, FieldInit, Function, GenericParam, ImplBlock, ImportDecl,
+    IntentConfigEntry, IntentConfigValue, IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen,
+    Ownership, Param, Pattern, Span, Stmt, StringPart, TraitDecl, TraitMethod, TypeAlias, TypeDecl,
+    TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -665,67 +665,101 @@ impl Parser {
         })
     }
 
-    /// Parses a trait declaration: `trait Name { fn method(self) -> RetType ... }`
+    /// Parses a trait declaration: `trait Name { type Item; fn method(self) -> RetType ... }`
+    ///
+    /// Supports associated type declarations (`type Name` with optional bounds)
+    /// and default method bodies (a block after the signature).
     fn parse_trait_decl(&mut self) -> Result<TraitDecl> {
         let start = self.expect(&TokenKind::Trait)?.span;
         let name = self.parse_ident()?;
         self.expect(&TokenKind::LBrace)?;
 
+        let mut associated_types = Vec::new();
         let mut methods = Vec::new();
-        while self.check(&TokenKind::Fn) {
-            let method_start = self.expect(&TokenKind::Fn)?.span;
-            let method_name = self.parse_ident()?;
-            self.expect(&TokenKind::LParen)?;
-
-            let mut params = Vec::new();
-            let mut has_self = false;
-            while !self.check(&TokenKind::RParen) {
-                if !params.is_empty() {
-                    self.expect(&TokenKind::Comma)?;
-                }
-                let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
-                // Check for `self` keyword
-                if self.check(&TokenKind::SelfValue) {
+        while self.check(&TokenKind::Fn) || self.check(&TokenKind::Type) {
+            if self.check(&TokenKind::Type) {
+                // Parse associated type: `type Name` or `type Name: Bound1 + Bound2`
+                let type_start = self.expect(&TokenKind::Type)?.span;
+                let type_name = self.parse_ident()?;
+                let mut bounds = Vec::new();
+                if self.check(&TokenKind::Colon) {
                     self.advance();
-                    has_self = true;
-                    let param_end = self.prev_span();
-                    params.push(Param {
-                        name: "self".to_string(),
-                        ty: TypeExpr::Named("Self".to_string()),
-                        span: param_start.merge(param_end),
-                        ownership: Ownership::Owned,
-                    });
-                } else {
-                    let param_name = self.parse_ident()?;
-                    self.expect(&TokenKind::Colon)?;
-                    let ty = self.parse_type()?;
-                    let param_end = self.prev_span();
-                    params.push(Param {
-                        name: param_name,
-                        ty,
-                        span: param_start.merge(param_end),
-                        ownership: Ownership::Owned,
-                    });
+                    bounds.push(self.parse_ident()?);
+                    while self.check(&TokenKind::Plus) {
+                        self.advance();
+                        bounds.push(self.parse_ident()?);
+                    }
                 }
-            }
-            self.expect(&TokenKind::RParen)?;
-
-            // Parse optional return type
-            let return_type = if self.check(&TokenKind::Arrow) {
-                self.advance();
-                self.parse_type()?
+                let type_end = self.prev_span();
+                associated_types.push(AssociatedType {
+                    name: type_name,
+                    bounds,
+                    span: type_start.merge(type_end),
+                });
             } else {
-                TypeExpr::Unit
-            };
+                // Parse method signature with optional default body
+                let method_start = self.expect(&TokenKind::Fn)?.span;
+                let method_name = self.parse_ident()?;
+                self.expect(&TokenKind::LParen)?;
 
-            let method_end = self.prev_span();
-            methods.push(TraitMethod {
-                name: method_name,
-                params,
-                return_type,
-                has_self,
-                span: method_start.merge(method_end),
-            });
+                let mut params = Vec::new();
+                let mut has_self = false;
+                while !self.check(&TokenKind::RParen) {
+                    if !params.is_empty() {
+                        self.expect(&TokenKind::Comma)?;
+                    }
+                    let param_start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+                    // Check for `self` keyword
+                    if self.check(&TokenKind::SelfValue) {
+                        self.advance();
+                        has_self = true;
+                        let param_end = self.prev_span();
+                        params.push(Param {
+                            name: "self".to_string(),
+                            ty: TypeExpr::Named("Self".to_string()),
+                            span: param_start.merge(param_end),
+                            ownership: Ownership::Owned,
+                        });
+                    } else {
+                        let param_name = self.parse_ident()?;
+                        self.expect(&TokenKind::Colon)?;
+                        let ty = self.parse_type()?;
+                        let param_end = self.prev_span();
+                        params.push(Param {
+                            name: param_name,
+                            ty,
+                            span: param_start.merge(param_end),
+                            ownership: Ownership::Owned,
+                        });
+                    }
+                }
+                self.expect(&TokenKind::RParen)?;
+
+                // Parse optional return type
+                let return_type = if self.check(&TokenKind::Arrow) {
+                    self.advance();
+                    self.parse_type()?
+                } else {
+                    TypeExpr::Unit
+                };
+
+                // Parse optional default body
+                let body = if self.check(&TokenKind::LBrace) {
+                    Some(self.parse_block()?)
+                } else {
+                    None
+                };
+
+                let method_end = self.prev_span();
+                methods.push(TraitMethod {
+                    name: method_name,
+                    params,
+                    return_type,
+                    has_self,
+                    body,
+                    span: method_start.merge(method_end),
+                });
+            }
         }
 
         let end = self.expect(&TokenKind::RBrace)?.span;
@@ -733,12 +767,15 @@ impl Parser {
             id: self.id_gen.next_id(),
             span: start.merge(end),
             name,
+            associated_types,
             methods,
         })
     }
 
-    /// Parses an impl block: `impl TraitName for TypeName { fn method(self) -> RetType { body } }`
+    /// Parses an impl block: `impl TraitName for TypeName { type Item = Int; fn method(self) -> RetType { body } }`
     /// or an inherent impl block: `impl TypeName { fn method(self) -> RetType { body } }`
+    ///
+    /// Supports associated type bindings (`type Name = ConcreteType`) inside impl blocks.
     fn parse_impl_block(&mut self) -> Result<ImplBlock> {
         let start = self.expect(&TokenKind::Impl)?.span;
         let first_name = self.parse_ident()?;
@@ -754,16 +791,26 @@ impl Parser {
         };
         self.expect(&TokenKind::LBrace)?;
 
+        let mut type_bindings = Vec::new();
         let mut methods = Vec::new();
-        while self.check(&TokenKind::Fn) {
-            let mut func = self.parse_impl_method()?;
-            // Resolve `self` param type to the implementing type
-            for param in &mut func.params {
-                if param.name == "self" {
-                    param.ty = TypeExpr::Named(type_name.clone());
+        while self.check(&TokenKind::Fn) || self.check(&TokenKind::Type) {
+            if self.check(&TokenKind::Type) {
+                // Parse type binding: `type Name = ConcreteType`
+                self.expect(&TokenKind::Type)?;
+                let binding_name = self.parse_ident()?;
+                self.expect(&TokenKind::Eq)?;
+                let binding_type = self.parse_type()?;
+                type_bindings.push((binding_name, binding_type));
+            } else {
+                let mut func = self.parse_impl_method()?;
+                // Resolve `self` param type to the implementing type
+                for param in &mut func.params {
+                    if param.name == "self" {
+                        param.ty = TypeExpr::Named(type_name.clone());
+                    }
                 }
+                methods.push(func);
             }
-            methods.push(func);
         }
 
         let end = self.expect(&TokenKind::RBrace)?.span;
@@ -772,6 +819,7 @@ impl Parser {
             span: start.merge(end),
             trait_name,
             type_name,
+            type_bindings,
             methods,
         })
     }
@@ -4956,5 +5004,181 @@ mod tests {
             }
             other => panic!("expected Tuple, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_trait_with_associated_type() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Container {
+                type Item
+                fn get(self) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls.len(), 1);
+        assert_eq!(module.trait_decls[0].associated_types.len(), 1);
+        assert_eq!(module.trait_decls[0].associated_types[0].name, "Item");
+        assert!(module.trait_decls[0].associated_types[0].bounds.is_empty());
+        assert_eq!(module.trait_decls[0].methods.len(), 1);
+    }
+
+    #[test]
+    fn parse_trait_associated_type_with_bounds() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Sortable {
+                type Item: Ord + Display
+                fn sort(self) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls[0].associated_types.len(), 1);
+        let assoc = &module.trait_decls[0].associated_types[0];
+        assert_eq!(assoc.name, "Item");
+        assert_eq!(assoc.bounds, vec!["Ord", "Display"]);
+    }
+
+    #[test]
+    fn parse_trait_with_default_method() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Greetable {
+                fn greet(self) -> Int {
+                    return 42
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls.len(), 1);
+        let method = &module.trait_decls[0].methods[0];
+        assert_eq!(method.name, "greet");
+        assert!(method.body.is_some());
+        assert!(method.has_self);
+    }
+
+    #[test]
+    fn parse_trait_mixed_default_and_required_methods() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Shape {
+                fn area(self) -> Int
+                fn describe(self) -> Int {
+                    return 0
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let methods = &module.trait_decls[0].methods;
+        assert_eq!(methods.len(), 2);
+        assert_eq!(methods[0].name, "area");
+        assert!(methods[0].body.is_none());
+        assert_eq!(methods[1].name, "describe");
+        assert!(methods[1].body.is_some());
+    }
+
+    #[test]
+    fn parse_impl_block_with_type_binding() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            struct MyList {
+                len: Int
+            }
+            trait Container {
+                type Item
+                fn get(self) -> Int
+            }
+            impl Container for MyList {
+                type Item = Int
+                fn get(self) -> Int {
+                    return self.len
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.impl_blocks.len(), 1);
+        assert_eq!(module.impl_blocks[0].type_bindings.len(), 1);
+        assert_eq!(module.impl_blocks[0].type_bindings[0].0, "Item");
+        assert_eq!(
+            module.impl_blocks[0].type_bindings[0].1,
+            TypeExpr::Named("Int".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_trait_with_associated_types_and_default_methods() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Collection {
+                type Item
+                fn size(self) -> Int
+                fn is_empty(self) -> Bool {
+                    return false
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let trait_decl = &module.trait_decls[0];
+        assert_eq!(trait_decl.associated_types.len(), 1);
+        assert_eq!(trait_decl.associated_types[0].name, "Item");
+        assert_eq!(trait_decl.methods.len(), 2);
+        assert!(trait_decl.methods[0].body.is_none());
+        assert!(trait_decl.methods[1].body.is_some());
+    }
+
+    #[test]
+    fn parse_trait_existing_methods_still_have_no_body() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait Describable {
+                fn describe(self) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert!(module.trait_decls[0].methods[0].body.is_none());
+        assert!(module.trait_decls[0].associated_types.is_empty());
+    }
+
+    #[test]
+    fn parse_impl_block_no_type_bindings() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            struct Point { x: Int, y: Int }
+            trait Describable {
+                fn describe(self) -> Int
+            }
+            impl Describable for Point {
+                fn describe(self) -> Int {
+                    return self.x
+                }
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert!(module.impl_blocks[0].type_bindings.is_empty());
+    }
+
+    #[test]
+    fn parse_multiple_associated_types_in_trait() {
+        let source = r#"module test {
+            meta { purpose: "test" }
+            trait BiMap {
+                type Key
+                type Value
+                fn get(self, k: Int) -> Int
+            }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.trait_decls[0].associated_types.len(), 2);
+        assert_eq!(module.trait_decls[0].associated_types[0].name, "Key");
+        assert_eq!(module.trait_decls[0].associated_types[1].name, "Value");
     }
 }
