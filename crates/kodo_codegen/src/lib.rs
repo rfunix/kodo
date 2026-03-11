@@ -1219,6 +1219,50 @@ fn declare_builtins(
         builtins.insert("kodo_map_free".to_string(), BuiltinInfo { func_id });
     }
 
+    // --- Channel builtins ---
+
+    // kodo_channel_new() -> i64  (returns channel handle)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_channel_new", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_new".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_send(handle: i64, value: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // value
+        let func_id = module
+            .declare_function("kodo_channel_send", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_send".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_recv(handle: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_channel_recv", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_recv".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_free(handle: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        let func_id = module
+            .declare_function("kodo_channel_free", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_free".to_string(), BuiltinInfo { func_id });
+    }
+
     Ok(builtins)
 }
 
