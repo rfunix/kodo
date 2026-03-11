@@ -1705,7 +1705,7 @@ pub extern "C" fn kodo_time_now_ms() -> i64 {
 }
 /// Formats a Unix timestamp as ISO 8601 UTC string.
 /// # Safety
-/// out_ptr and out_len must be valid writable pointers.
+/// `out_ptr` and `out_len` must be valid writable pointers.
 #[no_mangle]
 pub unsafe extern "C" fn kodo_time_format(
     timestamp: i64,
@@ -1756,7 +1756,7 @@ pub extern "C" fn kodo_time_elapsed_ms(start_ms: i64) -> i64 {
 // Environment builtins
 /// Gets an environment variable value.
 /// # Safety
-/// key_ptr must point to valid UTF-8. out_ptr and out_len must be valid.
+/// `key_ptr` must point to valid UTF-8. `out_ptr` and `out_len` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn kodo_env_get(
     key_ptr: *const u8,
@@ -1778,7 +1778,7 @@ pub unsafe extern "C" fn kodo_env_get(
 }
 /// Sets an environment variable.
 /// # Safety
-/// key_ptr and val_ptr must point to valid UTF-8.
+/// `key_ptr` and `val_ptr` must point to valid UTF-8.
 #[no_mangle]
 pub unsafe extern "C" fn kodo_env_set(
     key_ptr: *const u8,
