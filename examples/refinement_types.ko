@@ -1,6 +1,6 @@
 module refinement_demo {
     meta {
-        purpose: "Demonstrate refinement types with constraints"
+        purpose: "Demonstrate refinement types with runtime constraint validation"
         version: "1.0"
     }
 
@@ -17,12 +17,20 @@ module refinement_demo {
     type Name = String
 
     fn main() {
-        let port: Int = 8080
-        let pct: Int = 75
-        let age: Int = 30
+        // Valid refined type assignments — constraints satisfied at runtime
+        let port: Port = 8080
+        let pct: Percentage = 75
+        let age: Age = 30
+
         println("Refinement types demo")
+        print("Port: ")
         print_int(port)
+        println("")
+        print("Percentage: ")
         print_int(pct)
+        println("")
+        print("Age: ")
         print_int(age)
+        println("")
     }
 }

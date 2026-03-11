@@ -382,6 +382,7 @@ fn run_build(
             checker.struct_registry(),
             checker.enum_registry(),
             checker.enum_names(),
+            checker.type_alias_registry(),
         ) {
             Ok(fns) => all_mir_functions.extend(fns),
             Err(e) => {
@@ -397,6 +398,7 @@ fn run_build(
         checker.struct_registry(),
         checker.enum_registry(),
         checker.enum_names(),
+        checker.type_alias_registry(),
     ) {
         Ok(fns) => fns,
         Err(e) => {
