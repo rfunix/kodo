@@ -305,6 +305,37 @@ error[E0232]: type `Int` does not implement trait `Hashable` required by generic
    = help: implement trait `Hashable` for type `Int`, or use a type that already implements it
 ```
 
+### E0233: Missing Associated Type
+
+An `impl` block for a trait is missing a required associated type binding. Every
+associated type declared in the trait must be bound to a concrete type via
+`type Name = ConcreteType` in the impl block.
+
+```
+error[E0233]: missing associated type `Item` for trait `Iterator` at 8:1
+  --> src/main.ko:8:1
+   |
+ 8 | impl Iterator for MyList {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ missing `type Item = ...`
+   |
+   = help: add `type Item = <concrete type>` inside the impl block
+```
+
+### E0234: Unexpected Associated Type
+
+An `impl` block provides a `type` binding for a name that is not declared as an
+associated type in the trait.
+
+```
+error[E0234]: unexpected associated type `Output` for trait `Iterator` at 8:1
+  --> src/main.ko:8:1
+   |
+ 8 | impl Iterator for MyList {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ `Output` is not an associated type of `Iterator`
+   |
+   = help: remove the `type Output = ...` binding, or check the trait definition
+```
+
 ### E0235: Method Not Found
 A method was called on a type that does not have it.
 

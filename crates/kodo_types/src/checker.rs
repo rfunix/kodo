@@ -40,6 +40,17 @@ pub struct TypeChecker {
     pub(crate) mono_cache: std::collections::HashSet<String>,
     /// Trait definitions: name to list of method signatures.
     pub(crate) trait_registry: std::collections::HashMap<String, Vec<(String, Vec<Type>, Type)>>,
+    /// Trait associated types: trait name to list of associated type names.
+    pub(crate) trait_associated_types: std::collections::HashMap<String, Vec<String>>,
+    /// Trait default method bodies: trait name to list of (method name, default body).
+    pub(crate) trait_default_methods:
+        std::collections::HashMap<String, Vec<(String, kodo_ast::TraitMethod)>>,
+    /// Impl type bindings: (type name, trait name) to map of associated type name to concrete type.
+    pub(crate) impl_type_bindings:
+        std::collections::HashMap<(String, String), std::collections::HashMap<String, Type>>,
+    /// Current impl context during type checking — tracks which impl block we're in
+    /// so `Self::AssocType` can be resolved to the concrete type.
+    pub(crate) current_impl_context: Option<(String, String)>,
     /// Method lookup: (type, method) to (mangled name, params, return type).
     pub(crate) method_lookup:
         std::collections::HashMap<(String, String), (String, Vec<Type>, Type)>,
@@ -115,6 +126,10 @@ impl TypeChecker {
             fn_instances: Vec::new(),
             mono_cache: std::collections::HashSet::new(),
             trait_registry: std::collections::HashMap::new(),
+            trait_associated_types: std::collections::HashMap::new(),
+            trait_default_methods: std::collections::HashMap::new(),
+            impl_type_bindings: std::collections::HashMap::new(),
+            current_impl_context: None,
             method_lookup: std::collections::HashMap::new(),
             method_resolutions: std::collections::HashMap::new(),
             in_async_fn: false,
@@ -200,6 +215,17 @@ impl TypeChecker {
         &self.fn_instances
     }
 
+    /// Returns default method implementations registered for each trait.
+    ///
+    /// Used by the compiler driver to inject default method bodies into impl blocks
+    /// that do not override them.
+    #[must_use]
+    pub fn trait_default_methods(
+        &self,
+    ) -> &std::collections::HashMap<String, Vec<(String, kodo_ast::TraitMethod)>> {
+        &self.trait_default_methods
+    }
+
     /// Type-checks an entire module.
     ///
     /// Registers all function signatures first (enabling mutual recursion),
@@ -210,7 +236,8 @@ impl TypeChecker {
     /// Returns a [`TypeError`] if any type inconsistency is found.
     pub fn check_module(&mut self, module: &Module) -> crate::Result<()> {
         Self::validate_meta(module)?;
-        self.register_types_and_traits(module)?;
+        self.register_types(module)?;
+        self.register_traits(module)?;
         self.register_impls(module)?;
         self.register_actors(module)?;
         self.register_function_signatures(module)?;
@@ -236,8 +263,8 @@ impl TypeChecker {
         }
     }
 
-    /// Registers type aliases, structs, enums, and trait declarations.
-    fn register_types_and_traits(&mut self, module: &Module) -> crate::Result<()> {
+    /// Registers type aliases, structs, and enums.
+    fn register_types(&mut self, module: &Module) -> crate::Result<()> {
         for alias in &module.type_aliases {
             let base_ty = self.resolve_type_mono(&alias.base_type, alias.span)?;
             self.type_alias_registry
@@ -316,8 +343,19 @@ impl TypeChecker {
             }
         }
 
+        Ok(())
+    }
+
+    /// Registers trait declarations including associated types and default methods.
+    fn register_traits(&mut self, module: &Module) -> crate::Result<()> {
         for trait_decl in &module.trait_decls {
             let mut methods = Vec::new();
+            let mut default_methods = Vec::new();
+            let assoc_type_names: Vec<String> = trait_decl
+                .associated_types
+                .iter()
+                .map(|a| a.name.clone())
+                .collect();
             for method in &trait_decl.methods {
                 let param_types: std::result::Result<Vec<_>, _> = method
                     .params
@@ -328,46 +366,125 @@ impl TypeChecker {
                 let ret_type =
                     resolve_type_with_enums(&method.return_type, method.span, &self.enum_names)?;
                 methods.push((method.name.clone(), param_types, ret_type));
+                if method.body.is_some() {
+                    default_methods.push((method.name.clone(), method.clone()));
+                }
             }
             self.trait_registry.insert(trait_decl.name.clone(), methods);
+            if !assoc_type_names.is_empty() {
+                self.trait_associated_types
+                    .insert(trait_decl.name.clone(), assoc_type_names);
+            }
+            if !default_methods.is_empty() {
+                self.trait_default_methods
+                    .insert(trait_decl.name.clone(), default_methods);
+            }
         }
 
+        Ok(())
+    }
+
+    /// Validates trait conformance for a single impl block.
+    fn validate_trait_impl(
+        &mut self,
+        impl_block: &kodo_ast::ImplBlock,
+        trait_name: &str,
+    ) -> crate::Result<()> {
+        let trait_methods = self
+            .trait_registry
+            .get(trait_name)
+            .ok_or_else(|| TypeError::UnknownTrait {
+                name: trait_name.to_string(),
+                span: impl_block.span,
+            })?
+            .clone();
+
+        // Check all required methods are provided (skip those with defaults).
+        let defaults = self
+            .trait_default_methods
+            .get(trait_name)
+            .cloned()
+            .unwrap_or_default();
+        let default_names: std::collections::HashSet<&str> =
+            defaults.iter().map(|(n, _)| n.as_str()).collect();
+        for (method_name, _, _) in &trait_methods {
+            if !impl_block.methods.iter().any(|m| m.name == *method_name)
+                && !default_names.contains(method_name.as_str())
+            {
+                return Err(TypeError::MissingTraitMethod {
+                    method: method_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+            }
+        }
+
+        // Validate associated types.
+        self.validate_associated_types(impl_block, trait_name)?;
+
+        // Record that this type implements this trait (for bound checking).
+        self.trait_impl_set
+            .entry(impl_block.type_name.clone())
+            .or_default()
+            .insert(trait_name.to_string());
+        Ok(())
+    }
+
+    /// Validates associated type bindings in an impl block against trait requirements.
+    fn validate_associated_types(
+        &mut self,
+        impl_block: &kodo_ast::ImplBlock,
+        trait_name: &str,
+    ) -> crate::Result<()> {
+        let expected = self
+            .trait_associated_types
+            .get(trait_name)
+            .cloned()
+            .unwrap_or_default();
+
+        for (binding_name, _) in &impl_block.type_bindings {
+            if !expected.contains(binding_name) {
+                return Err(TypeError::UnexpectedAssociatedType {
+                    assoc_type: binding_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+            }
+        }
+        for assoc_name in &expected {
+            if !impl_block
+                .type_bindings
+                .iter()
+                .any(|(n, _)| n == assoc_name)
+            {
+                return Err(TypeError::MissingAssociatedType {
+                    assoc_type: assoc_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+            }
+        }
+        // Register type bindings for Self::AssocType resolution.
+        if !impl_block.type_bindings.is_empty() {
+            let mut bindings_map = std::collections::HashMap::new();
+            for (name, type_expr) in &impl_block.type_bindings {
+                let ty = self.resolve_type_mono(type_expr, impl_block.span)?;
+                bindings_map.insert(name.clone(), ty);
+            }
+            self.impl_type_bindings.insert(
+                (impl_block.type_name.clone(), trait_name.to_string()),
+                bindings_map,
+            );
+        }
         Ok(())
     }
 
     /// Registers impl blocks: validates trait conformance and builds method lookup.
     fn register_impls(&mut self, module: &Module) -> crate::Result<()> {
         for impl_block in &module.impl_blocks {
-            // For trait impls, validate the trait exists and all methods are implemented.
             if let Some(ref trait_name) = impl_block.trait_name {
-                let trait_methods = self
-                    .trait_registry
-                    .get(trait_name)
-                    .ok_or_else(|| TypeError::UnknownTrait {
-                        name: trait_name.clone(),
-                        span: impl_block.span,
-                    })?
-                    .clone();
-
-                for (method_name, _param_types, _ret_type) in &trait_methods {
-                    let _found = impl_block
-                        .methods
-                        .iter()
-                        .find(|m| m.name == *method_name)
-                        .ok_or_else(|| TypeError::MissingTraitMethod {
-                            method: method_name.clone(),
-                            trait_name: trait_name.clone(),
-                            span: impl_block.span,
-                        })?;
-                }
-
-                // Record that this type implements this trait (for bound checking).
-                self.trait_impl_set
-                    .entry(impl_block.type_name.clone())
-                    .or_default()
-                    .insert(trait_name.clone());
+                self.validate_trait_impl(impl_block, trait_name)?;
             }
-
             for method in &impl_block.methods {
                 let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
                 let param_types: std::result::Result<Vec<_>, _> = method
@@ -377,24 +494,59 @@ impl TypeChecker {
                     .collect();
                 let param_types = param_types?;
                 let ret_type = self.resolve_type_mono(&method.return_type, method.span)?;
-
                 self.method_lookup.insert(
                     (impl_block.type_name.clone(), method.name.clone()),
                     (mangled_name.clone(), param_types.clone(), ret_type.clone()),
                 );
-
                 self.env.insert(
                     mangled_name,
                     Type::Function(param_types, Box::new(ret_type)),
                 );
             }
+            // Register default methods from the trait that are not overridden.
+            if let Some(ref trait_name) = impl_block.trait_name {
+                if let Some(defaults) = self.trait_default_methods.get(trait_name).cloned() {
+                    for (method_name, trait_method) in &defaults {
+                        let overridden = impl_block.methods.iter().any(|m| m.name == *method_name);
+                        if !overridden && trait_method.body.is_some() {
+                            let mangled = format!("{}_{method_name}", impl_block.type_name);
+                            let concrete_type = Type::Struct(impl_block.type_name.clone());
+                            let param_types: std::result::Result<Vec<_>, _> = trait_method
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.name == "self" {
+                                        Ok(concrete_type.clone())
+                                    } else {
+                                        self.resolve_type_mono(&p.ty, p.span)
+                                    }
+                                })
+                                .collect();
+                            let param_types = param_types?;
+                            let ret_type = self
+                                .resolve_type_mono(&trait_method.return_type, trait_method.span)?;
+                            self.method_lookup.insert(
+                                (impl_block.type_name.clone(), method_name.clone()),
+                                (mangled.clone(), param_types.clone(), ret_type.clone()),
+                            );
+                            self.env
+                                .insert(mangled, Type::Function(param_types, Box::new(ret_type)));
+                        }
+                    }
+                }
+            }
         }
 
-        // Check impl block method bodies.
+        // Check impl block method bodies, with impl context for Self::AssocType resolution.
         for impl_block in &module.impl_blocks {
+            if let Some(ref trait_name) = impl_block.trait_name {
+                self.current_impl_context =
+                    Some((impl_block.type_name.clone(), trait_name.clone()));
+            }
             for method in &impl_block.methods {
                 self.check_function(method)?;
             }
+            self.current_impl_context = None;
         }
 
         Ok(())
@@ -672,7 +824,14 @@ impl TypeChecker {
     fn register_traits_collecting(&mut self, module: &Module, errors: &mut Vec<TypeError>) {
         for trait_decl in &module.trait_decls {
             let mut methods = Vec::new();
+            let mut default_methods = Vec::new();
+            let mut assoc_type_names = Vec::new();
             let mut trait_ok = true;
+
+            for assoc_type in &trait_decl.associated_types {
+                assoc_type_names.push(assoc_type.name.clone());
+            }
+
             for method in &trait_decl.methods {
                 let param_types: std::result::Result<Vec<_>, _> = method
                     .params
@@ -686,7 +845,12 @@ impl TypeChecker {
                             method.span,
                             &self.enum_names,
                         ) {
-                            Ok(ret_type) => methods.push((method.name.clone(), pt, ret_type)),
+                            Ok(ret_type) => {
+                                methods.push((method.name.clone(), pt, ret_type));
+                                if method.body.is_some() {
+                                    default_methods.push((method.name.clone(), method.clone()));
+                                }
+                            }
                             Err(e) => {
                                 errors.push(e);
                                 trait_ok = false;
@@ -701,44 +865,134 @@ impl TypeChecker {
             }
             if trait_ok {
                 self.trait_registry.insert(trait_decl.name.clone(), methods);
+                if !assoc_type_names.is_empty() {
+                    self.trait_associated_types
+                        .insert(trait_decl.name.clone(), assoc_type_names);
+                }
+                if !default_methods.is_empty() {
+                    self.trait_default_methods
+                        .insert(trait_decl.name.clone(), default_methods);
+                }
             }
         }
+    }
+
+    /// Validates a trait impl, collecting errors instead of returning early.
+    fn validate_trait_impl_collecting(
+        &mut self,
+        impl_block: &kodo_ast::ImplBlock,
+        trait_name: &str,
+        errors: &mut Vec<TypeError>,
+    ) -> bool {
+        let trait_methods = if let Some(m) = self.trait_registry.get(trait_name) {
+            m.clone()
+        } else {
+            errors.push(TypeError::UnknownTrait {
+                name: trait_name.to_string(),
+                span: impl_block.span,
+            });
+            return false;
+        };
+
+        let defaults = self
+            .trait_default_methods
+            .get(trait_name)
+            .cloned()
+            .unwrap_or_default();
+        let default_names: std::collections::HashSet<&str> =
+            defaults.iter().map(|(n, _)| n.as_str()).collect();
+
+        let mut ok = true;
+        for (method_name, _, _) in &trait_methods {
+            if !impl_block.methods.iter().any(|m| m.name == *method_name)
+                && !default_names.contains(method_name.as_str())
+            {
+                errors.push(TypeError::MissingTraitMethod {
+                    method: method_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+                ok = false;
+            }
+        }
+
+        if !self.validate_assoc_types_collecting(impl_block, trait_name, errors) {
+            ok = false;
+        }
+
+        if ok {
+            self.trait_impl_set
+                .entry(impl_block.type_name.clone())
+                .or_default()
+                .insert(trait_name.to_string());
+        }
+        ok
+    }
+
+    /// Validates associated type bindings, collecting errors instead of returning early.
+    fn validate_assoc_types_collecting(
+        &mut self,
+        impl_block: &kodo_ast::ImplBlock,
+        trait_name: &str,
+        errors: &mut Vec<TypeError>,
+    ) -> bool {
+        let expected = self
+            .trait_associated_types
+            .get(trait_name)
+            .cloned()
+            .unwrap_or_default();
+        let mut ok = true;
+
+        for (binding_name, _) in &impl_block.type_bindings {
+            if !expected.contains(binding_name) {
+                errors.push(TypeError::UnexpectedAssociatedType {
+                    assoc_type: binding_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+                ok = false;
+            }
+        }
+        for assoc_name in &expected {
+            if !impl_block
+                .type_bindings
+                .iter()
+                .any(|(n, _)| n == assoc_name)
+            {
+                errors.push(TypeError::MissingAssociatedType {
+                    assoc_type: assoc_name.clone(),
+                    trait_name: trait_name.to_string(),
+                    span: impl_block.span,
+                });
+                ok = false;
+            }
+        }
+
+        if !impl_block.type_bindings.is_empty() {
+            let mut bindings_map = std::collections::HashMap::new();
+            for (name, type_expr) in &impl_block.type_bindings {
+                match self.resolve_type_mono(type_expr, impl_block.span) {
+                    Ok(ty) => {
+                        bindings_map.insert(name.clone(), ty);
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+            self.impl_type_bindings.insert(
+                (impl_block.type_name.clone(), trait_name.to_string()),
+                bindings_map,
+            );
+        }
+        ok
     }
 
     /// Registers impl blocks, collecting errors. Populates `trait_impl_set`.
     fn register_impls_collecting(&mut self, module: &Module, errors: &mut Vec<TypeError>) {
         for impl_block in &module.impl_blocks {
-            // For trait impls, validate the trait exists and all methods are implemented.
             if let Some(ref trait_name) = impl_block.trait_name {
-                let trait_methods = if let Some(m) = self.trait_registry.get(trait_name) {
-                    m.clone()
-                } else {
-                    errors.push(TypeError::UnknownTrait {
-                        name: trait_name.clone(),
-                        span: impl_block.span,
-                    });
+                let valid = self.validate_trait_impl_collecting(impl_block, trait_name, errors);
+                if !valid {
                     continue;
-                };
-
-                // Verify all trait methods are implemented.
-                let mut trait_ok = true;
-                for (method_name, _param_types, _ret_type) in &trait_methods {
-                    if !impl_block.methods.iter().any(|m| m.name == *method_name) {
-                        errors.push(TypeError::MissingTraitMethod {
-                            method: method_name.clone(),
-                            trait_name: trait_name.clone(),
-                            span: impl_block.span,
-                        });
-                        trait_ok = false;
-                    }
-                }
-
-                if trait_ok {
-                    // Record that this type implements this trait (for bound checking).
-                    self.trait_impl_set
-                        .entry(impl_block.type_name.clone())
-                        .or_default()
-                        .insert(trait_name.clone());
                 }
             }
 
@@ -860,11 +1114,16 @@ impl TypeChecker {
         }
 
         for impl_block in &module.impl_blocks {
+            if let Some(ref trait_name) = impl_block.trait_name {
+                self.current_impl_context =
+                    Some((impl_block.type_name.clone(), trait_name.clone()));
+            }
             for method in &impl_block.methods {
                 if let Err(e) = self.check_function(method) {
                     errors.push(e);
                 }
             }
+            self.current_impl_context = None;
         }
 
         for actor_decl in &module.actor_decls {
