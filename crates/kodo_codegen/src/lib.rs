@@ -1093,6 +1093,65 @@ fn declare_builtins(
             .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
         builtins.insert("kodo_actor_free".to_string(), BuiltinInfo { func_id });
     }
+    // Time builtins
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_time_now", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_time_now".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_time_now_ms", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_time_now_ms".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_time_format", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_time_format".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_time_elapsed_ms", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_time_elapsed_ms".to_string(), BuiltinInfo { func_id });
+    }
+    // Environment builtins
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_env_get", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_env_get".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_env_set", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_env_set".to_string(), BuiltinInfo { func_id });
+    }
 
     // --- Cleanup functions for heap-allocated values ---
 
@@ -1227,6 +1286,9 @@ fn is_special_builtin(callee: &str) -> bool {
             | "json_parse"
             | "json_get_string"
             | "json_get_int"
+            | "time_format"
+            | "env_get"
+            | "env_set"
     )
 }
 
@@ -1245,6 +1307,8 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "http_get"
             | "http_post"
             | "json_get_string"
+            | "time_format"
+            | "env_get"
     )
 }
 

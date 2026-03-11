@@ -1,6 +1,5 @@
-// Demonstrates time and environment variable builtins.
-//
-// Run with: kodoc check examples/time_env.ko
+// Time and env builtins demo
+// Run: kodoc check examples/time_env.ko
 
 module time_env {
     meta {

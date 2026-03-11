@@ -1537,6 +1537,19 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
             .entry((*name).to_string())
             .or_insert(Type::Int);
     }
+    // Time builtins.
+    for name in &["time_now", "time_now_ms", "time_elapsed_ms"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+    fn_return_types
+        .entry("time_format".to_string())
+        .or_insert(Type::String);
+    fn_return_types
+        .entry("env_get".to_string())
+        .or_insert(Type::String);
+
     // Actor runtime builtins.
     fn_return_types
         .entry("kodo_actor_new".to_string())
