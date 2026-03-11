@@ -12,10 +12,10 @@
 //!
 //! ## Modules
 //!
-//! - [`expr`] — Recursive expression desugaring
-//! - [`stmt`] — Statement dispatch and block desugaring
-//! - [`for_loop`] — For and for-in loop transforms
-//! - [`operators`] — Sugar operator transforms (`??`, `?`, `?.`, `is`)
+//! - `expr` — Recursive expression desugaring
+//! - `stmt` — Statement dispatch and block desugaring
+//! - `for_loop` — For and for-in loop transforms
+//! - `operators` — Sugar operator transforms (`??`, `?`, `?.`, `is`)
 
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
@@ -55,7 +55,7 @@ pub fn desugar_module(module: &mut Module) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kodo_ast::{BinOp, Block, Expr, MatchArm, NodeIdGen, Pattern, Span, Stmt, StringPart};
+    use kodo_ast::{BinOp, Block, Expr, NodeIdGen, Pattern, Span, Stmt, StringPart};
 
     fn make_test_module(stmts: Vec<Stmt>) -> Module {
         let mut id_gen = NodeIdGen::new();

@@ -16,7 +16,7 @@
 //! - [`scheduler`] — Cooperative scheduler, channels, async runtime
 //! - [`memory`] — Reference-counted allocator
 //! - [`http`] — HTTP client builtins
-//! - [`helpers`] — Internal helper functions
+//! - `helpers` — Internal helper functions
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]

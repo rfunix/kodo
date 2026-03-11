@@ -27,13 +27,13 @@
 //!
 //! The parser is split across several modules for maintainability:
 //!
-//! - [`error`] — Error types, diagnostic integration, and `ParseOutput`
-//! - [`expr`] — Expression parsing (all precedence levels)
-//! - [`stmt`] — Statement parsing (let, return, for, while, etc.)
-//! - [`decl`] — Declaration parsing (functions, structs, enums, traits, impls, etc.)
-//! - [`types`] — Type expression and generic parameter parsing
-//! - [`pattern`] — Pattern matching (match arms, if-let, destructuring)
-//! - [`module`] — Module-level parsing, imports, meta blocks, and recovery
+//! - `error` — Error types, diagnostic integration, and `ParseOutput`
+//! - `expr` — Expression parsing (all precedence levels)
+//! - `stmt` — Statement parsing (let, return, for, while, etc.)
+//! - `decl` — Declaration parsing (functions, structs, enums, traits, impls, etc.)
+//! - `types` — Type expression and generic parameter parsing
+//! - `pattern` — Pattern matching (match arms, if-let, destructuring)
+//! - `module` — Module-level parsing, imports, meta blocks, and recovery
 //!
 //! ## Academic References
 //!
