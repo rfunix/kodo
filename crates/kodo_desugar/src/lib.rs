@@ -184,6 +184,22 @@ fn desugar_block(block: &mut Block) {
                 desugar_block(&mut body);
                 new_stmts.push(Stmt::Spawn { span, body });
             }
+            Stmt::Parallel { span, body } => {
+                let mut desugared = Vec::new();
+                for stmt in body {
+                    match stmt {
+                        Stmt::Spawn { span: s, mut body } => {
+                            desugar_block(&mut body);
+                            desugared.push(Stmt::Spawn { span: s, body });
+                        }
+                        other => desugared.push(other),
+                    }
+                }
+                new_stmts.push(Stmt::Parallel {
+                    span,
+                    body: desugared,
+                });
+            }
         }
     }
     block.stmts = new_stmts;

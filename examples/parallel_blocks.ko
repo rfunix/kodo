@@ -1,0 +1,39 @@
+// Parallel Blocks -- Demonstrates structured parallel execution.
+
+module parallel_blocks {
+    meta {
+        purpose: "Demonstrate parallel blocks with structured concurrency",
+        version: "1.0.0",
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        println("[main] starting parallel block")
+
+        parallel {
+            spawn {
+                println("[task 1] running")
+            }
+            spawn {
+                println("[task 2] running")
+            }
+        }
+
+        println("[main] all parallel tasks finished")
+
+        let a: Int = 10
+        let b: Int = 32
+
+        parallel {
+            spawn {
+                print_int(a)
+            }
+            spawn {
+                print_int(b)
+            }
+        }
+
+        println("[main] done")
+        return 0
+    }
+}

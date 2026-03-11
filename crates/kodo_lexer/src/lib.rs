@@ -138,6 +138,9 @@ pub enum TokenKind {
     /// The `spawn` keyword.
     #[token("spawn")]
     Spawn,
+    /// The `parallel` keyword.
+    #[token("parallel")]
+    Parallel,
     /// The `actor` keyword.
     #[token("actor")]
     Actor,
@@ -592,8 +595,15 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_parallel_keyword() {
+        let tokens = tokenize("parallel").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Parallel);
+    }
+
+    #[test]
     fn tokenize_concurrency_keywords_together() {
-        let tokens = tokenize("async await spawn actor").unwrap_or_default();
+        let tokens = tokenize("async await spawn actor parallel").unwrap_or_default();
         let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
         assert_eq!(
             kinds,
@@ -602,6 +612,7 @@ mod tests {
                 &TokenKind::Await,
                 &TokenKind::Spawn,
                 &TokenKind::Actor,
+                &TokenKind::Parallel,
             ]
         );
     }
@@ -760,7 +771,8 @@ mod tests {
                 let keywords = ["let", "fn", "if", "else", "return", "module", "meta",
                                 "while", "for", "true", "false", "struct", "enum",
                                 "match", "import", "trait", "impl", "self",
-                                "own", "ref", "is", "async", "await", "spawn", "actor"];
+                                "own", "ref", "is", "async", "await", "spawn", "actor",
+                                "parallel"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
                     let tokens = tokenize(&name).unwrap();
@@ -775,7 +787,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..26usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..27usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -790,6 +802,7 @@ mod tests {
                     ("impl", TokenKind::Impl), ("self", TokenKind::SelfValue),
                     ("own", TokenKind::Own), ("ref", TokenKind::Ref),
                     ("is", TokenKind::Is), ("async", TokenKind::Async),
+                    ("parallel", TokenKind::Parallel),
                 ];
                 let (src, expected) = &keywords[idx % keywords.len()];
                 let tokens = tokenize(src).unwrap();

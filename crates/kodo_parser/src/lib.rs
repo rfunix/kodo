@@ -1062,6 +1062,7 @@ impl Parser {
                 }
             }
             Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
+            Some(TokenKind::Parallel) => self.parse_parallel_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
         }
     }
@@ -1258,6 +1259,21 @@ impl Parser {
         Ok(Stmt::Spawn {
             span: start.merge(end),
             body,
+        })
+    }
+
+    /// Parses a parallel block: `parallel { spawn { ... } spawn { ... } }`.
+    fn parse_parallel_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Parallel)?.span;
+        self.expect(&TokenKind::LBrace)?;
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            stmts.push(self.parse_stmt()?);
+        }
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(Stmt::Parallel {
+            span: start.merge(end),
+            body: stmts,
         })
     }
 
@@ -3614,6 +3630,31 @@ mod tests {
             "expected Spawn statement, got {:?}",
             body.stmts[0]
         );
+    }
+
+    #[test]
+    fn parse_parallel_stmt() {
+        let source = r#"module test {
+            fn main() {
+                parallel {
+                    spawn {
+                        let x: Int = 1
+                    }
+                    spawn {
+                        let y: Int = 2
+                    }
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.functions[0].body;
+        if let Stmt::Parallel { body: stmts, .. } = &body.stmts[0] {
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(&stmts[0], Stmt::Spawn { .. }));
+            assert!(matches!(&stmts[1], Stmt::Spawn { .. }));
+        } else {
+            panic!("expected Parallel statement");
+        }
     }
 
     #[test]
