@@ -602,3 +602,84 @@ fn e2e_actor_creation_and_field_access() {
         "actor field access should produce 42, got: {stdout}"
     );
 }
+
+#[test]
+fn test_refinement_type_valid_literal() {
+    let source = r#"module refinement_valid {
+    meta {
+        purpose: "Test refinement type with valid literal"
+        version: "0.1.0"
+    }
+
+    type Port = Int requires { self > 0 && self < 65535 }
+
+    fn main() {
+        let port: Port = 8080
+        print_int(port)
+    }
+}"#;
+    let binary = compile_source(source, "test_refinement_valid");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "valid refinement should exit with 0");
+    assert!(stdout.contains("8080"), "should print 8080, got: {stdout}");
+}
+
+#[test]
+fn test_refinement_type_invalid_literal_panics() {
+    let source = r#"module refinement_invalid {
+    meta {
+        purpose: "Test refinement type violation"
+        version: "0.1.0"
+    }
+
+    type Port = Int requires { self > 0 && self < 65535 }
+
+    fn main() {
+        let port: Port = 0
+        print_int(port)
+    }
+}"#;
+    let binary = compile_source(source, "test_refinement_invalid");
+    let (exit_code, _stdout, stderr) = run_binary(&binary);
+
+    assert_ne!(
+        exit_code, 0,
+        "invalid refinement should produce non-zero exit code"
+    );
+    assert!(
+        stderr.contains("refinement constraint failed") || stderr.contains("contract violation"),
+        "error should mention refinement constraint, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_refinement_type_dynamic_value() {
+    let source = r#"module refinement_dynamic {
+    meta {
+        purpose: "Test refinement type with dynamic value"
+        version: "0.1.0"
+    }
+
+    type Positive = Int requires { self > 0 }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = 3
+        let y: Int = 7
+        let result: Positive = add(x, y)
+        print_int(result)
+    }
+}"#;
+    let binary = compile_source(source, "test_refinement_dynamic");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "dynamic refinement with valid value should pass"
+    );
+    assert!(stdout.contains("10"), "should print 10, got: {stdout}");
+}

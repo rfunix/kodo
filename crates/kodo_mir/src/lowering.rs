@@ -72,6 +72,11 @@ pub struct MirBuilder {
     /// lowering so that actor-specific runtime calls are emitted instead of
     /// regular struct operations.
     actor_names: HashSet<String>,
+    /// Registry of type aliases: name to (base type, optional refinement constraint).
+    ///
+    /// When a `let` binding has a type annotation that matches a refined alias,
+    /// the MIR builder emits a runtime contract check after the assignment.
+    type_alias_registry: HashMap<String, (kodo_types::Type, Option<kodo_ast::Expr>)>,
 }
 
 impl MirBuilder {
@@ -95,6 +100,7 @@ impl MirBuilder {
             generated_closures: Vec::new(),
             closure_registry: HashMap::new(),
             actor_names: HashSet::new(),
+            type_alias_registry: HashMap::new(),
         }
     }
 
@@ -475,9 +481,19 @@ impl MirBuilder {
                 value,
                 ..
             } => {
+                // If the annotation is a type alias, resolve to the base type.
                 let resolved_ty = if let Some(type_expr) = ty {
-                    resolve_type(type_expr, kodo_ast::Span::new(0, 0))
-                        .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                    if let kodo_ast::TypeExpr::Named(alias_name) = type_expr {
+                        if let Some((base_ty, _)) = self.type_alias_registry.get(alias_name) {
+                            base_ty.clone()
+                        } else {
+                            resolve_type(type_expr, kodo_ast::Span::new(0, 0))
+                                .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                        }
+                    } else {
+                        resolve_type(type_expr, kodo_ast::Span::new(0, 0))
+                            .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                    }
                 } else {
                     Type::Unknown
                 };
@@ -499,6 +515,15 @@ impl MirBuilder {
                         if let Some(entry) = self.closure_registry.get(&closure_name).cloned() {
                             self.closure_registry.insert(name.clone(), entry);
                         }
+                    }
+                }
+
+                // Emit a refinement check if the type annotation is a refined alias.
+                if let Some(kodo_ast::TypeExpr::Named(alias_name)) = ty {
+                    if let Some((_base_ty, Some(constraint))) =
+                        self.type_alias_registry.get(alias_name).cloned()
+                    {
+                        self.inject_refinement_check(name, &constraint, alias_name)?;
                     }
                 }
 
@@ -974,6 +999,78 @@ impl MirBuilder {
         }
 
         Ok(())
+    }
+
+    /// Emits a runtime refinement check for a variable bound to a refined type alias.
+    ///
+    /// Substitutes `self` in the constraint expression with the variable name,
+    /// lowers the resulting condition, and emits a branch to a fail block that
+    /// calls `kodo_contract_fail` if the constraint is violated.
+    fn inject_refinement_check(
+        &mut self,
+        var_name: &str,
+        constraint: &kodo_ast::Expr,
+        alias_name: &str,
+    ) -> Result<()> {
+        let substituted = Self::substitute_self_in_expr(constraint, var_name);
+        let cond = self.lower_expr(&substituted)?;
+        let fail_block = self.new_block();
+        let continue_block = self.new_block();
+        self.seal_block(
+            Terminator::Branch {
+                condition: cond,
+                true_block: continue_block,
+                false_block: fail_block,
+            },
+            fail_block,
+        );
+        let msg = format!(
+            "refinement constraint failed: `{var_name}` does not satisfy type `{alias_name}`"
+        );
+        let dest = self.alloc_local(Type::Unit, false);
+        self.emit(Instruction::Call {
+            dest,
+            callee: "kodo_contract_fail".to_string(),
+            args: vec![Value::StringConst(msg)],
+        });
+        self.seal_block(Terminator::Unreachable, continue_block);
+        Ok(())
+    }
+
+    /// Replaces `Ident("self")` with `Ident(var_name)` recursively in an expression.
+    ///
+    /// Used by refinement type checks to bind the constraint's `self` keyword
+    /// to the actual variable being constrained.
+    fn substitute_self_in_expr(expr: &kodo_ast::Expr, var_name: &str) -> kodo_ast::Expr {
+        match expr {
+            Expr::Ident(name, span) if name == "self" => Expr::Ident(var_name.to_string(), *span),
+            Expr::BinaryOp {
+                left,
+                op,
+                right,
+                span,
+            } => Expr::BinaryOp {
+                left: Box::new(Self::substitute_self_in_expr(left, var_name)),
+                op: *op,
+                right: Box::new(Self::substitute_self_in_expr(right, var_name)),
+                span: *span,
+            },
+            Expr::UnaryOp { op, operand, span } => Expr::UnaryOp {
+                op: *op,
+                operand: Box::new(Self::substitute_self_in_expr(operand, var_name)),
+                span: *span,
+            },
+            Expr::FieldAccess {
+                object,
+                field,
+                span,
+            } => Expr::FieldAccess {
+                object: Box::new(Self::substitute_self_in_expr(object, var_name)),
+                field: field.clone(),
+                span: *span,
+            },
+            other => other.clone(),
+        }
     }
 
     /// Lowers an expression to a [`Value`].
@@ -1519,6 +1616,7 @@ fn lower_function_with_registries(
         enum_registry,
         fn_return_types,
         &HashSet::new(),
+        &HashMap::new(),
     )?;
     Ok(func)
 }
@@ -1531,12 +1629,14 @@ fn lower_function_with_closures(
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>>,
     fn_return_types: &HashMap<String, Type>,
     actor_names: &HashSet<String>,
+    type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>)>,
 ) -> Result<(MirFunction, Vec<MirFunction>)> {
     let mut builder = MirBuilder::new();
     builder.actor_names.clone_from(actor_names);
     builder.struct_registry.clone_from(struct_registry);
     builder.enum_registry.clone_from(enum_registry);
     builder.fn_return_types.clone_from(fn_return_types);
+    builder.type_alias_registry.clone_from(type_alias_registry);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
@@ -1720,6 +1820,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     struct_registry: &HashMap<String, Vec<(String, Type)>, S>,
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>, S>,
     enum_names: &std::collections::HashSet<String, S>,
+    type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>), S>,
 ) -> Result<Vec<MirFunction>> {
     // Copy to standard HashMaps for internal use.
     let struct_reg: HashMap<String, Vec<(String, Type)>> = struct_registry
@@ -1731,6 +1832,10 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     let enum_ns: std::collections::HashSet<String> = enum_names.iter().cloned().collect();
+    let alias_reg: HashMap<String, (Type, Option<kodo_ast::Expr>)> = type_alias_registry
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
 
     // Build function return type registry.
     let mut fn_return_types: HashMap<String, Type> = HashMap::new();
@@ -1759,6 +1864,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             &enum_reg,
             &fn_return_types,
             &actor_names,
+            &alias_reg,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -1783,6 +1889,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
                 &enum_reg,
                 &fn_return_types,
                 &actor_names,
+                &alias_reg,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -1876,6 +1983,14 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
     // Collect actor names so the builder can distinguish actors from structs.
     let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
 
+    // Build type alias registry from module type aliases.
+    let mut alias_reg: HashMap<String, (Type, Option<kodo_ast::Expr>)> = HashMap::new();
+    for alias in &module.type_aliases {
+        let base_ty = resolve_type(&alias.base_type, alias.span)
+            .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        alias_reg.insert(alias.name.clone(), (base_ty, alias.constraint.clone()));
+    }
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
@@ -1888,6 +2003,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             &enum_registry,
             &fn_return_types,
             &actor_names,
+            &alias_reg,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -1912,6 +2028,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
                 &enum_registry,
                 &fn_return_types,
                 &actor_names,
+                &alias_reg,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -3122,8 +3239,14 @@ mod tests {
         let enum_registry: HashMap<String, Vec<(String, Vec<Type>)>> = HashMap::new();
         let enum_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let result =
-            lower_module_with_type_info(&module, &struct_registry, &enum_registry, &enum_names);
+        let type_alias_registry: HashMap<String, (Type, Option<kodo_ast::Expr>)> = HashMap::new();
+        let result = lower_module_with_type_info(
+            &module,
+            &struct_registry,
+            &enum_registry,
+            &enum_names,
+            &type_alias_registry,
+        );
         assert!(result.is_ok(), "field access lowering failed: {result:?}");
 
         let mir_functions = result.unwrap();
@@ -3164,6 +3287,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashSet::new(),
+            &HashMap::new(),
         )
         .unwrap();
         mir.validate().unwrap();
@@ -3215,6 +3339,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashSet::new(),
+            &HashMap::new(),
         )
         .unwrap();
         mir.validate().unwrap();
