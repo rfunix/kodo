@@ -1303,6 +1303,8 @@ impl TypeChecker {
         self.register_map_functions();
         self.register_http_functions();
         self.register_json_functions();
+        self.register_time_functions();
+        self.register_env_functions();
     }
 
     /// Registers builtin methods for the `String` type.
@@ -1651,6 +1653,37 @@ impl TypeChecker {
         self.env.insert(
             "json_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+    /// Registers builtin functions for time operations.
+    fn register_time_functions(&mut self) {
+        self.env.insert(
+            "time_now".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "time_now_ms".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "time_format".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        self.env.insert(
+            "time_elapsed_ms".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers builtin functions for environment variable access.
+    fn register_env_functions(&mut self) {
+        self.env.insert(
+            "env_get".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::String)),
+        );
+        self.env.insert(
+            "env_set".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Unit)),
         );
     }
 

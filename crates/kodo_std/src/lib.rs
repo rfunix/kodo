@@ -329,6 +329,36 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
             description: "Frees a parsed JSON handle".to_string(),
             param_count: 1,
         },
+        BuiltinFunction {
+            name: "kodo::time::now".to_string(),
+            description: "Returns the current Unix timestamp in seconds".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::time::now_ms".to_string(),
+            description: "Returns the current Unix timestamp in milliseconds".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::time::format".to_string(),
+            description: "Formats a Unix timestamp as an ISO 8601 string".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::time::elapsed_ms".to_string(),
+            description: "Returns elapsed milliseconds since a start timestamp".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::env::get".to_string(),
+            description: "Gets an environment variable value".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::env::set".to_string(),
+            description: "Sets an environment variable".to_string(),
+            param_count: 2,
+        },
     ]
 }
 
@@ -354,7 +384,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 42);
+        assert_eq!(builtins.len(), 48);
     }
 
     #[test]

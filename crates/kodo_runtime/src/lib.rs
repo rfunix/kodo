@@ -1686,6 +1686,116 @@ pub unsafe extern "C" fn kodo_json_free(handle: i64) {
     let _ = unsafe { Box::from_raw(handle as *mut serde_json::Value) };
 }
 
+// Time builtins
+/// Returns the current Unix timestamp in seconds.
+#[no_mangle]
+pub extern "C" fn kodo_time_now() -> i64 {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
+}
+/// Returns the current Unix timestamp in milliseconds.
+#[no_mangle]
+pub extern "C" fn kodo_time_now_ms() -> i64 {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    i64::try_from(d.as_millis()).unwrap_or(i64::MAX)
+}
+/// Formats a Unix timestamp as ISO 8601 UTC string.
+/// # Safety
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_time_format(
+    timestamp: i64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) {
+    const SECS_PER_MIN: u64 = 60;
+    const SECS_PER_HOUR: u64 = 3600;
+    const SECS_PER_DAY: u64 = 86400;
+    if out_ptr.is_null() || out_len.is_null() {
+        return;
+    }
+    #[allow(clippy::cast_sign_loss)]
+    let secs = if timestamp < 0 { 0 } else { timestamp as u64 };
+    let days_since_epoch = secs / SECS_PER_DAY;
+    let time_of_day = secs % SECS_PER_DAY;
+    let hour = time_of_day / SECS_PER_HOUR;
+    let minute = (time_of_day % SECS_PER_HOUR) / SECS_PER_MIN;
+    let second = time_of_day % SECS_PER_MIN;
+    #[allow(clippy::cast_possible_wrap)]
+    let z = days_since_epoch as i64 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    #[allow(clippy::cast_sign_loss)]
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    #[allow(clippy::cast_possible_wrap)]
+    let y_raw = yoe as i64 + era * 400;
+    #[allow(clippy::cast_sign_loss)]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { y_raw + 1 } else { y_raw };
+    let formatted = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z");
+    unsafe { write_string_out_mut(formatted, out_ptr, out_len) };
+}
+/// Returns elapsed milliseconds since start timestamp.
+#[no_mangle]
+pub extern "C" fn kodo_time_elapsed_ms(start_ms: i64) -> i64 {
+    let now = kodo_time_now_ms();
+    let diff = now - start_ms;
+    if diff < 0 {
+        0
+    } else {
+        diff
+    }
+}
+// Environment builtins
+/// Gets an environment variable value.
+/// # Safety
+/// `key_ptr` must point to valid UTF-8. `out_ptr` and `out_len` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_env_get(
+    key_ptr: *const u8,
+    key_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) {
+    if out_ptr.is_null() || out_len.is_null() {
+        return;
+    }
+    if key_ptr.is_null() {
+        unsafe { write_string_out_mut(String::new(), out_ptr, out_len) };
+        return;
+    }
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    let val = std::env::var(key).unwrap_or_default();
+    unsafe { write_string_out_mut(val, out_ptr, out_len) };
+}
+/// Sets an environment variable.
+/// # Safety
+/// `key_ptr` and `val_ptr` must point to valid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_env_set(
+    key_ptr: *const u8,
+    key_len: usize,
+    val_ptr: *const u8,
+    val_len: usize,
+) {
+    if key_ptr.is_null() || val_ptr.is_null() {
+        return;
+    }
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    let val =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(val_ptr, val_len)) };
+    unsafe { std::env::set_var(key, val) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2720,5 +2830,64 @@ mod tests {
         assert_eq!(kodo_actor_get_field(actor, 0), 0);
         assert_eq!(kodo_actor_get_field(actor, 8), 0);
         kodo_actor_free(actor, 16);
+    }
+
+    #[test]
+    fn time_now_pos() {
+        assert!(kodo_time_now() > 0);
+    }
+    #[test]
+    fn time_now_ms_pos() {
+        assert!(kodo_time_now_ms() > 0);
+    }
+    #[test]
+    fn time_fmt_epoch() {
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe { kodo_time_format(0, &mut p, &mut l) };
+        let s = unsafe { String::from_raw_parts(p, l, l) };
+        assert_eq!(s, "1970-01-01T00:00:00Z");
+    }
+    #[test]
+    fn time_fmt_known() {
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe { kodo_time_format(1_705_321_800, &mut p, &mut l) };
+        let s = unsafe { String::from_raw_parts(p, l, l) };
+        assert_eq!(s, "2024-01-15T12:30:00Z");
+    }
+    #[test]
+    fn time_elapsed_nonneg() {
+        assert!(kodo_time_elapsed_ms(kodo_time_now_ms()) >= 0);
+    }
+    #[test]
+    fn env_rt() {
+        let (k, v) = ("KODO_T27", "hi");
+        unsafe {
+            kodo_env_set(k.as_ptr(), k.len(), v.as_ptr(), v.len());
+        }
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe {
+            kodo_env_get(k.as_ptr(), k.len(), &mut p, &mut l);
+        }
+        let s = unsafe { String::from_raw_parts(p, l, l) };
+        assert_eq!(s, "hi");
+    }
+    #[test]
+    fn env_missing() {
+        let k = "KODO_X99";
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe {
+            kodo_env_get(k.as_ptr(), k.len(), &mut p, &mut l);
+        }
+        assert_eq!(l, 0);
+    }
+    #[test]
+    fn env_null() {
+        unsafe {
+            kodo_env_set(std::ptr::null(), 0, std::ptr::null(), 0);
+        }
     }
 }
