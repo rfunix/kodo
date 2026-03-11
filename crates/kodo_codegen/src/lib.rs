@@ -14,13 +14,13 @@
 //!
 //! The crate is split into the following internal modules:
 //!
-//! - [`module`] — Module-level compilation orchestration
-//! - [`function`] — Per-function translation and variable mapping
-//! - [`instruction`] — MIR instruction translation
-//! - [`terminator`] — MIR terminator translation
-//! - [`value`] — MIR value translation
-//! - [`layout`] — Struct and enum memory layout computation
-//! - [`builtins`] — Runtime builtin function declarations
+//! - `module` — Module-level compilation orchestration
+//! - `function` — Per-function translation and variable mapping
+//! - `instruction` — MIR instruction translation
+//! - `terminator` — MIR terminator translation
+//! - `value` — MIR value translation
+//! - `layout` — Struct and enum memory layout computation
+//! - `builtins` — Runtime builtin function declarations
 //!
 //! ## Academic References
 //!
