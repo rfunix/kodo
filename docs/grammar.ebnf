@@ -108,6 +108,8 @@ statement       = let_stmt
                 | for_stmt
                 | for_in_stmt
                 | return_stmt
+                | break_stmt
+                | continue_stmt
                 | spawn_stmt
                 | expr_stmt ;
 
@@ -120,6 +122,8 @@ while_stmt      = "while" expr block ;
 for_stmt        = "for" IDENT "in" range_expr block ;
 for_in_stmt     = "for" IDENT "in" expr block ;
 return_stmt     = "return" expr? ;
+break_stmt      = "break" ;
+continue_stmt   = "continue" ;
 expr_stmt       = expr ;
 
 (* ===== Expressions ===== *)

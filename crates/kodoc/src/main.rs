@@ -822,6 +822,8 @@ fn rewrite_method_calls_in_block(
                     }
                 }
             }
+            // Break and Continue have no expressions to rewrite.
+            kodo_ast::Stmt::Break { .. } | kodo_ast::Stmt::Continue { .. } => {}
         }
     }
 }

@@ -2,8 +2,8 @@
 //!
 //! Statements are the building blocks of function bodies. This module
 //! handles `let` bindings (including tuple destructuring), `return`,
-//! `while`, `for`/`for-in` loops, `if let`, `spawn`, `parallel`,
-//! assignment, and expression statements.
+//! `while`, `for`/`for-in` loops, `if let`, `break`, `continue`,
+//! `spawn`, `parallel`, assignment, and expression statements.
 
 use kodo_ast::{Expr, Span, Stmt};
 use kodo_lexer::TokenKind;
@@ -40,6 +40,8 @@ impl Parser {
                     self.parse_expr_or_assign_stmt()
                 }
             }
+            Some(TokenKind::Break) => self.parse_break_stmt(),
+            Some(TokenKind::Continue) => self.parse_continue_stmt(),
             Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
             Some(TokenKind::Parallel) => self.parse_parallel_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
@@ -155,6 +157,18 @@ impl Parser {
             name,
             value,
         })
+    }
+
+    /// Parses a `break` statement: `break`.
+    fn parse_break_stmt(&mut self) -> Result<Stmt> {
+        let token = self.expect(&TokenKind::Break)?;
+        Ok(Stmt::Break { span: token.span })
+    }
+
+    /// Parses a `continue` statement: `continue`.
+    fn parse_continue_stmt(&mut self) -> Result<Stmt> {
+        let token = self.expect(&TokenKind::Continue)?;
+        Ok(Stmt::Continue { span: token.span })
     }
 
     /// Parses a while loop: `while <condition> { <body> }`.

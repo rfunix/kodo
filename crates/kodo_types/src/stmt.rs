@@ -41,12 +41,26 @@ impl TypeChecker {
                 self.infer_expr(expr)?;
                 Ok(())
             }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(TypeError::BreakOutsideLoop { span: *span });
+                }
+                Ok(())
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(TypeError::ContinueOutsideLoop { span: *span });
+                }
+                Ok(())
+            }
             Stmt::While {
                 condition, body, ..
             } => {
                 let cond_ty = self.infer_expr(condition)?;
                 TypeEnv::check_eq(&Type::Bool, &cond_ty, expr_span(condition))?;
+                self.loop_depth += 1;
                 self.check_block(body)?;
+                self.loop_depth -= 1;
                 Ok(())
             }
             Stmt::For {
@@ -56,7 +70,12 @@ impl TypeChecker {
                 end,
                 body,
                 ..
-            } => self.check_for_stmt(*span, name, start, end, body),
+            } => {
+                self.loop_depth += 1;
+                let result = self.check_for_stmt(*span, name, start, end, body);
+                self.loop_depth -= 1;
+                result
+            }
             Stmt::Assign {
                 span, name, value, ..
             } => self.check_assign_stmt(*span, name, value),
@@ -66,7 +85,12 @@ impl TypeChecker {
                 iterable,
                 body,
                 ..
-            } => self.check_for_in_stmt(*span, name, iterable, body),
+            } => {
+                self.loop_depth += 1;
+                let result = self.check_for_in_stmt(*span, name, iterable, body);
+                self.loop_depth -= 1;
+                result
+            }
             Stmt::IfLet {
                 pattern,
                 value,

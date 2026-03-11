@@ -4333,3 +4333,204 @@ fn missing_associated_type_collecting() {
         errors
     );
 }
+
+// --- Break / Continue tests ---
+
+/// Helper to build a minimal module for testing break/continue.
+fn make_module_with_body(stmts: Vec<Stmt>) -> Module {
+    Module {
+        id: NodeId(0),
+        span: Span::new(0, 100),
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(1),
+            span: Span::new(0, 10),
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test".to_string(),
+                span: Span::new(0, 10),
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        functions: vec![Function {
+            id: NodeId(2),
+            span: Span::new(0, 100),
+            name: "test_fn".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: TypeExpr::Unit,
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span: Span::new(0, 100),
+                stmts,
+            },
+        }],
+    }
+}
+
+#[test]
+fn break_inside_while_is_valid() {
+    let module = make_module_with_body(vec![Stmt::While {
+        span: Span::new(0, 50),
+        condition: Expr::BoolLit(true, Span::new(6, 10)),
+        body: Block {
+            span: Span::new(11, 50),
+            stmts: vec![Stmt::Break {
+                span: Span::new(13, 18),
+            }],
+        },
+    }]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn continue_inside_while_is_valid() {
+    let module = make_module_with_body(vec![Stmt::While {
+        span: Span::new(0, 50),
+        condition: Expr::BoolLit(true, Span::new(6, 10)),
+        body: Block {
+            span: Span::new(11, 50),
+            stmts: vec![Stmt::Continue {
+                span: Span::new(13, 21),
+            }],
+        },
+    }]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn break_outside_loop_is_error() {
+    let module = make_module_with_body(vec![Stmt::Break {
+        span: Span::new(5, 10),
+    }]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0243");
+}
+
+#[test]
+fn continue_outside_loop_is_error() {
+    let module = make_module_with_body(vec![Stmt::Continue {
+        span: Span::new(5, 13),
+    }]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0244");
+}
+
+#[test]
+fn break_in_for_loop_is_valid() {
+    let module = make_module_with_body(vec![Stmt::For {
+        span: Span::new(0, 50),
+        name: "i".to_string(),
+        start: Expr::IntLit(0, Span::new(10, 11)),
+        end: Expr::IntLit(10, Span::new(13, 15)),
+        inclusive: false,
+        body: Block {
+            span: Span::new(16, 50),
+            stmts: vec![Stmt::Break {
+                span: Span::new(18, 23),
+            }],
+        },
+    }]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn continue_in_for_loop_is_valid() {
+    let module = make_module_with_body(vec![Stmt::For {
+        span: Span::new(0, 50),
+        name: "i".to_string(),
+        start: Expr::IntLit(0, Span::new(10, 11)),
+        end: Expr::IntLit(10, Span::new(13, 15)),
+        inclusive: false,
+        body: Block {
+            span: Span::new(16, 50),
+            stmts: vec![Stmt::Continue {
+                span: Span::new(18, 26),
+            }],
+        },
+    }]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn break_in_nested_loop_is_valid() {
+    let module = make_module_with_body(vec![Stmt::While {
+        span: Span::new(0, 80),
+        condition: Expr::BoolLit(true, Span::new(6, 10)),
+        body: Block {
+            span: Span::new(11, 80),
+            stmts: vec![Stmt::While {
+                span: Span::new(13, 70),
+                condition: Expr::BoolLit(true, Span::new(19, 23)),
+                body: Block {
+                    span: Span::new(24, 70),
+                    stmts: vec![Stmt::Break {
+                        span: Span::new(26, 31),
+                    }],
+                },
+            }],
+        },
+    }]);
+    let mut checker = TypeChecker::new();
+    assert!(checker.check_module(&module).is_ok());
+}
+
+#[test]
+fn break_outside_loop_error_has_correct_span() {
+    let err = TypeError::BreakOutsideLoop {
+        span: Span::new(10, 15),
+    };
+    assert_eq!(err.code(), "E0243");
+    assert_eq!(err.span(), Some(Span::new(10, 15)));
+}
+
+#[test]
+fn continue_outside_loop_error_has_correct_span() {
+    let err = TypeError::ContinueOutsideLoop {
+        span: Span::new(20, 28),
+    };
+    assert_eq!(err.code(), "E0244");
+    assert_eq!(err.span(), Some(Span::new(20, 28)));
+}
+
+#[test]
+fn break_error_has_suggestion() {
+    let err = TypeError::BreakOutsideLoop {
+        span: Span::new(0, 5),
+    };
+    use kodo_ast::Diagnostic;
+    let suggestion = err.suggestion();
+    assert!(suggestion.is_some());
+    assert!(suggestion.unwrap().contains("loop"));
+}
+
+#[test]
+fn continue_error_has_suggestion() {
+    let err = TypeError::ContinueOutsideLoop {
+        span: Span::new(0, 8),
+    };
+    use kodo_ast::Diagnostic;
+    let suggestion = err.suggestion();
+    assert!(suggestion.is_some());
+    assert!(suggestion.unwrap().contains("loop"));
+}

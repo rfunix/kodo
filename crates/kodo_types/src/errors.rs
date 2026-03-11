@@ -379,6 +379,18 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A `break` statement used outside of a loop.
+    #[error("`break` outside of loop at {span:?}")]
+    BreakOutsideLoop {
+        /// Source location.
+        span: Span,
+    },
+    /// A `continue` statement used outside of a loop.
+    #[error("`continue` outside of loop at {span:?}")]
+    ContinueOutsideLoop {
+        /// Source location.
+        span: Span,
+    },
     /// A tuple index is out of bounds.
     #[error("tuple index {index} is out of bounds for tuple of length {length} at {span:?}")]
     TupleIndexOutOfBounds {
@@ -433,6 +445,8 @@ impl TypeError {
             | Self::UseAfterMove { span, .. }
             | Self::BorrowEscapesScope { span, .. }
             | Self::MoveWhileBorrowed { span, .. }
+            | Self::BreakOutsideLoop { span, .. }
+            | Self::ContinueOutsideLoop { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
@@ -480,6 +494,8 @@ impl TypeError {
             Self::UseAfterMove { .. } => "E0240",
             Self::BorrowEscapesScope { .. } => "E0241",
             Self::MoveWhileBorrowed { .. } => "E0242",
+            Self::BreakOutsideLoop { .. } => "E0243",
+            Self::ContinueOutsideLoop { .. } => "E0244",
             Self::TupleIndexOutOfBounds { .. } => "E0253",
         }
     }
@@ -616,6 +632,12 @@ fn suggestion_for_type_mismatch(err: &TypeError) -> Option<String> {
             "valid indices for this tuple are 0..{}",
             length.saturating_sub(1)
         )),
+        TypeError::BreakOutsideLoop { .. } => {
+            Some("`break` can only be used inside `while`, `for`, or `for-in` loops".to_string())
+        }
+        TypeError::ContinueOutsideLoop { .. } => {
+            Some("`continue` can only be used inside `while`, `for`, or `for-in` loops".to_string())
+        }
         _ => None,
     }
 }

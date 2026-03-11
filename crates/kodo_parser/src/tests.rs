@@ -3138,3 +3138,159 @@ fn parse_multiple_associated_types_in_trait() {
     assert_eq!(module.trait_decls[0].associated_types[0].name, "Key");
     assert_eq!(module.trait_decls[0].associated_types[1].name, "Value");
 }
+
+// --- Break / Continue parser tests ---
+
+#[test]
+fn parse_break_in_while() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        break
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    assert_eq!(body.len(), 1);
+    if let Stmt::While { body, .. } = &body[0] {
+        assert_eq!(body.stmts.len(), 1);
+        assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+    } else {
+        panic!("expected While");
+    }
+}
+
+#[test]
+fn parse_continue_in_while() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        continue
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::While { body, .. } = &body[0] {
+        assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+    } else {
+        panic!("expected While");
+    }
+}
+
+#[test]
+fn parse_break_in_for() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    for i in 0..10 {
+                        break
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::For { body, .. } = &body[0] {
+        assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+    } else {
+        panic!("expected For");
+    }
+}
+
+#[test]
+fn parse_continue_in_for() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    for i in 0..10 {
+                        continue
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::For { body, .. } = &body[0] {
+        assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+    } else {
+        panic!("expected For");
+    }
+}
+
+#[test]
+fn parse_break_in_for_in() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo(items: List<Int>) {
+                    for x in items {
+                        break
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::ForIn { body, .. } = &body[0] {
+        assert!(matches!(body.stmts[0], Stmt::Break { .. }));
+    } else {
+        panic!("expected ForIn");
+    }
+}
+
+#[test]
+fn parse_break_has_span() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true { break }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::While { body, .. } = &body[0] {
+        if let Stmt::Break { span } = &body.stmts[0] {
+            assert!(span.start < span.end);
+        } else {
+            panic!("expected Break");
+        }
+    } else {
+        panic!("expected While");
+    }
+}
+
+#[test]
+fn parse_break_and_continue_mixed() {
+    let module = parse(
+        r#"module test {
+                meta { purpose: "test" }
+                fn foo() {
+                    while true {
+                        continue
+                        break
+                    }
+                }
+            }"#,
+    )
+    .unwrap();
+    let body = &module.functions[0].body.stmts;
+    if let Stmt::While { body, .. } = &body[0] {
+        assert_eq!(body.stmts.len(), 2);
+        assert!(matches!(body.stmts[0], Stmt::Continue { .. }));
+        assert!(matches!(body.stmts[1], Stmt::Break { .. }));
+    } else {
+        panic!("expected While");
+    }
+}
