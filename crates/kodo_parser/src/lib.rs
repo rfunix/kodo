@@ -42,7 +42,7 @@ use kodo_ast::{
     ActorDecl, Annotation, AnnotationArg, BinOp, Block, ClosureParam, EnumDecl, EnumVariant, Expr,
     FieldDef, FieldInit, Function, ImplBlock, ImportDecl, IntentConfigEntry, IntentConfigValue,
     IntentDecl, MatchArm, Meta, MetaEntry, Module, NodeIdGen, Ownership, Param, Pattern, Span,
-    Stmt, TraitDecl, TraitMethod, TypeDecl, TypeExpr, UnaryOp,
+    Stmt, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr, UnaryOp,
 };
 use kodo_lexer::{Token, TokenKind};
 use thiserror::Error;
@@ -270,6 +270,7 @@ impl Parser {
         let mut trait_decls = Vec::new();
         let mut impl_blocks = Vec::new();
         let mut actor_decls = Vec::new();
+        let mut type_aliases = Vec::new();
         let mut intent_decls = Vec::new();
         let mut functions = Vec::new();
         while self.check(&TokenKind::Fn)
@@ -281,8 +282,11 @@ impl Parser {
             || self.check(&TokenKind::Actor)
             || self.check(&TokenKind::Async)
             || self.check(&TokenKind::Intent)
+            || self.check(&TokenKind::Type)
         {
-            if self.check(&TokenKind::Struct) {
+            if self.check(&TokenKind::Type) {
+                type_aliases.push(self.parse_type_alias()?);
+            } else if self.check(&TokenKind::Struct) {
                 type_decls.push(self.parse_struct_decl()?);
             } else if self.check(&TokenKind::Enum) {
                 enum_decls.push(self.parse_enum_decl()?);
@@ -308,6 +312,7 @@ impl Parser {
             name,
             imports,
             meta,
+            type_aliases,
             type_decls,
             enum_decls,
             trait_decls,
@@ -536,6 +541,31 @@ impl Parser {
             ty,
             span: param_start.merge(param_end),
             ownership,
+        })
+    }
+
+    /// Parses a type alias: `type Name = BaseType` or `type Name = BaseType requires { expr }`
+    fn parse_type_alias(&mut self) -> Result<TypeAlias> {
+        let start = self.expect(&TokenKind::Type)?.span;
+        let name = self.parse_ident()?;
+        self.expect(&TokenKind::Eq)?;
+        let base_type = self.parse_type()?;
+        let constraint = if self.check(&TokenKind::Requires) {
+            self.advance();
+            self.expect(&TokenKind::LBrace)?;
+            let expr = self.parse_expr()?;
+            self.expect(&TokenKind::RBrace)?;
+            Some(expr)
+        } else {
+            None
+        };
+        let end = self.prev_span();
+        Ok(TypeAlias {
+            id: self.id_gen.next_id(),
+            span: start.merge(end),
+            name,
+            base_type,
+            constraint,
         })
     }
 

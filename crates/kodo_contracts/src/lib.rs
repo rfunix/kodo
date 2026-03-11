@@ -500,6 +500,75 @@ pub fn summarize_function_contracts(function: &Function) -> ContractSummary {
     }
 }
 
+/// Creates a [`Contract`] from a refinement constraint.
+///
+/// Substitutes `self` in the constraint expression with the given variable name,
+/// creating a `Requires` contract suitable for verification.
+#[must_use]
+pub fn refinement_contract(constraint: &Expr, var_name: &str, span: Span) -> Contract {
+    let substituted = substitute_self(constraint, var_name);
+    Contract {
+        kind: ContractKind::Requires,
+        expr: substituted,
+        span,
+    }
+}
+
+/// Replaces `Ident("self")` with `Ident(var_name)` recursively in an expression.
+///
+/// Used by refinement types to bind the constraint's `self` keyword to the
+/// actual variable being constrained.
+#[must_use]
+pub fn substitute_self(expr: &Expr, var_name: &str) -> Expr {
+    match expr {
+        Expr::Ident(name, span) if name == "self" => Expr::Ident(var_name.to_string(), *span),
+        Expr::BinaryOp {
+            left,
+            op,
+            right,
+            span,
+        } => Expr::BinaryOp {
+            left: Box::new(substitute_self(left, var_name)),
+            op: *op,
+            right: Box::new(substitute_self(right, var_name)),
+            span: *span,
+        },
+        Expr::UnaryOp { op, operand, span } => Expr::UnaryOp {
+            op: *op,
+            operand: Box::new(substitute_self(operand, var_name)),
+            span: *span,
+        },
+        Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => Expr::FieldAccess {
+            object: Box::new(substitute_self(object, var_name)),
+            field: field.clone(),
+            span: *span,
+        },
+        other => other.clone(),
+    }
+}
+
+/// Verifies a refinement constraint via the contract infrastructure.
+///
+/// Substitutes `self` with the given variable name, creates a `Requires` contract,
+/// and verifies it using the specified mode.
+///
+/// # Errors
+///
+/// Returns [`ContractError`] if the constraint expression is malformed or refuted.
+pub fn verify_refinement(
+    constraint: &Expr,
+    var_name: &str,
+    span: Span,
+    mode: ContractMode,
+) -> Result<VerificationResult> {
+    let contract = refinement_contract(constraint, var_name, span);
+    verify_contracts(&[contract], mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
