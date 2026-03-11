@@ -35,6 +35,7 @@ fn make_module(functions: Vec<Function>) -> Module {
         meta: None,
         imports: vec![],
         functions,
+        type_aliases: vec![],
         type_decls: vec![],
         enum_decls: vec![],
         trait_decls: vec![],

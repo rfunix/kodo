@@ -141,6 +141,8 @@ pub struct Module {
     pub imports: Vec<ImportDecl>,
     /// Module metadata block.
     pub meta: Option<Meta>,
+    /// Type aliases with optional refinement constraints.
+    pub type_aliases: Vec<TypeAlias>,
     /// User-defined struct type declarations.
     pub type_decls: Vec<TypeDecl>,
     /// User-defined enum type declarations.
@@ -257,6 +259,22 @@ pub struct ActorDecl {
     pub fields: Vec<FieldDef>,
     /// Handler functions.
     pub handlers: Vec<Function>,
+}
+
+/// A type alias with optional refinement constraint:
+/// `type Port = Int requires { self > 0 && self < 65535 }`
+#[derive(Debug, Clone)]
+pub struct TypeAlias {
+    /// Unique identifier for this node.
+    pub id: NodeId,
+    /// Source span.
+    pub span: Span,
+    /// The alias name.
+    pub name: String,
+    /// The base type being aliased.
+    pub base_type: TypeExpr,
+    /// Optional refinement constraint expression.
+    pub constraint: Option<Expr>,
 }
 
 /// A user-defined struct type declaration: `struct Name<T> { field: Type, ... }`

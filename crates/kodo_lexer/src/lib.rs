@@ -141,6 +141,9 @@ pub enum TokenKind {
     /// The `actor` keyword.
     #[token("actor")]
     Actor,
+    /// The `type` keyword (for type aliases and refinement types).
+    #[token("type")]
+    Type,
 
     // --- Literals ---
     /// An integer literal.

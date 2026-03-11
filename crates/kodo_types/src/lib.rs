@@ -1157,6 +1157,9 @@ pub struct TypeChecker {
     /// When the caller registers module names via [`register_imported_module`],
     /// `check_call` treats `FieldAccess` on module names as qualified function calls.
     imported_module_names: std::collections::HashSet<std::string::String>,
+    /// Registry of type aliases: name to (base type, optional constraint expression).
+    type_alias_registry:
+        std::collections::HashMap<std::string::String, (Type, Option<kodo_ast::Expr>)>,
     /// Definition index: maps identifiers to their source spans.
     ///
     /// Used by the LSP for goto-definition. Built during `check_module`.
@@ -1192,6 +1195,7 @@ impl TypeChecker {
             ownership_scopes: Vec::new(),
             fn_param_ownership: std::collections::HashMap::new(),
             imported_module_names: std::collections::HashSet::new(),
+            type_alias_registry: std::collections::HashMap::new(),
             definition_spans: std::collections::HashMap::new(),
         };
         checker.register_builtins();
@@ -1210,6 +1214,16 @@ impl TypeChecker {
     #[must_use]
     pub fn definition_spans(&self) -> &std::collections::HashMap<std::string::String, Span> {
         &self.definition_spans
+    }
+
+    /// Returns the type alias registry built during type checking.
+    ///
+    /// Maps alias names to their base type and optional refinement constraint.
+    #[must_use]
+    pub fn type_alias_registry(
+        &self,
+    ) -> &std::collections::HashMap<std::string::String, (Type, Option<kodo_ast::Expr>)> {
+        &self.type_alias_registry
     }
 
     /// Registers builtin functions in the type environment.
@@ -1663,6 +1677,14 @@ impl TypeChecker {
                     Some(_) => {}
                 }
             }
+        }
+
+        // Register type aliases.
+        for alias in &module.type_aliases {
+            let base_ty = self.resolve_type_mono(&alias.base_type, alias.span)?;
+            self.type_alias_registry
+                .insert(alias.name.clone(), (base_ty, alias.constraint.clone()));
+            self.definition_spans.insert(alias.name.clone(), alias.span);
         }
 
         // Register struct types.
@@ -3326,6 +3348,10 @@ impl TypeChecker {
                         span,
                     });
                 }
+                // Check if this is a type alias.
+                if let Some((base_ty, _constraint)) = self.type_alias_registry.get(name) {
+                    return Ok(base_ty.clone());
+                }
                 resolve_type_with_enums(type_expr, span, &self.enum_names)
             }
             _ => resolve_type_with_enums(type_expr, span, &self.enum_names),
@@ -3747,6 +3773,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls: vec![],
             enum_decls: vec![],
             trait_decls: vec![],
@@ -4462,6 +4489,7 @@ mod tests {
                 span: Span::new(0, 50),
                 entries,
             }),
+            type_aliases: vec![],
             type_decls: vec![],
             enum_decls: vec![],
             trait_decls: vec![],
@@ -4643,6 +4671,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls,
             enum_decls,
             trait_decls: vec![],
@@ -5242,6 +5271,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls: vec![kodo_ast::TypeDecl {
                 id: NodeId(1),
                 span: Span::new(50, 80),
@@ -5377,6 +5407,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls: vec![],
             enum_decls: vec![],
             trait_decls: vec![],
@@ -5414,6 +5445,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls: vec![kodo_ast::TypeDecl {
                 id: NodeId(1),
                 span: Span::new(50, 65),
@@ -5859,6 +5891,7 @@ mod tests {
                     },
                 ],
             }),
+            type_aliases: vec![],
             type_decls: vec![],
             enum_decls: vec![],
             trait_decls: vec![],

@@ -313,6 +313,7 @@ mod tests {
                     span: Span::new(10, 40),
                 }],
             }),
+            type_aliases: vec![],
             type_decls: vec![],
             enum_decls: vec![],
             trait_decls: vec![],
