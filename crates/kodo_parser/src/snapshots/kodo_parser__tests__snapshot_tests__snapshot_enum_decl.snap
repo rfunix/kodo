@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 186,
+        end: 162,
     },
     name: "test",
     imports: [],
@@ -21,8 +21,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 172,
+                start: 26,
+                end: 152,
             },
             name: "Shape",
             generic_params: [],
@@ -35,8 +35,8 @@ Module {
                         ),
                     ],
                     span: Span {
-                        start: 63,
-                        end: 78,
+                        start: 55,
+                        end: 70,
                     },
                 },
                 EnumVariant {
@@ -50,16 +50,16 @@ Module {
                         ),
                     ],
                     span: Span {
-                        start: 100,
-                        end: 127,
+                        start: 88,
+                        end: 115,
                     },
                 },
                 EnumVariant {
                     name: "Point",
                     fields: [],
                     span: Span {
-                        start: 149,
-                        end: 154,
+                        start: 133,
+                        end: 138,
                     },
                 },
             ],

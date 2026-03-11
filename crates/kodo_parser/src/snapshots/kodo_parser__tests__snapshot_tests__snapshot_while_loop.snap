@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 163,
+        end: 139,
     },
     name: "test",
     imports: [],
@@ -26,8 +26,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 149,
+                start: 26,
+                end: 129,
             },
             name: "main",
             is_async: false,
@@ -39,67 +39,67 @@ Module {
             ensures: [],
             body: Block {
                 span: Span {
-                    start: 40,
-                    end: 149,
+                    start: 36,
+                    end: 129,
                 },
                 stmts: [
                     While {
                         span: Span {
-                            start: 62,
-                            end: 131,
+                            start: 54,
+                            end: 115,
                         },
                         condition: BinaryOp {
                             left: Ident(
                                 "x",
                                 Span {
-                                    start: 68,
-                                    end: 69,
+                                    start: 60,
+                                    end: 61,
                                 },
                             ),
                             op: Gt,
                             right: IntLit(
                                 0,
                                 Span {
-                                    start: 72,
-                                    end: 73,
+                                    start: 64,
+                                    end: 65,
                                 },
                             ),
                             span: Span {
-                                start: 68,
-                                end: 73,
+                                start: 60,
+                                end: 65,
                             },
                         },
                         body: Block {
                             span: Span {
-                                start: 74,
-                                end: 131,
+                                start: 66,
+                                end: 115,
                             },
                             stmts: [
                                 Assign {
                                     span: Span {
-                                        start: 100,
-                                        end: 109,
+                                        start: 88,
+                                        end: 97,
                                     },
                                     name: "x",
                                     value: BinaryOp {
                                         left: Ident(
                                             "x",
                                             Span {
-                                                start: 104,
-                                                end: 105,
+                                                start: 92,
+                                                end: 93,
                                             },
                                         ),
                                         op: Sub,
                                         right: IntLit(
                                             1,
                                             Span {
-                                                start: 108,
-                                                end: 109,
+                                                start: 96,
+                                                end: 97,
                                             },
                                         ),
                                         span: Span {
-                                            start: 104,
-                                            end: 109,
+                                            start: 92,
+                                            end: 97,
                                         },
                                     },
                                 },

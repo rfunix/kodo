@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 258,
+        end: 226,
     },
     name: "test",
     imports: [],
@@ -26,8 +26,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 244,
+                start: 26,
+                end: 216,
             },
             name: "main",
             is_async: false,
@@ -39,14 +39,14 @@ Module {
             ensures: [],
             body: Block {
                 span: Span {
-                    start: 40,
-                    end: 244,
+                    start: 36,
+                    end: 216,
                 },
                 stmts: [
                     Let {
                         span: Span {
-                            start: 62,
-                            end: 226,
+                            start: 54,
+                            end: 202,
                         },
                         mutable: false,
                         name: "r",
@@ -59,8 +59,8 @@ Module {
                             expr: Ident(
                                 "x",
                                 Span {
-                                    start: 81,
-                                    end: 82,
+                                    start: 73,
+                                    end: 74,
                                 },
                             ),
                             arms: [
@@ -74,20 +74,20 @@ Module {
                                             "v",
                                         ],
                                         span: Span {
-                                            start: 109,
-                                            end: 124,
+                                            start: 97,
+                                            end: 112,
                                         },
                                     },
                                     body: Ident(
                                         "v",
                                         Span {
-                                            start: 128,
-                                            end: 129,
+                                            start: 116,
+                                            end: 117,
                                         },
                                     ),
                                     span: Span {
-                                        start: 109,
-                                        end: 129,
+                                        start: 97,
+                                        end: 117,
                                     },
                                 },
                                 MatchArm {
@@ -98,45 +98,45 @@ Module {
                                         variant: "None",
                                         bindings: [],
                                         span: Span {
-                                            start: 155,
-                                            end: 167,
+                                            start: 139,
+                                            end: 151,
                                         },
                                     },
                                     body: IntLit(
                                         0,
                                         Span {
-                                            start: 171,
-                                            end: 172,
+                                            start: 155,
+                                            end: 156,
                                         },
                                     ),
                                     span: Span {
-                                        start: 155,
-                                        end: 172,
+                                        start: 139,
+                                        end: 156,
                                     },
                                 },
                                 MatchArm {
                                     pattern: Wildcard(
                                         Span {
-                                            start: 198,
-                                            end: 199,
+                                            start: 178,
+                                            end: 179,
                                         },
                                     ),
                                     body: IntLit(
                                         1,
                                         Span {
-                                            start: 203,
-                                            end: 204,
+                                            start: 183,
+                                            end: 184,
                                         },
                                     ),
                                     span: Span {
-                                        start: 198,
-                                        end: 204,
+                                        start: 178,
+                                        end: 184,
                                     },
                                 },
                             ],
                             span: Span {
-                                start: 75,
-                                end: 226,
+                                start: 67,
+                                end: 202,
                             },
                         },
                     },
