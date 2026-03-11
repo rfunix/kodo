@@ -362,7 +362,7 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
         // Channels
         BuiltinFunction {
             name: "kodo::channel::new".to_string(),
-            description: "Creates a new channel and returns an opaque handle".to_string(),
+            description: "Creates a new generic channel and returns an opaque handle".to_string(),
             param_count: 0,
         },
         BuiltinFunction {
@@ -372,7 +372,27 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
         },
         BuiltinFunction {
             name: "kodo::channel::recv".to_string(),
-            description: "Receives a value from a channel (blocking)".to_string(),
+            description: "Receives an integer value from a channel (blocking)".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::send_bool".to_string(),
+            description: "Sends a boolean value through a channel".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::recv_bool".to_string(),
+            description: "Receives a boolean value from a channel (blocking)".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::send_string".to_string(),
+            description: "Sends a string value through a channel".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::channel::recv_string".to_string(),
+            description: "Receives a string value from a channel (blocking)".to_string(),
             param_count: 1,
         },
         BuiltinFunction {
@@ -405,7 +425,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 52);
+        assert_eq!(builtins.len(), 56);
     }
 
     #[test]
@@ -483,6 +503,30 @@ mod tests {
         let ch_recv = builtins.iter().find(|f| f.name == "kodo::channel::recv");
         assert!(ch_recv.is_some());
         assert_eq!(ch_recv.unwrap().param_count, 1);
+
+        let ch_send_bool = builtins
+            .iter()
+            .find(|f| f.name == "kodo::channel::send_bool");
+        assert!(ch_send_bool.is_some());
+        assert_eq!(ch_send_bool.unwrap().param_count, 2);
+
+        let ch_recv_bool = builtins
+            .iter()
+            .find(|f| f.name == "kodo::channel::recv_bool");
+        assert!(ch_recv_bool.is_some());
+        assert_eq!(ch_recv_bool.unwrap().param_count, 1);
+
+        let ch_send_string = builtins
+            .iter()
+            .find(|f| f.name == "kodo::channel::send_string");
+        assert!(ch_send_string.is_some());
+        assert_eq!(ch_send_string.unwrap().param_count, 2);
+
+        let ch_recv_string = builtins
+            .iter()
+            .find(|f| f.name == "kodo::channel::recv_string");
+        assert!(ch_recv_string.is_some());
+        assert_eq!(ch_recv_string.unwrap().param_count, 1);
 
         let ch_free = builtins.iter().find(|f| f.name == "kodo::channel::free");
         assert!(ch_free.is_some());

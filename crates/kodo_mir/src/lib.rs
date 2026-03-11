@@ -105,7 +105,7 @@ impl MirFunction {
 }
 
 /// A local variable declaration.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Local {
     /// The local identifier.
     pub id: LocalId,
@@ -127,7 +127,7 @@ pub struct BasicBlock {
 }
 
 /// A single MIR instruction.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     /// Assign a value to a local: `local = value`
     Assign(LocalId, Value),
@@ -153,6 +153,10 @@ pub enum Instruction {
         /// The parameter types of the function being called.
         param_types: Vec<Type>,
     },
+    /// Increment reference count for a heap-allocated value.
+    IncRef(LocalId),
+    /// Decrement reference count for a heap-allocated value (may free).
+    DecRef(LocalId),
 }
 
 /// A value in MIR — either a constant, a local reference, or a binary operation.
@@ -217,7 +221,7 @@ pub enum Value {
 }
 
 /// How a basic block transfers control flow.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Terminator {
     /// Return from the function with a value.
     Return(Value),
@@ -254,6 +258,27 @@ impl MirFunction {
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Assign(local, _value) => write!(f, "{local} = <value>"),
+            Self::Call { dest, callee, args } => {
+                write!(f, "{dest} = {callee}(")?;
+                for (i, _arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "<arg>")?;
+                }
+                write!(f, ")")
+            }
+            Self::IndirectCall { dest, .. } => write!(f, "{dest} = <indirect_call>(...)"),
+            Self::IncRef(local) => write!(f, "inc_ref {local}"),
+            Self::DecRef(local) => write!(f, "dec_ref {local}"),
+        }
     }
 }
 
@@ -301,5 +326,48 @@ mod tests {
     fn local_id_display() {
         assert_eq!(LocalId(0).to_string(), "_0");
         assert_eq!(LocalId(5).to_string(), "_5");
+    }
+
+    #[test]
+    fn test_incref_decref_display() {
+        let inc = Instruction::IncRef(LocalId(3));
+        assert_eq!(inc.to_string(), "inc_ref _3");
+
+        let dec = Instruction::DecRef(LocalId(7));
+        assert_eq!(dec.to_string(), "dec_ref _7");
+    }
+
+    #[test]
+    fn test_incref_decref_in_function() {
+        let func = MirFunction {
+            name: "test_rc".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Assign(LocalId(0), Value::StringConst("hello".to_string())),
+                    Instruction::IncRef(LocalId(0)),
+                    Instruction::DecRef(LocalId(0)),
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        assert!(func.validate().is_ok());
+        assert_eq!(func.blocks[0].instructions.len(), 3);
+        assert_eq!(
+            func.blocks[0].instructions[1],
+            Instruction::IncRef(LocalId(0))
+        );
+        assert_eq!(
+            func.blocks[0].instructions[2],
+            Instruction::DecRef(LocalId(0))
+        );
     }
 }

@@ -1,0 +1,12 @@
+module intent_database {
+    meta {
+        purpose: "Demonstrates database intent resolver",
+        version: "1.0.0"
+    }
+
+    intent database {
+        driver: "sqlite",
+        tables: ["users", "posts"],
+        queries: [find_user, list_posts]
+    }
+}

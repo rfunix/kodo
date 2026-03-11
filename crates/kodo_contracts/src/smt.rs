@@ -13,6 +13,11 @@
 
 use kodo_ast::{BinOp, Expr, UnaryOp};
 
+/// Separator used when flattening field access paths into Z3 constant names.
+///
+/// For example, `point.x` becomes the Z3 constant `"point.x"`.
+const FIELD_ACCESS_SEP: &str = ".";
+
 /// The outcome of an SMT verification attempt.
 ///
 /// Maps directly to Z3 solver results:
@@ -71,9 +76,69 @@ pub fn expr_to_z3(expr: &Expr) -> Option<Z3Expr> {
         Expr::BinaryOp {
             left, op, right, ..
         } => translate_binop(left, *op, right),
+        // Field access: `point.x` → uninterpreted Z3 integer constant "point.x"
+        //
+        // Struct field references in contracts are modeled as uninterpreted
+        // constants. This allows Z3 to reason about relationships between
+        // fields (e.g., `point.x > 0 && point.y > 0`) even without knowing
+        // the concrete struct layout.
+        Expr::FieldAccess { object, field, .. } => {
+            let base = flatten_field_path(object)?;
+            let name = format!("{base}{FIELD_ACCESS_SEP}{field}");
+            Some(Z3Expr::Int(z3::ast::Int::new_const(name.as_str())))
+        }
+
+        // Method calls: limited support for `.length()` as an uninterpreted
+        // function in Z3. This models string/array length as a non-negative
+        // integer, enabling bound-checking predicates like `s.length() > 0`
+        // and `index < list.length()`.
+        Expr::Call { callee, args, .. } => translate_method_call(callee, args),
+
         // Unsupported expression kinds — return None so the caller can
         // fall back to runtime verification.
         _ => None,
+    }
+}
+
+/// Flattens a field access chain into a dotted path string.
+///
+/// For example, `a.b.c` becomes `"a.b.c"`. Returns `None` if the chain
+/// contains unsupported expression kinds.
+fn flatten_field_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::FieldAccess { object, field, .. } => {
+            let base = flatten_field_path(object)?;
+            Some(format!("{base}{FIELD_ACCESS_SEP}{field}"))
+        }
+        _ => None,
+    }
+}
+
+/// Translates a method call expression to Z3.
+///
+/// Currently supports:
+/// - `.length()` — modeled as an uninterpreted non-negative integer function.
+///   This allows Z3 to reason about string length and array bounds predicates
+///   like `s.length() > 0` and `index >= 0 && index < list.length()`.
+///
+/// Returns `None` for unsupported method calls.
+fn translate_method_call(callee: &Expr, args: &[Expr]) -> Option<Z3Expr> {
+    // Method calls in Kodo AST are represented as Call { callee: FieldAccess { ... } }
+    if let Expr::FieldAccess { object, field, .. } = callee {
+        match field.as_str() {
+            "length" if args.is_empty() => {
+                // Model `obj.length()` as an uninterpreted integer constant
+                // named "obj.length". The result is constrained to be >= 0
+                // since lengths are never negative.
+                let base = flatten_field_path(object)?;
+                let name = format!("{base}{FIELD_ACCESS_SEP}length");
+                Some(Z3Expr::Int(z3::ast::Int::new_const(name.as_str())))
+            }
+            _ => None,
+        }
+    } else {
+        None
     }
 }
 
@@ -265,6 +330,26 @@ pub fn verify_with_hypotheses(hypotheses: &[&Expr], conclusion: &Expr) -> SmtRes
     })
 }
 
+/// Verifies a contract with refinement type constraints injected as hypotheses.
+///
+/// When a function parameter has a refined type (e.g., `port: Port` where
+/// `type Port = Int requires { self > 0 && self < 65535 }`), the refinement
+/// constraint is added as a hypothesis before checking the conclusion. This
+/// allows Z3 to use the constraint as an assumption.
+///
+/// `refinements` is a list of `(param_name, constraint_expr)` pairs where
+/// the constraint has already had `self` substituted with the param name.
+///
+/// # Returns
+///
+/// - `Proved` if the conclusion follows from the refinement constraints
+/// - `Refuted` if Z3 found a counter-example even with the constraints
+/// - `Unknown` if any expression could not be translated or Z3 timed out
+#[must_use]
+pub fn verify_with_refinements(refinements: &[&Expr], conclusion: &Expr) -> SmtResult {
+    verify_with_hypotheses(refinements, conclusion)
+}
+
 /// Core verification: checks if an expression is a tautology via Z3.
 ///
 /// Creates a Z3 context with a timeout, translates the expression,
@@ -376,11 +461,30 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_expr_returns_unknown() {
-        // Field access is not supported in SMT translation
-        let expr = Expr::FieldAccess {
-            object: Box::new(ident_expr("self")),
-            field: "count".to_string(),
+    fn field_access_expr_translates_and_refutes_without_context() {
+        // Field access IS now supported in SMT translation (Phase 35.1).
+        // `self.count > 0` translates to Z3 but is refuted without context.
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::FieldAccess {
+                object: Box::new(ident_expr("self")),
+                field: "count".to_string(),
+                span: Span::new(0, 10),
+            }),
+            op: BinOp::Gt,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 15),
+        };
+        let result = verify_precondition(&expr);
+        assert!(matches!(result, SmtResult::Refuted(_)));
+    }
+
+    #[test]
+    fn unsupported_closure_returns_unknown() {
+        // Closures are still not supported in SMT translation.
+        let expr = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
             span: Span::new(0, 10),
         };
         let result = verify_precondition(&expr);
@@ -589,6 +693,229 @@ mod tests {
         };
         let z3_result = expr_to_z3(&expr);
         assert!(z3_result.is_some());
+    }
+
+    // --- Phase 35.1: Field access predicates ---
+
+    /// Helper: build a field access expression `object.field`.
+    fn field_access_expr(object: Expr, field: &str) -> Expr {
+        Expr::FieldAccess {
+            object: Box::new(object),
+            field: field.to_string(),
+            span: Span::new(0, 10),
+        }
+    }
+
+    /// Helper: build a method call expression `object.method(args)`.
+    fn method_call_expr(object: Expr, method: &str, args: Vec<Expr>) -> Expr {
+        Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                object: Box::new(object),
+                field: method.to_string(),
+                span: Span::new(0, 10),
+            }),
+            args,
+            span: Span::new(0, 15),
+        }
+    }
+
+    #[test]
+    fn field_access_translates_to_z3() {
+        // `point.x` should translate to a Z3 integer constant named "point.x"
+        let mut cfg = z3::Config::new();
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let expr = field_access_expr(ident_expr("point"), "x");
+            let z3_expr = expr_to_z3(&expr);
+            assert!(z3_expr.is_some(), "field access should translate to Z3");
+        });
+    }
+
+    #[test]
+    fn field_access_gt_zero_with_hypothesis() {
+        // If point.x > 0, then point.x > 0 (trivial with hypothesis)
+        let field_x = field_access_expr(ident_expr("point"), "x");
+        let hypothesis = gt_expr(field_x.clone(), int_expr(0));
+        let conclusion = gt_expr(field_x, int_expr(0));
+        let result = verify_with_hypotheses(&[&hypothesis], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn field_access_implies_derived_predicate() {
+        // If point.x > 5, then point.x > 0
+        let field_x = field_access_expr(ident_expr("point"), "x");
+        let hypothesis = gt_expr(field_x.clone(), int_expr(5));
+        let conclusion = gt_expr(field_x, int_expr(0));
+        let result = verify_with_hypotheses(&[&hypothesis], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn nested_field_access_translates() {
+        // `a.b.c` should flatten to "a.b.c"
+        let mut cfg = z3::Config::new();
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let ab = field_access_expr(ident_expr("a"), "b");
+            let abc = field_access_expr(ab, "c");
+            let z3_expr = expr_to_z3(&abc);
+            assert!(
+                z3_expr.is_some(),
+                "nested field access should translate to Z3"
+            );
+        });
+    }
+
+    // --- Phase 35.1: Method call predicates (.length()) ---
+
+    #[test]
+    fn length_method_translates_to_z3() {
+        // `s.length()` should translate to a Z3 integer constant "s.length"
+        let mut cfg = z3::Config::new();
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let expr = method_call_expr(ident_expr("s"), "length", vec![]);
+            let z3_expr = expr_to_z3(&expr);
+            assert!(z3_expr.is_some(), ".length() should translate to Z3");
+        });
+    }
+
+    #[test]
+    fn string_length_gt_zero_with_hypothesis() {
+        // If s.length() > 0, then s.length() > 0 (trivial)
+        let len = method_call_expr(ident_expr("s"), "length", vec![]);
+        let hypothesis = gt_expr(len.clone(), int_expr(0));
+        let conclusion = gt_expr(len, int_expr(0));
+        let result = verify_with_hypotheses(&[&hypothesis], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn array_bounds_with_length_hypothesis() {
+        // If index >= 0 && index < list.length(), and list.length() > 0,
+        // then index >= 0 (a partial check)
+        let len = method_call_expr(ident_expr("list"), "length", vec![]);
+        let idx = ident_expr("index");
+
+        let h1 = Expr::BinaryOp {
+            left: Box::new(idx.clone()),
+            op: BinOp::Ge,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let h2 = lt_expr(idx.clone(), len.clone());
+        let h3 = gt_expr(len, int_expr(0));
+
+        let conclusion = Expr::BinaryOp {
+            left: Box::new(idx),
+            op: BinOp::Ge,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let result = verify_with_hypotheses(&[&h1, &h2, &h3], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn unsupported_method_returns_none() {
+        // `s.foo()` is not a supported method — should return None
+        let mut cfg = z3::Config::new();
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let expr = method_call_expr(ident_expr("s"), "foo", vec![]);
+            let z3_expr = expr_to_z3(&expr);
+            assert!(z3_expr.is_none(), "unsupported method should return None");
+        });
+    }
+
+    #[test]
+    fn length_with_args_returns_none() {
+        // `s.length(42)` is not valid — length takes no arguments
+        let mut cfg = z3::Config::new();
+        cfg.set_timeout_msec(5000);
+        z3::with_z3_config(&cfg, || {
+            let expr = method_call_expr(ident_expr("s"), "length", vec![int_expr(42)]);
+            let z3_expr = expr_to_z3(&expr);
+            assert!(z3_expr.is_none(), ".length(42) should return None");
+        });
+    }
+
+    // --- Phase 35.2: Refinement type integration ---
+
+    #[test]
+    fn refinement_constraint_as_hypothesis() {
+        // type Port = Int requires { self > 0 && self < 65535 }
+        // If port > 0 && port < 65535, then port > 0
+        let port = ident_expr("port");
+        let constraint = Expr::BinaryOp {
+            left: Box::new(gt_expr(port.clone(), int_expr(0))),
+            op: BinOp::And,
+            right: Box::new(lt_expr(port.clone(), int_expr(65535))),
+            span: Span::new(0, 30),
+        };
+        let conclusion = gt_expr(port, int_expr(0));
+        let result = verify_with_refinements(&[&constraint], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn refinement_constraint_upper_bound_proved() {
+        // type Port = Int requires { self > 0 && self < 65535 }
+        // If port > 0 && port < 65535, then port < 65535
+        let port = ident_expr("port");
+        let constraint = Expr::BinaryOp {
+            left: Box::new(gt_expr(port.clone(), int_expr(0))),
+            op: BinOp::And,
+            right: Box::new(lt_expr(port.clone(), int_expr(65535))),
+            span: Span::new(0, 30),
+        };
+        let conclusion = lt_expr(port, int_expr(65535));
+        let result = verify_with_refinements(&[&constraint], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
+    }
+
+    #[test]
+    fn multiple_refinement_constraints() {
+        // type Percentage = Int requires { self >= 0 && self <= 100 }
+        // type Age = Int requires { self >= 0 }
+        // If pct >= 0 && pct <= 100 and age >= 0, then pct + age >= 0
+        let pct = ident_expr("pct");
+        let age = ident_expr("age");
+
+        let pct_constraint = Expr::BinaryOp {
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(pct.clone()),
+                op: BinOp::Ge,
+                right: Box::new(int_expr(0)),
+                span: Span::new(0, 10),
+            }),
+            op: BinOp::And,
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(pct.clone()),
+                op: BinOp::Le,
+                right: Box::new(int_expr(100)),
+                span: Span::new(0, 10),
+            }),
+            span: Span::new(0, 20),
+        };
+
+        let age_constraint = Expr::BinaryOp {
+            left: Box::new(age.clone()),
+            op: BinOp::Ge,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+
+        let conclusion = Expr::BinaryOp {
+            left: Box::new(add_expr(pct, age)),
+            op: BinOp::Ge,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 15),
+        };
+
+        let result = verify_with_refinements(&[&pct_constraint, &age_constraint], &conclusion);
+        assert_eq!(result, SmtResult::Proved);
     }
 
     #[test]

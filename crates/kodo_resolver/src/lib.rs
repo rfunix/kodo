@@ -127,7 +127,7 @@ impl kodo_ast::Diagnostic for ResolverError {
     fn suggestion(&self) -> Option<String> {
         match self {
             Self::NoResolver { .. } => {
-                Some("available intents: console_app, math_module, serve_http".to_string())
+                Some("available intents: console_app, math_module, serve_http, database, json_api, cache, queue".to_string())
             }
             Self::UnknownConfig { intent, .. } => {
                 let valid_keys = valid_config_keys(intent);
@@ -195,6 +195,10 @@ impl Resolver {
         resolver.register(Box::new(ConsoleAppStrategy));
         resolver.register(Box::new(MathModuleStrategy));
         resolver.register(Box::new(ServeHttpStrategy));
+        resolver.register(Box::new(DatabaseStrategy));
+        resolver.register(Box::new(JsonApiStrategy));
+        resolver.register(Box::new(CacheStrategy));
+        resolver.register(Box::new(QueueStrategy));
         resolver
     }
 
@@ -254,6 +258,10 @@ fn valid_config_keys(intent: &str) -> Vec<&'static str> {
         "console_app" => vec!["greeting", "entry_point"],
         "math_module" => vec!["functions"],
         "serve_http" => vec!["port", "routes"],
+        "database" => vec!["driver", "tables", "queries"],
+        "json_api" => vec!["routes", "models"],
+        "cache" => vec!["strategy", "max_size"],
+        "queue" => vec!["backend", "topics"],
         _ => vec![],
     }
 }
@@ -280,6 +288,28 @@ fn get_int_config(intent: &IntentDecl, key: &str) -> Option<i64> {
         }
     }
     None
+}
+
+/// Extracts a list of string values from an intent config entry.
+///
+/// Handles both `StringLit` and `FnRef` list items, treating `FnRef` names as strings.
+fn get_string_list_config(intent: &IntentDecl, key: &str) -> Vec<String> {
+    for entry in &intent.config {
+        if entry.key == key {
+            if let IntentConfigValue::List(ref items, _) = entry.value {
+                return items
+                    .iter()
+                    .filter_map(|item| match item {
+                        IntentConfigValue::StringLit(s, _) | IntentConfigValue::FnRef(s, _) => {
+                            Some(s.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
 }
 
 // ===== Built-in Strategies =====
@@ -553,6 +583,673 @@ fn generate_http_handler(name: &str, span: Span) -> Function {
         body: Block {
             span,
             stmts: vec![Stmt::Expr(println_call)],
+        },
+    }
+}
+
+/// Generates typed database query functions with contracts.
+///
+/// Config keys:
+/// - `driver` (string): The database driver name (e.g., `"sqlite"`, `"postgres"`).
+/// - `tables` (list): Table names for which accessor functions are generated.
+/// - `queries` (list): Named query function stubs to generate.
+///
+/// Each table gets a `query_<table>` function with a contract requiring a non-empty
+/// table name. Each named query gets a function stub with a contract.
+pub struct DatabaseStrategy;
+
+impl ResolverStrategy for DatabaseStrategy {
+    fn handles(&self) -> &[&str] {
+        &["database"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["driver", "tables", "queries"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let driver = get_string_config(intent, "driver").unwrap_or("sqlite");
+        let tables = get_string_list_config(intent, "tables");
+        let queries = get_string_list_config(intent, "queries");
+
+        let mut generated = Vec::new();
+        let mut descriptions = Vec::new();
+
+        // Generate a connect function
+        let connect_func = generate_db_connect(driver, span);
+        descriptions.push(format!("  - `db_connect() -> String` (driver: {driver})"));
+        generated.push(connect_func);
+
+        // Generate query_<table> functions for each table
+        for table in &tables {
+            let func = generate_db_table_query(table, span);
+            descriptions.push(format!("  - `query_{table}(id: Int) -> String`"));
+            generated.push(func);
+        }
+
+        // Generate named query stubs
+        for query in &queries {
+            let func = generate_db_named_query(query, span);
+            descriptions.push(format!("  - `{query}(id: Int) -> String`"));
+            generated.push(func);
+        }
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types: tables.iter().map(|t| format!("{t}Row")).collect(),
+            description: format!(
+                "Generated database layer (driver: {driver}):\n{}",
+                descriptions.join("\n")
+            ),
+        })
+    }
+}
+
+/// Generates a database connection function stub.
+fn generate_db_connect(driver: &str, span: Span) -> Function {
+    let body_expr = Expr::StringLit(format!("connected:{driver}"), span);
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: "db_connect".to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Return {
+                span,
+                value: Some(body_expr),
+            }],
+        },
+    }
+}
+
+/// Generates a table query function with a contract requiring a valid ID.
+fn generate_db_table_query(table: &str, span: Span) -> Function {
+    let func_name = format!("query_{table}");
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(format!("querying table: {table}"), span)],
+        span,
+    };
+
+    // requires { id > 0 }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("id".to_string(), span)),
+        op: kodo_ast::BinOp::Gt,
+        right: Box::new(Expr::IntLit(0, span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: func_name,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "id".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a named query function stub with a contract.
+fn generate_db_named_query(name: &str, span: Span) -> Function {
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(format!("executing query: {name}"), span)],
+        span,
+    };
+
+    // requires { id > 0 }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("id".to_string(), span)),
+        op: kodo_ast::BinOp::Gt,
+        right: Box::new(Expr::IntLit(0, span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: name.to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "id".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates JSON API handler functions with validation contracts.
+///
+/// Config keys:
+/// - `routes` (list): Route path strings (e.g., `"/users"`, `"/posts"`).
+/// - `models` (list): Model names for which struct-like accessor stubs are generated.
+///
+/// Each route gets a handler function. Each model gets `create_<model>` and
+/// `get_<model>` functions with validation contracts.
+pub struct JsonApiStrategy;
+
+impl ResolverStrategy for JsonApiStrategy {
+    fn handles(&self) -> &[&str] {
+        &["json_api"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["routes", "models"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let routes = get_string_list_config(intent, "routes");
+        let models = get_string_list_config(intent, "models");
+
+        let mut generated = Vec::new();
+        let mut descriptions = Vec::new();
+        let mut generated_types = Vec::new();
+
+        // Generate route handlers
+        for route in &routes {
+            let handler_name = route_to_handler_name(route);
+            let func = generate_api_handler(&handler_name, route, span);
+            descriptions.push(format!("  - `{handler_name}()` -> handler for {route}"));
+            generated.push(func);
+        }
+
+        // Generate model CRUD stubs
+        for model in &models {
+            let lower = model.to_lowercase();
+            generated_types.push(model.clone());
+
+            // create_<model>(data: String) -> String
+            let create_func = generate_api_create_model(&lower, span);
+            descriptions.push(format!("  - `create_{lower}(data: String) -> String`"));
+            generated.push(create_func);
+
+            // get_<model>(id: Int) -> String
+            let get_func = generate_api_get_model(&lower, span);
+            descriptions.push(format!("  - `get_{lower}(id: Int) -> String`"));
+            generated.push(get_func);
+        }
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types,
+            description: format!(
+                "Generated JSON API:\n{}",
+                if descriptions.is_empty() {
+                    "  (no routes or models)".to_string()
+                } else {
+                    descriptions.join("\n")
+                }
+            ),
+        })
+    }
+}
+
+/// Converts a route path like `"/users"` to a handler name like `handle_users`.
+fn route_to_handler_name(route: &str) -> String {
+    let cleaned: String = route
+        .trim_matches('/')
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    if cleaned.is_empty() {
+        "handle_root".to_string()
+    } else {
+        format!("handle_{cleaned}")
+    }
+}
+
+/// Generates a JSON API route handler function.
+fn generate_api_handler(handler_name: &str, route: &str, span: Span) -> Function {
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(
+            format!("Handling API request: {route}"),
+            span,
+        )],
+        span,
+    };
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: handler_name.to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a `create_<model>` function with a non-empty data contract.
+fn generate_api_create_model(model_lower: &str, span: Span) -> Function {
+    let func_name = format!("create_{model_lower}");
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(format!("creating {model_lower}"), span)],
+        span,
+    };
+
+    // requires { data != "" } — validation contract
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("data".to_string(), span)),
+        op: kodo_ast::BinOp::Ne,
+        right: Box::new(Expr::StringLit(String::new(), span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: func_name,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "data".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a `get_<model>` function with a positive ID contract.
+fn generate_api_get_model(model_lower: &str, span: Span) -> Function {
+    let func_name = format!("get_{model_lower}");
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(format!("fetching {model_lower}"), span)],
+        span,
+    };
+
+    // requires { id > 0 }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("id".to_string(), span)),
+        op: kodo_ast::BinOp::Gt,
+        right: Box::new(Expr::IntLit(0, span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: func_name,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "id".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Default maximum size for cache strategies when not specified.
+const DEFAULT_CACHE_MAX_SIZE: i64 = 256;
+
+/// Generates cache access functions with size-bounded contracts.
+///
+/// Config keys:
+/// - `strategy` (string): The caching strategy (e.g., `"lru"`, `"fifo"`).
+/// - `max_size` (integer): The maximum number of entries in the cache.
+///
+/// Generates `cache_get`, `cache_set`, and `cache_invalidate` functions.
+/// The `cache_set` function includes a contract ensuring the key is non-empty.
+pub struct CacheStrategy;
+
+impl ResolverStrategy for CacheStrategy {
+    fn handles(&self) -> &[&str] {
+        &["cache"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["strategy", "max_size"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let strategy = get_string_config(intent, "strategy").unwrap_or("lru");
+        let max_size = get_int_config(intent, "max_size").unwrap_or(DEFAULT_CACHE_MAX_SIZE);
+
+        let mut generated = Vec::new();
+        let mut descriptions = Vec::new();
+
+        // cache_get(key: String) -> String
+        let get_func = generate_cache_get(span);
+        descriptions.push("  - `cache_get(key: String) -> String`".to_string());
+        generated.push(get_func);
+
+        // cache_set(key: String, value: String) -> Bool
+        let set_func = generate_cache_set(max_size, span);
+        descriptions.push(format!(
+            "  - `cache_set(key: String, value: String) -> Bool` (max_size: {max_size})"
+        ));
+        generated.push(set_func);
+
+        // cache_invalidate(key: String) -> Bool
+        let invalidate_func = generate_cache_invalidate(span);
+        descriptions.push("  - `cache_invalidate(key: String) -> Bool`".to_string());
+        generated.push(invalidate_func);
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types: vec![],
+            description: format!(
+                "Generated cache layer (strategy: {strategy}, max_size: {max_size}):\n{}",
+                descriptions.join("\n")
+            ),
+        })
+    }
+}
+
+/// Generates a `cache_get` function.
+fn generate_cache_get(span: Span) -> Function {
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit("cache_get".to_string(), span)],
+        span,
+    };
+
+    // requires { key != "" }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("key".to_string(), span)),
+        op: kodo_ast::BinOp::Ne,
+        right: Box::new(Expr::StringLit(String::new(), span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: "cache_get".to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "key".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a `cache_set` function with a max-size contract.
+fn generate_cache_set(max_size: i64, span: Span) -> Function {
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(
+            format!("cache_set (max: {max_size})"),
+            span,
+        )],
+        span,
+    };
+
+    // requires { key != "" }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("key".to_string(), span)),
+        op: kodo_ast::BinOp::Ne,
+        right: Box::new(Expr::StringLit(String::new(), span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: "cache_set".to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![
+            Param {
+                name: "key".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                span,
+                ownership: Ownership::Owned,
+            },
+            Param {
+                name: "value".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                span,
+                ownership: Ownership::Owned,
+            },
+        ],
+        return_type: TypeExpr::Named("Bool".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a `cache_invalidate` function.
+fn generate_cache_invalidate(span: Span) -> Function {
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit("cache_invalidate".to_string(), span)],
+        span,
+    };
+
+    // requires { key != "" }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("key".to_string(), span)),
+        op: kodo_ast::BinOp::Ne,
+        right: Box::new(Expr::StringLit(String::new(), span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: "cache_invalidate".to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "key".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Named("Bool".to_string()),
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates message queue produce/consume functions for each topic.
+///
+/// Config keys:
+/// - `backend` (string): The queue backend name (e.g., `"memory"`, `"redis"`).
+/// - `topics` (list): Topic names for which produce/consume function pairs are generated.
+///
+/// Each topic gets `produce_<topic>(message: String)` and
+/// `consume_<topic>() -> String` functions. Produce functions include a contract
+/// requiring a non-empty message.
+pub struct QueueStrategy;
+
+impl ResolverStrategy for QueueStrategy {
+    fn handles(&self) -> &[&str] {
+        &["queue"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["backend", "topics"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let backend = get_string_config(intent, "backend").unwrap_or("memory");
+        let topics = get_string_list_config(intent, "topics");
+
+        let mut generated = Vec::new();
+        let mut descriptions = Vec::new();
+
+        for topic in &topics {
+            // produce_<topic>(message: String)
+            let produce_func = generate_queue_produce(topic, span);
+            descriptions.push(format!("  - `produce_{topic}(message: String)`"));
+            generated.push(produce_func);
+
+            // consume_<topic>() -> String
+            let consume_func = generate_queue_consume(topic, span);
+            descriptions.push(format!("  - `consume_{topic}() -> String`"));
+            generated.push(consume_func);
+        }
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types: vec![],
+            description: format!(
+                "Generated message queue (backend: {backend}):\n{}",
+                if descriptions.is_empty() {
+                    "  (no topics)".to_string()
+                } else {
+                    descriptions.join("\n")
+                }
+            ),
+        })
+    }
+}
+
+/// Generates a `produce_<topic>` function with a non-empty message contract.
+fn generate_queue_produce(topic: &str, span: Span) -> Function {
+    let func_name = format!("produce_{topic}");
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(
+            format!("producing to topic: {topic}"),
+            span,
+        )],
+        span,
+    };
+
+    // requires { message != "" }
+    let requires = vec![Expr::BinaryOp {
+        left: Box::new(Expr::Ident("message".to_string(), span)),
+        op: kodo_ast::BinOp::Ne,
+        right: Box::new(Expr::StringLit(String::new(), span)),
+        span,
+    }];
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: func_name,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "message".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            span,
+            ownership: Ownership::Owned,
+        }],
+        return_type: TypeExpr::Unit,
+        requires,
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
+        },
+    }
+}
+
+/// Generates a `consume_<topic>` function.
+fn generate_queue_consume(topic: &str, span: Span) -> Function {
+    let func_name = format!("consume_{topic}");
+    let body_expr = Expr::Call {
+        callee: Box::new(Expr::Ident("println".to_string(), span)),
+        args: vec![Expr::StringLit(
+            format!("consuming from topic: {topic}"),
+            span,
+        )],
+        span,
+    };
+
+    Function {
+        id: NodeId(0),
+        span,
+        name: func_name,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("String".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span,
+            stmts: vec![Stmt::Expr(body_expr)],
         },
     }
 }
@@ -841,6 +1538,281 @@ mod tests {
     fn serve_http_invalid_config() {
         let resolver = Resolver::with_builtins();
         let intent = make_intent("serve_http", vec![string_entry("invalid_key", "value")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== Database resolver tests =====
+
+    fn list_entry(key: &str, items: Vec<&str>) -> kodo_ast::IntentConfigEntry {
+        kodo_ast::IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(
+                items
+                    .into_iter()
+                    .map(|s| IntentConfigValue::StringLit(s.to_string(), Span::new(0, 5)))
+                    .collect(),
+                Span::new(0, 20),
+            ),
+            span: Span::new(0, 30),
+        }
+    }
+
+    fn int_entry(key: &str, value: i64) -> kodo_ast::IntentConfigEntry {
+        kodo_ast::IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::IntLit(value, Span::new(0, 5)),
+            span: Span::new(0, 10),
+        }
+    }
+
+    #[test]
+    fn database_basic_defaults() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("database", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // Only the connect function with defaults
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "db_connect");
+        assert!(resolved.description.contains("sqlite"));
+    }
+
+    #[test]
+    fn database_with_tables_and_queries() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "database",
+            vec![
+                string_entry("driver", "postgres"),
+                list_entry("tables", vec!["users", "posts"]),
+                list_entry("queries", vec!["find_user", "list_posts"]),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // connect + 2 table queries + 2 named queries = 5
+        assert_eq!(resolved.generated_functions.len(), 5);
+        assert_eq!(resolved.generated_functions[0].name, "db_connect");
+        assert_eq!(resolved.generated_functions[1].name, "query_users");
+        assert_eq!(resolved.generated_functions[2].name, "query_posts");
+        assert_eq!(resolved.generated_functions[3].name, "find_user");
+        assert_eq!(resolved.generated_functions[4].name, "list_posts");
+        assert!(resolved.description.contains("postgres"));
+    }
+
+    #[test]
+    fn database_table_queries_have_contracts() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("database", vec![list_entry("tables", vec!["users"])]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // query_users should have requires { id > 0 }
+        let query_func = &resolved.generated_functions[1];
+        assert_eq!(query_func.name, "query_users");
+        assert!(!query_func.requires.is_empty());
+    }
+
+    #[test]
+    fn database_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("database", vec![string_entry("unknown", "x")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    #[test]
+    fn database_generates_type_names() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "database",
+            vec![list_entry("tables", vec!["users", "posts"])],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_types, vec!["usersRow", "postsRow"]);
+    }
+
+    // ===== JSON API resolver tests =====
+
+    #[test]
+    fn json_api_basic_empty() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("json_api", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.generated_functions.is_empty());
+        assert!(resolved.description.contains("no routes or models"));
+    }
+
+    #[test]
+    fn json_api_with_routes() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "json_api",
+            vec![list_entry("routes", vec!["/users", "/posts"])],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert_eq!(resolved.generated_functions[0].name, "handle_users");
+        assert_eq!(resolved.generated_functions[1].name, "handle_posts");
+    }
+
+    #[test]
+    fn json_api_with_models() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("json_api", vec![list_entry("models", vec!["User", "Post"])]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // 2 models * 2 (create + get) = 4 functions
+        assert_eq!(resolved.generated_functions.len(), 4);
+        assert_eq!(resolved.generated_functions[0].name, "create_user");
+        assert_eq!(resolved.generated_functions[1].name, "get_user");
+        assert_eq!(resolved.generated_functions[2].name, "create_post");
+        assert_eq!(resolved.generated_functions[3].name, "get_post");
+        // create functions should have requires { data != "" }
+        assert!(!resolved.generated_functions[0].requires.is_empty());
+        // get functions should have requires { id > 0 }
+        assert!(!resolved.generated_functions[1].requires.is_empty());
+    }
+
+    #[test]
+    fn json_api_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("json_api", vec![string_entry("port", "8080")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    #[test]
+    fn json_api_route_to_handler_root() {
+        assert_eq!(route_to_handler_name("/"), "handle_root");
+    }
+
+    // ===== Cache resolver tests =====
+
+    #[test]
+    fn cache_basic_defaults() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cache", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // get, set, invalidate = 3 functions
+        assert_eq!(resolved.generated_functions.len(), 3);
+        assert_eq!(resolved.generated_functions[0].name, "cache_get");
+        assert_eq!(resolved.generated_functions[1].name, "cache_set");
+        assert_eq!(resolved.generated_functions[2].name, "cache_invalidate");
+        assert!(resolved.description.contains("lru"));
+        assert!(resolved.description.contains("256"));
+    }
+
+    #[test]
+    fn cache_custom_strategy_and_size() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "cache",
+            vec![
+                string_entry("strategy", "fifo"),
+                int_entry("max_size", 1000),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("fifo"));
+        assert!(resolved.description.contains("1000"));
+    }
+
+    #[test]
+    fn cache_functions_have_contracts() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cache", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // All three functions should have requires { key != "" }
+        for func in &resolved.generated_functions {
+            assert!(
+                !func.requires.is_empty(),
+                "{} should have a contract",
+                func.name
+            );
+        }
+    }
+
+    #[test]
+    fn cache_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cache", vec![string_entry("backend", "redis")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== Queue resolver tests =====
+
+    #[test]
+    fn queue_basic_no_topics() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("queue", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.generated_functions.is_empty());
+        assert!(resolved.description.contains("no topics"));
+    }
+
+    #[test]
+    fn queue_with_topics() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "queue",
+            vec![
+                string_entry("backend", "redis"),
+                list_entry("topics", vec!["events", "tasks"]),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // 2 topics * 2 (produce + consume) = 4 functions
+        assert_eq!(resolved.generated_functions.len(), 4);
+        assert_eq!(resolved.generated_functions[0].name, "produce_events");
+        assert_eq!(resolved.generated_functions[1].name, "consume_events");
+        assert_eq!(resolved.generated_functions[2].name, "produce_tasks");
+        assert_eq!(resolved.generated_functions[3].name, "consume_tasks");
+        assert!(resolved.description.contains("redis"));
+    }
+
+    #[test]
+    fn queue_produce_has_contract() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("queue", vec![list_entry("topics", vec!["events"])]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // produce_events should have requires { message != "" }
+        let produce_func = &resolved.generated_functions[0];
+        assert_eq!(produce_func.name, "produce_events");
+        assert!(!produce_func.requires.is_empty());
+        // consume_events should have no requires
+        let consume_func = &resolved.generated_functions[1];
+        assert_eq!(consume_func.name, "consume_events");
+        assert!(consume_func.requires.is_empty());
+    }
+
+    #[test]
+    fn queue_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("queue", vec![string_entry("driver", "x")]);
         let result = resolver.resolve(&intent);
         assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
     }

@@ -84,14 +84,23 @@ Kōdo supports the following primitive types:
 
 The full type system also includes `Int8`, `Int16`, `Int32`, `Int64`, `Float32`, and `Byte` — see the [Language Specification](../DESIGN.md) for details.
 
-All variables must have explicit type annotations:
+Variables can have explicit type annotations or use **local type inference**:
 
 ```
+// Explicit type annotations
 let x: Int = 42
 let pi: Float64 = 3.14159
 let name: String = "Kōdo"
 let active: Bool = true
+
+// Type inference — the compiler infers the type from the initializer
+let y = 42           // inferred as Int
+let greeting = "hi"  // inferred as String
+let flag = true      // inferred as Bool
+let tau = 6.28       // inferred as Float64
 ```
+
+> **Note:** Function signatures always require explicit type annotations. Type inference is local to `let` bindings only.
 
 ## Variables
 

@@ -1,0 +1,11 @@
+module intent_cache {
+    meta {
+        purpose: "Demonstrates cache intent resolver",
+        version: "1.0.0"
+    }
+
+    intent cache {
+        strategy: "lru",
+        max_size: 1000
+    }
+}

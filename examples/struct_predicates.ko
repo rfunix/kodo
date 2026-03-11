@@ -1,0 +1,30 @@
+// Demonstrates struct field predicates in contracts.
+//
+// Contracts can reference struct fields directly, enabling Z3
+// to reason about struct invariants at compile time.
+
+module struct_predicates_demo {
+    meta {
+        purpose: "Demonstrate struct field predicates in contracts"
+        version: "1.0"
+    }
+
+    struct Point {
+        x: Int
+        y: Int
+    }
+
+    // Contract references struct fields: point.x > 0 && point.y > 0
+    fn first_quadrant(point: Point) -> Bool
+        requires { point.x > 0 }
+        requires { point.y > 0 }
+    {
+        return true
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10, y: 20 }
+        let result: Bool = first_quadrant(p)
+        println("Struct predicate contracts work!")
+    }
+}

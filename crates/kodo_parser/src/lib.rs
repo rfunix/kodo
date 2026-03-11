@@ -2078,6 +2078,52 @@ pub fn parse(source: &str) -> Result<Module> {
     parser.parse_module()
 }
 
+/// Result of parsing with error recovery.
+///
+/// Contains a best-effort AST (if recoverable) and all errors encountered.
+pub struct ParseOutput {
+    /// The parsed module (best-effort, may be incomplete if errors occurred).
+    pub module: Option<Module>,
+    /// All parse errors encountered during parsing.
+    pub errors: Vec<ParseError>,
+}
+
+/// Parses source code with error recovery, collecting multiple errors.
+///
+/// Unlike [`parse()`], this function does not stop at the first error.
+/// It attempts to synchronize and continue parsing, collecting all errors.
+///
+/// # Examples
+///
+/// ```
+/// let output = kodo_parser::parse_with_recovery("module m { meta {} fn a() {} }");
+/// // output.errors may contain multiple errors
+/// // output.module may be Some if recovery was possible
+/// ```
+#[must_use]
+pub fn parse_with_recovery(source: &str) -> ParseOutput {
+    let tokens = match kodo_lexer::tokenize(source) {
+        Ok(t) => t,
+        Err(e) => {
+            return ParseOutput {
+                module: None,
+                errors: vec![ParseError::from(e)],
+            };
+        }
+    };
+    let mut parser = Parser::new(tokens);
+    match parser.parse_module() {
+        Ok(module) => ParseOutput {
+            module: Some(module),
+            errors: vec![],
+        },
+        Err(e) => ParseOutput {
+            module: None,
+            errors: vec![e],
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

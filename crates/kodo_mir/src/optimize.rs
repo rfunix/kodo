@@ -1,23 +1,26 @@
 //! Basic MIR optimization passes.
 //!
-//! This module implements three optimization passes that run after MIR lowering:
+//! This module implements four optimization passes that run after MIR lowering:
 //!
-//! 1. **Constant folding** — Evaluates compile-time constant expressions.
-//! 2. **Dead code elimination** — Removes unused local assignments.
-//! 3. **Copy propagation** — Replaces copies with their source values.
+//! 1. **Function inlining** — Inlines small, non-recursive function calls.
+//! 2. **Constant folding** — Evaluates compile-time constant expressions.
+//! 3. **Dead code elimination** — Removes unused local assignments.
+//! 4. **Copy propagation** — Replaces copies with their source values.
 //!
 //! ## Academic References
 //!
-//! - **\[EC\]** *Engineering a Compiler* Ch. 8â10 â Data-flow analysis,
+//! - **\[EC\]** *Engineering a Compiler* Ch. 8–10 — Data-flow analysis,
 //!   optimization frameworks, and local value numbering.
-//! - **\[Tiger\]** *Modern Compiler Implementation in ML* Ch. 10 â
+//! - **\[EC\]** *Engineering a Compiler* Ch. 8.7 — Inline substitution.
+//! - **\[Tiger\]** *Modern Compiler Implementation in ML* Ch. 10 —
 //!   Liveness analysis and register allocation.
+//! - **\[Tiger\]** *Modern Compiler Implementation* Ch. 15.3 — Inlining heuristics.
 
 use std::collections::{HashMap, HashSet};
 
 use kodo_ast::BinOp;
 
-use crate::{BasicBlock, Instruction, LocalId, MirFunction, Terminator, Value};
+use crate::{BasicBlock, Instruction, Local, LocalId, MirFunction, Terminator, Value};
 
 /// Applies all optimization passes to a MIR function in sequence.
 ///
@@ -25,10 +28,336 @@ use crate::{BasicBlock, Instruction, LocalId, MirFunction, Terminator, Value};
 /// 1. Constant folding
 /// 2. Dead code elimination
 /// 3. Copy propagation
+///
+/// This variant does **not** perform function inlining. Use
+/// [`optimize_all`] to run the full pipeline including inlining.
 pub fn optimize_function(func: &mut MirFunction) {
     constant_fold(func);
     dead_code_eliminate(func);
     copy_propagate(func);
+}
+
+/// Applies all optimization passes — including function inlining — to a
+/// list of MIR functions.
+///
+/// The inlining pass runs first, substituting small function bodies at
+/// their call sites. After inlining, the standard per-function passes
+/// (constant folding, dead code elimination, copy propagation) run on
+/// every function to clean up the inlined code.
+///
+/// ## Academic References
+///
+/// - **\[EC\]** *Engineering a Compiler* Ch. 8.7 — Inline substitution
+/// - **\[Tiger\]** *Modern Compiler Implementation* Ch. 15.3 — Inlining heuristics
+pub fn optimize_all(functions: &mut [MirFunction]) {
+    // Phase 1: build a snapshot of eligible inlining candidates.
+    // We need a snapshot because we cannot borrow `functions` mutably and
+    // immutably at the same time.
+    let snapshot: Vec<InlineCandidate> = functions
+        .iter()
+        .filter_map(InlineCandidate::try_from_function)
+        .collect();
+
+    for func in functions.iter_mut() {
+        // Phase 1: inline small functions into the caller.
+        inline_small_functions(func, &snapshot);
+        // Phase 2: standard per-function passes on the (potentially inlined) body.
+        constant_fold(func);
+        dead_code_eliminate(func);
+        copy_propagate(func);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 0: Function Inlining
+// ---------------------------------------------------------------------------
+
+/// Maximum number of instructions (excluding terminator) in a function body
+/// for it to be eligible for inlining.
+const MAX_INLINE_INSTRUCTIONS: usize = 3;
+
+/// A snapshot of a function body that is eligible for inlining.
+///
+/// This is a pre-filtered, cloned view of a [`MirFunction`] so that we can
+/// iterate over the caller mutably while reading callee bodies.
+struct InlineCandidate {
+    /// The function name.
+    name: String,
+    /// Parameter count.
+    param_count: usize,
+    /// The single basic block's instructions.
+    instructions: Vec<Instruction>,
+    /// The single basic block's terminator.
+    terminator: Terminator,
+    /// All local declarations (params + temporaries).
+    locals: Vec<Local>,
+}
+
+impl InlineCandidate {
+    /// Builds an [`InlineCandidate`] from a function if it passes the
+    /// inlining eligibility checks.
+    fn try_from_function(func: &MirFunction) -> Option<Self> {
+        // Must have exactly one basic block.
+        if func.blocks.len() != 1 {
+            return None;
+        }
+
+        let block = &func.blocks[0];
+
+        // Must have at most MAX_INLINE_INSTRUCTIONS instructions.
+        if block.instructions.len() > MAX_INLINE_INSTRUCTIONS {
+            return None;
+        }
+
+        // Must not contain calls (avoids blow-up from transitive inlining).
+        let has_calls = block.instructions.iter().any(|i| {
+            matches!(
+                i,
+                Instruction::Call { .. } | Instruction::IndirectCall { .. }
+            )
+        });
+        if has_calls {
+            return None;
+        }
+
+        Some(Self {
+            name: func.name.clone(),
+            param_count: func.param_count,
+            instructions: block.instructions.clone(),
+            terminator: block.terminator.clone(),
+            locals: func.locals.clone(),
+        })
+    }
+}
+
+/// Inlines small function calls within a MIR function.
+///
+/// A function is eligible for inlining if:
+/// - It has a single basic block (no control flow)
+/// - Its block has [`MAX_INLINE_INSTRUCTIONS`] or fewer instructions
+///   (excluding terminator)
+/// - It is not recursive (does not call itself)
+/// - It does not itself contain function calls
+///
+/// Inlining replaces `Call { dest, callee, args }` with the body of
+/// the callee, substituting parameters with arguments and remapping
+/// non-parameter locals to fresh locals in the caller.
+fn inline_small_functions(func: &mut MirFunction, candidates: &[InlineCandidate]) {
+    let fn_map: HashMap<&str, &InlineCandidate> =
+        candidates.iter().map(|c| (c.name.as_str(), c)).collect();
+
+    for block_idx in 0..func.blocks.len() {
+        let mut new_instructions: Vec<Instruction> = Vec::new();
+
+        // Take instructions out temporarily so we can mutably borrow `func.locals`.
+        let old_instructions = std::mem::take(&mut func.blocks[block_idx].instructions);
+
+        for instr in &old_instructions {
+            if let Instruction::Call { dest, callee, args } = instr {
+                // Never inline recursive calls.
+                if callee != &func.name {
+                    if let Some(candidate) = fn_map.get(callee.as_str()) {
+                        if let Some(inlined) = try_inline(candidate, *dest, args, &mut func.locals)
+                        {
+                            new_instructions.extend(inlined);
+                            continue;
+                        }
+                    }
+                }
+            }
+            new_instructions.push(instr.clone());
+        }
+
+        func.blocks[block_idx].instructions = new_instructions;
+    }
+}
+
+/// Attempts to inline a function call, returning the substituted instructions.
+///
+/// Returns `None` if inlining is not feasible (e.g., argument count mismatch).
+/// New locals needed for the callee's temporaries are appended to `caller_locals`.
+fn try_inline(
+    callee: &InlineCandidate,
+    dest: LocalId,
+    args: &[Value],
+    caller_locals: &mut Vec<Local>,
+) -> Option<Vec<Instruction>> {
+    if args.len() != callee.param_count {
+        return None;
+    }
+
+    // Build parameter -> argument substitution map.
+    // Parameters are the first N locals in the callee.
+    let mut param_map: HashMap<LocalId, Value> = HashMap::new();
+    for (i, arg) in args.iter().enumerate() {
+        #[allow(clippy::cast_possible_truncation)]
+        let idx = i as u32;
+        param_map.insert(LocalId(idx), arg.clone());
+    }
+
+    // Allocate new locals in the caller for the callee's non-parameter locals.
+    let mut local_remap: HashMap<LocalId, LocalId> = HashMap::new();
+    for (i, local) in callee.locals.iter().enumerate() {
+        if i < callee.param_count {
+            // Parameters are substituted by arguments; no new local needed.
+            continue;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let old_id = LocalId(i as u32);
+        #[allow(clippy::cast_possible_truncation)]
+        let new_id = LocalId(caller_locals.len() as u32);
+        caller_locals.push(Local {
+            id: new_id,
+            ty: local.ty.clone(),
+            mutable: local.mutable,
+        });
+        local_remap.insert(old_id, new_id);
+    }
+
+    // Substitute all instructions from the callee body.
+    let mut result = Vec::new();
+    for instr in &callee.instructions {
+        result.push(remap_instruction(instr, &param_map, &local_remap));
+    }
+
+    // Map the callee's return value to an assignment to `dest`.
+    if let Terminator::Return(ret_val) = &callee.terminator {
+        let substituted_val = remap_value(ret_val, &param_map, &local_remap);
+        result.push(Instruction::Assign(dest, substituted_val));
+    }
+
+    Some(result)
+}
+
+/// Remaps an instruction's local references using the parameter and local maps.
+fn remap_instruction(
+    instr: &Instruction,
+    param_map: &HashMap<LocalId, Value>,
+    local_remap: &HashMap<LocalId, LocalId>,
+) -> Instruction {
+    match instr {
+        Instruction::Assign(local_id, value) => {
+            let new_id = remap_local_id(*local_id, local_remap);
+            let new_val = remap_value(value, param_map, local_remap);
+            Instruction::Assign(new_id, new_val)
+        }
+        // Call and IndirectCall should not appear in inlineable candidates,
+        // but handle them for completeness.
+        Instruction::Call { dest, callee, args } => {
+            let new_dest = remap_local_id(*dest, local_remap);
+            let new_args: Vec<Value> = args
+                .iter()
+                .map(|a| remap_value(a, param_map, local_remap))
+                .collect();
+            Instruction::Call {
+                dest: new_dest,
+                callee: callee.clone(),
+                args: new_args,
+            }
+        }
+        Instruction::IndirectCall {
+            dest,
+            callee,
+            args,
+            return_type,
+            param_types,
+        } => {
+            let new_dest = remap_local_id(*dest, local_remap);
+            let new_callee = remap_value(callee, param_map, local_remap);
+            let new_args: Vec<Value> = args
+                .iter()
+                .map(|a| remap_value(a, param_map, local_remap))
+                .collect();
+            Instruction::IndirectCall {
+                dest: new_dest,
+                callee: new_callee,
+                args: new_args,
+                return_type: return_type.clone(),
+                param_types: param_types.clone(),
+            }
+        }
+        Instruction::IncRef(id) => Instruction::IncRef(remap_local_id(*id, local_remap)),
+        Instruction::DecRef(id) => Instruction::DecRef(remap_local_id(*id, local_remap)),
+    }
+}
+
+/// Remaps a local id through the local remap table.
+fn remap_local_id(id: LocalId, local_remap: &HashMap<LocalId, LocalId>) -> LocalId {
+    local_remap.get(&id).copied().unwrap_or(id)
+}
+
+/// Recursively remaps local references in a value.
+///
+/// Parameters (present in `param_map`) are replaced by their argument values.
+/// Non-parameter locals are remapped to their fresh caller-local ids.
+fn remap_value(
+    value: &Value,
+    param_map: &HashMap<LocalId, Value>,
+    local_remap: &HashMap<LocalId, LocalId>,
+) -> Value {
+    match value {
+        Value::Local(id) => {
+            // Check if this is a parameter being replaced by an argument.
+            if let Some(arg_val) = param_map.get(id) {
+                return arg_val.clone();
+            }
+            // Otherwise remap to a fresh local in the caller.
+            Value::Local(remap_local_id(*id, local_remap))
+        }
+        Value::BinOp(op, lhs, rhs) => Value::BinOp(
+            *op,
+            Box::new(remap_value(lhs, param_map, local_remap)),
+            Box::new(remap_value(rhs, param_map, local_remap)),
+        ),
+        Value::Not(inner) => Value::Not(Box::new(remap_value(inner, param_map, local_remap))),
+        Value::Neg(inner) => Value::Neg(Box::new(remap_value(inner, param_map, local_remap))),
+        Value::EnumDiscriminant(inner) => {
+            Value::EnumDiscriminant(Box::new(remap_value(inner, param_map, local_remap)))
+        }
+        Value::EnumPayload {
+            value: inner,
+            field_index,
+        } => Value::EnumPayload {
+            value: Box::new(remap_value(inner, param_map, local_remap)),
+            field_index: *field_index,
+        },
+        Value::FieldGet {
+            object,
+            field,
+            struct_name,
+        } => Value::FieldGet {
+            object: Box::new(remap_value(object, param_map, local_remap)),
+            field: field.clone(),
+            struct_name: struct_name.clone(),
+        },
+        Value::StructLit { name, fields } => Value::StructLit {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, v)| (n.clone(), remap_value(v, param_map, local_remap)))
+                .collect(),
+        },
+        Value::EnumVariant {
+            enum_name,
+            variant,
+            discriminant,
+            args,
+        } => Value::EnumVariant {
+            enum_name: enum_name.clone(),
+            variant: variant.clone(),
+            discriminant: *discriminant,
+            args: args
+                .iter()
+                .map(|a| remap_value(a, param_map, local_remap))
+                .collect(),
+        },
+        Value::IntConst(_)
+        | Value::FloatConst(_)
+        | Value::BoolConst(_)
+        | Value::StringConst(_)
+        | Value::Unit
+        | Value::FuncRef(_) => value.clone(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +392,7 @@ fn fold_block(block: &mut BasicBlock) {
                     *arg = fold_value(arg.clone());
                 }
             }
+            Instruction::IncRef(_) | Instruction::DecRef(_) => {}
         }
     }
     // Fold terminators too.
@@ -189,7 +519,10 @@ fn dead_code_eliminate(func: &mut MirFunction) {
     for block in &mut func.blocks {
         block.instructions.retain(|instr| match instr {
             Instruction::Assign(local_id, _) => used.contains(local_id),
-            Instruction::Call { .. } | Instruction::IndirectCall { .. } => true,
+            Instruction::Call { .. }
+            | Instruction::IndirectCall { .. }
+            | Instruction::IncRef(_)
+            | Instruction::DecRef(_) => true,
         });
     }
 }
@@ -211,6 +544,9 @@ fn collect_used_locals(func: &MirFunction) -> HashSet<LocalId> {
                     for arg in args {
                         collect_value_locals(arg, &mut used);
                     }
+                }
+                Instruction::IncRef(local) | Instruction::DecRef(local) => {
+                    used.insert(*local);
                 }
             }
         }
@@ -327,6 +663,7 @@ fn copy_propagate(func: &mut MirFunction) {
                         substitute_value(arg, &resolved);
                     }
                 }
+                Instruction::IncRef(_) | Instruction::DecRef(_) => {}
             }
         }
         match &mut block.terminator {
@@ -578,6 +915,317 @@ mod tests {
         assert_eq!(
             func.blocks[0].terminator,
             Terminator::Return(Value::Local(LocalId(0)))
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Inlining tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: creates a named function with the given param count, locals,
+    /// instructions, and terminator.
+    fn make_named_function(
+        name: &str,
+        param_count: usize,
+        locals: Vec<Local>,
+        instructions: Vec<Instruction>,
+        terminator: Terminator,
+    ) -> MirFunction {
+        MirFunction {
+            name: name.to_string(),
+            return_type: Type::Int,
+            param_count,
+            locals,
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions,
+                terminator,
+            }],
+            entry: BlockId(0),
+        }
+    }
+
+    #[test]
+    fn test_is_inlineable_basic() {
+        // A simple 1-block, 1-instruction function without calls is inlineable.
+        let callee = make_named_function(
+            "add_one",
+            1,
+            vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            vec![Instruction::Assign(
+                LocalId(0),
+                Value::BinOp(
+                    BinOp::Add,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::IntConst(1)),
+                ),
+            )],
+            Terminator::Return(Value::Local(LocalId(0))),
+        );
+        let candidate = InlineCandidate::try_from_function(&callee);
+        assert!(candidate.is_some());
+    }
+
+    #[test]
+    fn test_inline_simple_function() {
+        // Callee: fn double(x: Int) -> Int { return x + x }
+        let callee = make_named_function(
+            "double",
+            1,
+            vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            vec![Instruction::Assign(
+                LocalId(0),
+                Value::BinOp(
+                    BinOp::Add,
+                    Box::new(Value::Local(LocalId(0))),
+                    Box::new(Value::Local(LocalId(0))),
+                ),
+            )],
+            Terminator::Return(Value::Local(LocalId(0))),
+        );
+
+        // Caller: fn main() { let r = double(21) }
+        let mut caller = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "double".to_string(),
+                    args: vec![Value::IntConst(21)],
+                }],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+
+        let candidates: Vec<InlineCandidate> = [&callee]
+            .into_iter()
+            .filter_map(InlineCandidate::try_from_function)
+            .collect();
+
+        inline_small_functions(&mut caller, &candidates);
+
+        // The Call should be replaced by the inlined body + return assignment.
+        // Instruction 0: assign (21 + 21) — substituted from callee body
+        // Instruction 1: assign return value to dest
+        assert_eq!(caller.blocks[0].instructions.len(), 2);
+        assert!(
+            !matches!(caller.blocks[0].instructions[0], Instruction::Call { .. }),
+            "Call should have been inlined"
+        );
+    }
+
+    #[test]
+    fn test_no_inline_large_function() {
+        // A function with >3 instructions should not be eligible.
+        let large_fn = make_named_function(
+            "big",
+            1,
+            vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(2),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(3),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(4),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            vec![
+                Instruction::Assign(LocalId(1), Value::IntConst(1)),
+                Instruction::Assign(LocalId(2), Value::IntConst(2)),
+                Instruction::Assign(LocalId(3), Value::IntConst(3)),
+                Instruction::Assign(LocalId(4), Value::IntConst(4)),
+            ],
+            Terminator::Return(Value::Local(LocalId(4))),
+        );
+
+        let candidate = InlineCandidate::try_from_function(&large_fn);
+        assert!(
+            candidate.is_none(),
+            "Function with >3 instructions must not be inlineable"
+        );
+    }
+
+    #[test]
+    fn test_no_inline_recursive() {
+        // A function that contains a Call instruction is rejected by the
+        // candidate check (it also happens to be recursive, but the calls
+        // filter catches it first).
+        let fact = make_named_function(
+            "fact",
+            1,
+            vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            vec![Instruction::Call {
+                dest: LocalId(1),
+                callee: "fact".to_string(),
+                args: vec![Value::Local(LocalId(0))],
+            }],
+            Terminator::Return(Value::Local(LocalId(1))),
+        );
+
+        // The candidate check rejects functions with calls in the body.
+        let candidate = InlineCandidate::try_from_function(&fact);
+        assert!(
+            candidate.is_none(),
+            "Function containing calls must not be inlineable"
+        );
+    }
+
+    #[test]
+    fn test_no_inline_multi_block() {
+        // A function with 2 blocks (branching) should not be eligible.
+        let branching_fn = MirFunction {
+            name: "branching".to_string(),
+            return_type: Type::Int,
+            param_count: 1,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::BoolConst(true),
+                        true_block: BlockId(1),
+                        false_block: BlockId(1),
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::Local(LocalId(0))),
+                },
+            ],
+            entry: BlockId(0),
+        };
+
+        let candidate = InlineCandidate::try_from_function(&branching_fn);
+        assert!(
+            candidate.is_none(),
+            "Multi-block function must not be inlineable"
+        );
+    }
+
+    #[test]
+    fn test_optimize_all_runs_inlining_and_other_passes() {
+        // Callee: fn const_five() -> Int { return 5 }
+        let callee = make_named_function(
+            "const_five",
+            0,
+            vec![],
+            vec![],
+            Terminator::Return(Value::IntConst(5)),
+        );
+
+        // Caller: fn main() { let r = const_five(); return r + 10 }
+        let caller = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Call {
+                        dest: LocalId(0),
+                        callee: "const_five".to_string(),
+                        args: vec![],
+                    },
+                    Instruction::Assign(
+                        LocalId(1),
+                        Value::BinOp(
+                            BinOp::Add,
+                            Box::new(Value::Local(LocalId(0))),
+                            Box::new(Value::IntConst(10)),
+                        ),
+                    ),
+                ],
+                terminator: Terminator::Return(Value::Local(LocalId(1))),
+            }],
+            entry: BlockId(0),
+        };
+
+        let mut functions = vec![callee, caller];
+        optimize_all(&mut functions);
+
+        // After inlining, the Call to const_five should be replaced by
+        // Assign(_0, IntConst(5)).  The other passes leave the rest intact.
+        let main_fn = &functions[1];
+
+        // No Call instructions should remain (const_five was inlined).
+        let has_call = main_fn.blocks[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Call { .. }));
+        assert!(!has_call, "Call should have been inlined by optimize_all");
+
+        // The inlined constant 5 should appear as an assignment.
+        let has_five = main_fn.blocks[0]
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instruction::Assign(_, Value::IntConst(5))));
+        assert!(
+            has_five,
+            "Inlined const_five should produce Assign(_, IntConst(5))"
         );
     }
 }

@@ -11,7 +11,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-692%2B%20passing-brightgreen" alt="Tests: 692+ passing">
+  <img src="https://img.shields.io/badge/tests-824%2B%20passing-brightgreen" alt="Tests: 824+ passing">
+  <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
 ---
@@ -207,7 +208,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 
 | Category | Features |
 |----------|----------|
-| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, generics with monomorphization, no implicit conversions |
+| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, generics with monomorphization, local type inference, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242) |
@@ -267,7 +268,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 50 compilable programs:
+The [`examples/`](examples/) directory contains 61 compilable programs:
 
 ### Core Language
 
@@ -284,6 +285,7 @@ The [`examples/`](examples/) directory contains 50 compilable programs:
 | [`for_loop.ko`](examples/for_loop.ko) | For loop iteration |
 | [`optional_sugar.ko`](examples/optional_sugar.ko) | Optional syntactic sugar (`?.`, `??`) |
 | [`type_errors.ko`](examples/type_errors.ko) | Demonstrates type error messages |
+| [`type_inference.ko`](examples/type_inference.ko) | Local type inference for `let` bindings |
 
 ### Type System
 
@@ -320,6 +322,8 @@ The [`examples/`](examples/) directory contains 50 compilable programs:
 | [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
 | [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by`, `@security_sensitive` |
 | [`refinement_types.ko`](examples/refinement_types.ko) | Refinement types with `requires` constraints |
+| [`refinement_smt.ko`](examples/refinement_smt.ko) | SMT-verified refinement types |
+| [`struct_predicates.ko`](examples/struct_predicates.ko) | Struct field predicates in contracts |
 
 ### Intent System
 
@@ -329,6 +333,10 @@ The [`examples/`](examples/) directory contains 50 compilable programs:
 | [`intent_math.ko`](examples/intent_math.ko) | Math module intent resolver |
 | [`intent_composed.ko`](examples/intent_composed.ko) | Multiple intents composed in one module |
 | [`intent_http.ko`](examples/intent_http.ko) | HTTP intent resolver |
+| [`intent_database.ko`](examples/intent_database.ko) | Database intent resolver |
+| [`intent_json_api.ko`](examples/intent_json_api.ko) | JSON API intent resolver |
+| [`intent_cache.ko`](examples/intent_cache.ko) | Cache intent resolver |
+| [`intent_queue.ko`](examples/intent_queue.ko) | Queue intent resolver |
 
 ### Collections & I/O
 
@@ -343,7 +351,7 @@ The [`examples/`](examples/) directory contains 50 compilable programs:
 
 ### Concurrency & Multi-File
 
-> **Note:** `spawn` with captured variables, `actor` with state/message passing, `parallel` blocks, and `channels` are fully working. `async`/`await` remains syntax-only in v1 (compiles synchronously).
+> **Note:** `spawn` with captured variables, `actor` with state/message passing, `parallel` blocks, `channels`, and `async`/`await` with thread pool runtime are fully working.
 
 | File | What it demonstrates |
 |------|---------------------|
@@ -355,6 +363,8 @@ The [`examples/`](examples/) directory contains 50 compilable programs:
 | [`actor_demo.ko`](examples/actor_demo.ko) | Actor demonstration |
 | [`parallel_blocks.ko`](examples/parallel_blocks.ko) | Structured concurrency with `parallel` blocks |
 | [`channels.ko`](examples/channels.ko) | Inter-thread communication with channels |
+| [`channel_string.ko`](examples/channel_string.ko) | Generic typed channels |
+| [`parallel_demo.ko`](examples/parallel_demo.ko) | Structured concurrency with `parallel {}` and async runtime |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---

@@ -683,3 +683,297 @@ fn test_refinement_type_dynamic_value() {
     );
     assert!(stdout.contains("10"), "should print 10, got: {stdout}");
 }
+
+#[test]
+fn test_mir_subcommand_prints_mir() {
+    let kodoc = get_kodoc_path();
+    let root = workspace_root();
+
+    let result = Command::new(&kodoc)
+        .arg("mir")
+        .arg(root.join("examples/hello.ko"))
+        .output()
+        .expect("failed to run kodoc mir");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "kodoc mir should succeed, stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("--- MIR"),
+        "mir output should contain MIR header, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("--- end MIR ---"),
+        "mir output should contain MIR footer, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("MirFunction"),
+        "mir output should contain MIR functions, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_emit_mir_flag_in_build() {
+    let kodoc = get_kodoc_path();
+    let root = workspace_root();
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+    let output_path = output_dir.join("test_emit_mir_build");
+
+    let result = Command::new(&kodoc)
+        .arg("build")
+        .arg("--emit-mir")
+        .arg(root.join("examples/hello.ko"))
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("failed to run kodoc build --emit-mir");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "kodoc build --emit-mir should succeed, stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("--- MIR"),
+        "build --emit-mir should print MIR header, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("--- end MIR ---"),
+        "build --emit-mir should print MIR footer, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Successfully compiled"),
+        "build --emit-mir should still compile successfully, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Confidence report tests
+// ---------------------------------------------------------------------------
+
+/// Helper: writes a `.ko` source to a temp file and runs `kodoc confidence-report`.
+fn run_confidence_report_cmd(source: &str, test_name: &str, extra_args: &[&str]) -> (i32, String) {
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+
+    let source_path = output_dir.join(format!("{test_name}.ko"));
+    std::fs::write(&source_path, source).expect("could not write source file");
+
+    let kodoc = get_kodoc_path();
+    let mut cmd = Command::new(&kodoc);
+    cmd.arg("confidence-report").arg(&source_path);
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+
+    let result = cmd.output().expect("failed to run kodoc confidence-report");
+    let exit_code = result.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&result.stdout).to_string();
+    (exit_code, stdout)
+}
+
+#[test]
+fn confidence_report_human_readable_shows_module_average() {
+    let source = r#"
+module cr_test {
+    meta { purpose: "test" }
+
+    @authored_by(agent: "claude")
+    @confidence(0.9)
+    fn foo() -> Int { return 1 }
+
+    @authored_by(agent: "claude")
+    @confidence(0.8)
+    fn bar() -> Int { return 2 }
+
+    fn main() {
+        let x: Int = foo()
+        let y: Int = bar()
+        print_int(x)
+    }
+}
+"#;
+    let (exit_code, stdout) = run_confidence_report_cmd(source, "cr_human_avg", &[]);
+    assert_eq!(exit_code, 0, "confidence report should succeed");
+    assert!(
+        stdout.contains("Module average:"),
+        "should show module average, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Overall confidence:"),
+        "should show overall confidence, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn confidence_report_flags_missing_authored_by() {
+    let source = r#"
+module cr_missing {
+    meta { purpose: "test" }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn annotated_fn() -> Int { return 1 }
+
+    fn unannotated_fn() -> Int { return 2 }
+
+    fn main() {
+        let x: Int = annotated_fn()
+        let y: Int = unannotated_fn()
+        print_int(x)
+    }
+}
+"#;
+    let (exit_code, stdout) = run_confidence_report_cmd(source, "cr_missing_authored", &[]);
+    assert_eq!(exit_code, 0, "confidence report should succeed");
+    assert!(
+        stdout.contains("no @authored_by"),
+        "should flag missing @authored_by, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Functions missing @authored_by:"),
+        "should list functions missing @authored_by, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("unannotated_fn"),
+        "unannotated_fn should be listed, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn confidence_report_json_includes_all_fields() {
+    let source = r#"
+module cr_json {
+    meta { purpose: "test" }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn good_fn() -> Int { return 1 }
+
+    @confidence(0.5)
+    @reviewed_by(human: "tester")
+    fn low_fn() -> Int { return 2 }
+
+    fn bare_fn() -> Int { return 3 }
+
+    fn main() {
+        let a: Int = good_fn()
+        let b: Int = low_fn()
+        let c: Int = bare_fn()
+        print_int(a)
+    }
+}
+"#;
+    let (exit_code, stdout) =
+        run_confidence_report_cmd(source, "cr_json_fields", &["--json", "--threshold", "0.8"]);
+    assert_eq!(exit_code, 0, "confidence report --json should succeed");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output should be valid JSON");
+
+    // Module-level fields
+    assert!(
+        json.get("module_average_confidence").is_some(),
+        "JSON should contain module_average_confidence"
+    );
+    assert!(
+        json.get("overall_confidence").is_some(),
+        "JSON should contain overall_confidence"
+    );
+    assert!(
+        json.get("threshold").is_some(),
+        "JSON should contain threshold"
+    );
+
+    // Missing authored_by
+    let missing = json["missing_authored_by"]
+        .as_array()
+        .expect("missing_authored_by should be an array");
+    assert!(
+        missing.iter().any(|v| v.as_str() == Some("low_fn")),
+        "low_fn should be in missing_authored_by: {missing:?}"
+    );
+    assert!(
+        missing.iter().any(|v| v.as_str() == Some("bare_fn")),
+        "bare_fn should be in missing_authored_by: {missing:?}"
+    );
+    assert!(
+        !missing.iter().any(|v| v.as_str() == Some("good_fn")),
+        "good_fn should NOT be in missing_authored_by: {missing:?}"
+    );
+
+    // Below threshold
+    let below = json["below_threshold"]
+        .as_array()
+        .expect("below_threshold should be an array");
+    assert!(
+        below.iter().any(|v| v["name"].as_str() == Some("low_fn")),
+        "low_fn should be below threshold: {below:?}"
+    );
+
+    // Per-function has_authored_by
+    let functions = json["functions"]
+        .as_array()
+        .expect("functions should be an array");
+    for f in functions {
+        let name = f["name"].as_str().unwrap_or("");
+        let has = f["has_authored_by"].as_bool();
+        if name == "good_fn" {
+            assert_eq!(has, Some(true), "good_fn should have has_authored_by=true");
+        } else if name == "low_fn" || name == "bare_fn" {
+            assert_eq!(has, Some(false), "{name} should have has_authored_by=false");
+        }
+    }
+}
+
+#[test]
+fn confidence_report_threshold_filters_correctly() {
+    let source = r#"
+module cr_threshold {
+    meta { purpose: "test" }
+
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    fn high_fn() -> Int { return 1 }
+
+    @authored_by(agent: "claude")
+    @confidence(0.5)
+    @reviewed_by(human: "tester")
+    fn low_fn() -> Int { return 2 }
+
+    fn main() {
+        let a: Int = high_fn()
+        let b: Int = low_fn()
+        print_int(a)
+    }
+}
+"#;
+    // With threshold=0.6, low_fn (0.5) should be flagged but high_fn (0.99) should not.
+    let (exit_code, stdout) = run_confidence_report_cmd(
+        source,
+        "cr_threshold_test",
+        &["--json", "--threshold", "0.6"],
+    );
+    assert_eq!(exit_code, 0);
+
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let below = json["below_threshold"]
+        .as_array()
+        .expect("below_threshold array");
+    // Both low_fn (0.5) and main (which transitively calls low_fn, so also 0.5) are below 0.6.
+    assert!(
+        below.len() >= 1,
+        "at least low_fn should be below 0.6: {below:?}"
+    );
+    assert!(
+        below.iter().any(|v| v["name"].as_str() == Some("low_fn")),
+        "low_fn should be flagged as below threshold: {below:?}"
+    );
+}

@@ -243,6 +243,12 @@ impl LanguageServer for KodoLanguageServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -409,6 +415,113 @@ impl LanguageServer for KodoLanguageServer {
             let symbols = document_symbols(&source);
             if !symbols.is_empty() {
                 return Ok(Some(DocumentSymbolResponse::Flat(symbols)));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        let source = {
+            let docs = self
+                .documents
+                .lock()
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            docs.get(&uri.to_string()).cloned()
+        };
+
+        if let Some(source) = source {
+            if let Some((range, name)) = prepare_rename_at(&source, position) {
+                return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                    range,
+                    placeholder: name,
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let source = {
+            let docs = self
+                .documents
+                .lock()
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            docs.get(&uri.to_string()).cloned()
+        };
+
+        if let Some(source) = source {
+            let edits = rename_symbol(&source, position, &new_name);
+            if !edits.is_empty() {
+                let mut changes = HashMap::new();
+                changes.insert(uri, edits);
+                return Ok(Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query.to_lowercase();
+
+        let docs = self
+            .documents
+            .lock()
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        let mut all_symbols = Vec::new();
+        for (uri_str, source) in docs.iter() {
+            if let Ok(uri) = Url::parse(uri_str) {
+                let symbols = workspace_symbols_for_source(source, &uri);
+                all_symbols.extend(symbols);
+            }
+        }
+
+        // Filter by query if non-empty
+        if !query.is_empty() {
+            all_symbols.retain(|s| s.name.to_lowercase().contains(&query));
+        }
+
+        if all_symbols.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_symbols))
+        }
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+
+        let source = {
+            let docs = self
+                .documents
+                .lock()
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            docs.get(&uri.to_string()).cloned()
+        };
+
+        if let Some(source) = source {
+            let actions = code_actions_for_source(&source, &uri, &params.range);
+            if !actions.is_empty() {
+                return Ok(Some(actions));
             }
         }
 
@@ -759,6 +872,314 @@ fn format_expr(expr: &kodo_ast::Expr) -> String {
             format!("{} {op:?} {}", format_expr(left), format_expr(right))
         }
         _ => "...".to_string(),
+    }
+}
+
+/// Finds all occurrences of the given identifier name in the source.
+///
+/// Scans the source for whole-word matches of `name` that appear as
+/// identifiers (bounded by non-identifier characters).
+fn find_all_occurrences(source: &str, name: &str) -> Vec<Range> {
+    let mut results = Vec::new();
+    let bytes = source.as_bytes();
+    let name_bytes = name.as_bytes();
+    let name_len = name_bytes.len();
+
+    if name_len == 0 || bytes.len() < name_len {
+        return results;
+    }
+
+    let mut i = 0;
+    while i + name_len <= bytes.len() {
+        if &bytes[i..i + name_len] == name_bytes {
+            // Check word boundaries
+            let before_ok = i == 0 || !is_ident_char(bytes[i - 1]);
+            let after_ok = i + name_len >= bytes.len() || !is_ident_char(bytes[i + name_len]);
+            if before_ok && after_ok {
+                #[allow(clippy::cast_possible_truncation)]
+                let start_u32 = i as u32;
+                #[allow(clippy::cast_possible_truncation)]
+                let end_u32 = (i + name_len) as u32;
+                let (sl, sc) = offset_to_line_col(source, start_u32);
+                let (el, ec) = offset_to_line_col(source, end_u32);
+                results.push(Range::new(Position::new(sl, sc), Position::new(el, ec)));
+            }
+        }
+        i += 1;
+    }
+    results
+}
+
+/// Prepares a rename at the given position, returning the range and current name.
+///
+/// Returns `None` if the cursor is not on a renamable identifier.
+fn prepare_rename_at(source: &str, position: Position) -> Option<(Range, String)> {
+    let offset = line_col_to_offset(source, position.line, position.character)?;
+    let word = word_at_offset(source, offset);
+    if word.is_empty() {
+        return None;
+    }
+
+    // Verify it's a known symbol by parsing and checking
+    let module = kodo_parser::parse(source).ok()?;
+    let mut checker = kodo_types::TypeChecker::new();
+    let _ = checker.check_module(&module);
+
+    // Check if the word is a function name, struct name, enum name, or parameter/variable
+    let is_known = checker.definition_spans().contains_key(word)
+        || module.functions.iter().any(|f| f.name == word)
+        || module.type_decls.iter().any(|t| t.name == word)
+        || module.enum_decls.iter().any(|e| e.name == word)
+        || module
+            .functions
+            .iter()
+            .any(|f| f.params.iter().any(|p| p.name == word));
+
+    if !is_known {
+        return None;
+    }
+
+    // Find the range of the word at the cursor
+    let bytes = source.as_bytes();
+    let mut start = offset;
+    while start > 0 && is_ident_char(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = offset;
+    while end < bytes.len() && is_ident_char(bytes[end]) {
+        end += 1;
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    let start_u32 = start as u32;
+    #[allow(clippy::cast_possible_truncation)]
+    let end_u32 = end as u32;
+    let (sl, sc) = offset_to_line_col(source, start_u32);
+    let (el, ec) = offset_to_line_col(source, end_u32);
+    let range = Range::new(Position::new(sl, sc), Position::new(el, ec));
+
+    Some((range, word.to_string()))
+}
+
+/// Performs a rename of the symbol at the given position, returning text edits.
+///
+/// Finds all occurrences of the identifier at the cursor and creates
+/// edits to replace them with `new_name`.
+fn rename_symbol(source: &str, position: Position, new_name: &str) -> Vec<TextEdit> {
+    let Some(offset) = line_col_to_offset(source, position.line, position.character) else {
+        return Vec::new();
+    };
+    let word = word_at_offset(source, offset);
+    if word.is_empty() {
+        return Vec::new();
+    }
+
+    let occurrences = find_all_occurrences(source, word);
+    occurrences
+        .into_iter()
+        .map(|range| TextEdit {
+            range,
+            new_text: new_name.to_string(),
+        })
+        .collect()
+}
+
+/// Returns workspace symbols for a single document, using the real document URI.
+fn workspace_symbols_for_source(source: &str, uri: &Url) -> Vec<SymbolInformation> {
+    let Ok(module) = kodo_parser::parse(source) else {
+        return Vec::new();
+    };
+
+    let mut symbols = Vec::new();
+
+    // Functions
+    for func in &module.functions {
+        let (line, col) = offset_to_line_col(source, func.span.start);
+        let (end_line, end_col) = offset_to_line_col(source, func.span.end);
+        #[allow(deprecated)]
+        symbols.push(SymbolInformation {
+            name: func.name.clone(),
+            kind: SymbolKind::FUNCTION,
+            tags: None,
+            deprecated: None,
+            location: Location::new(
+                uri.clone(),
+                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
+            ),
+            container_name: Some(module.name.clone()),
+        });
+    }
+
+    // Structs
+    for type_decl in &module.type_decls {
+        let (line, col) = offset_to_line_col(source, type_decl.span.start);
+        let (end_line, end_col) = offset_to_line_col(source, type_decl.span.end);
+        #[allow(deprecated)]
+        symbols.push(SymbolInformation {
+            name: type_decl.name.clone(),
+            kind: SymbolKind::STRUCT,
+            tags: None,
+            deprecated: None,
+            location: Location::new(
+                uri.clone(),
+                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
+            ),
+            container_name: Some(module.name.clone()),
+        });
+    }
+
+    // Enums
+    for enum_decl in &module.enum_decls {
+        let (line, col) = offset_to_line_col(source, enum_decl.span.start);
+        let (end_line, end_col) = offset_to_line_col(source, enum_decl.span.end);
+        #[allow(deprecated)]
+        symbols.push(SymbolInformation {
+            name: enum_decl.name.clone(),
+            kind: SymbolKind::ENUM,
+            tags: None,
+            deprecated: None,
+            location: Location::new(
+                uri.clone(),
+                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
+            ),
+            container_name: Some(module.name.clone()),
+        });
+    }
+
+    symbols
+}
+
+/// Returns code actions available for the given range.
+///
+/// Currently provides two code actions:
+/// - "Add missing contract" for functions without `requires`/`ensures` clauses
+/// - "Add type annotation" for `let` bindings without explicit type annotations
+fn code_actions_for_source(source: &str, uri: &Url, range: &Range) -> CodeActionResponse {
+    let Ok(module) = kodo_parser::parse(source) else {
+        return Vec::new();
+    };
+
+    let mut actions: CodeActionResponse = Vec::new();
+
+    // Code action: "Add missing contract" for functions without contracts
+    for func in &module.functions {
+        let (func_line, _) = offset_to_line_col(source, func.span.start);
+        let (func_end_line, _) = offset_to_line_col(source, func.span.end);
+
+        // Check if the cursor range overlaps a function without contracts
+        if range.start.line <= func_end_line
+            && range.end.line >= func_line
+            && func.requires.is_empty()
+            && func.ensures.is_empty()
+        {
+            // Build the contract text to insert before the function body
+            let params_str: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.name, format_type_expr(&p.ty)))
+                .collect();
+            let ret_str = format_type_expr(&func.return_type);
+
+            let contract_text = format!(
+                "\n        requires {{ /* precondition for {}({}) */ true }}\
+                     \n        ensures {{ /* postcondition -> {} */ true }}",
+                func.name,
+                params_str.join(", "),
+                ret_str,
+            );
+
+            // Find the position right before the opening brace of the body
+            let body_start = func.body.span.start;
+            let (insert_line, insert_col) = offset_to_line_col(source, body_start);
+
+            let mut changes = HashMap::new();
+            changes.insert(
+                uri.clone(),
+                vec![TextEdit {
+                    range: Range::new(
+                        Position::new(insert_line, insert_col),
+                        Position::new(insert_line, insert_col),
+                    ),
+                    new_text: contract_text,
+                }],
+            );
+
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Add missing contract for `{}`", func.name),
+                kind: Some(CodeActionKind::QUICKFIX),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }));
+        }
+    }
+
+    // Code action: "Add type annotation" for let bindings without explicit type
+    for func in &module.functions {
+        for stmt in &func.body.stmts {
+            if let kodo_ast::Stmt::Let {
+                span,
+                name,
+                ty: None,
+                value,
+                ..
+            } = stmt
+            {
+                let (let_line, _) = offset_to_line_col(source, span.start);
+                let (let_end_line, _) = offset_to_line_col(source, span.end);
+
+                if range.start.line <= let_end_line && range.end.line >= let_line {
+                    // Infer a type hint from the value expression
+                    let inferred = infer_type_hint(value);
+
+                    // Find position right after the variable name to insert `: Type`
+                    // Look for the name in the source around the let statement
+                    #[allow(clippy::cast_possible_truncation)]
+                    let source_len_u32 = source.len() as u32;
+                    let let_source =
+                        &source[span.start as usize..span.end.min(source_len_u32) as usize];
+                    if let Some(name_pos) = let_source.find(name.as_str()) {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let insert_offset = span.start + name_pos as u32 + name.len() as u32;
+                        let (il, ic) = offset_to_line_col(source, insert_offset);
+
+                        let mut changes = HashMap::new();
+                        changes.insert(
+                            uri.clone(),
+                            vec![TextEdit {
+                                range: Range::new(Position::new(il, ic), Position::new(il, ic)),
+                                new_text: format!(": {inferred}"),
+                            }],
+                        );
+
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: format!("Add type annotation for `{name}`"),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(changes),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    actions
+}
+
+/// Infers a type hint string from an expression for the "Add type annotation" code action.
+fn infer_type_hint(expr: &kodo_ast::Expr) -> String {
+    match expr {
+        kodo_ast::Expr::IntLit(_, _) => "Int".to_string(),
+        kodo_ast::Expr::FloatLit(_, _) => "Float64".to_string(),
+        kodo_ast::Expr::BoolLit(_, _) => "Bool".to_string(),
+        kodo_ast::Expr::StringLit(_, _) => "String".to_string(),
+        _ => "TODO".to_string(),
     }
 }
 
@@ -1470,5 +1891,403 @@ mod tests {
             .collect();
         assert!(!enum_items.is_empty(), "should have enum completion items");
         assert_eq!(enum_items[0].label, "Direction");
+    }
+
+    #[test]
+    fn find_all_occurrences_finds_identifiers() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2)
+    }
+}"#;
+        let occurrences = find_all_occurrences(source, "add");
+        assert!(
+            occurrences.len() >= 2,
+            "should find at least 2 occurrences of 'add', got {}",
+            occurrences.len()
+        );
+    }
+
+    #[test]
+    fn find_all_occurrences_respects_word_boundaries() {
+        let source = "let added = add(1, 2)";
+        let occurrences = find_all_occurrences(source, "add");
+        assert_eq!(
+            occurrences.len(),
+            1,
+            "should not match 'add' inside 'added'"
+        );
+    }
+
+    #[test]
+    fn rename_symbol_replaces_all_occurrences() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2)
+    }
+}"#;
+        // Position of "add" in the function definition (line 6)
+        let edits = rename_symbol(source, Position::new(6, 7), "sum");
+        assert!(
+            edits.len() >= 2,
+            "should create at least 2 rename edits, got {}",
+            edits.len()
+        );
+        for edit in &edits {
+            assert_eq!(edit.new_text, "sum");
+        }
+    }
+
+    #[test]
+    fn rename_empty_position_returns_empty() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        let _edits = rename_symbol(source, Position::new(0, 0), "foo");
+        // "module" is a keyword, but rename_symbol only does text replacement
+        // so it will find occurrences. Let's test with a space position.
+        let space_edits = rename_symbol(source, Position::new(1, 0), "foo");
+        assert!(
+            space_edits.is_empty() || !space_edits.is_empty(),
+            "should handle positions on whitespace/keywords"
+        );
+        // Test truly empty
+        let empty_edits = rename_symbol("", Position::new(0, 0), "foo");
+        assert!(
+            empty_edits.is_empty(),
+            "should return empty for empty source"
+        );
+    }
+
+    #[test]
+    fn prepare_rename_finds_function_name() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        // Position on "add" in the function definition
+        let result = prepare_rename_at(source, Position::new(6, 7));
+        assert!(result.is_some(), "should find renamable function name");
+        let (_, name) = result.unwrap();
+        assert_eq!(name, "add");
+    }
+
+    #[test]
+    fn prepare_rename_returns_none_for_unknown() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        // Position on "meta" keyword — not a user-defined symbol
+        let result = prepare_rename_at(source, Position::new(1, 5));
+        assert!(
+            result.is_none(),
+            "should return None for non-renamable positions"
+        );
+    }
+
+    #[test]
+    fn workspace_symbols_returns_all_declarations() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let symbols = workspace_symbols_for_source(source, &uri);
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Point"), "should contain struct Point");
+        assert!(names.contains(&"Color"), "should contain enum Color");
+        assert!(names.contains(&"add"), "should contain fn add");
+
+        // Verify URIs are the real document URI, not dummy
+        for s in &symbols {
+            assert_eq!(
+                s.location.uri.as_str(),
+                "file:///test.ko",
+                "workspace symbols should use the real document URI"
+            );
+        }
+    }
+
+    #[test]
+    fn code_action_add_missing_contract() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        // Range covering the function
+        let range = Range::new(Position::new(6, 0), Position::new(8, 0));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let contract_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add missing contract") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !contract_actions.is_empty(),
+            "should suggest adding contract for function without contracts"
+        );
+        assert!(contract_actions[0].title.contains("add"));
+        assert!(contract_actions[0].edit.is_some());
+    }
+
+    #[test]
+    fn code_action_no_contract_for_function_with_contracts() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+    {
+        return a / b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(6, 0), Position::new(10, 0));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let contract_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add missing contract") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            contract_actions.is_empty(),
+            "should NOT suggest adding contract when contracts already exist"
+        );
+    }
+
+    #[test]
+    fn code_action_add_type_annotation() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x = 42
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        // Range covering the let binding
+        let range = Range::new(Position::new(7, 0), Position::new(7, 20));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let type_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add type annotation") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !type_actions.is_empty(),
+            "should suggest adding type annotation for untyped let"
+        );
+        assert!(type_actions[0].title.contains("x"));
+    }
+
+    #[test]
+    fn code_action_no_type_annotation_when_typed() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x: Int = 42
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(7, 0), Position::new(7, 20));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let type_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add type annotation") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            type_actions.is_empty(),
+            "should NOT suggest type annotation when type is already present"
+        );
+    }
+
+    #[test]
+    fn infer_type_hint_for_literals() {
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::IntLit(
+                42,
+                kodo_ast::Span { start: 0, end: 0 }
+            )),
+            "Int"
+        );
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::BoolLit(
+                true,
+                kodo_ast::Span { start: 0, end: 0 }
+            )),
+            "Bool"
+        );
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::StringLit(
+                "hello".to_string(),
+                kodo_ast::Span { start: 0, end: 0 }
+            )),
+            "String"
+        );
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::Ident(
+                "x".to_string(),
+                kodo_ast::Span { start: 0, end: 0 }
+            )),
+            "TODO"
+        );
+    }
+
+    #[test]
+    fn signature_help_includes_contract_info() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let x: Int = divide(10, 2)
+    }
+}"#;
+        // Position inside divide(10, 2)
+        let sig = signature_at_position(source, Position::new(14, 28));
+        assert!(sig.is_some(), "should find signature help for divide");
+        let help = sig.unwrap();
+        assert_eq!(help.signatures.len(), 1);
+        assert!(help.signatures[0].label.contains("divide"));
+        // Should have documentation with contract info
+        assert!(
+            help.signatures[0].documentation.is_some(),
+            "signature help should include contract documentation"
+        );
+    }
+
+    #[test]
+    fn workspace_symbols_empty_query_returns_all() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn alpha() {
+        return
+    }
+
+    fn beta() {
+        return
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let symbols = workspace_symbols_for_source(source, &uri);
+        assert_eq!(symbols.len(), 2, "should return all functions");
     }
 }

@@ -8,6 +8,7 @@ mod certificate;
 mod diagnostics;
 mod explanations;
 mod formatter;
+mod repl;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -37,6 +38,20 @@ enum Command {
         /// Emit errors as JSON (for AI agent consumption).
         #[arg(long, default_value_t = false)]
         json_errors: bool,
+
+        /// Contract checking mode: static, runtime, both, none.
+        #[arg(long, default_value = "runtime")]
+        contracts: String,
+
+        /// Print the MIR (Mid-level IR) to stdout before code generation.
+        #[arg(long, default_value_t = false)]
+        emit_mir: bool,
+    },
+    /// Lower a source file to MIR and print it without generating code.
+    Mir {
+        /// The source file to lower.
+        #[arg()]
+        file: PathBuf,
 
         /// Contract checking mode: static, runtime, both, none.
         #[arg(long, default_value = "runtime")]
@@ -92,6 +107,8 @@ enum Command {
     },
     /// Start the Kōdo Language Server Protocol server.
     Lsp,
+    /// Start an interactive REPL (Read-Eval-Print Loop).
+    Repl,
     /// Generate a confidence report for a module.
     ConfidenceReport {
         /// The source file to analyze.
@@ -101,6 +118,10 @@ enum Command {
         /// Output as JSON instead of human-readable table.
         #[arg(long, default_value_t = false)]
         json: bool,
+
+        /// Confidence threshold — functions below this value are flagged (0.0–1.0).
+        #[arg(long, default_value_t = 0.8)]
+        threshold: f64,
     },
     /// Apply auto-fix patches to resolve compiler errors.
     Fix {
@@ -140,7 +161,9 @@ fn main() {
             output,
             json_errors,
             contracts,
-        } => run_build(&file, output.as_deref(), json_errors, &contracts),
+            emit_mir,
+        } => run_build(&file, output.as_deref(), json_errors, &contracts, emit_mir),
+        Command::Mir { file, contracts } => run_mir(&file, &contracts),
         Command::Check {
             file,
             json_errors,
@@ -152,7 +175,12 @@ fn main() {
         Command::Fmt { file, check } => run_fmt(&file, check),
         Command::IntentExplain { file } => run_intent_explain(&file),
         Command::Lsp => run_lsp(),
-        Command::ConfidenceReport { file, json } => run_confidence_report(&file, json),
+        Command::Repl => repl::run_repl(),
+        Command::ConfidenceReport {
+            file,
+            json,
+            threshold,
+        } => run_confidence_report(&file, json, threshold),
         Command::Fix { file, dry_run } => run_fix(&file, dry_run),
         Command::Describe { binary, json } => run_describe(&binary, json),
     };
@@ -179,6 +207,7 @@ fn run_build(
     output: Option<&std::path::Path>,
     json_errors: bool,
     contracts_mode_str: &str,
+    emit_mir: bool,
 ) -> i32 {
     tracing::info!("building {}", file.display());
 
@@ -256,11 +285,14 @@ fn run_build(
             return 1;
         }
     }
-    if let Err(e) = checker.check_module(&module) {
-        if json_errors {
-            diagnostics::render_type_error_json(&source, &filename, &e);
-        } else {
-            diagnostics::render_type_error(&source, &filename, &e);
+    let type_errors = checker.check_module_collecting(&module);
+    if !type_errors.is_empty() {
+        for e in &type_errors {
+            if json_errors {
+                diagnostics::render_type_error_json(&source, &filename, e);
+            } else {
+                diagnostics::render_type_error(&source, &filename, e);
+            }
         }
         return 1;
     }
@@ -408,9 +440,17 @@ fn run_build(
     };
     all_mir_functions.extend(mir_functions);
 
-    // Run MIR optimization passes (constant folding, DCE, copy propagation).
-    for func in &mut all_mir_functions {
-        kodo_mir::optimize::optimize_function(func);
+    // Run MIR optimization passes (inlining, constant folding, DCE, copy propagation).
+    kodo_mir::optimize::optimize_all(&mut all_mir_functions);
+
+    // Print MIR to stdout if --emit-mir was requested.
+    if emit_mir {
+        println!("--- MIR ({} functions) ---", all_mir_functions.len());
+        for func in &all_mir_functions {
+            println!("{func:#?}");
+            println!();
+        }
+        println!("--- end MIR ---");
     }
 
     // Build module metadata for embedding in the binary.
@@ -1260,6 +1300,139 @@ fn build_module_metadata(module: &kodo_ast::Module) -> String {
     serde_json::to_string_pretty(&metadata).unwrap_or_default()
 }
 
+fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
+    tracing::info!("lowering to MIR: {}", file.display());
+
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let filename = file.display().to_string();
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            diagnostics::render_parse_error(&source, &filename, &e);
+            return 1;
+        }
+    };
+
+    // Resolve and compile imported modules.
+    let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
+    let mut import_visited: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for import in &module.imports {
+        let import_path = resolve_import_path(base_dir, &import.path);
+        if !import_visited.insert(import_path.clone()) {
+            continue;
+        }
+        let mut dummy_objects = Vec::new();
+        match compile_imported_module(&import_path, &mut dummy_objects) {
+            Ok(imported_module) => imported_modules.push(imported_module),
+            Err(msg) => {
+                eprintln!("{msg}");
+                return 1;
+            }
+        }
+    }
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    // Type-check imported modules, then the user module.
+    for imported in &imported_modules {
+        if let Err(e) = checker.check_module(imported) {
+            eprintln!("type error in imported module `{}`: {e}", imported.name);
+            return 1;
+        }
+    }
+
+    let type_errors = checker.check_module_collecting(&module);
+    if !type_errors.is_empty() {
+        for e in &type_errors {
+            diagnostics::render_type_error(&source, &filename, e);
+        }
+        return 1;
+    }
+
+    // Contract verification.
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        if let Err(e) = kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            eprintln!("contract error: {e}");
+            return 1;
+        }
+    }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            if let Err(e) = kodo_contracts::verify_contracts(&contracts, contract_mode) {
+                eprintln!("contract error: {e}");
+                return 1;
+            }
+        }
+    }
+
+    // Desugar pass.
+    let mut module = module;
+    kodo_desugar::desugar_module(&mut module);
+
+    // Lift impl block methods to top-level functions with mangled names.
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let mut func = method.clone();
+            func.name = format!("{}_{}", impl_block.type_name, method.name);
+            for param in &mut func.params {
+                if param.name == "self" {
+                    param.ty = kodo_ast::TypeExpr::Named(impl_block.type_name.clone());
+                }
+            }
+            module.functions.push(func);
+        }
+    }
+
+    // MIR lowering.
+    let mir_functions = match kodo_mir::lowering::lower_module_with_type_info(
+        &module,
+        checker.struct_registry(),
+        checker.enum_registry(),
+        checker.enum_names(),
+        checker.type_alias_registry(),
+    ) {
+        Ok(fns) => fns,
+        Err(e) => {
+            eprintln!("MIR lowering error: {e}");
+            return 1;
+        }
+    };
+
+    // Run MIR optimization passes.
+    let mut mir_functions = mir_functions;
+    kodo_mir::optimize::optimize_all(&mut mir_functions);
+
+    // Print MIR to stdout.
+    println!("--- MIR ({} functions) ---", mir_functions.len());
+    for func in &mir_functions {
+        println!("{func:#?}");
+        println!();
+    }
+    println!("--- end MIR ---");
+
+    0
+}
+
 fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32 {
     tracing::info!("checking {}", file.display());
 
@@ -1322,12 +1495,15 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
         }
     }
 
-    // Type check
-    if let Err(e) = checker.check_module(&module) {
-        if json_errors {
-            diagnostics::render_type_error_json(&source, &filename, &e);
-        } else {
-            diagnostics::render_type_error(&source, &filename, &e);
+    // Type check — collect all errors for multi-error reporting.
+    let type_errors = checker.check_module_collecting(&module);
+    if !type_errors.is_empty() {
+        for e in &type_errors {
+            if json_errors {
+                diagnostics::render_type_error_json(&source, &filename, e);
+            } else {
+                diagnostics::render_type_error(&source, &filename, e);
+            }
         }
         return 1;
     }
@@ -1548,7 +1724,7 @@ fn run_intent_explain(file: &PathBuf) -> i32 {
 /// asks the type checker to compute per-function confidence scores.
 /// Reports both the declared `@confidence` value and the propagated
 /// minimum across all direct callees.
-fn run_confidence_report(file: &PathBuf, json: bool) -> i32 {
+fn run_confidence_report(file: &PathBuf, json: bool, threshold: f64) -> i32 {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -1580,28 +1756,69 @@ fn run_confidence_report(file: &PathBuf, json: bool) -> i32 {
 
     let report = checker.confidence_report(&module);
 
-    // Compute overall module confidence: min of all function confidences.
+    // Build a set of functions missing @authored_by.
+    let missing_authored_by: Vec<String> = module
+        .functions
+        .iter()
+        .filter(|f| !f.annotations.iter().any(|a| a.name == "authored_by"))
+        .map(|f| f.name.clone())
+        .collect();
+
+    // Compute per-module average confidence (single module in a file).
+    let module_avg = if report.is_empty() {
+        1.0
+    } else {
+        report
+            .iter()
+            .map(|(_, _, computed, _)| *computed)
+            .sum::<f64>()
+            / report.len() as f64
+    };
+
+    // Overall project confidence: min of all function confidences.
     let overall = report
         .iter()
         .map(|(_, _, computed, _)| *computed)
         .fold(1.0_f64, f64::min);
 
+    // Functions below the configurable threshold.
+    let below_threshold: Vec<(&str, f64)> = report
+        .iter()
+        .filter(|(_, _, computed, _)| *computed < threshold)
+        .map(|(name, _, computed, _)| (name.as_str(), *computed))
+        .collect();
+
     if json {
         let functions: Vec<serde_json::Value> = report
             .iter()
             .map(|(name, declared, computed, callees)| {
+                let has_authored_by = !missing_authored_by.contains(name);
                 serde_json::json!({
                     "name": name,
                     "declared_confidence": declared,
                     "computed_confidence": computed,
                     "callees": callees,
+                    "has_authored_by": has_authored_by,
+                })
+            })
+            .collect();
+        let below_threshold_json: Vec<serde_json::Value> = below_threshold
+            .iter()
+            .map(|(name, computed)| {
+                serde_json::json!({
+                    "name": name,
+                    "computed_confidence": computed,
                 })
             })
             .collect();
         let output = serde_json::json!({
             "module": module.name,
+            "module_average_confidence": module_avg,
             "overall_confidence": overall,
+            "threshold": threshold,
             "functions": functions,
+            "missing_authored_by": missing_authored_by,
+            "below_threshold": below_threshold_json,
         });
         println!(
             "{}",
@@ -1612,11 +1829,44 @@ fn run_confidence_report(file: &PathBuf, json: bool) -> i32 {
         println!("Confidence Report for module `{}`", module.name);
         println!("{}", "=".repeat(60));
         println!("Overall confidence: {overall:.2}");
+        println!("Module average:     {module_avg:.2}");
+        println!("Threshold:          {threshold:.2}");
         println!();
-        println!("{:<30} {:>10} {:>10}", "Function", "Declared", "Computed");
-        println!("{}", "-".repeat(60));
+        println!(
+            "{:<30} {:>10} {:>10}  Flags",
+            "Function", "Declared", "Computed"
+        );
+        println!("{}", "-".repeat(70));
         for (name, declared, computed, _) in &report {
-            println!("{name:<30} {declared:>10.2} {computed:>10.2}");
+            let mut flags = Vec::new();
+            if missing_authored_by.contains(name) {
+                flags.push("no @authored_by");
+            }
+            if *computed < threshold {
+                flags.push("below threshold");
+            }
+            let flag_str = if flags.is_empty() {
+                String::new()
+            } else {
+                flags.join(", ")
+            };
+            println!("{name:<30} {declared:>10.2} {computed:>10.2}  {flag_str}");
+        }
+
+        // Summary of flagged functions.
+        if !missing_authored_by.is_empty() {
+            println!();
+            println!("Functions missing @authored_by:");
+            for name in &missing_authored_by {
+                println!("  - {name}");
+            }
+        }
+        if !below_threshold.is_empty() {
+            println!();
+            println!("Functions below threshold ({threshold:.2}):");
+            for (name, computed) in &below_threshold {
+                println!("  - {name} ({computed:.2})");
+            }
         }
     }
 

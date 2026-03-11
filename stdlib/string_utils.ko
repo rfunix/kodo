@@ -1,0 +1,86 @@
+// String Utilities — helper functions for common string operations.
+//
+// Provides utility functions over the String type using builtin
+// methods like .length(), .starts_with(), and .contains().
+//
+// Usage:
+//   kodoc check stdlib/string_utils.ko
+
+module string_utils {
+    meta {
+        purpose: "String utility functions with contract-enforced preconditions",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // Check whether a string has zero length.
+    fn is_empty(s: String) -> Bool {
+        return s.length() == 0
+    }
+
+    // Check whether a string starts with a given prefix.
+    fn starts_with_char(s: String, prefix: String) -> Bool {
+        return s.starts_with(prefix)
+    }
+
+    // Return the length of a string.
+    fn string_length(s: String) -> Int {
+        return s.length()
+    }
+
+    // Check whether a string contains a substring.
+    fn contains_substring(s: String, sub: String) -> Bool {
+        return s.contains(sub)
+    }
+
+    // Convert a string to uppercase.
+    fn to_upper(s: String) -> String {
+        return s.to_upper()
+    }
+
+    // Convert a string to lowercase.
+    fn to_lower(s: String) -> String {
+        return s.to_lower()
+    }
+
+    // Trim whitespace from both ends of a string.
+    fn trimmed(s: String) -> String {
+        return s.trim()
+    }
+
+    fn main() {
+        println("=== String Utils Module Demo ===")
+
+        let e: Bool = is_empty("")
+        if e {
+            println("empty string is empty")
+        }
+
+        let ne: Bool = is_empty("Hello, Kodo!")
+        if !ne {
+            println("greeting is not empty")
+        }
+
+        let sw: Bool = starts_with_char("Hello, Kodo!", "Hello")
+        if sw {
+            println("greeting starts with Hello")
+        }
+
+        let len: Int = string_length("Hello, Kodo!")
+        print_int(len)
+
+        let has: Bool = contains_substring("Hello, Kodo!", "Kodo")
+        if has {
+            println("greeting contains Kodo")
+        }
+
+        let upper: String = to_upper("hello")
+        println(upper)
+
+        let lower: String = to_lower("HELLO")
+        println(lower)
+
+        let trimmed_str: String = trimmed("  hello  ")
+        println(trimmed_str)
+    }
+}

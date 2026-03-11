@@ -1253,6 +1253,52 @@ fn declare_builtins(
         builtins.insert("channel_recv".to_string(), BuiltinInfo { func_id });
     }
 
+    // kodo_channel_send_bool(handle: i64, value: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // value (0 or 1)
+        let func_id = module
+            .declare_function("kodo_channel_send_bool", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_send_bool".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_recv_bool(handle: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_channel_recv_bool", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_recv_bool".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_send_string(handle: i64, ptr: i64, len: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        let func_id = module
+            .declare_function("kodo_channel_send_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_send_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_channel_recv_string(handle: i64, out_ptr: *mut *mut u8, out_len: *mut usize)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.params.push(AbiParam::new(types::I64)); // out_ptr
+        sig.params.push(AbiParam::new(types::I64)); // out_len
+        let func_id = module
+            .declare_function("kodo_channel_recv_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("channel_recv_string".to_string(), BuiltinInfo { func_id });
+    }
+
     // kodo_channel_free(handle: i64)
     {
         let mut sig = Signature::new(call_conv);
@@ -1261,6 +1307,74 @@ fn declare_builtins(
             .declare_function("kodo_channel_free", Linkage::Import, &sig)
             .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
         builtins.insert("channel_free".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Reference counting builtins ---
+
+    // kodo_rc_inc(handle: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        let func_id = module
+            .declare_function("kodo_rc_inc", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_rc_inc".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_rc_dec(handle: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        let func_id = module
+            .declare_function("kodo_rc_dec", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_rc_dec".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_rc_inc_string(ptr: i64, len: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        let func_id = module
+            .declare_function("kodo_rc_inc_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_rc_inc_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_rc_dec_string(ptr: i64, len: i64) -> void
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // ptr
+        sig.params.push(AbiParam::new(types::I64)); // len
+        let func_id = module
+            .declare_function("kodo_rc_dec_string", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_rc_dec_string".to_string(), BuiltinInfo { func_id });
+    }
+
+    // --- Async builtins ---
+
+    // kodo_spawn_async(fn_ptr: i64) -> i64 (returns future handle)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // fn_ptr
+        sig.returns.push(AbiParam::new(types::I64)); // handle
+        let func_id = module
+            .declare_function("kodo_spawn_async", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_spawn_async".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_await(handle: i64) -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64)); // handle
+        sig.returns.push(AbiParam::new(types::I64)); // result
+        let func_id = module
+            .declare_function("kodo_await", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_await".to_string(), BuiltinInfo { func_id });
     }
 
     Ok(builtins)
@@ -1366,6 +1480,8 @@ fn is_special_builtin(callee: &str) -> bool {
             | "time_format"
             | "env_get"
             | "env_set"
+            | "channel_send_string"
+            | "channel_recv_string"
     )
 }
 
@@ -1386,6 +1502,7 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "json_get_string"
             | "time_format"
             | "env_get"
+            | "channel_recv_string"
     )
 }
 
@@ -2415,6 +2532,25 @@ fn translate_instruction(
                 return Err(CodegenError::Unsupported(format!(
                     "unknown function: {callee}"
                 )));
+            }
+        }
+        Instruction::IncRef(local_id) => {
+            // Phase 1: call kodo_rc_inc with the handle value (no-op stub).
+            if let Ok(var) = var_map.get(*local_id) {
+                let handle_val = builder.use_var(var);
+                if let Some(bi) = builtins.get("kodo_rc_inc") {
+                    let func_ref = module.declare_func_in_func(bi.func_id, builder.func);
+                    builder.ins().call(func_ref, &[handle_val]);
+                }
+            }
+        }
+        Instruction::DecRef(local_id) => {
+            if let Ok(var) = var_map.get(*local_id) {
+                let handle_val = builder.use_var(var);
+                if let Some(bi) = builtins.get("kodo_rc_dec") {
+                    let func_ref = module.declare_func_in_func(bi.func_id, builder.func);
+                    builder.ins().call(func_ref, &[handle_val]);
+                }
             }
         }
         Instruction::IndirectCall {

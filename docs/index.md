@@ -79,3 +79,12 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`async_tasks.ko`](../examples/async_tasks.ko) | Spawn with captured variables |
 | [`actors.ko`](../examples/actors.ko) | Actor state and message passing |
 | [`actor_demo.ko`](../examples/actor_demo.ko) | Actor demonstration |
+| [`type_inference.ko`](../examples/type_inference.ko) | Local type inference for `let` bindings |
+| [`intent_database.ko`](../examples/intent_database.ko) | Database intent resolver |
+| [`intent_json_api.ko`](../examples/intent_json_api.ko) | JSON API intent resolver |
+| [`intent_cache.ko`](../examples/intent_cache.ko) | Cache intent resolver |
+| [`intent_queue.ko`](../examples/intent_queue.ko) | Queue intent resolver |
+| [`parallel_demo.ko`](../examples/parallel_demo.ko) | Structured concurrency with `parallel {}` |
+| [`channel_string.ko`](../examples/channel_string.ko) | Generic typed channels |
+| [`refinement_smt.ko`](../examples/refinement_smt.ko) | SMT-verified refinement types |
+| [`struct_predicates.ko`](../examples/struct_predicates.ko) | Struct field predicates in contracts |

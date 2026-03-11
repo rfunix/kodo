@@ -1,0 +1,11 @@
+module intent_queue {
+    meta {
+        purpose: "Demonstrates queue intent resolver",
+        version: "1.0.0"
+    }
+
+    intent queue {
+        backend: "memory",
+        topics: ["events", "tasks"]
+    }
+}

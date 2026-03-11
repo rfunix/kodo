@@ -1,0 +1,119 @@
+// Collections — typed wrappers for List and Map with contracts.
+//
+// Provides higher-level functions over the builtin List<Int> and
+// Map<Int, Int> types with contract-enforced preconditions for
+// safe access patterns.
+//
+// Usage:
+//   kodoc check stdlib/collections.ko
+
+module collections {
+    meta {
+        purpose: "Typed wrappers for List and Map with contract-enforced safety",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // Safely get an element from a list by index.
+    // Returns -1 as a sentinel for out-of-bounds access.
+    fn list_get_safe(list: List<Int>, index: Int) -> Int
+        requires { index >= 0 }
+    {
+        let len: Int = list_length(list)
+        if index >= len {
+            return 0 - 1
+        }
+        return list_get(list, index)
+    }
+
+    // Check whether a list contains a given value.
+    // Delegates to the builtin list_contains.
+    fn list_has(list: List<Int>, value: Int) -> Bool {
+        return list_contains(list, value)
+    }
+
+    // Create a list with a single element.
+    fn list_of_one(value: Int) -> List<Int> {
+        let result: List<Int> = list_new()
+        list_push(result, value)
+        return result
+    }
+
+    // Create a list with two elements.
+    fn list_of_two(a: Int, b: Int) -> List<Int> {
+        let result: List<Int> = list_new()
+        list_push(result, a)
+        list_push(result, b)
+        return result
+    }
+
+    // Create a list with three elements.
+    fn list_of_three(a: Int, b: Int, c: Int) -> List<Int> {
+        let result: List<Int> = list_new()
+        list_push(result, a)
+        list_push(result, b)
+        list_push(result, c)
+        return result
+    }
+
+    // Get the length of a map.
+    fn map_size(m: Map<Int, Int>) -> Int {
+        return map_length(m)
+    }
+
+    // Check whether a map contains a given key.
+    fn map_has_key(m: Map<Int, Int>, key: Int) -> Bool {
+        return map_contains_key(m, key)
+    }
+
+    // Safely get a value from a map by key.
+    // Returns -1 as a sentinel if the key is not present.
+    fn map_get_safe(m: Map<Int, Int>, key: Int) -> Int {
+        let exists: Bool = map_contains_key(m, key)
+        if !exists {
+            return 0 - 1
+        }
+        return map_get(m, key)
+    }
+
+    fn main() {
+        println("=== Collections Module Demo ===")
+
+        // List operations
+        let nums: List<Int> = list_of_three(10, 20, 30)
+
+        let first: Int = list_get_safe(nums, 0)
+        print_int(first)
+
+        let oob: Int = list_get_safe(nums, 99)
+        print_int(oob)
+
+        let has_20: Bool = list_has(nums, 20)
+        if has_20 {
+            println("list contains 20")
+        }
+
+        let single: List<Int> = list_of_one(42)
+        let single_len: Int = list_length(single)
+        print_int(single_len)
+
+        // Map operations
+        let scores: Map<Int, Int> = map_new()
+        map_insert(scores, 1, 100)
+        map_insert(scores, 2, 200)
+
+        let size: Int = map_size(scores)
+        print_int(size)
+
+        let has_1: Bool = map_has_key(scores, 1)
+        if has_1 {
+            println("map contains key 1")
+        }
+
+        let val: Int = map_get_safe(scores, 2)
+        print_int(val)
+
+        let missing: Int = map_get_safe(scores, 99)
+        print_int(missing)
+    }
+}

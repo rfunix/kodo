@@ -1,0 +1,47 @@
+// I/O Standard Library — typed wrappers for console and file operations.
+//
+// Provides idiomatic Kōdo functions for reading and writing to the console
+// and filesystem. All functions use explicit types and contracts where
+// meaningful.
+//
+// Usage:
+//   kodoc check stdlib/io.ko
+
+module io {
+    meta {
+        purpose: "Typed wrappers for console and file I/O operations",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // Write a string to standard output followed by a newline.
+    fn write_line(s: String) {
+        println(s)
+    }
+
+    // Write an integer to standard output.
+    fn write_int(n: Int) {
+        print_int(n)
+    }
+
+    // Write a float to standard output followed by a newline.
+    fn write_float(f: Float64) {
+        println_float(f)
+    }
+
+    // Check whether a file exists at the given path.
+    fn file_exists_safe(path: String) -> Bool {
+        return file_exists(path)
+    }
+
+    fn main() {
+        write_line("=== I/O Module Demo ===")
+        write_int(42)
+        write_float(3.14)
+
+        let exists: Bool = file_exists_safe("stdlib/io.ko")
+        if exists {
+            write_line("stdlib/io.ko exists")
+        }
+    }
+}

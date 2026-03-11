@@ -711,13 +711,31 @@ pub extern "C" fn kodo_parallel_join(group: i64) {
 // Channel support — inter-thread communication via `std::sync::mpsc`
 // ---------------------------------------------------------------------------
 
+/// A value that can be sent through a generic channel.
+///
+/// Channels in Kōdo support multiple primitive types: integers, booleans,
+/// and heap-allocated strings. This enum wraps all supported payloads so a
+/// single `mpsc::channel` can carry any of them.
+#[derive(Debug, Clone)]
+enum ChannelValue {
+    /// A 64-bit integer value.
+    Int(i64),
+    /// A boolean value.
+    Bool(bool),
+    /// A heap-allocated string, stored as a `Vec<u8>`.
+    ///
+    /// The runtime copies the bytes on send and reconstructs a `(ptr, len)`
+    /// pair on recv, so callers do not share memory across threads.
+    StringVal(Vec<u8>),
+}
+
 /// A channel pair stored in the global registry.
 struct ChannelEntry {
     /// The sending half (wrapped in `Arc<Mutex<…>>` so multiple threads can send).
-    sender: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Sender<i64>>>,
+    sender: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Sender<ChannelValue>>>,
     /// The receiving half (wrapped in `Arc<Mutex<…>>` so we can access it
     /// without holding the registry lock, preventing deadlocks on recv).
-    receiver_arc: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<i64>>>,
+    receiver_arc: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ChannelValue>>>,
 }
 
 /// Global registry of live channels, keyed by handle.
@@ -750,62 +768,165 @@ pub extern "C" fn kodo_channel_new() -> i64 {
     id
 }
 
-/// Sends `value` through the channel identified by `handle`.
+/// Clones the sender `Arc` for a given channel handle.
+///
+/// Returns `None` if the handle is invalid or the registry lock is poisoned.
+fn channel_get_sender(
+    handle: i64,
+) -> Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Sender<ChannelValue>>>> {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    let registry = CHANNEL_REGISTRY.lock().ok()?;
+    registry
+        .get(idx)
+        .and_then(Option::as_ref)
+        .map(|entry| std::sync::Arc::clone(&entry.sender))
+}
+
+/// Clones the receiver `Arc` for a given channel handle.
+///
+/// Returns `None` if the handle is invalid or the registry lock is poisoned.
+fn channel_get_receiver(
+    handle: i64,
+) -> Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ChannelValue>>>> {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    let registry = CHANNEL_REGISTRY.lock().ok()?;
+    registry
+        .get(idx)
+        .and_then(Option::as_ref)
+        .map(|entry| std::sync::Arc::clone(&entry.receiver_arc))
+}
+
+/// Sends an integer `value` through the channel identified by `handle`.
 ///
 /// If the handle is invalid or the receiver has been dropped the call is a
 /// silent no-op (matching the fire-and-forget semantics of Kōdo channels).
 #[no_mangle]
 pub extern "C" fn kodo_channel_send(handle: i64, value: i64) {
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let idx = handle as usize;
-    // Clone the Arc-wrapped sender so we can drop the registry lock
-    // before actually sending — prevents deadlocks when a receiver on
-    // another thread needs registry access.
-    let tx_arc = {
-        let Ok(registry) = CHANNEL_REGISTRY.lock() else {
-            return;
-        };
-        match registry.get(idx).and_then(Option::as_ref) {
-            Some(entry) => std::sync::Arc::clone(&entry.sender),
-            None => return,
-        }
+    let Some(tx_arc) = channel_get_sender(handle) else {
+        return;
     };
     let guard = tx_arc.lock();
     if let Ok(tx) = guard {
-        let _ = tx.send(value);
+        let _ = tx.send(ChannelValue::Int(value));
     }
 }
 
-/// Receives a value from the channel identified by `handle` (blocking).
+/// Receives an integer value from the channel identified by `handle` (blocking).
 ///
-/// Returns the received `i64` value. If the channel is closed or the handle
-/// is invalid, returns `0`.
-///
-/// The implementation clones an `Arc`-wrapped receiver so that the global
-/// registry lock is released before blocking on `recv`, preventing deadlocks
-/// when senders on other threads need registry access.
+/// Returns the received `i64` value. If the channel is closed, the handle
+/// is invalid, or the received value is not an integer, returns `0`.
 #[no_mangle]
 pub extern "C" fn kodo_channel_recv(handle: i64) -> i64 {
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let idx = handle as usize;
-    // Grab a clone of the Arc-wrapped receiver, then drop the registry lock
-    // so that senders can still acquire it while we block.
-    let rx_arc = {
-        let Ok(registry) = CHANNEL_REGISTRY.lock() else {
-            return 0;
-        };
-        match registry.get(idx).and_then(Option::as_ref) {
-            Some(entry) => std::sync::Arc::clone(&entry.receiver_arc),
-            None => return 0,
-        }
+    let Some(rx_arc) = channel_get_receiver(handle) else {
+        return 0;
     };
-    // Now block on recv without holding the registry lock.
-    let result = if let Ok(rx) = rx_arc.lock() {
-        rx.recv().unwrap_or(0)
+    let guard = rx_arc.lock();
+    if let Ok(rx) = guard {
+        match rx.recv() {
+            Ok(ChannelValue::Int(v)) => v,
+            Ok(ChannelValue::Bool(b)) => i64::from(b),
+            _ => 0,
+        }
     } else {
         0
+    }
+}
+
+/// Sends a boolean value through the channel identified by `handle`.
+#[no_mangle]
+pub extern "C" fn kodo_channel_send_bool(handle: i64, value: i64) {
+    let Some(tx_arc) = channel_get_sender(handle) else {
+        return;
     };
-    result
+    let guard = tx_arc.lock();
+    if let Ok(tx) = guard {
+        let _ = tx.send(ChannelValue::Bool(value != 0));
+    }
+}
+
+/// Receives a boolean value from the channel identified by `handle` (blocking).
+///
+/// Returns `1` for `true`, `0` for `false`.
+#[no_mangle]
+pub extern "C" fn kodo_channel_recv_bool(handle: i64) -> i64 {
+    let Some(rx_arc) = channel_get_receiver(handle) else {
+        return 0;
+    };
+    let guard = rx_arc.lock();
+    if let Ok(rx) = guard {
+        match rx.recv() {
+            Ok(ChannelValue::Bool(b)) => i64::from(b),
+            Ok(ChannelValue::Int(v)) => i64::from(v != 0),
+            _ => 0,
+        }
+    } else {
+        0
+    }
+}
+
+/// Sends a string through the channel identified by `handle`.
+///
+/// # Safety
+///
+/// `ptr` must point to a valid byte buffer of at least `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_channel_send_string(handle: i64, ptr: *const u8, len: usize) {
+    let Some(tx_arc) = channel_get_sender(handle) else {
+        return;
+    };
+    // SAFETY: caller guarantees ptr is valid for `len` bytes.
+    let bytes = if ptr.is_null() || len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
+    };
+    let guard = tx_arc.lock();
+    if let Ok(tx) = guard {
+        let _ = tx.send(ChannelValue::StringVal(bytes));
+    }
+}
+
+/// Receives a string from the channel identified by `handle` (blocking).
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must point to valid writable locations.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_channel_recv_string(
+    handle: i64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) {
+    let write_empty = || unsafe {
+        *out_ptr = std::ptr::null_mut();
+        *out_len = 0;
+    };
+
+    let Some(rx_arc) = channel_get_receiver(handle) else {
+        write_empty();
+        return;
+    };
+    let received = if let Ok(rx) = rx_arc.lock() {
+        rx.recv().ok()
+    } else {
+        None
+    };
+    match received {
+        Some(ChannelValue::StringVal(bytes)) => {
+            let len = bytes.len();
+            let boxed = bytes.into_boxed_slice();
+            let raw = Box::into_raw(boxed).cast::<u8>();
+            unsafe {
+                *out_ptr = raw;
+                *out_len = len;
+            }
+        }
+        _ => {
+            write_empty();
+        }
+    }
 }
 
 /// Frees the channel identified by `handle`, dropping both sender and receiver.
@@ -2011,6 +2132,200 @@ pub unsafe extern "C" fn kodo_env_set(
     let val =
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(val_ptr, val_len)) };
     unsafe { std::env::set_var(key, val) };
+}
+
+// ---------------------------------------------------------------------------
+// Reference Counting Stubs (Phase 32.1)
+// ---------------------------------------------------------------------------
+
+/// Increment reference count for a heap-allocated object (handle-based).
+///
+/// Phase 1: no-op stub — existing allocations don't have RC headers yet.
+/// The MIR and codegen infrastructure is in place; actual RC logic can be
+/// enabled later without changing any other crate.
+#[no_mangle]
+pub extern "C" fn kodo_rc_inc(handle: i64) {
+    let _ = handle;
+}
+
+/// Decrement reference count for a heap-allocated object (handle-based).
+///
+/// When count reaches zero, the object will be freed.
+/// Phase 1: no-op stub — existing allocations don't have RC headers yet.
+#[no_mangle]
+pub extern "C" fn kodo_rc_dec(handle: i64) {
+    let _ = handle;
+}
+
+/// Increment reference count for a string (ptr+len pair).
+///
+/// Phase 1: no-op stub — existing string allocations don't have RC headers yet.
+#[no_mangle]
+pub extern "C" fn kodo_rc_inc_string(ptr: i64, len: i64) {
+    let _ = (ptr, len);
+}
+
+/// Decrement reference count for a string (ptr+len pair).
+///
+/// Phase 1: no-op stub — existing string allocations don't have RC headers yet.
+#[no_mangle]
+pub extern "C" fn kodo_rc_dec_string(ptr: i64, len: i64) {
+    let _ = (ptr, len);
+}
+
+// ---------------------------------------------------------------------------
+// Async runtime — thread-pool-based spawn/await with future handles
+// ---------------------------------------------------------------------------
+
+/// Number of worker threads in the async thread pool.
+const ASYNC_THREAD_POOL_SIZE: usize = 4;
+
+/// A boxed task closure that can be sent to a worker thread.
+type BoxedTask = Box<dyn FnOnce() + Send>;
+
+/// The sender half of the thread pool's task channel, wrapped in a Mutex
+/// so it can be stored in a static.
+type PoolSender = std::sync::Mutex<std::sync::mpsc::Sender<BoxedTask>>;
+
+/// An entry in the global future table.
+///
+/// Each future tracks whether the spawned task has completed and stores
+/// the result value. A `Condvar` is used so that `kodo_await` can block
+/// efficiently until the result is ready.
+struct FutureEntry {
+    /// The result value, set by the worker thread upon completion.
+    result: std::sync::Mutex<Option<i64>>,
+    /// Flag indicating whether the task has finished.
+    completed: std::sync::atomic::AtomicBool,
+    /// Condition variable to wake up threads waiting on this future.
+    condvar: std::sync::Condvar,
+}
+
+/// Global table of outstanding futures, indexed by handle.
+static FUTURE_TABLE: std::sync::Mutex<Vec<Option<std::sync::Arc<FutureEntry>>>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Monotonically increasing counter for future handles.
+static FUTURE_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Lazily initialised global thread pool sender.
+///
+/// Worker threads are spawned on the first call to [`kodo_spawn_async`].
+/// Tasks are sent via an `mpsc` channel so workers can pick them up.
+static THREAD_POOL_TX: std::sync::OnceLock<PoolSender> = std::sync::OnceLock::new();
+
+/// Initialises the thread pool (idempotent — only the first call spawns threads).
+fn ensure_thread_pool() -> &'static PoolSender {
+    THREAD_POOL_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for _ in 0..ASYNC_THREAD_POOL_SIZE {
+            let rx = std::sync::Arc::clone(&rx);
+            std::thread::spawn(move || {
+                loop {
+                    let task = {
+                        let Ok(guard) = rx.lock() else { break };
+                        match guard.recv() {
+                            Ok(task) => task,
+                            Err(_) => break, // channel closed
+                        }
+                    };
+                    task();
+                }
+            });
+        }
+        std::sync::Mutex::new(tx)
+    })
+}
+
+/// Spawns an async task on the thread pool and returns a future handle.
+///
+/// `fn_ptr` is a function pointer with signature `extern "C" fn() -> i64`.
+/// The returned handle is an opaque integer that can be passed to
+/// [`kodo_await`] to retrieve the result.
+#[no_mangle]
+pub extern "C" fn kodo_spawn_async(fn_ptr: i64) -> i64 {
+    let handle = FUTURE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let entry = std::sync::Arc::new(FutureEntry {
+        result: std::sync::Mutex::new(None),
+        completed: std::sync::atomic::AtomicBool::new(false),
+        condvar: std::sync::Condvar::new(),
+    });
+
+    // Register the future in the global table.
+    if let Ok(mut table) = FUTURE_TABLE.lock() {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let idx = handle as usize;
+        if table.len() <= idx {
+            table.resize_with(idx + 1, || None);
+        }
+        table[idx] = Some(std::sync::Arc::clone(&entry));
+    }
+
+    // SAFETY: `fn_ptr` is a valid function pointer produced by Cranelift
+    // codegen with the `extern "C" fn() -> i64` signature.
+    let func: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+
+    let pool_tx = ensure_thread_pool();
+    if let Ok(tx) = pool_tx.lock() {
+        let _ = tx.send(Box::new(move || {
+            let result = func();
+            if let Ok(mut guard) = entry.result.lock() {
+                *guard = Some(result);
+            }
+            entry
+                .completed
+                .store(true, std::sync::atomic::Ordering::Release);
+            entry.condvar.notify_all();
+        }));
+    }
+
+    handle
+}
+
+/// Blocks until the async task identified by `handle` completes, then returns
+/// its result.
+///
+/// If the handle is invalid or the future table is inaccessible, returns `0`.
+#[no_mangle]
+pub extern "C" fn kodo_await(handle: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+
+    // Retrieve the Arc<FutureEntry> from the table so we can wait on it
+    // without holding the table lock.
+    let entry = {
+        let Ok(table) = FUTURE_TABLE.lock() else {
+            return 0;
+        };
+        match table.get(idx).and_then(|slot| slot.as_ref()) {
+            Some(arc) => std::sync::Arc::clone(arc),
+            None => return 0,
+        }
+    };
+
+    // Wait for completion using condvar (avoids busy-spin).
+    if !entry.completed.load(std::sync::atomic::Ordering::Acquire) {
+        let guard = entry.result.lock();
+        if let Ok(guard) = guard {
+            let _unused = entry.condvar.wait_while(guard, |_| {
+                !entry.completed.load(std::sync::atomic::Ordering::Acquire)
+            });
+        }
+    }
+
+    // Read the result.
+    let result = entry.result.lock().ok().and_then(|g| *g).unwrap_or(0);
+
+    // Remove the entry from the table to free memory.
+    if let Ok(mut table) = FUTURE_TABLE.lock() {
+        if let Some(slot) = table.get_mut(idx) {
+            *slot = None;
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -3230,5 +3545,176 @@ mod tests {
         let val = kodo_channel_recv(ch);
         assert_eq!(val, 77);
         kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn test_rc_inc_noop() {
+        // Verify kodo_rc_inc doesn't panic for arbitrary handles.
+        kodo_rc_inc(0);
+        kodo_rc_inc(42);
+        kodo_rc_inc(-1);
+    }
+
+    #[test]
+    fn test_rc_dec_noop() {
+        // Verify kodo_rc_dec doesn't panic for arbitrary handles.
+        kodo_rc_dec(0);
+        kodo_rc_dec(42);
+        kodo_rc_dec(-1);
+    }
+
+    #[test]
+    fn test_rc_inc_string_noop() {
+        // Verify kodo_rc_inc_string doesn't panic.
+        kodo_rc_inc_string(0, 0);
+        kodo_rc_inc_string(123, 456);
+    }
+
+    #[test]
+    fn test_rc_dec_string_noop() {
+        // Verify kodo_rc_dec_string doesn't panic.
+        kodo_rc_dec_string(0, 0);
+        kodo_rc_dec_string(123, 456);
+    }
+
+    #[test]
+    fn spawn_async_and_await_returns_result() {
+        extern "C" fn compute() -> i64 {
+            42
+        }
+        let handle = kodo_spawn_async(compute as *const () as i64);
+        let result = kodo_await(handle);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn spawn_async_multiple_tasks() {
+        extern "C" fn add_ten() -> i64 {
+            10
+        }
+        extern "C" fn add_twenty() -> i64 {
+            20
+        }
+        let h1 = kodo_spawn_async(add_ten as *const () as i64);
+        let h2 = kodo_spawn_async(add_twenty as *const () as i64);
+        let r1 = kodo_await(h1);
+        let r2 = kodo_await(h2);
+        assert_eq!(r1, 10);
+        assert_eq!(r2, 20);
+    }
+
+    #[test]
+    fn spawn_async_concurrent_execution() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static ASYNC_COUNTER: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn increment() -> i64 {
+            ASYNC_COUNTER.fetch_add(1, Ordering::Relaxed);
+            1
+        }
+
+        ASYNC_COUNTER.store(0, Ordering::Relaxed);
+
+        let task_count = 8;
+        let mut handles = Vec::with_capacity(task_count);
+        for _ in 0..task_count {
+            handles.push(kodo_spawn_async(increment as *const () as i64));
+        }
+
+        for h in handles {
+            kodo_await(h);
+        }
+
+        assert_eq!(ASYNC_COUNTER.load(Ordering::Relaxed), task_count as i64);
+    }
+
+    #[test]
+    fn await_invalid_handle_returns_zero() {
+        let result = kodo_await(999_999);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn spawn_async_unique_handles() {
+        extern "C" fn noop() -> i64 {
+            0
+        }
+        let h1 = kodo_spawn_async(noop as *const () as i64);
+        let h2 = kodo_spawn_async(noop as *const () as i64);
+        assert_ne!(h1, h2);
+        kodo_await(h1);
+        kodo_await(h2);
+    }
+
+    // --- Generic channel tests (bool) ---
+
+    #[test]
+    fn channel_send_recv_bool_true() {
+        let ch = kodo_channel_new();
+        kodo_channel_send_bool(ch, 1);
+        let val = kodo_channel_recv_bool(ch);
+        assert_eq!(val, 1);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_send_recv_bool_false() {
+        let ch = kodo_channel_new();
+        kodo_channel_send_bool(ch, 0);
+        let val = kodo_channel_recv_bool(ch);
+        assert_eq!(val, 0);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_send_bool_invalid_handle() {
+        kodo_channel_send_bool(999_999, 1);
+    }
+
+    // --- Generic channel tests (string) ---
+
+    #[test]
+    fn channel_send_recv_string_basic() {
+        let ch = kodo_channel_new();
+        let msg = "hello channel";
+        unsafe {
+            kodo_channel_send_string(ch, msg.as_ptr(), msg.len());
+        }
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_channel_recv_string(ch, &mut out_ptr, &mut out_len);
+        }
+        assert!(!out_ptr.is_null());
+        assert_eq!(out_len, msg.len());
+        let received = unsafe { String::from_raw_parts(out_ptr, out_len, out_len) };
+        assert_eq!(received, "hello channel");
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_send_recv_string_empty() {
+        let ch = kodo_channel_new();
+        unsafe {
+            kodo_channel_send_string(ch, std::ptr::null(), 0);
+        }
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_channel_recv_string(ch, &mut out_ptr, &mut out_len);
+        }
+        assert_eq!(out_len, 0);
+        kodo_channel_free(ch);
+    }
+
+    #[test]
+    fn channel_recv_string_invalid_handle() {
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_channel_recv_string(999_999, &mut out_ptr, &mut out_len);
+        }
+        assert!(out_ptr.is_null());
+        assert_eq!(out_len, 0);
     }
 }

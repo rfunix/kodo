@@ -1,0 +1,19 @@
+module parallel_demo {
+    meta { purpose: "demonstrate structured concurrency with parallel blocks" }
+
+    fn task_a() -> Int {
+        return 1
+    }
+
+    fn task_b() -> Int {
+        return 2
+    }
+
+    fn main() -> Int {
+        parallel {
+            spawn { task_a() }
+            spawn { task_b() }
+        }
+        return 0
+    }
+}

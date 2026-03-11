@@ -68,6 +68,8 @@ pub struct MirBuilder {
     /// Maps variable names bound to closures to their generated function
     /// name and list of captured variable names.
     closure_registry: HashMap<String, (String, Vec<String>)>,
+    /// Number of function parameters (first N locals are params).
+    param_count: usize,
     /// Names of actor types — used to distinguish actors from structs during
     /// lowering so that actor-specific runtime calls are emitted instead of
     /// regular struct operations.
@@ -89,6 +91,7 @@ impl MirBuilder {
             current_block: BlockId(0),
             next_local: 0,
             next_block: 1, // 0 is the entry block
+            param_count: 0,
             name_map: HashMap::new(),
             local_types: HashMap::new(),
             struct_registry: HashMap::new(),
@@ -154,6 +157,40 @@ impl MirBuilder {
             callee_name.starts_with(actor.as_str())
                 && callee_name.as_bytes().get(actor.len()) == Some(&b'_')
         })
+    }
+
+    /// Returns `true` if the given type is heap-allocated and requires
+    /// reference counting (String, Struct, or generic containers like List/Map).
+    fn is_heap_type(ty: &Type) -> bool {
+        matches!(ty, Type::String | Type::Struct(_) | Type::Generic(_, _))
+    }
+
+    /// Emits [`Instruction::DecRef`] for all heap-allocated locals in the
+    /// function body, excluding parameters and the return value local.
+    ///
+    /// Called before emitting a `Return` terminator to ensure heap locals
+    /// are cleaned up.
+    fn emit_decref_for_heap_locals(&mut self, param_count: usize, return_local: Option<LocalId>) {
+        let heap_locals: Vec<LocalId> = self
+            .locals
+            .iter()
+            .filter(|local| {
+                // Skip parameters — they are owned by the caller.
+                if (local.id.0 as usize) < param_count {
+                    return false;
+                }
+                // Skip the local being returned — ownership transfers.
+                if return_local == Some(local.id) {
+                    return false;
+                }
+                Self::is_heap_type(&local.ty)
+            })
+            .map(|local| local.id)
+            .collect();
+
+        for local_id in heap_locals {
+            self.emit(Instruction::DecRef(local_id));
+        }
     }
 
     /// Creates a new basic block and returns its identifier.
@@ -536,6 +573,14 @@ impl MirBuilder {
                 };
                 // Inject ensures checks before returning.
                 self.inject_ensures_checks(&ret_val)?;
+                // Emit DecRef for heap-allocated locals before returning.
+                let return_local = if let Value::Local(lid) = &ret_val {
+                    Some(*lid)
+                } else {
+                    None
+                };
+                let pc = self.param_count;
+                self.emit_decref_for_heap_locals(pc, return_local);
                 // Seal the current block with a Return terminator and
                 // create an unreachable continuation block.
                 let continuation = self.new_block();
@@ -739,34 +784,40 @@ impl MirBuilder {
                 Ok(Value::Unit)
             }
             Stmt::Parallel { body, .. } => {
-                let group_local = self.alloc_local(Type::Int, false);
-                self.emit(Instruction::Call {
-                    dest: group_local,
-                    callee: "kodo_parallel_begin".to_string(),
-                    args: vec![],
-                });
+                // Structured concurrency: spawn each task asynchronously,
+                // collect handles, then await all before the block exits.
+                let mut handles = Vec::new();
                 for stmt in body {
                     if let Stmt::Spawn {
                         body: spawn_body, ..
                     } = stmt
                     {
-                        self.lower_parallel_spawn(group_local, spawn_body)?;
+                        let handle = self.lower_parallel_spawn(spawn_body)?;
+                        handles.push(handle);
                     }
                 }
-                let join_dest = self.alloc_local(Type::Unit, false);
-                self.emit(Instruction::Call {
-                    dest: join_dest,
-                    callee: "kodo_parallel_join".to_string(),
-                    args: vec![Value::Local(group_local)],
-                });
+                // Emit kodo_await for each handle to guarantee structured
+                // concurrency: all tasks complete before leaving the block.
+                for handle in handles {
+                    let await_dest = self.alloc_local(Type::Unit, false);
+                    self.emit(Instruction::Call {
+                        dest: await_dest,
+                        callee: "kodo_await".to_string(),
+                        args: vec![Value::Local(handle)],
+                    });
+                }
                 Ok(Value::Unit)
             }
         }
     }
 
-    /// Lambda-lifts a spawn body inside a parallel block.
+    /// Lambda-lifts a spawn body inside a parallel block and emits a
+    /// `kodo_spawn_async` call that returns a future handle.
+    ///
+    /// Returns the [`LocalId`] holding the handle so the caller can emit
+    /// a corresponding `kodo_await` after all spawns.
     #[allow(clippy::too_many_lines)]
-    fn lower_parallel_spawn(&mut self, group_local: LocalId, body: &Block) -> Result<()> {
+    fn lower_parallel_spawn(&mut self, body: &Block) -> Result<LocalId> {
         let params = std::collections::HashSet::new();
         let mut free_vars = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -804,17 +855,18 @@ impl MirBuilder {
                 .extend(spawn_builder.generated_closures);
             self.generated_closures.push(mir_func);
             self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
-            let dest = self.alloc_local(Type::Unit, false);
+            // kodo_spawn_async returns a handle (i64).
+            let handle = self.alloc_local(Type::Int, false);
             self.emit(Instruction::Call {
-                dest,
-                callee: "kodo_parallel_spawn".to_string(),
+                dest: handle,
+                callee: "kodo_spawn_async".to_string(),
                 args: vec![
-                    Value::Local(group_local),
                     Value::FuncRef(spawn_name),
                     Value::IntConst(0),
                     Value::IntConst(0),
                 ],
             });
+            Ok(handle)
         } else {
             let env_param = spawn_builder.alloc_local(Type::Int, false);
             spawn_builder
@@ -871,19 +923,18 @@ impl MirBuilder {
             });
             #[allow(clippy::cast_possible_wrap)]
             let env_size = (captures.len() as i64) * 8;
-            let dest = self.alloc_local(Type::Unit, false);
+            let handle = self.alloc_local(Type::Int, false);
             self.emit(Instruction::Call {
-                dest,
-                callee: "kodo_parallel_spawn".to_string(),
+                dest: handle,
+                callee: "kodo_spawn_async".to_string(),
                 args: vec![
-                    Value::Local(group_local),
                     Value::FuncRef(spawn_name),
                     Value::Local(env_local),
                     Value::IntConst(env_size),
                 ],
             });
+            Ok(handle)
         }
-        Ok(())
     }
 
     /// Lowers a `for` loop into MIR by desugaring into a while-style loop.
@@ -1651,6 +1702,7 @@ fn lower_function_with_closures(
         builder.name_map.insert(param.name.clone(), local_id);
     }
     let param_count = function.params.len();
+    builder.param_count = param_count;
 
     // Inject `requires` contract checks before the function body.
     for (i, req_expr) in function.requires.iter().enumerate() {
@@ -1685,6 +1737,9 @@ fn lower_function_with_closures(
 
     // Inject ensures checks before the implicit Return(Unit).
     builder.inject_ensures_checks(&Value::Unit)?;
+
+    // Emit DecRef for heap-allocated locals before the implicit return.
+    builder.emit_decref_for_heap_locals(param_count, None);
 
     // If the current block still has no terminator (i.e. it was not
     // sealed by a Return statement), seal it with Return(Unit).
@@ -1815,6 +1870,12 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     fn_return_types
         .entry("channel_recv".to_string())
         .or_insert(Type::Int);
+    fn_return_types
+        .entry("channel_recv_bool".to_string())
+        .or_insert(Type::Bool);
+    fn_return_types
+        .entry("channel_recv_string".to_string())
+        .or_insert(Type::String);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],

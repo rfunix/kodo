@@ -1,0 +1,56 @@
+// Type Inference — local type inference for let bindings.
+//
+// Kōdo supports local type inference: the compiler infers the type
+// of a variable from its initializer expression. Function signatures
+// remain fully explicit.
+//
+// Compile and run:
+//   kodoc build examples/type_inference.ko -o type_inference
+//   ./type_inference
+
+module type_inference {
+    meta {
+        purpose: "Demonstrate local type inference for let bindings",
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() -> Int {
+        // Integer literals infer to Int
+        let x = 42
+
+        // String literals infer to String
+        let greeting = "Hello from Kōdo!"
+
+        // Boolean literals infer to Bool
+        let flag = true
+
+        // Float literals infer to Float64
+        let pi = 3.14159
+
+        // Struct literals infer the struct type
+        let origin = Point { x: 0, y: 0 }
+
+        // Function return types are used for inference
+        let sum = add(10, 20)
+
+        // Explicit type annotations still work
+        let explicit: Int = 100
+
+        // Print results using builtin functions
+        println("Type inference demo:")
+        print_int(sum)
+        print_int(x)
+        print_int(explicit)
+
+        return 0
+    }
+}

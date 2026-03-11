@@ -1,0 +1,38 @@
+// Demonstrates refinement types with SMT verification.
+//
+// When a function receives a refined type parameter, Z3 uses the
+// refinement constraint as an assumption to prove the function's
+// own contracts.
+
+module refinement_smt_demo {
+    meta {
+        purpose: "Demonstrate refinement types with SMT verification"
+        version: "1.0"
+    }
+
+    // Port must be between 1 and 65534
+    type Port = Int requires { self > 0 && self < 65535 }
+
+    // Percentage must be between 0 and 100
+    type Percentage = Int requires { self >= 0 && self <= 100 }
+
+    // Z3 can prove this contract because Port guarantees port > 0
+    fn serve(port: Port) -> Int
+        requires { port > 0 }
+    {
+        return port
+    }
+
+    // Z3 can prove pct + pct2 >= 0 because both are >= 0
+    fn combine_pct(pct: Percentage, pct2: Percentage) -> Int {
+        let total: Int = pct + pct2
+        return total
+    }
+
+    fn main() {
+        let p: Port = 8080
+        let result: Int = serve(p)
+        print_int(result)
+        println("")
+    }
+}

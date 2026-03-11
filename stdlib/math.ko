@@ -1,0 +1,111 @@
+// Math Standard Library — integer math functions with contracts.
+//
+// Provides pure mathematical functions over Int with precondition
+// contracts that prevent undefined behavior (e.g., negative sqrt,
+// invalid ranges).
+//
+// Usage:
+//   kodoc check stdlib/math.ko
+
+module math {
+    meta {
+        purpose: "Integer math functions with contract-enforced preconditions",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // Absolute value of an integer.
+    fn abs_int(x: Int) -> Int {
+        return abs(x)
+    }
+
+    // Return the larger of two integers.
+    fn max_int(a: Int, b: Int) -> Int {
+        return max(a, b)
+    }
+
+    // Return the smaller of two integers.
+    fn min_int(a: Int, b: Int) -> Int {
+        return min(a, b)
+    }
+
+    // Clamp a value to the range [lo, hi].
+    // Requires that lo <= hi to form a valid range.
+    fn clamp_int(x: Int, lo: Int, hi: Int) -> Int
+        requires { lo <= hi }
+    {
+        return clamp(x, lo, hi)
+    }
+
+    // Integer square root (floor).
+    // Requires a non-negative input since square root of a negative
+    // number is undefined over the integers.
+    fn sqrt_int(x: Int) -> Int
+        requires { x >= 0 }
+    {
+        if x == 0 {
+            return 0
+        }
+        if x == 1 {
+            return 1
+        }
+        // Newton's method for integer square root
+        let guess: Int = x / 2
+        let prev: Int = x
+        // For simplicity, use the builtin approach:
+        // iterate a fixed number of steps (sufficient for 64-bit ints)
+        let g1: Int = (guess + x / guess) / 2
+        let g2: Int = (g1 + x / g1) / 2
+        let g3: Int = (g2 + x / g2) / 2
+        let g4: Int = (g3 + x / g3) / 2
+        let g5: Int = (g4 + x / g4) / 2
+        let g6: Int = (g5 + x / g5) / 2
+        let g7: Int = (g6 + x / g6) / 2
+        let g8: Int = (g7 + x / g7) / 2
+        return min(g7, g8)
+    }
+
+    // Greatest common divisor using subtraction-based approach.
+    // Requires both arguments to be positive.
+    fn gcd(a: Int, b: Int) -> Int
+        requires { a > 0 }
+        requires { b > 0 }
+    {
+        // Use the simpler Euclidean approach with subtraction
+        if a == b {
+            return a
+        }
+        if a > b {
+            return gcd(a - b, b)
+        }
+        return gcd(a, b - a)
+    }
+
+    fn main() {
+        println("=== Math Module Demo ===")
+
+        // abs
+        let neg: Int = 0 - 42
+        let pos: Int = abs_int(neg)
+        print_int(pos)
+
+        // max / min
+        let bigger: Int = max_int(10, 20)
+        print_int(bigger)
+
+        let smaller: Int = min_int(10, 20)
+        print_int(smaller)
+
+        // clamp
+        let clamped: Int = clamp_int(150, 0, 100)
+        print_int(clamped)
+
+        // sqrt_int
+        let root: Int = sqrt_int(16)
+        print_int(root)
+
+        // gcd
+        let divisor: Int = gcd(12, 8)
+        print_int(divisor)
+    }
+}

@@ -1315,4 +1315,472 @@ mod tests {
             panic!("expected While statement");
         }
     }
+
+    #[test]
+    fn desugar_spawn_body_desugared() {
+        let span = Span::new(0, 50);
+        let spawn_stmt = Stmt::Spawn {
+            span,
+            body: Block {
+                span: Span::new(5, 45),
+                stmts: vec![Stmt::For {
+                    span,
+                    name: "i".to_string(),
+                    start: Expr::IntLit(0, span),
+                    end: Expr::IntLit(5, span),
+                    inclusive: false,
+                    body: Block {
+                        span,
+                        stmts: vec![],
+                    },
+                }],
+            },
+        };
+        let mut module = make_test_module(vec![spawn_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Spawn { body, .. } = &stmts[0] {
+            // The for loop inside spawn should be desugared to let + while
+            assert_eq!(body.stmts.len(), 2, "for in spawn should desugar");
+            assert!(matches!(body.stmts[0], Stmt::Let { mutable: true, .. }));
+            assert!(matches!(body.stmts[1], Stmt::While { .. }));
+        } else {
+            panic!("expected Spawn statement");
+        }
+    }
+
+    #[test]
+    fn desugar_parallel_body_desugared() {
+        let span = Span::new(0, 80);
+        let parallel_stmt = Stmt::Parallel {
+            span,
+            body: vec![
+                Stmt::Spawn {
+                    span,
+                    body: Block {
+                        span,
+                        stmts: vec![Stmt::For {
+                            span,
+                            name: "i".to_string(),
+                            start: Expr::IntLit(0, span),
+                            end: Expr::IntLit(3, span),
+                            inclusive: false,
+                            body: Block {
+                                span,
+                                stmts: vec![],
+                            },
+                        }],
+                    },
+                },
+                Stmt::Spawn {
+                    span,
+                    body: Block {
+                        span,
+                        stmts: vec![Stmt::Expr(Expr::IntLit(42, span))],
+                    },
+                },
+            ],
+        };
+        let mut module = make_test_module(vec![parallel_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Parallel { body, .. } = &stmts[0] {
+            assert_eq!(body.len(), 2, "parallel should still have 2 spawn stmts");
+            // First spawn's for loop should be desugared
+            if let Stmt::Spawn { body, .. } = &body[0] {
+                assert_eq!(body.stmts.len(), 2, "for in spawn should desugar");
+            } else {
+                panic!("expected Spawn in parallel body");
+            }
+        } else {
+            panic!("expected Parallel statement");
+        }
+    }
+
+    #[test]
+    fn desugar_closure_body_desugared() {
+        let span = Span::new(0, 30);
+        let closure = Expr::Closure {
+            params: vec![kodo_ast::ClosureParam {
+                name: "x".to_string(),
+                ty: None,
+                span,
+            }],
+            return_type: None,
+            body: Box::new(Expr::NullCoalesce {
+                left: Box::new(Expr::Ident("x".to_string(), span)),
+                right: Box::new(Expr::IntLit(0, span)),
+                span,
+            }),
+            span,
+        };
+        let stmt = Stmt::Expr(closure);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::Closure { body, .. }) = &stmts[0] {
+            // The closure body's NullCoalesce should be desugared to Match
+            assert!(
+                matches!(body.as_ref(), Expr::Match { .. }),
+                "closure body coalesce should desugar to match"
+            );
+        } else {
+            panic!("expected Closure expression");
+        }
+    }
+
+    #[test]
+    fn desugar_try_in_let_value() {
+        let span = Span::new(0, 30);
+        let let_stmt = Stmt::Let {
+            span,
+            mutable: false,
+            name: "val".to_string(),
+            ty: None,
+            value: Expr::Try {
+                operand: Box::new(Expr::Ident("result".to_string(), span)),
+                span,
+            },
+        };
+        let mut module = make_test_module(vec![let_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            assert!(
+                matches!(value, Expr::Match { .. }),
+                "try in let value should desugar to match"
+            );
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn desugar_null_coalesce_with_complex_default() {
+        let span = Span::new(0, 40);
+        let coalesce = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("opt".to_string(), span)),
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::IntLit(10, span)),
+                op: BinOp::Mul,
+                right: Box::new(Expr::IntLit(5, span)),
+                span,
+            }),
+            span,
+        };
+        let stmt = Stmt::Expr(coalesce);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &stmts[0] {
+            // None arm's body should be BinaryOp (10 * 5)
+            assert!(
+                matches!(&arms[1].body, Expr::BinaryOp { op: BinOp::Mul, .. }),
+                "default should be the complex expression"
+            );
+        } else {
+            panic!("expected Match expression");
+        }
+    }
+
+    #[test]
+    fn desugar_assign_with_sugar() {
+        let span = Span::new(0, 30);
+        let assign_stmt = Stmt::Assign {
+            span,
+            name: "x".to_string(),
+            value: Expr::NullCoalesce {
+                left: Box::new(Expr::Ident("opt".to_string(), span)),
+                right: Box::new(Expr::IntLit(0, span)),
+                span,
+            },
+        };
+        let mut module = make_test_module(vec![assign_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Assign { value, .. } = &stmts[0] {
+            assert!(
+                matches!(value, Expr::Match { .. }),
+                "coalesce in assignment should desugar to match"
+            );
+        } else {
+            panic!("expected Assign statement");
+        }
+    }
+
+    #[test]
+    fn desugar_return_with_try() {
+        let span = Span::new(0, 20);
+        let return_stmt = Stmt::Return {
+            span,
+            value: Some(Expr::Try {
+                operand: Box::new(Expr::Ident("res".to_string(), span)),
+                span,
+            }),
+        };
+        let mut module = make_test_module(vec![return_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Return {
+            value: Some(val), ..
+        } = &stmts[0]
+        {
+            assert!(
+                matches!(val, Expr::Match { .. }),
+                "try in return should desugar to match"
+            );
+        } else {
+            panic!("expected Return statement with value");
+        }
+    }
+
+    #[test]
+    fn desugar_binary_op_with_nested_sugar() {
+        let span = Span::new(0, 40);
+        // (a ?? 0) + (b ?? 1) => both sides should desugar
+        let left = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("a".to_string(), span)),
+            right: Box::new(Expr::IntLit(0, span)),
+            span,
+        };
+        let right = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("b".to_string(), span)),
+            right: Box::new(Expr::IntLit(1, span)),
+            span,
+        };
+        let binop = Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Add,
+            right: Box::new(right),
+            span,
+        };
+        let stmt = Stmt::Expr(binop);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::BinaryOp { left, right, .. }) = &stmts[0] {
+            assert!(
+                matches!(left.as_ref(), Expr::Match { .. }),
+                "left coalesce should desugar"
+            );
+            assert!(
+                matches!(right.as_ref(), Expr::Match { .. }),
+                "right coalesce should desugar"
+            );
+        } else {
+            panic!("expected BinaryOp expression");
+        }
+    }
+
+    #[test]
+    fn desugar_call_with_sugar_args() {
+        let span = Span::new(0, 40);
+        let call = Expr::Call {
+            callee: Box::new(Expr::Ident("foo".to_string(), span)),
+            args: vec![
+                Expr::NullCoalesce {
+                    left: Box::new(Expr::Ident("a".to_string(), span)),
+                    right: Box::new(Expr::IntLit(0, span)),
+                    span,
+                },
+                Expr::Try {
+                    operand: Box::new(Expr::Ident("b".to_string(), span)),
+                    span,
+                },
+            ],
+            span,
+        };
+        let stmt = Stmt::Expr(call);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::Call { args, .. }) = &stmts[0] {
+            assert_eq!(args.len(), 2);
+            assert!(
+                matches!(&args[0], Expr::Match { .. }),
+                "coalesce arg should desugar"
+            );
+            assert!(
+                matches!(&args[1], Expr::Match { .. }),
+                "try arg should desugar"
+            );
+        } else {
+            panic!("expected Call expression");
+        }
+    }
+
+    #[test]
+    fn desugar_if_condition_with_sugar() {
+        let span = Span::new(0, 50);
+        let if_expr = Expr::If {
+            condition: Box::new(Expr::Is {
+                operand: Box::new(Expr::Ident("opt".to_string(), span)),
+                type_name: "Some".to_string(),
+                span,
+            }),
+            then_branch: Block {
+                span,
+                stmts: vec![Stmt::Expr(Expr::IntLit(1, span))],
+            },
+            else_branch: Some(Block {
+                span,
+                stmts: vec![Stmt::Expr(Expr::IntLit(0, span))],
+            }),
+            span,
+        };
+        let stmt = Stmt::Expr(if_expr);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::If { condition, .. }) = &stmts[0] {
+            assert!(
+                matches!(condition.as_ref(), Expr::Match { .. }),
+                "is expr in condition should desugar to match"
+            );
+        } else {
+            panic!("expected If expression");
+        }
+    }
+
+    #[test]
+    fn desugar_struct_lit_field_with_sugar() {
+        let span = Span::new(0, 40);
+        let struct_lit = Expr::StructLit {
+            name: "Point".to_string(),
+            fields: vec![kodo_ast::FieldInit {
+                name: "x".to_string(),
+                value: Expr::NullCoalesce {
+                    left: Box::new(Expr::Ident("opt_x".to_string(), span)),
+                    right: Box::new(Expr::IntLit(0, span)),
+                    span,
+                },
+                span,
+            }],
+            span,
+        };
+        let stmt = Stmt::Expr(struct_lit);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::StructLit { fields, .. }) = &stmts[0] {
+            assert!(
+                matches!(&fields[0].value, Expr::Match { .. }),
+                "field value coalesce should desugar"
+            );
+        } else {
+            panic!("expected StructLit expression");
+        }
+    }
+
+    #[test]
+    fn desugar_while_condition_with_sugar() {
+        let span = Span::new(0, 50);
+        let while_stmt = Stmt::While {
+            span,
+            condition: Expr::Is {
+                operand: Box::new(Expr::Ident("state".to_string(), span)),
+                type_name: "Running".to_string(),
+                span,
+            },
+            body: Block {
+                span,
+                stmts: vec![],
+            },
+        };
+        let mut module = make_test_module(vec![while_stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::While { condition, .. } = &stmts[0] {
+            assert!(
+                matches!(condition, Expr::Match { .. }),
+                "is expr in while condition should desugar"
+            );
+        } else {
+            panic!("expected While statement");
+        }
+    }
+
+    #[test]
+    fn desugar_match_arm_body_with_sugar() {
+        let span = Span::new(0, 50);
+        let match_expr = Expr::Match {
+            expr: Box::new(Expr::Ident("val".to_string(), span)),
+            arms: vec![MatchArm {
+                pattern: Pattern::Wildcard(span),
+                body: Expr::NullCoalesce {
+                    left: Box::new(Expr::Ident("opt".to_string(), span)),
+                    right: Box::new(Expr::IntLit(0, span)),
+                    span,
+                },
+                span,
+            }],
+            span,
+        };
+        let stmt = Stmt::Expr(match_expr);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &stmts[0] {
+            assert!(
+                matches!(&arms[0].body, Expr::Match { .. }),
+                "coalesce in match arm body should desugar"
+            );
+        } else {
+            panic!("expected Match expression");
+        }
+    }
+
+    #[test]
+    fn desugar_unary_op_with_sugar() {
+        let span = Span::new(0, 20);
+        let unary = Expr::UnaryOp {
+            op: kodo_ast::UnaryOp::Not,
+            operand: Box::new(Expr::Is {
+                operand: Box::new(Expr::Ident("opt".to_string(), span)),
+                type_name: "None".to_string(),
+                span,
+            }),
+            span,
+        };
+        let stmt = Stmt::Expr(unary);
+        let mut module = make_test_module(vec![stmt]);
+        desugar_module(&mut module);
+
+        let stmts = &module.functions[0].body.stmts;
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::Expr(Expr::UnaryOp { operand, .. }) = &stmts[0] {
+            assert!(
+                matches!(operand.as_ref(), Expr::Match { .. }),
+                "is expr in unary operand should desugar"
+            );
+        } else {
+            panic!("expected UnaryOp expression");
+        }
+    }
 }

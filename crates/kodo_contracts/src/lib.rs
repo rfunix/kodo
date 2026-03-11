@@ -243,11 +243,26 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
             span: *span,
         }),
 
-        // Function calls may have side effects — reject them in contracts.
-        Expr::Call { span, .. } => Err(ContractError::InvalidExpression {
-            message: "function calls are not allowed in contract expressions".to_string(),
-            span: *span,
-        }),
+        // Method calls: allow pure, side-effect-free built-in methods like
+        // `.length()` in contracts. These are essential for string length and
+        // array bounds predicates. General function calls are still rejected.
+        Expr::Call { callee, args, span } => {
+            if is_allowed_contract_method(callee, args) {
+                // Validate the receiver object in the method call.
+                if let Expr::FieldAccess { object, .. } = callee.as_ref() {
+                    validate_contract_expr(object)
+                } else {
+                    Ok(())
+                }
+            } else {
+                Err(ContractError::InvalidExpression {
+                    message: "function calls are not allowed in contract expressions \
+                              (only .length() is permitted)"
+                        .to_string(),
+                    span: *span,
+                })
+            }
+        }
 
         // If expressions are too complex for contract expressions.
         Expr::If { span, .. } => Err(ContractError::InvalidExpression {
@@ -323,6 +338,21 @@ pub fn validate_contract_expr(expr: &Expr) -> Result<()> {
             message: "await is not allowed in contract expressions".to_string(),
             span: *span,
         }),
+    }
+}
+
+/// Checks whether a method call is allowed in a contract expression.
+///
+/// Only pure, side-effect-free built-in methods are permitted:
+/// - `.length()` on strings and arrays — returns the length as an integer.
+///
+/// This whitelist approach ensures contracts remain side-effect-free
+/// while allowing common predicate patterns like `s.length() > 0`.
+fn is_allowed_contract_method(callee: &Expr, args: &[Expr]) -> bool {
+    if let Expr::FieldAccess { field, .. } = callee {
+        matches!(field.as_str(), "length") && args.is_empty()
+    } else {
+        false
     }
 }
 
@@ -548,6 +578,117 @@ pub fn substitute_self(expr: &Expr, var_name: &str) -> Expr {
             span: *span,
         },
         other => other.clone(),
+    }
+}
+
+/// Verifies a contract with refinement type constraints as assumptions.
+///
+/// When a function has parameters with refined types, the refinement constraints
+/// should be injected as hypotheses before verifying the function's own contracts.
+/// For example, if `port: Port` where `type Port = Int requires { self > 0 && self < 65535 }`,
+/// the constraint `port > 0 && port < 65535` is assumed to hold when verifying
+/// the function's `requires`/`ensures` clauses.
+///
+/// `refinement_assumptions` contains the substituted constraint expressions
+/// (with `self` already replaced by the parameter name).
+///
+/// # Errors
+///
+/// Returns [`ContractError`] if a contract expression is malformed or refuted.
+pub fn verify_contracts_with_refinements(
+    contracts: &[Contract],
+    refinement_assumptions: &[Expr],
+    mode: ContractMode,
+) -> Result<VerificationResult> {
+    if mode == ContractMode::None {
+        return Ok(VerificationResult {
+            static_verified: 0,
+            runtime_checks_needed: 0,
+            failures: Vec::new(),
+        });
+    }
+
+    let mut failures = Vec::new();
+    let mut static_verified: usize = 0;
+    let mut runtime_checks_needed: usize = 0;
+    let use_smt = mode == ContractMode::Static || mode == ContractMode::Both;
+
+    for contract in contracts {
+        match validate_contract_expr(&contract.expr) {
+            Ok(()) => {
+                if use_smt && !refinement_assumptions.is_empty() {
+                    match try_smt_verify_with_refinements(contract, refinement_assumptions) {
+                        SmtOutcome::Proved => {
+                            static_verified += 1;
+                        }
+                        SmtOutcome::Refuted(counter_example) => {
+                            if mode == ContractMode::Both {
+                                runtime_checks_needed += 1;
+                            } else {
+                                failures.push(ContractError::StaticRefutation {
+                                    counter_example,
+                                    span: contract.span,
+                                });
+                            }
+                        }
+                        SmtOutcome::Fallback => {
+                            runtime_checks_needed += 1;
+                        }
+                    }
+                } else if use_smt {
+                    match try_smt_verify(contract) {
+                        SmtOutcome::Proved => {
+                            static_verified += 1;
+                        }
+                        SmtOutcome::Refuted(counter_example) => {
+                            if mode == ContractMode::Both {
+                                runtime_checks_needed += 1;
+                            } else {
+                                failures.push(ContractError::StaticRefutation {
+                                    counter_example,
+                                    span: contract.span,
+                                });
+                            }
+                        }
+                        SmtOutcome::Fallback => {
+                            runtime_checks_needed += 1;
+                        }
+                    }
+                } else {
+                    runtime_checks_needed += 1;
+                }
+            }
+            Err(err) => {
+                failures.push(err);
+            }
+        }
+    }
+
+    Ok(VerificationResult {
+        static_verified,
+        runtime_checks_needed,
+        failures,
+    })
+}
+
+/// Attempts SMT verification with refinement type constraints as hypotheses.
+fn try_smt_verify_with_refinements(
+    contract: &Contract,
+    refinement_assumptions: &[Expr],
+) -> SmtOutcome {
+    #[cfg(feature = "smt")]
+    {
+        let assumption_refs: Vec<&Expr> = refinement_assumptions.iter().collect();
+        match smt::verify_with_refinements(&assumption_refs, &contract.expr) {
+            smt::SmtResult::Proved => SmtOutcome::Proved,
+            smt::SmtResult::Refuted(msg) => SmtOutcome::Refuted(msg),
+            smt::SmtResult::Unknown => SmtOutcome::Fallback,
+        }
+    }
+    #[cfg(not(feature = "smt"))]
+    {
+        let _ = (contract, refinement_assumptions);
+        SmtOutcome::Fallback
     }
 }
 
@@ -1084,9 +1225,10 @@ mod tests {
 
     #[cfg(feature = "smt")]
     #[test]
-    fn smt_e2e_unsupported_expr_falls_back_to_runtime() {
-        // Field access expressions cannot be translated to Z3, so they
-        // should fall back to runtime checks (Unknown → Fallback).
+    fn smt_e2e_field_access_expr_translates_to_z3() {
+        // Field access expressions ARE now translatable to Z3 (Phase 35.1).
+        // `self.count > 0` translates but cannot be proved without context,
+        // so Z3 refutes it with a counter-example (e.g., self.count = 0).
         let field_access = Expr::FieldAccess {
             object: Box::new(ident_expr("self")),
             field: "count".to_string(),
@@ -1106,10 +1248,39 @@ mod tests {
         let result = verify_contracts(&contracts, ContractMode::Static);
         assert!(result.is_ok());
         let result = result.unwrap_or_else(|_| panic!("already checked"));
-        // SMT returns Unknown for unsupported expr → falls back to runtime
-        assert_eq!(result.runtime_checks_needed, 1);
-        assert_eq!(result.static_verified, 0);
-        assert!(result.failures.is_empty());
+        // Z3 can now translate field access; without context, it refutes
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::StaticRefutation { .. }
+        ));
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_closure_expr_falls_back_to_runtime() {
+        // Closure expressions are still unsupported in Z3, so they
+        // should fall back to runtime checks (Unknown → Fallback).
+        let closure = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: closure,
+            span: Span::new(0, 10),
+        }];
+        // Closures are rejected by validate_contract_expr, so they become failures
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::InvalidExpression { .. }
+        ));
     }
 
     #[cfg(feature = "smt")]
@@ -1219,5 +1390,175 @@ mod tests {
         assert_eq!(result.static_verified, 2);
         assert_eq!(result.runtime_checks_needed, 0);
         assert!(result.failures.is_empty());
+    }
+
+    // --- Phase 35.1: Struct field predicate validation ---
+
+    #[test]
+    fn validate_field_access_in_contract_is_valid() {
+        // `point.x > 0` should be valid in a contract
+        let field = Expr::FieldAccess {
+            object: Box::new(ident_expr("point")),
+            field: "x".to_string(),
+            span: Span::new(0, 7),
+        };
+        let expr = gt_expr(field, int_expr(0));
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    #[test]
+    fn validate_length_method_call_in_contract_is_valid() {
+        // `s.length() > 0` should be valid in a contract
+        let length_call = Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                object: Box::new(ident_expr("s")),
+                field: "length".to_string(),
+                span: Span::new(0, 8),
+            }),
+            args: vec![],
+            span: Span::new(0, 10),
+        };
+        let expr = gt_expr(length_call, int_expr(0));
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    #[test]
+    fn validate_generic_method_call_in_contract_is_invalid() {
+        // `s.foo()` should still be invalid — only .length() is whitelisted
+        let foo_call = Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                object: Box::new(ident_expr("s")),
+                field: "foo".to_string(),
+                span: Span::new(0, 5),
+            }),
+            args: vec![],
+            span: Span::new(0, 7),
+        };
+        let result = validate_contract_expr(&foo_call);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_plain_function_call_still_invalid() {
+        // `foo(x)` should still be invalid — only method calls are considered
+        let expr = Expr::Call {
+            callee: Box::new(ident_expr("foo")),
+            args: vec![ident_expr("x")],
+            span: Span::new(0, 6),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+    }
+
+    // --- Phase 35.2: Refinement type SMT integration ---
+
+    #[test]
+    fn substitute_self_replaces_correctly() {
+        // `self > 0` with var_name "port" → `port > 0`
+        let constraint = gt_expr(ident_expr("self"), int_expr(0));
+        let substituted = substitute_self(&constraint, "port");
+        if let Expr::BinaryOp { left, .. } = &substituted {
+            if let Expr::Ident(name, _) = left.as_ref() {
+                assert_eq!(name, "port");
+            } else {
+                panic!("expected Ident");
+            }
+        } else {
+            panic!("expected BinaryOp");
+        }
+    }
+
+    #[test]
+    fn substitute_self_in_field_access() {
+        // `self.count > 0` with var_name "obj" → `obj.count > 0`
+        let field = Expr::FieldAccess {
+            object: Box::new(ident_expr("self")),
+            field: "count".to_string(),
+            span: Span::new(0, 10),
+        };
+        let constraint = gt_expr(field, int_expr(0));
+        let substituted = substitute_self(&constraint, "obj");
+        if let Expr::BinaryOp { left, .. } = &substituted {
+            if let Expr::FieldAccess { object, field, .. } = left.as_ref() {
+                if let Expr::Ident(name, _) = object.as_ref() {
+                    assert_eq!(name, "obj");
+                    assert_eq!(field, "count");
+                } else {
+                    panic!("expected Ident");
+                }
+            } else {
+                panic!("expected FieldAccess");
+            }
+        } else {
+            panic!("expected BinaryOp");
+        }
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_verify_with_refinement_port_constraint() {
+        // Simulate: type Port = Int requires { self > 0 && self < 65535 }
+        // Function: fn serve(port: Port) requires { port > 0 }
+        // The refinement constraint should allow Z3 to prove the requires clause.
+        let port_constraint = Expr::BinaryOp {
+            left: Box::new(gt_expr(ident_expr("port"), int_expr(0))),
+            op: BinOp::And,
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(ident_expr("port")),
+                op: BinOp::Lt,
+                right: Box::new(int_expr(65535)),
+                span: Span::new(0, 15),
+            }),
+            span: Span::new(0, 30),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: gt_expr(ident_expr("port"), int_expr(0)),
+            span: Span::new(0, 10),
+        }];
+        let result =
+            verify_contracts_with_refinements(&contracts, &[port_constraint], ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_field_access_predicate_proved() {
+        // `point.x > 0` should be translatable to Z3 and provable with hypothesis
+        let field_x = Expr::FieldAccess {
+            object: Box::new(ident_expr("point")),
+            field: "x".to_string(),
+            span: Span::new(0, 7),
+        };
+        let hypothesis = gt_expr(field_x.clone(), int_expr(0));
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: gt_expr(field_x, int_expr(0)),
+            span: Span::new(0, 15),
+        }];
+        let result =
+            verify_contracts_with_refinements(&contracts, &[hypothesis], ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_refinements_none_mode_skips() {
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: bool_expr(true),
+            span: Span::new(0, 4),
+        }];
+        let result = verify_contracts_with_refinements(&contracts, &[], ContractMode::None);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 0);
+        assert_eq!(result.runtime_checks_needed, 0);
     }
 }

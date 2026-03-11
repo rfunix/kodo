@@ -33,3 +33,4 @@ serde.workspace = true
 sha2.workspace = true
 strsim.workspace = true
 object.workspace = true
+rustyline.workspace = true

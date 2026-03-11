@@ -891,4 +891,108 @@ mod tests {
         assert_eq!(b, NodeId(1));
         assert_eq!(c, NodeId(2));
     }
+
+    #[test]
+    fn span_merge_same_span() {
+        let a = Span::new(5, 10);
+        let merged = a.merge(a);
+        assert_eq!(merged.start, 5);
+        assert_eq!(merged.end, 10);
+    }
+
+    #[test]
+    fn span_merge_overlapping() {
+        let a = Span::new(5, 15);
+        let b = Span::new(10, 20);
+        let merged = a.merge(b);
+        assert_eq!(merged.start, 5);
+        assert_eq!(merged.end, 20);
+    }
+
+    #[test]
+    fn span_merge_adjacent() {
+        let a = Span::new(0, 5);
+        let b = Span::new(5, 10);
+        let merged = a.merge(b);
+        assert_eq!(merged.start, 0);
+        assert_eq!(merged.end, 10);
+    }
+
+    #[test]
+    fn span_new_zero_length() {
+        let span = Span::new(42, 42);
+        assert_eq!(span.len(), 0);
+        assert!(span.is_empty());
+    }
+
+    #[test]
+    fn node_id_gen_default() {
+        let mut gen = NodeIdGen::default();
+        assert_eq!(gen.next_id(), NodeId(0));
+    }
+
+    #[test]
+    fn node_id_gen_many_ids() {
+        let mut gen = NodeIdGen::new();
+        for i in 0..1000 {
+            assert_eq!(gen.next_id(), NodeId(i));
+        }
+    }
+
+    #[test]
+    fn node_id_equality() {
+        assert_eq!(NodeId(5), NodeId(5));
+        assert_ne!(NodeId(5), NodeId(6));
+    }
+
+    #[test]
+    fn type_expr_named_equality() {
+        assert_eq!(
+            TypeExpr::Named("Int".to_string()),
+            TypeExpr::Named("Int".to_string())
+        );
+        assert_ne!(
+            TypeExpr::Named("Int".to_string()),
+            TypeExpr::Named("Bool".to_string())
+        );
+    }
+
+    #[test]
+    fn type_expr_generic_equality() {
+        let a = TypeExpr::Generic("List".to_string(), vec![TypeExpr::Named("Int".to_string())]);
+        let b = TypeExpr::Generic("List".to_string(), vec![TypeExpr::Named("Int".to_string())]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn type_expr_optional_equality() {
+        let a = TypeExpr::Optional(Box::new(TypeExpr::Named("Int".to_string())));
+        let b = TypeExpr::Optional(Box::new(TypeExpr::Named("Int".to_string())));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn type_expr_different_variants_not_equal() {
+        assert_ne!(TypeExpr::Named("Int".to_string()), TypeExpr::Unit);
+    }
+
+    #[test]
+    fn binop_all_variants_exist() {
+        let ops = [
+            BinOp::Add,
+            BinOp::Sub,
+            BinOp::Mul,
+            BinOp::Div,
+            BinOp::Mod,
+            BinOp::Eq,
+            BinOp::Ne,
+            BinOp::Lt,
+            BinOp::Gt,
+            BinOp::Le,
+            BinOp::Ge,
+            BinOp::And,
+            BinOp::Or,
+        ];
+        assert_eq!(ops.len(), 13);
+    }
 }

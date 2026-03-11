@@ -1,0 +1,11 @@
+module intent_json_api {
+    meta {
+        purpose: "Demonstrates JSON API intent resolver",
+        version: "1.0.0"
+    }
+
+    intent json_api {
+        routes: ["/users", "/posts"],
+        models: ["User", "Post"]
+    }
+}

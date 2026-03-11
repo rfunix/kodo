@@ -1702,6 +1702,24 @@ impl TypeChecker {
             "channel_recv".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Int)),
         );
+        // Bool channel operations
+        self.env.insert(
+            "channel_send_bool".to_string(),
+            Type::Function(vec![Type::Int, Type::Bool], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "channel_recv_bool".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+        );
+        // String channel operations
+        self.env.insert(
+            "channel_send_string".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "channel_recv_string".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
         self.env.insert(
             "channel_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
@@ -1999,6 +2017,268 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// Type-checks a module, collecting all errors instead of stopping at the first.
+    ///
+    /// Returns a list of type errors found. An empty list means the module is well-typed.
+    /// This is useful for reporting multiple diagnostics to the user in a single
+    /// compilation pass.
+    #[allow(clippy::too_many_lines)]
+    pub fn check_module_collecting(&mut self, module: &Module) -> Vec<TypeError> {
+        let mut errors = Vec::new();
+
+        // Validate mandatory meta block.
+        match &module.meta {
+            None => {
+                errors.push(TypeError::MissingMeta);
+                return errors;
+            }
+            Some(meta) => {
+                let purpose = meta.entries.iter().find(|e| e.key == "purpose");
+                match purpose {
+                    None => errors.push(TypeError::MissingPurpose { span: meta.span }),
+                    Some(entry) if entry.value.trim().is_empty() => {
+                        errors.push(TypeError::EmptyPurpose { span: entry.span });
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+
+        // Register type aliases (skip on error).
+        for alias in &module.type_aliases {
+            match self.resolve_type_mono(&alias.base_type, alias.span) {
+                Ok(base_ty) => {
+                    self.type_alias_registry
+                        .insert(alias.name.clone(), (base_ty, alias.constraint.clone()));
+                    self.definition_spans.insert(alias.name.clone(), alias.span);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        // Register struct types (skip on error).
+        for type_decl in &module.type_decls {
+            if type_decl.generic_params.is_empty() {
+                let mut fields = Vec::new();
+                let mut field_ok = true;
+                for field in &type_decl.fields {
+                    match resolve_type(&field.ty, field.span) {
+                        Ok(ty) => fields.push((field.name.clone(), ty)),
+                        Err(e) => {
+                            errors.push(e);
+                            field_ok = false;
+                        }
+                    }
+                }
+                if field_ok {
+                    self.struct_registry.insert(type_decl.name.clone(), fields);
+                    self.definition_spans
+                        .insert(type_decl.name.clone(), type_decl.span);
+                }
+            } else {
+                self.generic_structs.insert(
+                    type_decl.name.clone(),
+                    GenericStructDef {
+                        params: type_decl.generic_params.clone(),
+                        fields: type_decl
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.clone(), f.ty.clone()))
+                            .collect(),
+                    },
+                );
+            }
+        }
+
+        // Register enum types.
+        for enum_decl in &module.enum_decls {
+            self.enum_names.insert(enum_decl.name.clone());
+            if enum_decl.generic_params.is_empty() {
+                let mut variants = Vec::new();
+                let mut variant_ok = true;
+                for variant in &enum_decl.variants {
+                    let field_types: std::result::Result<Vec<_>, _> = variant
+                        .fields
+                        .iter()
+                        .map(|f| resolve_type(f, variant.span))
+                        .collect();
+                    match field_types {
+                        Ok(ft) => variants.push((variant.name.clone(), ft)),
+                        Err(e) => {
+                            errors.push(e);
+                            variant_ok = false;
+                        }
+                    }
+                }
+                if variant_ok {
+                    self.enum_registry.insert(enum_decl.name.clone(), variants);
+                }
+            } else {
+                self.generic_enums.insert(
+                    enum_decl.name.clone(),
+                    GenericEnumDef {
+                        params: enum_decl.generic_params.clone(),
+                        variants: enum_decl
+                            .variants
+                            .iter()
+                            .map(|v| (v.name.clone(), v.fields.clone()))
+                            .collect(),
+                    },
+                );
+            }
+        }
+
+        // Register actor declarations as structs + handler signatures.
+        for actor_decl in &module.actor_decls {
+            let mut fields = Vec::new();
+            let mut field_ok = true;
+            for field in &actor_decl.fields {
+                match self.resolve_type_mono(&field.ty, field.span) {
+                    Ok(ty) => fields.push((field.name.clone(), ty)),
+                    Err(e) => {
+                        errors.push(e);
+                        field_ok = false;
+                    }
+                }
+            }
+            if field_ok {
+                self.struct_registry.insert(actor_decl.name.clone(), fields);
+            }
+
+            for handler in &actor_decl.handlers {
+                let mangled_name = format!("{}_{}", actor_decl.name, handler.name);
+                let param_types: std::result::Result<Vec<_>, _> = handler
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                    .collect();
+                match param_types {
+                    Ok(pt) => match self.resolve_type_mono(&handler.return_type, handler.span) {
+                        Ok(ret_type) => {
+                            self.env
+                                .insert(mangled_name, Type::Function(pt, Box::new(ret_type)));
+                        }
+                        Err(e) => errors.push(e),
+                    },
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+
+        // Register function signatures (first pass).
+        for func in &module.functions {
+            if !func.generic_params.is_empty() {
+                self.generic_functions.insert(
+                    func.name.clone(),
+                    GenericFunctionDef {
+                        params: func.generic_params.clone(),
+                        param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
+                        return_type: func.return_type.clone(),
+                    },
+                );
+                continue;
+            }
+            let param_types: std::result::Result<Vec<_>, _> = func
+                .params
+                .iter()
+                .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                .collect();
+            match param_types {
+                Ok(pt) => match self.resolve_type_mono(&func.return_type, func.span) {
+                    Ok(ret_type) => {
+                        self.env
+                            .insert(func.name.clone(), Type::Function(pt, Box::new(ret_type)));
+                        self.definition_spans.insert(func.name.clone(), func.span);
+                        let qualifiers: Vec<kodo_ast::Ownership> =
+                            func.params.iter().map(|p| p.ownership).collect();
+                        self.fn_param_ownership
+                            .insert(func.name.clone(), qualifiers);
+                    }
+                    Err(e) => errors.push(e),
+                },
+                Err(e) => errors.push(e),
+            }
+        }
+
+        // Check each function body independently (second pass).
+        for func in &module.functions {
+            if func.generic_params.is_empty() {
+                if let Err(e) = self.check_function(func) {
+                    errors.push(e);
+                }
+            }
+        }
+
+        // Check impl block methods.
+        for impl_block in &module.impl_blocks {
+            for method in &impl_block.methods {
+                if let Err(e) = self.check_function(method) {
+                    errors.push(e);
+                }
+            }
+        }
+
+        // Check actor handler bodies.
+        for actor_decl in &module.actor_decls {
+            for handler in &actor_decl.handlers {
+                if let Err(e) = self.check_function(handler) {
+                    errors.push(e);
+                }
+            }
+        }
+
+        // Validate trust policies based on annotations.
+        let trust_policy = module
+            .meta
+            .as_ref()
+            .and_then(|m| m.entries.iter().find(|e| e.key == "trust_policy"))
+            .map(|e| e.value.clone());
+
+        if let Some(policy) = trust_policy {
+            if policy == "high_security" {
+                for func in &module.functions {
+                    if let Err(e) = Self::validate_trust_policy(func) {
+                        errors.push(e);
+                    }
+                }
+            }
+        }
+
+        // Check annotation-based policies.
+        for func in &module.functions {
+            if let Err(e) = Self::check_annotation_policies(func) {
+                errors.push(e);
+            }
+        }
+
+        // Check confidence threshold.
+        let min_confidence = module
+            .meta
+            .as_ref()
+            .and_then(|m| m.entries.iter().find(|e| e.key == "min_confidence"))
+            .and_then(|e| e.value.parse::<f64>().ok());
+
+        if let Some(threshold) = min_confidence {
+            for func in &module.functions {
+                let computed =
+                    self.compute_confidence(&func.name, &mut std::collections::HashSet::new());
+                if computed < threshold {
+                    let (weakest_fn, weakest_conf) =
+                        self.find_weakest_link(&func.name, &mut std::collections::HashSet::new());
+                    errors.push(TypeError::ConfidenceThreshold {
+                        computed: format!("{computed:.2}"),
+                        threshold: format!("{threshold:.2}"),
+                        weakest_fn,
+                        weakest_confidence: format!("{weakest_conf:.2}"),
+                        span: func.span,
+                    });
+                }
+            }
+        }
+
+        errors
     }
 
     /// Validates trust policy constraints on a function's annotations.

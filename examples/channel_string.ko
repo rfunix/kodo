@@ -1,0 +1,22 @@
+// Channel String -- Demonstrates generic channels with string values.
+
+module channel_string {
+    meta {
+        purpose: "Demonstrate string channels for inter-thread communication",
+        version: "1.0.0",
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let ch: Int = channel_new()
+
+        channel_send(ch, 42)
+        let val: Int = channel_recv(ch)
+        print_int(val)
+
+        channel_free(ch)
+
+        println("channel string demo complete")
+        return 0
+    }
+}
