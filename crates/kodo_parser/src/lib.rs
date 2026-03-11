@@ -2248,6 +2248,217 @@ impl Parser {
             .is_some_and(|t| std::mem::discriminant(&t.kind) == std::mem::discriminant(expected))
     }
 
+    // ── Error Recovery ─────────────────────────────────────────────────
+    //
+    // The methods below implement *panic-mode* error recovery as described
+    // in [CI] Ch. 6 and [EC] Ch. 3.4.  When the parser encounters an
+    // unexpected token it records the error and advances the token stream
+    // until it reaches a **synchronization point** — a token where the
+    // parser can reliably restart.  This lets us report multiple errors in
+    // a single parse pass, which is critical for LSP and AI-agent
+    // feedback loops.
+
+    /// Returns `true` if the given token kind is a *module-level*
+    /// synchronization point — i.e. a token that can begin a new
+    /// top-level declaration.
+    ///
+    /// Note: `RBrace` is intentionally excluded.  During recovery we
+    /// want to land on the *start* of the next declaration, not on a
+    /// stray closing brace that belongs to a malformed block.  The
+    /// module-closing `}` is handled separately after the declaration
+    /// loop.
+    fn is_module_sync_token(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Fn
+                | TokenKind::Struct
+                | TokenKind::Enum
+                | TokenKind::Trait
+                | TokenKind::Impl
+                | TokenKind::Intent
+                | TokenKind::Actor
+                | TokenKind::Module
+                | TokenKind::At
+                | TokenKind::Async
+                | TokenKind::Type
+        )
+    }
+
+    /// Advances the token stream until a module-level synchronization
+    /// token is found or the token stream is exhausted.
+    ///
+    /// This is the core of panic-mode recovery: after an error we skip
+    /// the damaged portion of the input and resume at the next point
+    /// where a fresh declaration can reasonably begin.
+    fn synchronize_to_declaration(&mut self) {
+        while let Some(token) = self.peek() {
+            if Self::is_module_sync_token(&token.kind) {
+                return;
+            }
+            self.advance();
+        }
+    }
+
+    /// Creates an empty [`Module`] with the given name and span.
+    fn empty_module(&mut self, name: String, span: Span) -> Module {
+        Module {
+            id: self.id_gen.next_id(),
+            span,
+            name,
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            functions: vec![],
+        }
+    }
+
+    /// Parses a module with error recovery, collecting all parse errors
+    /// instead of bailing on the first one.
+    ///
+    /// The returned [`ParseOutput`] always contains a [`Module`] — though
+    /// it may be missing declarations whose parsing failed — plus every
+    /// error that was encountered along the way.
+    fn parse_module_with_recovery(&mut self) -> ParseOutput {
+        let mut errors: Vec<ParseError> = Vec::new();
+        let start = self.peek().map_or(Span::new(0, 0), |t| t.span);
+
+        // Parse: module <name> {
+        let name = match self
+            .expect(&TokenKind::Module)
+            .and_then(|_| self.parse_ident())
+        {
+            Ok(n) => n,
+            Err(e) => {
+                errors.push(e);
+                return ParseOutput {
+                    module: self.empty_module(String::new(), start),
+                    errors,
+                };
+            }
+        };
+
+        if let Err(e) = self.expect(&TokenKind::LBrace) {
+            errors.push(e);
+            return ParseOutput {
+                module: self.empty_module(name, start),
+                errors,
+            };
+        }
+
+        let (imports, meta) = self.parse_header_with_recovery(&mut errors);
+        let module_body = self.parse_declarations_with_recovery(&mut errors);
+
+        // Try to consume closing brace.
+        if let Err(e) = self.expect(&TokenKind::RBrace) {
+            errors.push(e);
+        }
+        let span = start.merge(self.prev_span());
+
+        ParseOutput {
+            module: Module {
+                id: self.id_gen.next_id(),
+                span,
+                name,
+                imports,
+                meta,
+                type_aliases: module_body.type_aliases,
+                type_decls: module_body.type_decls,
+                enum_decls: module_body.enum_decls,
+                trait_decls: module_body.trait_decls,
+                impl_blocks: module_body.impl_blocks,
+                actor_decls: module_body.actor_decls,
+                intent_decls: module_body.intent_decls,
+                functions: module_body.functions,
+            },
+            errors,
+        }
+    }
+
+    /// Parses imports and meta block, recovering from errors.
+    fn parse_header_with_recovery(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> (Vec<ImportDecl>, Option<Meta>) {
+        let mut imports = Vec::new();
+        while self.check(&TokenKind::Import) {
+            match self.parse_import() {
+                Ok(imp) => imports.push(imp),
+                Err(e) => {
+                    errors.push(e);
+                    self.synchronize_to_declaration();
+                }
+            }
+        }
+        let meta = if self.check(&TokenKind::Meta) {
+            match self.parse_meta() {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    errors.push(e);
+                    self.synchronize_to_declaration();
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        (imports, meta)
+    }
+
+    /// Parses top-level declarations with recovery, collecting errors.
+    #[allow(clippy::too_many_lines)]
+    fn parse_declarations_with_recovery(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> RecoveredDeclarations {
+        let mut decls = RecoveredDeclarations::default();
+
+        while self.check(&TokenKind::Fn)
+            || self.check(&TokenKind::At)
+            || self.check(&TokenKind::Struct)
+            || self.check(&TokenKind::Enum)
+            || self.check(&TokenKind::Trait)
+            || self.check(&TokenKind::Impl)
+            || self.check(&TokenKind::Actor)
+            || self.check(&TokenKind::Async)
+            || self.check(&TokenKind::Intent)
+            || self.check(&TokenKind::Type)
+        {
+            let result: std::result::Result<(), ParseError> = (|| {
+                if self.check(&TokenKind::Type) {
+                    decls.type_aliases.push(self.parse_type_alias()?);
+                } else if self.check(&TokenKind::Struct) {
+                    decls.type_decls.push(self.parse_struct_decl()?);
+                } else if self.check(&TokenKind::Enum) {
+                    decls.enum_decls.push(self.parse_enum_decl()?);
+                } else if self.check(&TokenKind::Trait) {
+                    decls.trait_decls.push(self.parse_trait_decl()?);
+                } else if self.check(&TokenKind::Impl) {
+                    decls.impl_blocks.push(self.parse_impl_block()?);
+                } else if self.check(&TokenKind::Actor) {
+                    decls.actor_decls.push(self.parse_actor_decl()?);
+                } else if self.check(&TokenKind::Intent) {
+                    decls.intent_decls.push(self.parse_intent()?);
+                } else {
+                    decls.functions.push(self.parse_annotated_function()?);
+                }
+                Ok(())
+            })();
+
+            if let Err(e) = result {
+                errors.push(e);
+                self.synchronize_to_declaration();
+            }
+        }
+
+        decls
+    }
+
     /// Returns the span of an expression.
     fn expr_span(expr: &Expr) -> Span {
         match expr {
@@ -2293,27 +2504,50 @@ pub fn parse(source: &str) -> Result<Module> {
     parser.parse_module()
 }
 
-/// Result of parsing with error recovery.
+/// Result of parsing with error recovery — contains partial AST and accumulated errors.
 ///
-/// Contains a best-effort AST (if recoverable) and all errors encountered.
+/// When the parser encounters an error it synchronizes to the next reliable
+/// token boundary and continues, collecting all diagnostics in one pass.
+/// This is essential for LSP and IDE integration where reporting every error
+/// at once gives the programmer (or AI agent) a complete picture.
+///
+/// # Academic Reference
+///
+/// Panic-mode recovery as described in **\[CI\]** *Crafting Interpreters* Ch. 6
+/// and **\[EC\]** *Engineering a Compiler* Ch. 3.4.
 pub struct ParseOutput {
-    /// The parsed module (best-effort, may be incomplete if errors occurred).
-    pub module: Option<Module>,
+    /// The (possibly incomplete) parsed module.
+    pub module: Module,
     /// All parse errors encountered during parsing.
     pub errors: Vec<ParseError>,
+}
+
+/// Internal bucket for declarations collected during error recovery.
+#[derive(Default)]
+struct RecoveredDeclarations {
+    type_aliases: Vec<TypeAlias>,
+    type_decls: Vec<TypeDecl>,
+    enum_decls: Vec<EnumDecl>,
+    trait_decls: Vec<TraitDecl>,
+    impl_blocks: Vec<ImplBlock>,
+    actor_decls: Vec<ActorDecl>,
+    intent_decls: Vec<IntentDecl>,
+    functions: Vec<Function>,
 }
 
 /// Parses source code with error recovery, collecting multiple errors.
 ///
 /// Unlike [`parse()`], this function does not stop at the first error.
 /// It attempts to synchronize and continue parsing, collecting all errors.
+/// The returned [`ParseOutput`] always contains a [`Module`] (possibly with
+/// missing declarations) plus every error that was encountered.
 ///
 /// # Examples
 ///
 /// ```
 /// let output = kodo_parser::parse_with_recovery("module m { meta {} fn a() {} }");
-/// // output.errors may contain multiple errors
-/// // output.module may be Some if recovery was possible
+/// assert!(output.errors.is_empty());
+/// assert_eq!(output.module.name, "m");
 /// ```
 #[must_use]
 pub fn parse_with_recovery(source: &str) -> ParseOutput {
@@ -2321,22 +2555,27 @@ pub fn parse_with_recovery(source: &str) -> ParseOutput {
         Ok(t) => t,
         Err(e) => {
             return ParseOutput {
-                module: None,
+                module: Module {
+                    id: kodo_ast::NodeId(0),
+                    span: Span::new(0, 0),
+                    name: String::new(),
+                    imports: vec![],
+                    meta: None,
+                    type_aliases: vec![],
+                    type_decls: vec![],
+                    enum_decls: vec![],
+                    trait_decls: vec![],
+                    impl_blocks: vec![],
+                    actor_decls: vec![],
+                    intent_decls: vec![],
+                    functions: vec![],
+                },
                 errors: vec![ParseError::from(e)],
             };
         }
     };
     let mut parser = Parser::new(tokens);
-    match parser.parse_module() {
-        Ok(module) => ParseOutput {
-            module: Some(module),
-            errors: vec![],
-        },
-        Err(e) => ParseOutput {
-            module: None,
-            errors: vec![e],
-        },
-    }
+    parser.parse_module_with_recovery()
 }
 
 #[cfg(test)]
@@ -4956,5 +5195,343 @@ mod tests {
             }
             other => panic!("expected Tuple, got {other:?}"),
         }
+    }
+
+    // ── Error Recovery Tests ───────────────────────────────────────────
+
+    #[test]
+    fn recovery_valid_module_no_errors() {
+        let output =
+            parse_with_recovery(r#"module m { meta { v: "1" } fn a() {} fn b() -> Int { 42 } }"#);
+        assert!(output.errors.is_empty());
+        assert_eq!(output.module.name, "m");
+        assert_eq!(output.module.functions.len(), 2);
+    }
+
+    #[test]
+    fn recovery_bad_first_fn_still_parses_second() {
+        let output = parse_with_recovery(r#"module m { fn a( {} fn b() -> Int { 42 } }"#);
+        assert!(!output.errors.is_empty(), "should have at least one error");
+        // The second function `b` should be recovered.
+        assert!(
+            output.module.functions.iter().any(|f| f.name == "b"),
+            "function b should be present in partial AST, got: {:?}",
+            output
+                .module
+                .functions
+                .iter()
+                .map(|f| &f.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn recovery_multiple_bad_functions() {
+        let output = parse_with_recovery(r#"module m { fn a( {} fn b( {} fn c() { } }"#);
+        assert!(
+            output.errors.len() >= 2,
+            "should have >=2 errors, got {}",
+            output.errors.len()
+        );
+        assert!(
+            output.module.functions.iter().any(|f| f.name == "c"),
+            "function c should be present"
+        );
+    }
+
+    #[test]
+    fn recovery_bad_struct_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { struct S { x: } fn ok() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(
+            output.module.functions.iter().any(|f| f.name == "ok"),
+            "function ok should be recovered"
+        );
+    }
+
+    #[test]
+    fn recovery_missing_module_closing_brace() {
+        let output = parse_with_recovery(r#"module m { fn a() { } "#);
+        assert!(!output.errors.is_empty());
+        assert_eq!(output.module.name, "m");
+        assert_eq!(output.module.functions.len(), 1);
+    }
+
+    #[test]
+    fn recovery_error_span_is_present() {
+        let output = parse_with_recovery(r#"module m { fn a( {} fn b() { } }"#);
+        assert!(!output.errors.is_empty());
+        // At least one error should carry a span.
+        assert!(
+            output.errors.iter().any(|e| e.span().is_some()),
+            "at least one error should have a span"
+        );
+    }
+
+    #[test]
+    fn recovery_error_codes_are_valid() {
+        let output = parse_with_recovery(r#"module m { fn a( {} fn b() { } }"#);
+        for e in &output.errors {
+            let code = e.code();
+            assert!(
+                code == "E0100" || code == "E0101" || code == "E0001",
+                "unexpected error code: {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_enum_error_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { enum E { A( } fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_trait_error_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { trait T { fn bad( } fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_impl_error_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { impl S { fn bad( } fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_intent_error_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { intent I { bad: } fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_bad_meta_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { meta { bad } fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_multiple_good_fns_among_errors() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn a() { }
+                fn bad( {}
+                fn b() -> Int { 42 }
+                fn also_bad( {}
+                fn c() { }
+            }"#,
+        );
+        assert!(output.errors.len() >= 2);
+        let names: Vec<&str> = output
+            .module
+            .functions
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert!(names.contains(&"a"), "a should be present, got {names:?}");
+        assert!(names.contains(&"b"), "b should be present, got {names:?}");
+        assert!(names.contains(&"c"), "c should be present, got {names:?}");
+    }
+
+    #[test]
+    fn recovery_preserves_module_name() {
+        let output = parse_with_recovery(r#"module my_module { fn bad( {} }"#);
+        assert_eq!(output.module.name, "my_module");
+    }
+
+    #[test]
+    fn recovery_three_errors() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn err1( {}
+                fn err2( {}
+                fn err3( {}
+            }"#,
+        );
+        assert!(
+            output.errors.len() >= 3,
+            "expected >=3 errors, got {}",
+            output.errors.len()
+        );
+    }
+
+    #[test]
+    fn recovery_empty_module_no_errors() {
+        let output = parse_with_recovery(r#"module m { }"#);
+        assert!(output.errors.is_empty());
+        assert_eq!(output.module.name, "m");
+    }
+
+    #[test]
+    fn recovery_struct_and_fn_both_good() {
+        let output = parse_with_recovery(r#"module m { struct S { x: Int } fn f() { } }"#);
+        assert!(output.errors.is_empty());
+        assert_eq!(output.module.type_decls.len(), 1);
+        assert_eq!(output.module.functions.len(), 1);
+    }
+
+    #[test]
+    fn recovery_annotation_error_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { @bad( fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        // After annotation parse failure, sync should pick up `fn good`.
+        // Depending on how far recovery goes, `good` may or may not be present,
+        // but we must get at least one error.
+    }
+
+    #[test]
+    fn recovery_original_parse_still_works() {
+        // Ensure the non-recovery path is unaffected.
+        let result = parse(r#"module m { fn a() { } }"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn recovery_original_parse_fails_on_first_error() {
+        // The non-recovery path must still fail on the first error.
+        let result = parse(r#"module m { fn a( {} fn b() { } }"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn recovery_sync_to_async_fn() {
+        let output = parse_with_recovery(r#"module m { fn bad( {} async fn good() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(
+            output.module.functions.iter().any(|f| f.name == "good"),
+            "async function should be recovered"
+        );
+    }
+
+    #[test]
+    fn recovery_five_errors() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn e1( {}
+                fn e2( {}
+                fn e3( {}
+                fn e4( {}
+                fn e5( {}
+            }"#,
+        );
+        assert!(
+            output.errors.len() >= 5,
+            "expected >=5 errors, got {}",
+            output.errors.len()
+        );
+    }
+
+    #[test]
+    fn recovery_bad_type_alias_then_good_fn() {
+        let output = parse_with_recovery(r#"module m { type T = fn ok() { } }"#);
+        // The type alias parse will fail; sync should recover.
+        assert!(!output.errors.is_empty());
+    }
+
+    #[test]
+    fn recovery_module_with_meta_and_errors() {
+        let output = parse_with_recovery(
+            r#"module m {
+                meta { version: "1.0" }
+                fn bad( {}
+                fn good() { }
+            }"#,
+        );
+        assert!(!output.errors.is_empty());
+        assert!(output.module.meta.is_some());
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
+    }
+
+    #[test]
+    fn recovery_preserves_function_body() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn bad( {}
+                fn good() -> Int {
+                    let x: Int = 10
+                    return x
+                }
+            }"#,
+        );
+        assert!(!output.errors.is_empty());
+        let good = output.module.functions.iter().find(|f| f.name == "good");
+        assert!(good.is_some(), "function good should be present");
+        let good = good.unwrap();
+        assert_eq!(good.body.stmts.len(), 2, "good should have 2 statements");
+    }
+
+    #[test]
+    fn recovery_preserves_return_type() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn bad( {}
+                fn good() -> Bool { true }
+            }"#,
+        );
+        let good = output.module.functions.iter().find(|f| f.name == "good");
+        assert!(good.is_some());
+        assert!(
+            matches!(good.unwrap().return_type, TypeExpr::Named(ref n) if n == "Bool"),
+            "return type should be Bool"
+        );
+    }
+
+    #[test]
+    fn recovery_output_has_module_when_all_bad() {
+        let output = parse_with_recovery(
+            r#"module m {
+                fn e1( {}
+                fn e2( {}
+            }"#,
+        );
+        // Even when all declarations fail, we still get a module.
+        assert_eq!(output.module.name, "m");
+        assert!(!output.errors.is_empty());
+    }
+
+    #[test]
+    fn recovery_sync_skips_tokens_correctly() {
+        // Junk tokens between fn keyword and next fn should be skipped.
+        let output = parse_with_recovery(r#"module m { fn a 123 456 fn b() { } }"#);
+        assert!(!output.errors.is_empty());
+        assert!(
+            output.module.functions.iter().any(|f| f.name == "b"),
+            "function b should be recovered after junk tokens"
+        );
+    }
+
+    #[test]
+    fn recovery_struct_error_preserves_good_struct() {
+        let output = parse_with_recovery(
+            r#"module m {
+                struct Bad { x: }
+                struct Good { y: Int }
+            }"#,
+        );
+        assert!(!output.errors.is_empty());
+        assert!(
+            output.module.type_decls.iter().any(|s| s.name == "Good"),
+            "Good struct should be present"
+        );
+    }
+
+    #[test]
+    fn recovery_interleaved_structs_and_fns() {
+        let output = parse_with_recovery(
+            r#"module m {
+                struct S { x: Int }
+                fn bad( {}
+                fn good() { }
+                struct T { y: Bool }
+            }"#,
+        );
+        assert!(!output.errors.is_empty());
+        assert_eq!(output.module.type_decls.len(), 2);
+        assert!(output.module.functions.iter().any(|f| f.name == "good"));
     }
 }

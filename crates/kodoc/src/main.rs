@@ -1653,15 +1653,20 @@ fn run_parse(file: &PathBuf) -> i32 {
         }
     };
 
-    match kodo_parser::parse(&source) {
-        Ok(module) => {
-            println!("{module:#?}");
-            0
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            1
-        }
+    let output = kodo_parser::parse_with_recovery(&source);
+
+    // Report all errors that were collected during recovery.
+    for e in &output.errors {
+        let filename = file.display().to_string();
+        diagnostics::render_parse_error(&source, &filename, e);
+    }
+
+    if output.errors.is_empty() {
+        println!("{:#?}", output.module);
+        0
+    } else {
+        eprintln!("{} parse error(s) found", output.errors.len());
+        1
     }
 }
 
