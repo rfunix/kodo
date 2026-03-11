@@ -538,6 +538,39 @@ fn declare_builtins(
         );
     }
 
+    // kodo_parallel_begin() -> i64
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_parallel_begin", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_parallel_begin".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_parallel_spawn(group: i64, fn_ptr: i64, env_ptr: i64, env_size: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_parallel_spawn", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_parallel_spawn".to_string(), BuiltinInfo { func_id });
+    }
+
+    // kodo_parallel_join(group: i64)
+    {
+        let mut sig = Signature::new(call_conv);
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = module
+            .declare_function("kodo_parallel_join", Linkage::Import, &sig)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        builtins.insert("kodo_parallel_join".to_string(), BuiltinInfo { func_id });
+    }
+
     // kodo_clamp(val: i64, lo: i64, hi: i64) -> i64
     {
         let mut sig = Signature::new(call_conv);

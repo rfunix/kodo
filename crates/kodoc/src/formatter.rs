@@ -356,6 +356,15 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str("}\n");
         }
+        Stmt::Parallel { body, .. } => {
+            indent(out, level);
+            out.push_str("parallel {\n");
+            for stmt in body {
+                format_stmt(out, stmt, level + 1);
+            }
+            indent(out, level);
+            out.push_str("}\n");
+        }
     }
 }
 

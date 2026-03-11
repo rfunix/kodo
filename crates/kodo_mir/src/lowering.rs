@@ -331,6 +331,11 @@ impl MirBuilder {
                     Self::collect_free_vars_in_stmt(s, params, free, seen);
                 }
             }
+            Stmt::Parallel { body, .. } => {
+                for s in body {
+                    Self::collect_free_vars_in_stmt(s, params, free, seen);
+                }
+            }
         }
     }
 
@@ -708,7 +713,152 @@ impl MirBuilder {
 
                 Ok(Value::Unit)
             }
+            Stmt::Parallel { body, .. } => {
+                let group_local = self.alloc_local(Type::Int, false);
+                self.emit(Instruction::Call {
+                    dest: group_local,
+                    callee: "kodo_parallel_begin".to_string(),
+                    args: vec![],
+                });
+                for stmt in body {
+                    if let Stmt::Spawn {
+                        body: spawn_body, ..
+                    } = stmt
+                    {
+                        self.lower_parallel_spawn(group_local, spawn_body)?;
+                    }
+                }
+                let join_dest = self.alloc_local(Type::Unit, false);
+                self.emit(Instruction::Call {
+                    dest: join_dest,
+                    callee: "kodo_parallel_join".to_string(),
+                    args: vec![Value::Local(group_local)],
+                });
+                Ok(Value::Unit)
+            }
         }
+    }
+
+    /// Lambda-lifts a spawn body inside a parallel block.
+    #[allow(clippy::too_many_lines)]
+    fn lower_parallel_spawn(&mut self, group_local: LocalId, body: &Block) -> Result<()> {
+        let params = std::collections::HashSet::new();
+        let mut free_vars = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for s in &body.stmts {
+            Self::collect_free_vars_in_stmt(s, &params, &mut free_vars, &mut seen);
+        }
+        let captures: Vec<String> = free_vars
+            .into_iter()
+            .filter(|name| self.name_map.contains_key(name))
+            .collect();
+        let spawn_name = format!("__parallel_spawn_{}", self.closure_counter);
+        self.closure_counter += 1;
+        let mut spawn_builder = MirBuilder::new();
+        spawn_builder
+            .struct_registry
+            .clone_from(&self.struct_registry);
+        spawn_builder.enum_registry.clone_from(&self.enum_registry);
+        spawn_builder
+            .fn_return_types
+            .clone_from(&self.fn_return_types);
+        spawn_builder.fn_name.clone_from(&spawn_name);
+        if captures.is_empty() {
+            let body_val = spawn_builder.lower_block(body)?;
+            let _ = body_val;
+            spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+            let mir_func = MirFunction {
+                name: spawn_name.clone(),
+                return_type: Type::Unit,
+                param_count: 0,
+                locals: spawn_builder.locals,
+                blocks: spawn_builder.blocks,
+                entry: BlockId(0),
+            };
+            self.generated_closures
+                .extend(spawn_builder.generated_closures);
+            self.generated_closures.push(mir_func);
+            self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
+            let dest = self.alloc_local(Type::Unit, false);
+            self.emit(Instruction::Call {
+                dest,
+                callee: "kodo_parallel_spawn".to_string(),
+                args: vec![
+                    Value::Local(group_local),
+                    Value::FuncRef(spawn_name),
+                    Value::IntConst(0),
+                    Value::IntConst(0),
+                ],
+            });
+        } else {
+            let env_param = spawn_builder.alloc_local(Type::Int, false);
+            spawn_builder
+                .name_map
+                .insert("__env_ptr".to_string(), env_param);
+            for (idx, cap_name) in captures.iter().enumerate() {
+                let cap_ty = self
+                    .name_map
+                    .get(cap_name)
+                    .and_then(|lid| self.local_types.get(lid))
+                    .cloned()
+                    .unwrap_or(Type::Int);
+                let cap_local = spawn_builder.alloc_local(cap_ty.clone(), false);
+                spawn_builder.name_map.insert(cap_name.clone(), cap_local);
+                spawn_builder.local_types.insert(cap_local, cap_ty);
+                #[allow(clippy::cast_possible_wrap)]
+                let offset = (idx as i64) * 8;
+                spawn_builder.emit(Instruction::Call {
+                    dest: cap_local,
+                    callee: "__env_load".to_string(),
+                    args: vec![Value::Local(env_param), Value::IntConst(offset)],
+                });
+            }
+            let param_count = 1;
+            let body_val = spawn_builder.lower_block(body)?;
+            let _ = body_val;
+            spawn_builder.seal_block_final(Terminator::Return(Value::Unit));
+            let mir_func = MirFunction {
+                name: spawn_name.clone(),
+                return_type: Type::Unit,
+                param_count,
+                locals: spawn_builder.locals,
+                blocks: spawn_builder.blocks,
+                entry: BlockId(0),
+            };
+            self.generated_closures
+                .extend(spawn_builder.generated_closures);
+            self.generated_closures.push(mir_func);
+            self.fn_return_types.insert(spawn_name.clone(), Type::Unit);
+            let env_local = self.alloc_local(Type::Int, false);
+            let mut pack_args = Vec::with_capacity(captures.len());
+            for cap_name in &captures {
+                let cap_lid = self
+                    .name_map
+                    .get(cap_name)
+                    .copied()
+                    .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
+                pack_args.push(Value::Local(cap_lid));
+            }
+            self.emit(Instruction::Call {
+                dest: env_local,
+                callee: "__env_pack".to_string(),
+                args: pack_args,
+            });
+            #[allow(clippy::cast_possible_wrap)]
+            let env_size = (captures.len() as i64) * 8;
+            let dest = self.alloc_local(Type::Unit, false);
+            self.emit(Instruction::Call {
+                dest,
+                callee: "kodo_parallel_spawn".to_string(),
+                args: vec![
+                    Value::Local(group_local),
+                    Value::FuncRef(spawn_name),
+                    Value::Local(env_local),
+                    Value::IntConst(env_size),
+                ],
+            });
+        }
+        Ok(())
     }
 
     /// Lowers a `for` loop into MIR by desugaring into a while-style loop.

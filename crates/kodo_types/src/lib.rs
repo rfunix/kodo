@@ -2330,6 +2330,12 @@ impl TypeChecker {
                 self.check_block(body)?;
                 Ok(())
             }
+            Stmt::Parallel { body, .. } => {
+                for stmt in body {
+                    self.check_stmt(stmt)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -2879,6 +2885,12 @@ impl TypeChecker {
                 }
                 Stmt::Spawn { body, .. } => {
                     self.infer_block(body)?;
+                    last_ty = Type::Unit;
+                }
+                Stmt::Parallel { body, .. } => {
+                    for stmt in body {
+                        self.check_stmt(stmt)?;
+                    }
                     last_ty = Type::Unit;
                 }
             }

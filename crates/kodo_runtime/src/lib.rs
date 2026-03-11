@@ -603,6 +603,110 @@ enum Task {
 /// All tasks are executed when `kodo_run_scheduler` is called.
 static TASK_QUEUE: std::sync::Mutex<Vec<Task>> = std::sync::Mutex::new(Vec::new());
 
+/// A task inside a parallel group.
+enum ParallelTask {
+    /// A plain function with no captures.
+    Plain(extern "C" fn()),
+    /// A function that takes a captured-environment pointer.
+    WithEnv {
+        /// The function pointer.
+        func: extern "C" fn(i64),
+        /// Captured environment bytes (copied from caller stack).
+        env: Vec<u8>,
+    },
+}
+
+/// A group of tasks to be executed in parallel.
+struct ParallelGroup {
+    /// The tasks queued for parallel execution.
+    tasks: Vec<ParallelTask>,
+}
+
+static PARALLEL_GROUPS: std::sync::Mutex<Vec<Option<ParallelGroup>>> =
+    std::sync::Mutex::new(Vec::new());
+static PARALLEL_GROUP_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Creates a new parallel group and returns its identifier.
+#[no_mangle]
+pub extern "C" fn kodo_parallel_begin() -> i64 {
+    let id = PARALLEL_GROUP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut groups) = PARALLEL_GROUPS.lock() {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let idx = id as usize;
+        if groups.len() <= idx {
+            groups.resize_with(idx + 1, || None);
+        }
+        groups[idx] = Some(ParallelGroup { tasks: Vec::new() });
+    }
+    id
+}
+
+/// Adds a task to a parallel group.
+///
+/// # Safety
+///
+/// When `env_size > 0`, the caller must ensure `env_ptr` points to
+/// a readable buffer of at least `env_size` bytes.
+#[no_mangle]
+pub extern "C" fn kodo_parallel_spawn(group: i64, fn_ptr: i64, env_ptr: i64, env_size: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = env_size as usize;
+    let task = if size == 0 {
+        // SAFETY: `fn_ptr` is a valid function pointer from Cranelift codegen.
+        let func: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
+        ParallelTask::Plain(func)
+    } else {
+        let mut env = vec![0u8; size];
+        // SAFETY: caller guarantees `env_ptr` points to `env_size` readable bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(env_ptr as *const u8, env.as_mut_ptr(), size);
+        }
+        // SAFETY: `fn_ptr` is a valid function pointer from Cranelift codegen.
+        let func: extern "C" fn(i64) = unsafe { std::mem::transmute(fn_ptr) };
+        ParallelTask::WithEnv { func, env }
+    };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = group as usize;
+    if let Ok(mut groups) = PARALLEL_GROUPS.lock() {
+        if let Some(Some(g)) = groups.get_mut(idx) {
+            g.tasks.push(task);
+        }
+    }
+}
+
+/// Joins all tasks in a parallel group using [`std::thread::scope`].
+#[no_mangle]
+pub extern "C" fn kodo_parallel_join(group: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = group as usize;
+    let tasks = {
+        if let Ok(mut groups) = PARALLEL_GROUPS.lock() {
+            groups
+                .get_mut(idx)
+                .and_then(Option::take)
+                .map(|g| g.tasks)
+                .unwrap_or_default()
+        } else {
+            return;
+        }
+    };
+    std::thread::scope(|s| {
+        for task in &tasks {
+            match task {
+                ParallelTask::Plain(func) => {
+                    let f = *func;
+                    s.spawn(move || f());
+                }
+                ParallelTask::WithEnv { func, env } => {
+                    let f = *func;
+                    let ptr = env.as_ptr() as i64;
+                    s.spawn(move || f(ptr));
+                }
+            }
+        }
+    });
+}
+
 /// Spawns a task by adding its function pointer to the task queue.
 ///
 /// The task will be executed when the scheduler runs (at the end of `main`).
@@ -2720,5 +2824,54 @@ mod tests {
         assert_eq!(kodo_actor_get_field(actor, 0), 0);
         assert_eq!(kodo_actor_get_field(actor, 8), 0);
         kodo_actor_free(actor, 16);
+    }
+    #[test]
+    fn parallel_group_unique_ids() {
+        let id1 = kodo_parallel_begin();
+        let id2 = kodo_parallel_begin();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn parallel_empty_group_join() {
+        let id = kodo_parallel_begin();
+        kodo_parallel_join(id);
+    }
+
+    #[test]
+    fn parallel_spawn_and_join() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static COUNTER: AtomicI64 = AtomicI64::new(0);
+        extern "C" fn inc() {
+            COUNTER.fetch_add(1, Ordering::Relaxed);
+        }
+        COUNTER.store(0, Ordering::Relaxed);
+        let g = kodo_parallel_begin();
+        kodo_parallel_spawn(g, inc as *const () as i64, 0, 0);
+        kodo_parallel_spawn(g, inc as *const () as i64, 0, 0);
+        kodo_parallel_join(g);
+        assert_eq!(COUNTER.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn parallel_spawn_with_env() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static RESULT: AtomicI64 = AtomicI64::new(0);
+        extern "C" fn read_env(env: i64) {
+            // SAFETY: env points to an i64 value.
+            let val = unsafe { *(env as *const i64) };
+            RESULT.store(val, Ordering::Relaxed);
+        }
+        RESULT.store(0, Ordering::Relaxed);
+        let value: i64 = 42;
+        let g = kodo_parallel_begin();
+        kodo_parallel_spawn(
+            g,
+            read_env as *const () as i64,
+            &value as *const i64 as i64,
+            8,
+        );
+        kodo_parallel_join(g);
+        assert_eq!(RESULT.load(Ordering::Relaxed), 42);
     }
 }

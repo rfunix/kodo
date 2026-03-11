@@ -560,6 +560,13 @@ pub enum Stmt {
         /// The task body.
         body: Block,
     },
+    /// Parallel block: `parallel { spawn { ... } spawn { ... } }`
+    Parallel {
+        /// Source span.
+        span: Span,
+        /// The body containing spawn statements.
+        body: Vec<Stmt>,
+    },
 }
 
 /// An expression.

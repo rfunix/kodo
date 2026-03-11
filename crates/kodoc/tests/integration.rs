@@ -154,6 +154,13 @@ fn rewrite_method_calls_in_block(
             kodo_ast::Stmt::Spawn { body, .. } => {
                 rewrite_method_calls_in_block(body, resolutions);
             }
+            kodo_ast::Stmt::Parallel { body, .. } => {
+                for stmt in body {
+                    if let kodo_ast::Stmt::Spawn { body, .. } = stmt {
+                        rewrite_method_calls_in_block(body, resolutions);
+                    }
+                }
+            }
         }
     }
 }
