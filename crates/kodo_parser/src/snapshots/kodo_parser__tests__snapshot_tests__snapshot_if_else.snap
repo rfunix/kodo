@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 137,
+        end: 121,
     },
     name: "test",
     imports: [],
@@ -26,8 +26,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 123,
+                start: 26,
+                end: 111,
             },
             name: "main",
             is_async: false,
@@ -39,14 +39,14 @@ Module {
             ensures: [],
             body: Block {
                 span: Span {
-                    start: 40,
-                    end: 123,
+                    start: 36,
+                    end: 111,
                 },
                 stmts: [
                     Let {
                         span: Span {
-                            start: 62,
-                            end: 105,
+                            start: 54,
+                            end: 97,
                         },
                         mutable: false,
                         name: "result",
@@ -60,35 +60,35 @@ Module {
                                 left: Ident(
                                     "x",
                                     Span {
-                                        start: 83,
-                                        end: 84,
+                                        start: 75,
+                                        end: 76,
                                     },
                                 ),
                                 op: Gt,
                                 right: IntLit(
                                     0,
                                     Span {
-                                        start: 87,
-                                        end: 88,
+                                        start: 79,
+                                        end: 80,
                                     },
                                 ),
                                 span: Span {
-                                    start: 83,
-                                    end: 88,
+                                    start: 75,
+                                    end: 80,
                                 },
                             },
                             then_branch: Block {
                                 span: Span {
-                                    start: 89,
-                                    end: 94,
+                                    start: 81,
+                                    end: 86,
                                 },
                                 stmts: [
                                     Expr(
                                         IntLit(
                                             1,
                                             Span {
-                                                start: 91,
-                                                end: 92,
+                                                start: 83,
+                                                end: 84,
                                             },
                                         ),
                                     ),
@@ -97,16 +97,16 @@ Module {
                             else_branch: Some(
                                 Block {
                                     span: Span {
-                                        start: 100,
-                                        end: 105,
+                                        start: 92,
+                                        end: 97,
                                     },
                                     stmts: [
                                         Expr(
                                             IntLit(
                                                 0,
                                                 Span {
-                                                    start: 102,
-                                                    end: 103,
+                                                    start: 94,
+                                                    end: 95,
                                                 },
                                             ),
                                         ),
@@ -114,8 +114,8 @@ Module {
                                 },
                             ),
                             span: Span {
-                                start: 80,
-                                end: 105,
+                                start: 72,
+                                end: 97,
                             },
                         },
                     },

@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 107,
+        end: 91,
     },
     name: "test",
     imports: [],
@@ -26,8 +26,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 93,
+                start: 26,
+                end: 81,
             },
             name: "main",
             is_async: false,
@@ -39,14 +39,14 @@ Module {
             ensures: [],
             body: Block {
                 span: Span {
-                    start: 40,
-                    end: 93,
+                    start: 36,
+                    end: 81,
                 },
                 stmts: [
                     Let {
                         span: Span {
-                            start: 62,
-                            end: 75,
+                            start: 54,
+                            end: 67,
                         },
                         mutable: false,
                         name: "f",
@@ -57,13 +57,13 @@ Module {
                             body: IntLit(
                                 42,
                                 Span {
-                                    start: 73,
-                                    end: 75,
+                                    start: 65,
+                                    end: 67,
                                 },
                             ),
                             span: Span {
-                                start: 70,
-                                end: 75,
+                                start: 62,
+                                end: 67,
                             },
                         },
                     },

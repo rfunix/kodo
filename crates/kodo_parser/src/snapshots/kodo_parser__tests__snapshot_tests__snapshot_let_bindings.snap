@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 198,
+        end: 174,
     },
     name: "test",
     imports: [],
@@ -26,8 +26,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 184,
+                start: 26,
+                end: 164,
             },
             name: "main",
             is_async: false,
@@ -39,14 +39,14 @@ Module {
             ensures: [],
             body: Block {
                 span: Span {
-                    start: 40,
-                    end: 184,
+                    start: 36,
+                    end: 164,
                 },
                 stmts: [
                     Let {
                         span: Span {
-                            start: 62,
-                            end: 77,
+                            start: 54,
+                            end: 69,
                         },
                         mutable: false,
                         name: "x",
@@ -58,15 +58,15 @@ Module {
                         value: IntLit(
                             42,
                             Span {
-                                start: 75,
-                                end: 77,
+                                start: 67,
+                                end: 69,
                             },
                         ),
                     },
                     Let {
                         span: Span {
-                            start: 98,
-                            end: 124,
+                            start: 86,
+                            end: 112,
                         },
                         mutable: false,
                         name: "name",
@@ -78,15 +78,15 @@ Module {
                         value: StringLit(
                             "hello",
                             Span {
-                                start: 117,
-                                end: 124,
+                                start: 105,
+                                end: 112,
                             },
                         ),
                     },
                     Let {
                         span: Span {
-                            start: 145,
-                            end: 166,
+                            start: 129,
+                            end: 150,
                         },
                         mutable: false,
                         name: "flag",
@@ -98,8 +98,8 @@ Module {
                         value: BoolLit(
                             true,
                             Span {
-                                start: 162,
-                                end: 166,
+                                start: 146,
+                                end: 150,
                             },
                         ),
                     },

@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -8,7 +8,7 @@ Module {
     ),
     span: Span {
         start: 0,
-        end: 139,
+        end: 119,
     },
     name: "test",
     imports: [],
@@ -20,8 +20,8 @@ Module {
                 0,
             ),
             span: Span {
-                start: 30,
-                end: 125,
+                start: 26,
+                end: 109,
             },
             name: "Point",
             generic_params: [],
@@ -32,8 +32,8 @@ Module {
                         "Float64",
                     ),
                     span: Span {
-                        start: 65,
-                        end: 75,
+                        start: 57,
+                        end: 67,
                     },
                 },
                 FieldDef {
@@ -42,8 +42,8 @@ Module {
                         "Float64",
                     ),
                     span: Span {
-                        start: 97,
-                        end: 107,
+                        start: 85,
+                        end: 95,
                     },
                 },
             ],
