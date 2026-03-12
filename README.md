@@ -237,9 +237,6 @@ Download the latest release from the [Releases page](https://github.com/rfunix/k
 # macOS (Apple Silicon)
 curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-aarch64 -o kodoc
 
-# macOS (Intel)
-curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-x86_64 -o kodoc
-
 # Linux (x86_64)
 curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-linux-x86_64 -o kodoc
 

@@ -22,9 +22,6 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: kodoc-linux-x86_64
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact: kodoc-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: kodoc-macos-aarch64
@@ -94,5 +91,4 @@ jobs:
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           files: |
             artifacts/kodoc-linux-x86_64/kodoc-linux-x86_64
-            artifacts/kodoc-macos-x86_64/kodoc-macos-x86_64
             artifacts/kodoc-macos-aarch64/kodoc-macos-aarch64
