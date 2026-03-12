@@ -300,12 +300,13 @@ pub fn compile_and_run(source: &str) -> Result<String, String> {
     let struct_defs = checker.struct_registry().clone();
     let enum_defs = checker.enum_registry().clone();
     let options = kodo_codegen::CodegenOptions::default();
+    let repl_meta = r#"{"purpose":"repl"}"#;
     let object_bytes = kodo_codegen::compile_module_with_types(
         &mir_functions,
         &struct_defs,
         &enum_defs,
         &options,
-        None,
+        Some(repl_meta),
     )
     .map_err(|e| format!("codegen error: {e}"))?;
 
