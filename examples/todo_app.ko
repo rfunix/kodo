@@ -1,16 +1,21 @@
-// Real-world example: CLI Todo App
+// Real-world example: Agent-Built Todo App
 //
-// Demonstrates a complete task manager with CRUD operations,
-// using structs, List, contracts, closures (fold/filter),
-// and string interpolation.
+// Demonstrates how an AI agent builds a task manager with
+// compiler-enforced quality guarantees:
+//
+// - @authored_by / @confidence: the compiler tracks WHO wrote each function
+// - @reviewed_by: low-confidence code requires human sign-off
+// - requires/ensures: the compiler verifies correctness, not just types
+// - meta: every module is self-describing — agents and humans know WHY
 //
 // Run with: kodoc build examples/todo_app.ko -o todo_app && ./todo_app
+// Audit with: kodoc confidence-report examples/todo_app.ko
 
 module todo_app {
     meta {
-        purpose: "CLI todo app with CRUD operations"
+        purpose: "Agent-built task manager with confidence tracking"
         version: "1.0.0"
-        author: "Kodo Team"
+        author: "claude"
     }
 
     struct Task {
@@ -20,6 +25,9 @@ module todo_app {
         priority: String
     }
 
+    // High confidence: simple struct construction, agent is sure this is correct.
+    @authored_by(agent: "claude")
+    @confidence(0.99)
     fn create_task(id: Int, title: String, priority: String) -> Task
         requires { id > 0 }
     {
@@ -31,6 +39,9 @@ module todo_app {
         }
     }
 
+    // High confidence: straightforward struct construction.
+    @authored_by(agent: "claude")
+    @confidence(0.95)
     fn complete_task(id: Int, title: String, priority: String) -> Task {
         return Task {
             id: id,
@@ -40,16 +51,17 @@ module todo_app {
         }
     }
 
-    fn print_task(ref task: Task) {
-        if task.done {
-            println(f"[x] #{task.id} [{task.priority}] {task.title}")
-        } else {
-            println(f"[ ] #{task.id} [{task.priority}] {task.title}")
-        }
+    // Lower confidence: aggregation logic is more complex.
+    // Under 0.8 → compiler REQUIRES @reviewed_by or it won't compile.
+    @authored_by(agent: "claude")
+    @confidence(0.7)
+    @reviewed_by(human: "rafael")
+    fn count_completed(flags: List<Int>) -> Int {
+        return flags.fold(0, |acc: Int, x: Int| -> Int { acc + x })
     }
 
     fn main() -> Int {
-        // Create tasks
+        // Create tasks — contract enforces id > 0
         let t1: Task = create_task(1, "Write unit tests", "HIGH")
         let t2: Task = create_task(2, "Update README", "MED")
         let t3: Task = create_task(3, "Refactor parser", "HIGH")
@@ -59,30 +71,22 @@ module todo_app {
         let t1_done: Task = complete_task(1, "Write unit tests", "HIGH")
         let t3_done: Task = complete_task(3, "Refactor parser", "HIGH")
 
-        // Display all tasks
+        // Display tasks
         println("=== Todo List ===")
-        print_task(t1_done)
-        print_task(t2)
-        print_task(t3_done)
-        print_task(t4)
+        println(t1_done.title)
+        println(t2.title)
+        println(t3_done.title)
+        println(t4.title)
 
-        // Summary using list + fold
+        // Summary using fold
         let done_flags: List<Int> = list_new()
         list_push(done_flags, 1)
         list_push(done_flags, 0)
         list_push(done_flags, 1)
         list_push(done_flags, 0)
-        let completed: Int = done_flags.fold(0, |acc: Int, x: Int| -> Int { acc + x })
-        println(f"Completed: {completed.to_string()}/4")
-
-        // Count high priority tasks
-        let priorities: List<Int> = list_new()
-        list_push(priorities, 1)
-        list_push(priorities, 0)
-        list_push(priorities, 1)
-        list_push(priorities, 0)
-        let high_count: Int = priorities.fold(0, |acc: Int, x: Int| -> Int { acc + x })
-        println(f"High priority: {high_count.to_string()}")
+        let completed: Int = count_completed(done_flags)
+        println("Completed:")
+        print_int(completed)
 
         return 0
     }

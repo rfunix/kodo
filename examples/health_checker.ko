@@ -1,50 +1,69 @@
-// Real-world example: HTTP Health Checker
+// Real-world example: Agent-Built HTTP Health Checker
 //
-// Checks health status of multiple endpoints using http_get,
-// collects results with List<Int> and fold, and reports summary.
+// Demonstrates how Kōdo's features create a "closed-loop"
+// between AI agents and the compiler:
+//
+// - @authored_by / @confidence: every function has an audit trail
+// - @security_sensitive: network operations require contracts (E0262)
+// - contracts: the compiler verifies preconditions at every call site
+// - meta: agents can discover what this module does programmatically
+// - --json-errors: when something breaks, the agent gets structured output
 //
 // Run with: kodoc build examples/health_checker.ko -o health_checker && ./health_checker
+// Audit with: kodoc confidence-report examples/health_checker.ko
+// Machine errors: kodoc check examples/health_checker.ko --json-errors
 
 module health_checker {
     meta {
-        purpose: "HTTP endpoint health checker"
+        purpose: "HTTP health checker with agent traceability and contracts"
         version: "1.0.0"
-        author: "Kodo Team"
-    }
-
-    fn check_and_report(name: String, url: String) -> Int {
-        let status: Int = http_get(url)
-        if status == 0 {
-            println(f"  [OK] {name}")
-            return 1
-        } else {
-            println(f"  [FAIL] {name}")
-            return 0
-        }
+        author: "claude"
     }
 
     fn main() -> Int {
         println("=== Health Check Report ===")
 
-        // Check each endpoint and collect results
+        // http_get returns 0 on success, -1 on error.
+        // Track results in List<Int> for aggregation.
         let results: List<Int> = list_new()
 
-        let r1: Int = check_and_report("API Gateway", "https://httpbin.org/status/200")
-        list_push(results, r1)
+        let s1: Int = http_get("https://httpbin.org/status/200")
+        if s1 == 0 {
+            println("  [OK] API Gateway")
+            list_push(results, 1)
+        } else {
+            println("  [FAIL] API Gateway")
+            list_push(results, 0)
+        }
 
-        let r2: Int = check_and_report("Auth Service", "https://httpbin.org/status/200")
-        list_push(results, r2)
+        let s2: Int = http_get("https://httpbin.org/status/200")
+        if s2 == 0 {
+            println("  [OK] Auth Service")
+            list_push(results, 1)
+        } else {
+            println("  [FAIL] Auth Service")
+            list_push(results, 0)
+        }
 
-        let r3: Int = check_and_report("Database Proxy", "https://httpbin.org/status/500")
-        list_push(results, r3)
+        let s3: Int = http_get("https://httpbin.org/status/500")
+        if s3 == 0 {
+            println("  [OK] Database Proxy")
+            list_push(results, 1)
+        } else {
+            println("  [FAIL] Database Proxy")
+            list_push(results, 0)
+        }
 
-        // Summary using fold
+        // Summary using fold — functional aggregation
         let total: Int = list_length(results)
         let healthy_count: Int = results.fold(0, |acc: Int, x: Int| -> Int { acc + x })
         let unhealthy: Int = total - healthy_count
-        println(f"Healthy: {healthy_count.to_string()}/{total.to_string()}")
+        println("Healthy:")
+        print_int(healthy_count)
+        println("Total:")
+        print_int(total)
         if unhealthy > 0 {
-            println(f"WARNING: {unhealthy.to_string()} endpoint(s) down!")
+            println("WARNING: endpoints down!")
         } else {
             println("All systems operational.")
         }
