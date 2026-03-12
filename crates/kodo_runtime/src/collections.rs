@@ -52,7 +52,10 @@ pub unsafe extern "C" fn kodo_list_push(list_ptr: i64, value: i64) {
             list.capacity * 2
         };
         let new_layout = std::alloc::Layout::array::<i64>(new_cap);
-        let Ok(layout) = new_layout else { return };
+        let Ok(layout) = new_layout else {
+            eprintln!("fatal: out of memory in kodo runtime (list_push layout)");
+            std::process::abort();
+        };
         let new_data = if list.data.is_null() {
             // SAFETY: layout is valid and non-zero size.
             #[allow(clippy::cast_ptr_alignment)]
@@ -62,7 +65,8 @@ pub unsafe extern "C" fn kodo_list_push(list_ptr: i64, value: i64) {
         } else {
             let old_layout_result = std::alloc::Layout::array::<i64>(list.capacity);
             let Ok(old_layout) = old_layout_result else {
-                return;
+                eprintln!("fatal: out of memory in kodo runtime (list_push realloc layout)");
+                std::process::abort();
             };
             // SAFETY: list.data was allocated with old_layout, new size >= old size.
             #[allow(clippy::cast_ptr_alignment)]
@@ -71,7 +75,8 @@ pub unsafe extern "C" fn kodo_list_push(list_ptr: i64, value: i64) {
             }
         };
         if new_data.is_null() {
-            return; // allocation failed
+            eprintln!("fatal: out of memory in kodo runtime (list_push)");
+            std::process::abort();
         }
         list.data = new_data;
         list.capacity = new_cap;

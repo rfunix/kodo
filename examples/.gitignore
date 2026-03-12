@@ -1,0 +1,7 @@
+# Ignore compiled binaries (Mach-O, ELF, etc.)
+# Keep only .ko source files in this directory
+*
+!*.ko
+!.gitignore
+!multi_file/
+!multi_file/**

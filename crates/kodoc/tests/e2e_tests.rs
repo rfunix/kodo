@@ -1291,6 +1291,40 @@ fn test_chained_arithmetic() {
 }
 
 // ---------------------------------------------------------------------------
+// String cleanup stress test — verifies heap_locals cleanup works without crash
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_string_concat_loop_no_crash() {
+    let source = r#"module string_stress {
+    meta {
+        purpose: "Stress test string operations",
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let mut i: Int = 0
+        while i < 50 {
+            let a: String = "hello"
+            let b: String = " world"
+            let c: String = a + b
+            let d: String = c + "!"
+            i = i + 1
+        }
+        println("done")
+    }
+}"#;
+    let binary = compile_source(source, "test_string_stress");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(exit_code, 0, "string stress test should exit with 0");
+    assert!(
+        stdout.contains("done"),
+        "should print 'done', got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Phase 54 — Send/Sync bounds for spawn blocks + concurrency test coverage
 // ---------------------------------------------------------------------------
 

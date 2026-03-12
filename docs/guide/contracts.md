@@ -210,6 +210,38 @@ The contract violation is still recorded in stderr, so monitoring tools can capt
 
 Use `recoverable` only when you have external monitoring in place. For development and testing, prefer the default `runtime` mode to catch bugs immediately.
 
+## Enabling Z3 for Static Verification
+
+Static contract verification requires Z3 to be installed on your system and the `smt` feature to be enabled at build time.
+
+### Install Z3
+
+```bash
+# macOS
+brew install z3
+
+# Ubuntu / Debian
+sudo apt-get install libz3-dev
+
+# Verify installation
+z3 --version  # requires Z3 4.8+
+```
+
+### Build with SMT Support
+
+```bash
+cargo build -p kodoc --features smt
+```
+
+Once built with `smt`, you can use static verification:
+
+```bash
+kodoc build my_program.ko --contracts static
+kodoc build my_program.ko --contracts both  # static + runtime fallback
+```
+
+Without the `smt` feature, the `--contracts static` flag will fall back to runtime-only checking.
+
 ## Next Steps
 
 - [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling

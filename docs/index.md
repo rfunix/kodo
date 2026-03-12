@@ -27,6 +27,8 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Agent Traceability](guide/agent-traceability.md) — annotations, trust policies, and confidence propagation
 - [HTTP & JSON](guide/http.md) — HTTP client and JSON parsing
 - [Actors](guide/actors.md) — actor model with state and message passing
+- [Iterators](guide/iterators.md) — for-in loops, iterator protocol, collection traversal
+- [Functional Combinators](guide/functional.md) — map, filter, fold, count, any, all, reduce, pipelines
 - [Concurrency & Spawn](guide/concurrency.md) — spawn with captured variables
 - [Real-World Examples](guide/real-world-examples.md) — complete programs: todo app, URL shortener, word counter, config validator, health checker
 

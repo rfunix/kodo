@@ -1,4 +1,4 @@
-.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci
+.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall
 
 # Default: run all checks
 all: fmt clippy test doc
@@ -39,6 +39,30 @@ check:
 
 clean:
 	cargo clean
+
+# === Install ===
+
+PREFIX ?= $(HOME)/.kodo
+
+install: release
+	@mkdir -p $(PREFIX)/bin
+	@cp target/release/kodoc $(PREFIX)/bin/kodoc
+	@chmod +x $(PREFIX)/bin/kodoc
+	@echo ""
+	@echo "  kodoc installed to $(PREFIX)/bin/kodoc"
+	@echo ""
+	@echo "  Add to your PATH (add this to ~/.zshrc or ~/.bashrc):"
+	@echo ""
+	@echo "    export PATH=\"$(PREFIX)/bin:\$$PATH\""
+	@echo ""
+	@echo "  Then restart your shell or run: source ~/.zshrc"
+	@echo ""
+	@echo "  Verify: kodoc --version"
+	@echo ""
+
+uninstall:
+	@rm -f $(PREFIX)/bin/kodoc
+	@echo "kodoc removed from $(PREFIX)/bin/"
 
 # === Run Compiler ===
 

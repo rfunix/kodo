@@ -2,30 +2,71 @@
 
 This guide walks you through installing the Kōdo compiler and running your first program.
 
-## Prerequisites
-
-- **Rust toolchain** (1.75 or later) — install via [rustup](https://rustup.rs/)
-- **C linker** (`cc`) — needed to link the final executable
-  - **macOS**: Install Xcode Command Line Tools (`xcode-select --install`)
-  - **Linux**: Install `build-essential` (`apt install build-essential`) or equivalent
-
 ## Installation
 
-Clone the repository and build all crates:
+### Option A: Download Pre-Built Binary
+
+The quickest way to get started. Download from the [Releases page](https://github.com/rfunix/kodo/releases):
 
 ```bash
-git clone https://github.com/kodo-lang/kodo.git
+# macOS (Apple Silicon)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-aarch64 -o kodoc
+
+# macOS (Intel)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-x86_64 -o kodoc
+
+# Linux (x86_64)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-linux-x86_64 -o kodoc
+
+chmod +x kodoc
+sudo mv kodoc /usr/local/bin/
+```
+
+**Requirement:** A C linker (`cc`) is needed to link the final executable:
+- **macOS**: Install Xcode Command Line Tools (`xcode-select --install`)
+- **Linux**: Install `build-essential` (`sudo apt install build-essential`)
+
+Verify:
+
+```bash
+kodoc --version
+```
+
+### Option B: Build from Source
+
+**Prerequisites:**
+- **Rust toolchain** (1.91 or later) — install via [rustup](https://rustup.rs/)
+- **C linker** (`cc`) — see above
+
+```bash
+git clone https://github.com/rfunix/kodo.git
 cd kodo
-cargo build --workspace
+make install
 ```
 
-This builds the compiler (`kodoc`) and the runtime library (`libkodo_runtime.a`). Both are placed in `target/debug/`.
-
-You can verify the build worked:
+This builds in release mode and installs `kodoc` to `~/.kodo/bin/`. Add to your PATH:
 
 ```bash
-cargo run -p kodoc -- --version
+echo 'export PATH="$HOME/.kodo/bin:$PATH"' >> ~/.zshrc  # or ~/.bashrc
+source ~/.zshrc
 ```
+
+Verify:
+
+```bash
+kodoc --version
+```
+
+> **Tip:** You can also use `make install PREFIX=/usr/local` to install system-wide.
+
+### Optional: Z3 for Static Verification
+
+To enable compile-time contract verification via Z3:
+
+- **macOS**: `brew install z3`
+- **Ubuntu/Debian**: `sudo apt-get install libz3-dev`
+
+Then rebuild with `cargo build -p kodoc --release --features smt`. See the [Contracts guide](contracts.md#enabling-z3-for-static-verification) for details.
 
 ## Your First Program
 
@@ -53,7 +94,7 @@ Every Kōdo program has:
 ## Compile and Run
 
 ```bash
-cargo run -p kodoc -- build hello.ko -o hello
+kodoc build hello.ko -o hello
 ./hello
 ```
 
@@ -93,7 +134,7 @@ module fibonacci {
 Compile and run:
 
 ```bash
-cargo run -p kodoc -- build fibonacci.ko -o fibonacci
+kodoc build fibonacci.ko -o fibonacci
 ./fibonacci
 ```
 
@@ -104,7 +145,7 @@ This prints `55` — the 10th Fibonacci number.
 You can type-check and verify contracts without generating a binary:
 
 ```bash
-cargo run -p kodoc -- check hello.ko
+kodoc check hello.ko
 ```
 
 This is useful for fast feedback during development.

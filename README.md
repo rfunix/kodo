@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-1100%2B%20passing-brightgreen" alt="Tests: 1100+ passing">
+  <img src="https://img.shields.io/badge/tests-1224%20passing-brightgreen" alt="Tests: 1224 passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -229,17 +229,45 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 
 ## Quick Start
 
-### Prerequisites
+### Option A: Download Pre-Built Binary
 
-- [Rust toolchain](https://rustup.rs/) (1.91+)
-- A C linker (`cc`) — Xcode Command Line Tools on macOS or `build-essential` on Linux
-
-### Build
+Download the latest release from the [Releases page](https://github.com/rfunix/kodo/releases):
 
 ```bash
-git clone https://github.com/kodo-lang/kodo.git
+# macOS (Apple Silicon)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-aarch64 -o kodoc
+
+# macOS (Intel)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-macos-x86_64 -o kodoc
+
+# Linux (x86_64)
+curl -L https://github.com/rfunix/kodo/releases/latest/download/kodoc-linux-x86_64 -o kodoc
+
+chmod +x kodoc
+sudo mv kodoc /usr/local/bin/
+```
+
+### Option B: Build from Source
+
+**Prerequisites:** [Rust toolchain](https://rustup.rs/) (1.91+) and a C linker (`cc`).
+
+```bash
+git clone https://github.com/rfunix/kodo.git
 cd kodo
-cargo build --workspace
+make install
+```
+
+This builds in release mode and installs `kodoc` to `~/.kodo/bin/`. Add to your PATH:
+
+```bash
+echo 'export PATH="$HOME/.kodo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Verify:
+
+```bash
+kodoc --version
 ```
 
 ### Hello World
@@ -263,14 +291,14 @@ module hello {
 Compile and run:
 
 ```bash
-cargo run -p kodoc -- build hello.ko -o hello
+kodoc build hello.ko -o hello
 ./hello
 ```
 
 Or try the interactive REPL:
 
 ```bash
-cargo run -p kodoc -- repl
+kodoc repl
 # kōdo> println("Hello from the REPL!")
 # kōdo> let x: Int = 2 + 3
 # kōdo> fn double(n: Int) -> Int { return n * 2 }

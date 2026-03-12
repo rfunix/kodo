@@ -196,6 +196,14 @@ pub extern "C" fn kodo_rc_count(handle: i64) -> i64 {
 /// `kodo_string_concat`) use `Box::into_raw` and do not have an RC header.
 /// String RC will be integrated when string allocation migrates to
 /// [`kodo_alloc`].
+///
+/// **Alpha limitation**: Because these are no-ops, intermediate strings from
+/// operations like concat/split/substring are not freed until the process exits.
+/// This is acceptable for short-lived programs (CLIs, scripts) but can cause
+/// memory growth in long-running services. The fix requires migrating all string
+/// allocation paths (`kodo_string_concat`, `kodo_string_split`, etc.) to use
+/// `kodo_alloc` with RC headers — a non-trivial refactor deferred to beta.
+/// See `docs/KNOWN_LIMITATIONS.md` for user-facing documentation.
 #[no_mangle]
 pub extern "C" fn kodo_rc_inc_string(ptr: i64, len: i64) {
     let _ = (ptr, len);

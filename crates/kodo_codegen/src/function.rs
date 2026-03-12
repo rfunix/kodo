@@ -72,7 +72,10 @@ impl VarMap {
         builder: &mut FunctionBuilder,
     ) -> Result<()> {
         let var = self.get(id)?;
-        let declared = self.var_types.get(&id).copied().unwrap_or(types::I64);
+        let declared = self.var_types.get(&id).copied().unwrap_or_else(|| {
+            eprintln!("warning: codegen: variable {id:?} has no declared type, defaulting to I64");
+            types::I64
+        });
         let actual = builder.func.dfg.value_type(val);
         let final_val = if declared == actual {
             val
