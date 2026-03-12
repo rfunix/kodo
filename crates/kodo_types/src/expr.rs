@@ -338,7 +338,11 @@ impl TypeChecker {
         Ok(Type::Struct(name.to_string()))
     }
 
-    /// Checks an enum variant expression.
+    /// Checks an enum variant expression, or a qualified module function call.
+    ///
+    /// When `enum_name` matches an imported module (not an enum), treats
+    /// `module::func(args)` as a qualified function call. This allows both
+    /// `module.func()` and `module::func()` syntax for cross-module calls.
     fn check_enum_variant_expr(
         &mut self,
         enum_name: &str,
@@ -346,6 +350,14 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> crate::Result<Type> {
+        // Check if this is a qualified module function call: module::func(args).
+        if self.imported_module_names.contains(enum_name)
+            && !self.enum_registry.contains_key(enum_name)
+        {
+            let callee = Expr::Ident(variant.to_string(), span);
+            return self.check_call(&callee, args, span);
+        }
+
         // Check if this is a concrete enum.
         if let Some(variants) = self.enum_registry.get(enum_name).cloned() {
             let variant_def = variants.iter().find(|(n, _)| n == variant).ok_or_else(|| {

@@ -201,13 +201,42 @@ Splits a string by a separator, returning a `List<String>`:
 let parts: List<String> = "a,b,c".split(",")
 ```
 
+## Qualified Imports with `::`
+
+You can use `::` as a path separator for imports, particularly useful for standard library modules:
+
+```
+import std::option
+import std::result
+```
+
+The dot separator (`.`) is also supported for backward compatibility:
+
+```
+import math.utils
+```
+
+Both forms resolve to the same module.
+
+### Selective Imports with `from...import`
+
+To bring specific names from a module into scope, use the `from...import` syntax:
+
+```
+from std::option import Some, None
+from math::utils import add, multiply
+```
+
+This imports only the named items, keeping the local scope clean.
+
 ## Qualified Calls
 
-When importing a module, you can use qualified calls with dot notation:
+When importing a module, you can use qualified calls with dot notation or `::`:
 
 ```
 import math
 let result: Int = math.add(1, 2)
+let result2: Int = math::add(1, 2)
 ```
 
 This is equivalent to calling `add(1, 2)` directly — the module prefix makes the origin explicit.

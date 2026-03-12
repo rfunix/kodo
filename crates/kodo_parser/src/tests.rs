@@ -3387,3 +3387,90 @@ fn parse_invariant_between_functions() {
     assert_eq!(module.invariants.len(), 1);
     assert_eq!(module.functions.len(), 2);
 }
+
+// --- Phase 53: Qualified module system ---
+
+#[test]
+fn parse_import_with_dot_separator() {
+    let source = r#"module m {
+        import std.option
+        meta { purpose: "test" }
+    }"#;
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["std", "option"]);
+    assert!(module.imports[0].names.is_none());
+}
+
+#[test]
+fn parse_import_with_double_colon_separator() {
+    let source = r#"module m {
+        import std::collections::List
+        meta { purpose: "test" }
+    }"#;
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["std", "collections", "List"]);
+    assert!(module.imports[0].names.is_none());
+}
+
+#[test]
+fn parse_selective_import_from() {
+    let source = r#"module m {
+        from std::option import Some, None
+        meta { purpose: "test" }
+    }"#;
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["std", "option"]);
+    assert_eq!(
+        module.imports[0].names,
+        Some(vec!["Some".to_string(), "None".to_string()])
+    );
+}
+
+#[test]
+fn parse_multiple_imports_mixed_syntax() {
+    let source = r#"module m {
+        import math
+        import std::option
+        from std::result import Ok, Err
+        meta { purpose: "test" }
+    }"#;
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.imports.len(), 3);
+    assert_eq!(module.imports[0].path, vec!["math"]);
+    assert!(module.imports[0].names.is_none());
+    assert_eq!(module.imports[1].path, vec!["std", "option"]);
+    assert!(module.imports[1].names.is_none());
+    assert_eq!(module.imports[2].path, vec!["std", "result"]);
+    assert_eq!(
+        module.imports[2].names,
+        Some(vec!["Ok".to_string(), "Err".to_string()])
+    );
+}
+
+#[test]
+fn parse_selective_import_single_name() {
+    let source = r#"module m {
+        from utils import helper
+        meta { purpose: "test" }
+    }"#;
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["utils"]);
+    assert_eq!(module.imports[0].names, Some(vec!["helper".to_string()]));
+}
+
+#[test]
+fn parse_import_with_recovery_from_syntax() {
+    let source = r#"module m {
+        from std::option import Some
+        meta { purpose: "test" }
+        fn main() {}
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(output.errors.is_empty(), "errors: {:?}", output.errors);
+    assert_eq!(output.module.imports.len(), 1);
+    assert_eq!(output.module.imports[0].path, vec!["std", "option"]);
+}

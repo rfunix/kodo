@@ -87,6 +87,24 @@ pub fn prelude_sources() -> Vec<(&'static str, &'static str)> {
     vec![("std/option", OPTION_SOURCE), ("std/result", RESULT_SOURCE)]
 }
 
+/// Resolves a `std::*` import path to its embedded source code, if available.
+///
+/// Supports paths like `["std", "option"]` → `OPTION_SOURCE` and
+/// `["std", "result"]` → `RESULT_SOURCE`. Returns `None` for unknown
+/// stdlib modules or non-`std` paths.
+#[must_use]
+pub fn resolve_stdlib_module(path: &[String]) -> Option<&'static str> {
+    if path.len() == 2 && path[0] == "std" {
+        match path[1].as_str() {
+            "option" => Some(OPTION_SOURCE),
+            "result" => Some(RESULT_SOURCE),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// Describes a builtin function available in the standard library.
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {

@@ -441,6 +441,19 @@ error[E0253]: tuple index 3 is out of bounds for tuple of length 2
    |                  ^ tuple has 2 elements, valid indices are 0..1
 ```
 
+### E0280: Spawn Captures Non-Send Type
+A `spawn` block captures a variable with a borrowed reference (`ref`), which cannot be safely sent to another thread. Only owned values can cross thread boundaries.
+
+```
+error[E0280]: type `ref Int` cannot be sent between threads
+  --> src/main.ko:8:20
+   |
+ 8 |     spawn {
+   |            ^ variable `x` of type `ref Int` is captured but is not Send
+   |
+   = help: use owned values (own) instead of references when sending data to spawned tasks
+```
+
 ### E0260: Low Confidence Without Review
 A function annotated with `@confidence(X)` where X < 0.8 is missing a `@reviewed_by(human: "...")` annotation. Agent-generated code with low confidence must be reviewed by a human.
 

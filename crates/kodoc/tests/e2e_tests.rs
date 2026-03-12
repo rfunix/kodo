@@ -1289,3 +1289,186 @@ fn test_chained_arithmetic() {
     // or may have precedence. Check the actual output.
     let _stdout = stdout; // Output depends on parser precedence rules
 }
+
+// ---------------------------------------------------------------------------
+// Phase 54 — Send/Sync bounds for spawn blocks + concurrency test coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_parallel_block_compiles() {
+    let source = r#"module test_parallel {
+    meta { purpose: "Test parallel compilation" }
+
+    fn task_a() -> Int {
+        return 1
+    }
+
+    fn task_b() -> Int {
+        return 2
+    }
+
+    fn main() -> Int {
+        parallel {
+            spawn { task_a() }
+            spawn { task_b() }
+        }
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    let mut checker = kodo_types::TypeChecker::new();
+    let errors = checker.check_module_collecting(&module);
+    assert!(errors.is_empty(), "type errors: {errors:?}");
+}
+
+#[test]
+fn test_spawn_with_owned_value() {
+    let source = r#"module test_spawn_own {
+    meta { purpose: "Test spawn with owned value" }
+
+    fn process(x: Int) -> Int {
+        return x + 1
+    }
+
+    fn main() -> Int {
+        let val: Int = 42
+        spawn {
+            process(val)
+        }
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    let mut checker = kodo_types::TypeChecker::new();
+    let errors = checker.check_module_collecting(&module);
+    assert!(errors.is_empty(), "type errors: {errors:?}");
+}
+
+#[test]
+fn test_channel_type_checking() {
+    let source = r#"module test_channel {
+    meta { purpose: "Test channel type checking" }
+
+    fn main() -> Int {
+        let ch: Int = channel_new()
+        channel_send(ch, 42)
+        let val: Int = channel_recv(ch)
+        channel_free(ch)
+        return val
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    let mut checker = kodo_types::TypeChecker::new();
+    let errors = checker.check_module_collecting(&module);
+    assert!(errors.is_empty(), "type errors: {errors:?}");
+}
+
+#[test]
+fn test_async_await_basic_type_check() {
+    let source = r#"module test_await {
+    meta { purpose: "Test basic async module" }
+
+    fn main() -> Int {
+        let x: Int = 1
+        return x
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    let mut checker = kodo_types::TypeChecker::new();
+    let errors = checker.check_module_collecting(&module);
+    assert!(errors.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Phase 53 — Qualified module system
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_import_with_double_colon_parses() {
+    let source = r#"module test_import_dc {
+    import std::option
+    meta { purpose: "Test :: import syntax" }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["std", "option"]);
+}
+
+#[test]
+fn test_from_import_parses() {
+    let source = r#"module test_from_import {
+    from std::option import Some, None
+    meta { purpose: "Test from import syntax" }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+    let module = kodo_parser::parse(source).expect("parse");
+    assert_eq!(module.imports.len(), 1);
+    assert_eq!(module.imports[0].path, vec!["std", "option"]);
+    assert_eq!(
+        module.imports[0].names,
+        Some(vec!["Some".to_string(), "None".to_string()])
+    );
+}
+
+#[test]
+fn test_qualified_dot_access_type_checks() {
+    // First define a helper module, then use qualified access
+    let helper_source = r#"module helper {
+    meta { purpose: "Helper module" }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+    let main_source = r#"module main {
+    import helper
+    meta { purpose: "Test qualified access" }
+
+    fn main() -> Int {
+        let result: Int = helper.add(1, 2)
+        return result
+    }
+}"#;
+    let helper_mod = kodo_parser::parse(helper_source).expect("parse helper");
+    let main_mod = kodo_parser::parse(main_source).expect("parse main");
+
+    let mut checker = kodo_types::TypeChecker::new();
+    // Check helper module first to register its functions
+    let helper_errors = checker.check_module_collecting(&helper_mod);
+    assert!(
+        helper_errors.is_empty(),
+        "helper type errors: {helper_errors:?}"
+    );
+    // Register the module name for qualified access
+    checker.register_imported_module("helper".to_string());
+    // Now check the main module
+    let main_errors = checker.check_module_collecting(&main_mod);
+    assert!(main_errors.is_empty(), "main type errors: {main_errors:?}");
+}
+
+#[test]
+fn test_stdlib_resolve_module() {
+    // Test that kodo_std::resolve_stdlib_module works
+    let path = vec!["std".to_string(), "option".to_string()];
+    let source = kodo_std::resolve_stdlib_module(&path);
+    assert!(source.is_some(), "std::option should resolve");
+
+    let path = vec!["std".to_string(), "result".to_string()];
+    let source = kodo_std::resolve_stdlib_module(&path);
+    assert!(source.is_some(), "std::result should resolve");
+
+    let path = vec!["std".to_string(), "unknown".to_string()];
+    let source = kodo_std::resolve_stdlib_module(&path);
+    assert!(source.is_none(), "std::unknown should not resolve");
+
+    let path = vec!["math".to_string()];
+    let source = kodo_std::resolve_stdlib_module(&path);
+    assert!(source.is_none(), "non-std path should not resolve");
+}

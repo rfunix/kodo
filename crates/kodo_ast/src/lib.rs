@@ -119,11 +119,23 @@ impl NodeIdGen {
     }
 }
 
-/// An import declaration: `import std.option`
+/// An import declaration.
+///
+/// Supports three forms:
+/// - **Simple**: `import math` — imports entire module
+/// - **Qualified**: `import std::collections::List` — imports via `::` path
+/// - **Selective**: `from std::option import Some, None` — imports specific names
+///
+/// Backward-compatible `.` separator is also accepted in parsing.
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
     /// The import path segments (e.g. `["std", "option"]`).
     pub path: Vec<String>,
+    /// Optional list of selectively imported names (e.g. `Some`, `None`).
+    ///
+    /// When `Some`, this represents a `from path import name1, name2` declaration.
+    /// When `None`, the entire module is imported.
+    pub names: Option<Vec<String>>,
     /// Source span.
     pub span: Span,
 }

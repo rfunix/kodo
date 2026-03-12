@@ -98,7 +98,9 @@ impl TypeChecker {
                 else_body,
                 ..
             } => self.check_if_let_stmt(pattern, value, body, else_body.as_ref()),
-            Stmt::Spawn { body, .. } => {
+            Stmt::Spawn { span, body, .. } => {
+                // Check Send safety: ref borrows cannot be sent between threads.
+                self.check_spawn_captures(body, *span)?;
                 self.check_block(body)?;
                 Ok(())
             }
@@ -253,6 +255,96 @@ impl TypeChecker {
         self.env.truncate(scope);
         if let Some(else_block) = else_body {
             self.check_block(else_block)?;
+        }
+        Ok(())
+    }
+
+    /// Checks that variables captured by a spawn block are safe to send between threads.
+    ///
+    /// Borrowed references (`ref`) are not `Send`-safe because the original value
+    /// might be deallocated or modified concurrently. Mutable borrows are already
+    /// caught by [`TypeError::SpawnCaptureMutableRef`] (E0251).
+    fn check_spawn_captures(
+        &self,
+        body: &kodo_ast::Block,
+        span: kodo_ast::Span,
+    ) -> crate::Result<()> {
+        for stmt in &body.stmts {
+            self.check_spawn_stmt_captures(stmt, span)?;
+        }
+        Ok(())
+    }
+
+    /// Checks a single statement inside a spawn block for non-Send captures.
+    fn check_spawn_stmt_captures(
+        &self,
+        stmt: &Stmt,
+        spawn_span: kodo_ast::Span,
+    ) -> crate::Result<()> {
+        match stmt {
+            Stmt::Expr(expr)
+            | Stmt::Return {
+                value: Some(expr), ..
+            } => {
+                self.check_spawn_expr_captures(expr, spawn_span)?;
+            }
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
+                self.check_spawn_expr_captures(value, spawn_span)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Recursively checks an expression inside a spawn block for non-Send captures.
+    fn check_spawn_expr_captures(
+        &self,
+        expr: &Expr,
+        spawn_span: kodo_ast::Span,
+    ) -> crate::Result<()> {
+        match expr {
+            Expr::Ident(name, _ident_span) => {
+                if let Some(OwnershipState::Borrowed) = self.ownership_map.get(name) {
+                    return Err(TypeError::SpawnCaptureNonSend {
+                        name: name.clone(),
+                        type_name: "ref borrow".to_string(),
+                        span: spawn_span,
+                    });
+                }
+            }
+            Expr::Call { callee, args, .. } => {
+                self.check_spawn_expr_captures(callee, spawn_span)?;
+                for arg in args {
+                    self.check_spawn_expr_captures(arg, spawn_span)?;
+                }
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                self.check_spawn_expr_captures(left, spawn_span)?;
+                self.check_spawn_expr_captures(right, spawn_span)?;
+            }
+            Expr::UnaryOp { operand, .. } => {
+                self.check_spawn_expr_captures(operand, spawn_span)?;
+            }
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_spawn_expr_captures(condition, spawn_span)?;
+                for s in &then_branch.stmts {
+                    self.check_spawn_stmt_captures(s, spawn_span)?;
+                }
+                if let Some(eb) = else_branch {
+                    for s in &eb.stmts {
+                        self.check_spawn_stmt_captures(s, spawn_span)?;
+                    }
+                }
+            }
+            Expr::FieldAccess { object, .. } => {
+                self.check_spawn_expr_captures(object, spawn_span)?;
+            }
+            _ => {}
         }
         Ok(())
     }

@@ -1,0 +1,32 @@
+module send_sync_demo {
+    meta {
+        purpose: "Demonstrate Send/Sync bounds in spawn blocks"
+        version: "0.1.0"
+    }
+
+    fn compute(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        // Owned values can be sent to spawned tasks
+        let data: Int = 42
+
+        spawn {
+            let result: Int = compute(data)
+            print_int(result)
+        }
+
+        // Parallel blocks also work with owned values
+        parallel {
+            spawn {
+                print_int(100)
+            }
+            spawn {
+                print_int(200)
+            }
+        }
+
+        return 0
+    }
+}

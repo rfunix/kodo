@@ -1,0 +1,49 @@
+{
+  "name": "kodo-lang",
+  "displayName": "Kodo Language",
+  "description": "Language support for the Kodo programming language",
+  "version": "0.1.0",
+  "publisher": "kodo",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:kodo"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kodo",
+        "aliases": [
+          "Kodo",
+          "kodo"
+        ],
+        "extensions": [
+          ".ko"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kodo",
+        "scopeName": "source.kodo",
+        "path": "./syntaxes/kodo.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Kodo",
+      "properties": {
+        "kodo.serverPath": {
+          "type": "string",
+          "default": "kodoc",
+          "description": "Path to the kodoc binary"
+        }
+      }
+    }
+  }
+}

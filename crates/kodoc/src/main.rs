@@ -249,6 +249,17 @@ fn run_build(
     }
 
     for import in &module.imports {
+        // Check stdlib first for `std::*` imports.
+        if let Some(stdlib_source) = kodo_std::resolve_stdlib_module(&import.path) {
+            match kodo_parser::parse(stdlib_source) {
+                Ok(m) => imported_modules.push(m),
+                Err(e) => {
+                    eprintln!("stdlib parse error: {e}");
+                    return 1;
+                }
+            }
+            continue;
+        }
         let import_path = resolve_import_path(base_dir, &import.path);
         match compile_imported_module(&import_path, &mut imported_object_files) {
             Ok(imported_module) => imported_modules.push(imported_module),
@@ -279,11 +290,16 @@ fn run_build(
             return 1;
         }
     }
-    for imported in &imported_modules {
+    for (idx, imported) in imported_modules.iter().enumerate() {
         if let Err(e) = checker.check_module(imported) {
             eprintln!("type error in imported module `{}`: {e}", imported.name);
             return 1;
         }
+        // Register the module name for qualified access (e.g., math.add()).
+        checker.register_imported_module(imported.name.clone());
+        // For selective imports, the names are already in scope via check_module.
+        // The import declaration's `names` field is informational at this stage.
+        let _ = &module.imports.get(idx);
     }
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
@@ -2073,6 +2089,16 @@ fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
         std::collections::HashSet::new();
 
     for import in &module.imports {
+        if let Some(stdlib_source) = kodo_std::resolve_stdlib_module(&import.path) {
+            match kodo_parser::parse(stdlib_source) {
+                Ok(m) => imported_modules.push(m),
+                Err(e) => {
+                    eprintln!("stdlib parse error: {e}");
+                    return 1;
+                }
+            }
+            continue;
+        }
         let import_path = resolve_import_path(base_dir, &import.path);
         if !import_visited.insert(import_path.clone()) {
             continue;
@@ -2101,6 +2127,7 @@ fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
             eprintln!("type error in imported module `{}`: {e}", imported.name);
             return 1;
         }
+        checker.register_imported_module(imported.name.clone());
     }
 
     let type_errors = checker.check_module_collecting(&module);
@@ -2213,6 +2240,16 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
         std::collections::HashSet::new();
 
     for import in &module.imports {
+        if let Some(stdlib_source) = kodo_std::resolve_stdlib_module(&import.path) {
+            match kodo_parser::parse(stdlib_source) {
+                Ok(m) => imported_modules.push(m),
+                Err(e) => {
+                    eprintln!("stdlib parse error: {e}");
+                    return 1;
+                }
+            }
+            continue;
+        }
         let import_path = resolve_import_path(base_dir, &import.path);
         if !import_visited.insert(import_path.clone()) {
             continue; // Skip duplicate imports.
@@ -2241,6 +2278,7 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
             eprintln!("type error in imported module `{}`: {e}", imported.name);
             return 1;
         }
+        checker.register_imported_module(imported.name.clone());
     }
 
     // Type check — collect all errors for multi-error reporting.

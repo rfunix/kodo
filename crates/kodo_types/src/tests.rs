@@ -6029,3 +6029,169 @@ fn owned_param_can_be_used() {
     let result = checker.check_module(&module);
     assert!(result.is_ok(), "owned param should be usable: {result:?}");
 }
+
+// --- Phase 54: Send/Sync bounds for spawn blocks ---
+
+#[test]
+fn spawn_capture_owned_value_is_ok() {
+    // spawn blocks should accept owned values (no borrows)
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Spawn {
+            span: Span::new(0, 50),
+            body: Block {
+                span: Span::new(5, 45),
+                stmts: vec![Stmt::Expr(Expr::IntLit(42, Span::new(10, 12)))],
+            },
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "spawn with owned value should pass: {result:?}"
+    );
+}
+
+#[test]
+fn spawn_capture_ref_borrow_is_non_send() {
+    // A ref-borrowed variable captured by a spawn block should produce E0280
+    let span = Span::new(0, 100);
+    let func = Function {
+        id: NodeId(1),
+        span,
+        name: "test_fn".to_string(),
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![Param {
+            name: "x".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            ownership: kodo_ast::Ownership::Ref,
+            span: Span::new(0, 10),
+        }],
+        return_type: TypeExpr::Unit,
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span: Span::new(10, 90),
+            stmts: vec![Stmt::Spawn {
+                span: Span::new(20, 80),
+                body: Block {
+                    span: Span::new(25, 75),
+                    stmts: vec![Stmt::Expr(Expr::Ident("x".to_string(), Span::new(30, 31)))],
+                },
+            }],
+        },
+    };
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "spawn capturing ref borrow should fail");
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("cannot be sent between threads"),
+        "error should mention Send safety: {err}"
+    );
+    assert_eq!(err.code(), "E0280");
+}
+
+#[test]
+fn spawn_capture_non_send_error_has_correct_suggestion() {
+    let err = TypeError::SpawnCaptureNonSend {
+        name: "x".to_string(),
+        type_name: "ref borrow".to_string(),
+        span: Span::new(0, 10),
+    };
+    let diag: &dyn kodo_ast::Diagnostic = &err;
+    let suggestion = diag.suggestion();
+    assert!(suggestion.is_some(), "should have a suggestion");
+    assert!(
+        suggestion.unwrap().contains("owned values"),
+        "suggestion should mention owned values"
+    );
+}
+
+#[test]
+fn spawn_with_binary_op_on_owned_values_is_ok() {
+    // spawn { x + y } where x and y are owned should be fine
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![
+            Stmt::Let {
+                span: Span::new(0, 10),
+                mutable: false,
+                name: "a".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::IntLit(1, Span::new(5, 6)),
+            },
+            Stmt::Let {
+                span: Span::new(11, 20),
+                mutable: false,
+                name: "b".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::IntLit(2, Span::new(15, 16)),
+            },
+            Stmt::Spawn {
+                span: Span::new(21, 60),
+                body: Block {
+                    span: Span::new(25, 55),
+                    stmts: vec![Stmt::Expr(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("a".to_string(), Span::new(30, 31))),
+                        op: BinOp::Add,
+                        right: Box::new(Expr::Ident("b".to_string(), Span::new(34, 35))),
+                        span: Span::new(30, 35),
+                    })],
+                },
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "spawn with owned values in binary op should pass: {result:?}"
+    );
+}
+
+#[test]
+fn parallel_with_spawn_blocks_is_ok() {
+    // parallel { spawn { 1 }; spawn { 2 } } should be fine
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Parallel {
+            span: Span::new(0, 80),
+            body: vec![
+                Stmt::Spawn {
+                    span: Span::new(10, 30),
+                    body: Block {
+                        span: Span::new(15, 25),
+                        stmts: vec![Stmt::Expr(Expr::IntLit(1, Span::new(17, 18)))],
+                    },
+                },
+                Stmt::Spawn {
+                    span: Span::new(35, 55),
+                    body: Block {
+                        span: Span::new(40, 50),
+                        stmts: vec![Stmt::Expr(Expr::IntLit(2, Span::new(42, 43)))],
+                    },
+                },
+            ],
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "parallel with spawn blocks should pass: {result:?}"
+    );
+}

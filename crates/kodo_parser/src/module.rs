@@ -56,9 +56,9 @@ impl Parser {
         let name = self.parse_ident()?;
         self.expect(&TokenKind::LBrace)?;
 
-        // Parse import declarations
+        // Parse import declarations (both `import` and `from ... import`)
         let mut imports = Vec::new();
-        while self.check(&TokenKind::Import) {
+        while self.check(&TokenKind::Import) || self.check(&TokenKind::From) {
             imports.push(self.parse_import()?);
         }
 
@@ -262,7 +262,7 @@ impl Parser {
         errors: &mut Vec<ParseError>,
     ) -> (Vec<ImportDecl>, Option<Meta>) {
         let mut imports = Vec::new();
-        while self.check(&TokenKind::Import) {
+        while self.check(&TokenKind::Import) || self.check(&TokenKind::From) {
             match self.parse_import() {
                 Ok(imp) => imports.push(imp),
                 Err(e) => {
@@ -338,16 +338,54 @@ impl Parser {
         decls
     }
 
-    /// Parses an import declaration: `import ident(.ident)*`
+    /// Parses an import declaration.
+    ///
+    /// Supported forms:
+    /// - `import ident(.ident)*` — traditional dot-separated path
+    /// - `import ident(::ident)*` — qualified `::` path
+    /// - `from ident(::ident)* import name1, name2` — selective import
     fn parse_import(&mut self) -> Result<ImportDecl> {
+        // Check for `from` prefix (selective import)
+        if self.check(&TokenKind::From) {
+            return self.parse_from_import();
+        }
+
         let start = self.expect(&TokenKind::Import)?.span;
         let mut path = vec![self.parse_ident()?];
-        while self.check(&TokenKind::Dot) {
+        // Accept both `::` and `.` as path separators
+        while self.check(&TokenKind::ColonColon) || self.check(&TokenKind::Dot) {
             self.advance();
             path.push(self.parse_ident()?);
         }
         let span = start.merge(self.prev_span());
-        Ok(ImportDecl { path, span })
+        Ok(ImportDecl {
+            path,
+            names: None,
+            span,
+        })
+    }
+
+    /// Parses a selective import: `from path::to::module import Name1, Name2`
+    fn parse_from_import(&mut self) -> Result<ImportDecl> {
+        let start = self.expect(&TokenKind::From)?.span;
+        let mut path = vec![self.parse_ident()?];
+        // Accept both `::` and `.` as path separators
+        while self.check(&TokenKind::ColonColon) || self.check(&TokenKind::Dot) {
+            self.advance();
+            path.push(self.parse_ident()?);
+        }
+        self.expect(&TokenKind::Import)?;
+        let mut names = vec![self.parse_ident()?];
+        while self.check(&TokenKind::Comma) {
+            self.advance();
+            names.push(self.parse_ident()?);
+        }
+        let span = start.merge(self.prev_span());
+        Ok(ImportDecl {
+            path,
+            names: Some(names),
+            span,
+        })
     }
 
     /// Parses a meta block: `meta { key: "value", ... }`

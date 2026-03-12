@@ -290,6 +290,19 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A `spawn` block captures a value whose type is not safe to send between threads.
+    ///
+    /// Borrowed references (`ref`) cannot be safely transferred across thread boundaries
+    /// because the original value might be deallocated or modified concurrently.
+    #[error("type `{type_name}` of variable `{name}` cannot be sent between threads at {span:?}")]
+    SpawnCaptureNonSend {
+        /// The captured variable name.
+        name: String,
+        /// The type that is not Send.
+        type_name: String,
+        /// Source location.
+        span: Span,
+    },
     /// Direct field access on an actor (fields are private to handlers).
     #[error("cannot access actor field `{field}` directly on `{actor_name}` at {span:?}")]
     ActorDirectFieldAccess {
@@ -480,6 +493,7 @@ impl TypeError {
             | Self::MethodNotFound { span, .. }
             | Self::AwaitOutsideAsync { span, .. }
             | Self::SpawnCaptureMutableRef { span, .. }
+            | Self::SpawnCaptureNonSend { span, .. }
             | Self::ActorDirectFieldAccess { span, .. }
             | Self::LowConfidenceWithoutReview { span, .. }
             | Self::ConfidenceThreshold { span, .. }
@@ -533,6 +547,7 @@ impl TypeError {
             Self::MethodNotFound { .. } => "E0235",
             Self::AwaitOutsideAsync { .. } => "E0250",
             Self::SpawnCaptureMutableRef { .. } => "E0251",
+            Self::SpawnCaptureNonSend { .. } => "E0280",
             Self::ActorDirectFieldAccess { .. } => "E0252",
             Self::PolicyViolation { .. } => "E0350",
             Self::LowConfidenceWithoutReview { .. } => "E0260",
@@ -827,6 +842,10 @@ fn suggestion_for_trait_method_error(err: &TypeError) -> Option<String> {
         TypeError::SpawnCaptureMutableRef { name, .. } => Some(format!(
             "spawn blocks cannot capture mutable references like `{name}`"
         )),
+        TypeError::SpawnCaptureNonSend { .. } => Some(
+            "use owned values (own) instead of references when sending data to spawned tasks"
+                .to_string(),
+        ),
         TypeError::ActorDirectFieldAccess { field, .. } => {
             Some(format!("use a handler method to access `{field}` instead"))
         }

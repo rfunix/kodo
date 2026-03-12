@@ -1,0 +1,19 @@
+module selective_imports {
+    // Selective import: bring specific names into scope
+    from std::option import Some, None
+
+    meta {
+        purpose: "Demonstrate selective imports with from...import syntax"
+        version: "0.1.0"
+    }
+
+    fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        let val: Int = double(21)
+        print_int(val)
+        return 0
+    }
+}

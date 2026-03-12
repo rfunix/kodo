@@ -236,7 +236,7 @@ impl LanguageServer for KodoLanguageServer {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec![".".to_string()]),
+                    trigger_characters: Some(vec![".".to_string(), ":".to_string()]),
                     ..Default::default()
                 }),
                 signature_help_provider: Some(SignatureHelpOptions {
@@ -332,6 +332,7 @@ impl LanguageServer for KodoLanguageServer {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
 
         let source = {
             let docs = self
@@ -342,7 +343,7 @@ impl LanguageServer for KodoLanguageServer {
         };
 
         if let Some(source) = source {
-            let items = completions_for_source(&source);
+            let items = completions_for_source(&source, position);
             if !items.is_empty() {
                 return Ok(Some(CompletionResponse::Array(items)));
             }
@@ -657,12 +658,80 @@ fn add_string_method_completions(items: &mut Vec<CompletionItem>) {
     }
 }
 
-/// Returns completion items for the current source.
+/// Extracts the qualified prefix before the cursor (e.g., `"Color"` from `Color::`).
 ///
-/// Provides function names, struct/enum names, builtin functions,
-/// string method completions, and struct field completions.
-fn completions_for_source(source: &str) -> Vec<CompletionItem> {
+/// Returns `Some(name)` if the text before the cursor ends with `Name::`,
+/// meaning the user wants completions for variants/members of `Name`.
+fn qualified_prefix_at(source: &str, position: Position) -> Option<String> {
+    let offset = line_col_to_offset(source, position.line, position.character)?;
+    let before = &source[..offset];
+    let trimmed = before.trim_end();
+
+    // Check for `Name::` pattern
+    if !trimmed.ends_with("::") {
+        return None;
+    }
+    let prefix = &trimmed[..trimmed.len() - 2];
+    // Extract the identifier right before `::`
+    let bytes = prefix.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1] == b' ' {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && is_ident_char(bytes[start - 1]) {
+        start -= 1;
+    }
+    let name = &prefix[start..end];
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Returns completion items for the current source at the given cursor position.
+///
+/// Provides context-aware completions:
+/// - After `EnumName::`: enum variant names
+/// - Otherwise: function names, struct/enum names, builtin functions,
+///   string method completions, and struct field completions.
+fn completions_for_source(source: &str, position: Position) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+
+    // Check for qualified prefix (e.g., `Color::`) before parsing,
+    // since incomplete source like `Color::` may fail to parse.
+    if let Some(prefix) = qualified_prefix_at(source, position) {
+        // Use recovery parser to get the module even with incomplete source
+        let output = kodo_parser::parse_with_recovery(source);
+        for enum_decl in &output.module.enum_decls {
+            if enum_decl.name == prefix {
+                for variant in &enum_decl.variants {
+                    let detail = if variant.fields.is_empty() {
+                        format!("{}::{}", enum_decl.name, variant.name)
+                    } else {
+                        let fields_str: Vec<String> =
+                            variant.fields.iter().map(format_type_expr).collect();
+                        format!(
+                            "{}::{}({})",
+                            enum_decl.name,
+                            variant.name,
+                            fields_str.join(", ")
+                        )
+                    };
+                    items.push(CompletionItem {
+                        label: variant.name.clone(),
+                        kind: Some(CompletionItemKind::ENUM_MEMBER),
+                        detail: Some(detail),
+                        ..Default::default()
+                    });
+                }
+                return items;
+            }
+        }
+        // No matching enum found — return empty
+        return items;
+    }
 
     let Ok(module) = kodo_parser::parse(source) else {
         return items;
@@ -1393,7 +1462,7 @@ mod tests {
         return x
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let func_names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             func_names.contains(&"my_func"),
@@ -1452,7 +1521,7 @@ mod tests {
         let s: String = "hello"
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             labels.contains(&"length"),
@@ -1485,7 +1554,7 @@ mod tests {
         let p: Point = Point { x: 1, y: 2 }
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(labels.contains(&"x"), "should contain struct field x");
         assert!(labels.contains(&"y"), "should contain struct field y");
@@ -1579,7 +1648,7 @@ mod tests {
         let s: String = "hello"
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let method_items: Vec<&CompletionItem> = items
             .iter()
             .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
@@ -1715,7 +1784,7 @@ mod tests {
         let x: Int = 1
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
         // Verify core builtin functions are present
@@ -1892,7 +1961,7 @@ mod tests {
         let d: Direction = Direction::North
     }
 }"#;
-        let items = completions_for_source(source);
+        let items = completions_for_source(source, Position::new(0, 0));
         let enum_items: Vec<&CompletionItem> = items
             .iter()
             .filter(|i| i.kind == Some(CompletionItemKind::ENUM))
@@ -2276,6 +2345,109 @@ mod tests {
             help.signatures[0].documentation.is_some(),
             "signature help should include contract documentation"
         );
+    }
+
+    #[test]
+    fn completions_after_double_colon_returns_enum_variants() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main() {
+        let c: Color = Color::
+    }
+}"#;
+        // Position right after `Color::` (line 13, col 30)
+        let items = completions_for_source(source, Position::new(13, 30));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"Red"), "should suggest Red variant");
+        assert!(labels.contains(&"Green"), "should suggest Green variant");
+        assert!(labels.contains(&"Blue"), "should suggest Blue variant");
+        assert_eq!(items.len(), 3, "should only return enum variants");
+        assert_eq!(
+            items[0].kind,
+            Some(CompletionItemKind::ENUM_MEMBER),
+            "variant completions should be ENUM_MEMBER kind"
+        );
+    }
+
+    #[test]
+    fn completions_after_double_colon_unknown_prefix_returns_empty() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let c: Int = Unknown::
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(7, 30));
+        assert!(
+            items.is_empty(),
+            "unknown prefix after :: should return no completions"
+        );
+    }
+
+    #[test]
+    fn completions_after_double_colon_with_payload_variants() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int),
+        Point
+    }
+
+    fn main() {
+        let s: Shape = Shape::
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(13, 30));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"Circle"), "should suggest Circle variant");
+        assert!(
+            labels.contains(&"Rectangle"),
+            "should suggest Rectangle variant"
+        );
+        assert!(labels.contains(&"Point"), "should suggest Point variant");
+
+        // Check that payload variants have informative detail
+        let circle = items.iter().find(|i| i.label == "Circle");
+        assert!(circle.is_some());
+        let detail = circle.and_then(|c| c.detail.as_deref()).unwrap_or("");
+        assert!(
+            detail.contains("Int"),
+            "Circle detail should show payload type"
+        );
+    }
+
+    #[test]
+    fn qualified_prefix_at_extracts_name() {
+        let source = "let x = Color::";
+        // Position at end of source
+        let result = qualified_prefix_at(source, Position::new(0, 15));
+        assert_eq!(result, Some("Color".to_string()));
+    }
+
+    #[test]
+    fn qualified_prefix_at_returns_none_without_colons() {
+        let source = "let x = Color.";
+        let result = qualified_prefix_at(source, Position::new(0, 14));
+        assert!(result.is_none(), "dot should not trigger qualified prefix");
     }
 
     #[test]

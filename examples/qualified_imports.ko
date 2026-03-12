@@ -1,0 +1,29 @@
+module qualified_imports {
+    // Qualified import using :: separator
+    import std::option
+
+    meta {
+        purpose: "Demonstrate qualified import syntax with :: separator"
+        version: "0.1.0"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Option<Int> {
+        if b == 0 {
+            return Option::None
+        }
+        return Option::Some(a / b)
+    }
+
+    fn main() -> Int {
+        let result: Option<Int> = safe_divide(10, 2)
+        match result {
+            Option::Some(v) => {
+                print_int(v)
+            }
+            Option::None => {
+                println("division by zero")
+            }
+        }
+        return 0
+    }
+}

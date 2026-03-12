@@ -108,6 +108,9 @@ pub enum TokenKind {
     /// The `import` keyword.
     #[token("import")]
     Import,
+    /// The `from` keyword (selective imports: `from std::option import Some`).
+    #[token("from")]
+    From,
     /// The `while` keyword.
     #[token("while")]
     While,
@@ -876,7 +879,7 @@ mod tests {
                 // e.g. "letx", "returnfoo", "ify" — should be identifiers, not keywords
                 let keywords = ["let", "fn", "if", "else", "return", "module", "meta",
                                 "while", "for", "true", "false", "struct", "enum",
-                                "match", "import", "trait", "impl", "self",
+                                "match", "import", "from", "trait", "impl", "self",
                                 "own", "ref", "is", "async", "await", "spawn", "actor",
                                 "parallel", "break", "continue"];
                 for kw in &keywords {
@@ -893,7 +896,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..29usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..30usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -903,7 +906,8 @@ mod tests {
                     ("requires", TokenKind::Requires), ("ensures", TokenKind::Ensures),
                     ("invariant", TokenKind::Invariant), ("intent", TokenKind::Intent), ("struct", TokenKind::Struct),
                     ("enum", TokenKind::Enum), ("match", TokenKind::Match),
-                    ("import", TokenKind::Import), ("while", TokenKind::While),
+                    ("import", TokenKind::Import), ("from", TokenKind::From),
+                    ("while", TokenKind::While),
                     ("for", TokenKind::For), ("trait", TokenKind::Trait),
                     ("impl", TokenKind::Impl), ("self", TokenKind::SelfValue),
                     ("own", TokenKind::Own), ("ref", TokenKind::Ref),
