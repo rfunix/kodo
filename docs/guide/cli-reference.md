@@ -217,7 +217,41 @@ kodoc lsp
 
 **Features:**
 - Real-time diagnostics (parse errors, type errors)
-- Hover information (function signatures, contracts, annotations)
+- Hover information (function signatures, contracts, full annotations with args — e.g., `@confidence(0.85)`, `@authored_by(agent: "claude")`)
+- Code actions from FixPatch — automatic quick-fix suggestions for type errors with machine-applicable patches
+- Completions for 31 built-in functions with signature details, user-defined functions with contract info (`requires`/`ensures`)
+- Goto definition, rename, signature help, document symbols
+
+### `kodoc audit`
+
+Generate a consolidated audit report combining confidence scores, contract verification status, and annotations.
+
+```bash
+kodoc audit <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json` | Output as JSON | `false` |
+| `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `none` | `runtime` |
+
+**Example:**
+
+```bash
+# Human-readable audit
+kodoc audit my_module.ko
+
+# JSON for agents
+kodoc audit my_module.ko --json --contracts both
+```
+
+The audit report includes:
+- Per-function confidence scores (declared and effective after transitive propagation)
+- Contract verification summary (static verified, runtime checks, failures)
+- Deployability status (`true` if min confidence > 0.9 and zero contract failures)
+- All annotations per function
 
 ## Running via Cargo
 

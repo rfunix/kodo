@@ -52,6 +52,9 @@ pub struct CompilationCertificate {
     /// Differences from the parent certificate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_from_parent: Option<CertificateDiff>,
+    /// Per-function confidence scores.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confidence: Vec<FunctionConfidence>,
 }
 
 /// Statistics about contracts in the compiled module.
@@ -63,6 +66,15 @@ pub struct ContractStats {
     pub ensures_count: usize,
     /// Contract checking mode used.
     pub mode: String,
+    /// Number of contracts verified statically (via Z3 SMT solver).
+    #[serde(default)]
+    pub static_verified: usize,
+    /// Number of contracts that need runtime checks.
+    #[serde(default)]
+    pub runtime_checks_needed: usize,
+    /// Number of contracts that failed verification.
+    #[serde(default)]
+    pub failures: usize,
 }
 
 /// Differences between two consecutive compilation certificates.
@@ -87,14 +99,33 @@ pub struct FunctionDetail {
     pub annotations: HashMap<String, serde_json::Value>,
 }
 
+/// Per-function confidence score data.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FunctionConfidence {
+    /// Function name.
+    pub name: String,
+    /// Declared `@confidence` value (defaults to 1.0 if absent).
+    pub declared: f64,
+    /// Effective confidence after transitive propagation through call graph.
+    pub effective: f64,
+    /// Direct callees of this function.
+    pub callees: Vec<String>,
+}
+
+/// Raw confidence data: (function_name, declared, effective, callees).
+pub type ConfidenceData = (String, f64, f64, Vec<String>);
+
 impl CompilationCertificate {
     /// Creates a new compilation certificate from the module, source, and
-    /// optional binary bytes and parent certificate.
+    /// optional binary bytes, parent certificate, confidence data, and
+    /// contract verification results.
     pub fn from_module(
         module: &kodo_ast::Module,
         source: &str,
         binary_bytes: Option<&[u8]>,
         parent: Option<&CompilationCertificate>,
+        confidence_data: Option<&[ConfidenceData]>,
+        verification: Option<(usize, usize, usize)>,
     ) -> Self {
         let meta = module.meta.as_ref();
 
@@ -209,7 +240,14 @@ impl CompilationCertificate {
             contracts: ContractStats {
                 requires_count,
                 ensures_count,
-                mode: "runtime".to_string(),
+                mode: match verification {
+                    Some((s, _, _)) if s > 0 => "static".to_string(),
+                    _ => "runtime".to_string(),
+                },
+                static_verified: verification.map_or(0, |(s, _, _)| s),
+                runtime_checks_needed: verification
+                    .map_or(requires_count + ensures_count, |(_, r, _)| r),
+                failures: verification.map_or(0, |(_, _, f)| f),
             },
             functions,
             function_details,
@@ -220,6 +258,16 @@ impl CompilationCertificate {
             certificate_hash: String::new(),
             parent_certificate,
             diff_from_parent,
+            confidence: confidence_data.map_or_else(Vec::new, |data| {
+                data.iter()
+                    .map(|(name, declared, effective, callees)| FunctionConfidence {
+                        name: name.clone(),
+                        declared: *declared,
+                        effective: *effective,
+                        callees: callees.clone(),
+                    })
+                    .collect()
+            }),
         };
 
         // Compute certificate_hash over the serialized certificate
@@ -348,7 +396,14 @@ mod tests {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
         let binary_bytes: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        let cert = CompilationCertificate::from_module(&module, source, Some(&binary_bytes), None);
+        let cert = CompilationCertificate::from_module(
+            &module,
+            source,
+            Some(&binary_bytes),
+            None,
+            None,
+            None,
+        );
         assert!(
             !cert.binary_hash.is_empty(),
             "binary_hash should not be empty"
@@ -364,7 +419,14 @@ mod tests {
     fn certificate_has_certificate_hash() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let cert = CompilationCertificate::from_module(&module, source, Some(&[1, 2, 3]), None);
+        let cert = CompilationCertificate::from_module(
+            &module,
+            source,
+            Some(&[1, 2, 3]),
+            None,
+            None,
+            None,
+        );
         assert!(
             cert.certificate_hash.starts_with("sha256:"),
             "certificate_hash should start with 'sha256:', got: {}",
@@ -376,7 +438,7 @@ mod tests {
     fn first_certificate_has_no_parent() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let cert = CompilationCertificate::from_module(&module, source, None, None);
+        let cert = CompilationCertificate::from_module(&module, source, None, None, None, None);
         assert!(
             cert.parent_certificate.is_none(),
             "first certificate should have no parent"
@@ -387,9 +449,10 @@ mod tests {
     fn chained_certificate_references_parent() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let first = CompilationCertificate::from_module(&module, source, None, None);
+        let first = CompilationCertificate::from_module(&module, source, None, None, None, None);
         let first_hash = first.certificate_hash.clone();
-        let second = CompilationCertificate::from_module(&module, source, None, Some(&first));
+        let second =
+            CompilationCertificate::from_module(&module, source, None, Some(&first), None, None);
         assert_eq!(
             second.parent_certificate,
             Some(first_hash),
@@ -401,11 +464,19 @@ mod tests {
     fn diff_detects_added_function() {
         let parent_module = make_test_module(&["foo"]);
         let source_v1 = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let parent = CompilationCertificate::from_module(&parent_module, source_v1, None, None);
+        let parent =
+            CompilationCertificate::from_module(&parent_module, source_v1, None, None, None, None);
 
         let new_module = make_test_module(&["foo", "bar"]);
         let source_v2 = "module test { meta { purpose: \"testing\" } fn foo() {} fn bar() {} }";
-        let cert = CompilationCertificate::from_module(&new_module, source_v2, None, Some(&parent));
+        let cert = CompilationCertificate::from_module(
+            &new_module,
+            source_v2,
+            None,
+            Some(&parent),
+            None,
+            None,
+        );
 
         let diff = cert
             .diff_from_parent
@@ -415,6 +486,82 @@ mod tests {
             diff.functions_added.contains(&"bar".to_string()),
             "diff should detect 'bar' as added, got: {:?}",
             diff.functions_added
+        );
+    }
+
+    #[test]
+    fn certificate_includes_confidence_data() {
+        let module = make_test_module(&["add", "helper"]);
+        let source = "module test { meta { purpose: \"testing\" } fn add() {} fn helper() {} }";
+        let confidence_data = vec![
+            ("add".to_string(), 0.95, 0.90, vec!["helper".to_string()]),
+            ("helper".to_string(), 0.90, 0.90, vec![]),
+        ];
+        let cert = CompilationCertificate::from_module(
+            &module,
+            source,
+            None,
+            None,
+            Some(&confidence_data),
+            None,
+        );
+        assert_eq!(cert.confidence.len(), 2, "should have 2 confidence entries");
+        assert_eq!(cert.confidence[0].name, "add");
+        assert!((cert.confidence[0].declared - 0.95).abs() < f64::EPSILON);
+        assert!((cert.confidence[0].effective - 0.90).abs() < f64::EPSILON);
+        assert_eq!(cert.confidence[0].callees, vec!["helper".to_string()]);
+    }
+
+    #[test]
+    fn certificate_includes_contract_verification_stats() {
+        let module = make_test_module(&["foo"]);
+        let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
+        let cert =
+            CompilationCertificate::from_module(&module, source, None, None, None, Some((3, 2, 0)));
+        assert_eq!(cert.contracts.static_verified, 3);
+        assert_eq!(cert.contracts.runtime_checks_needed, 2);
+        assert_eq!(cert.contracts.failures, 0);
+        assert_eq!(cert.contracts.mode, "static");
+    }
+
+    #[test]
+    fn certificate_contract_stats_runtime_mode_default() {
+        let module = make_test_module(&["foo"]);
+        let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
+        let cert = CompilationCertificate::from_module(&module, source, None, None, None, None);
+        assert_eq!(cert.contracts.static_verified, 0);
+        assert_eq!(cert.contracts.mode, "runtime");
+    }
+
+    #[test]
+    fn certificate_confidence_in_json() {
+        let module = make_test_module(&["foo"]);
+        let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
+        let confidence_data = vec![("foo".to_string(), 0.85, 0.85, vec![])];
+        let cert = CompilationCertificate::from_module(
+            &module,
+            source,
+            None,
+            None,
+            Some(&confidence_data),
+            Some((1, 0, 0)),
+        );
+        let json = cert.to_json().unwrap_or_default();
+        assert!(
+            json.contains("\"confidence\""),
+            "JSON should contain confidence field"
+        );
+        assert!(
+            json.contains("\"declared\""),
+            "JSON should contain declared field"
+        );
+        assert!(
+            json.contains("\"effective\""),
+            "JSON should contain effective field"
+        );
+        assert!(
+            json.contains("\"static_verified\""),
+            "JSON should contain static_verified"
         );
     }
 }

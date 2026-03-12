@@ -247,24 +247,46 @@ When you compile a Kōdo program, the compiler emits a **compilation certificate
 
 ```json
 {
-  "module_name": "hello",
+  "module": "hello",
   "purpose": "My first Kōdo program",
   "version": "0.1.0",
   "contracts": {
-    "requires_count": 0,
-    "ensures_count": 0,
-    "mode": "runtime"
+    "requires_count": 1,
+    "ensures_count": 1,
+    "mode": "static",
+    "static_verified": 1,
+    "runtime_checks_needed": 1,
+    "failures": 0
   },
-  "functions": ["main"],
-  "source_hash": "sha256:..."
+  "functions": ["main", "validate"],
+  "confidence": [
+    {
+      "name": "main",
+      "declared": 0.95,
+      "effective": 0.90,
+      "callees": ["validate"]
+    },
+    {
+      "name": "validate",
+      "declared": 0.90,
+      "effective": 0.90,
+      "callees": []
+    }
+  ],
+  "source_hash": "sha256:...",
+  "binary_hash": "sha256:...",
+  "certificate_hash": "sha256:..."
 }
 ```
 
 This certificate is a machine-readable record of what was compiled. AI agents can use certificates to verify:
 
 - What the module claims to do (from `meta`)
-- How many contracts are in place
+- How many contracts are in place, and which were statically verified vs runtime-checked
+- Per-function confidence scores (declared and effective after transitive propagation)
 - Whether the source has changed since the last compilation
+
+Use `kodoc audit <file> --json` for a consolidated report combining confidence, contracts, and annotations with a deployability verdict.
 
 ## Next Steps
 

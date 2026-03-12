@@ -4,6 +4,7 @@
 //! Designed to be used both by AI agents (with `--emit json-errors`) and
 //! humans (with beautiful terminal error messages via ariadne).
 
+mod audit;
 mod certificate;
 mod diagnostics;
 mod explanations;
@@ -151,6 +152,20 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Generate a consolidated audit report (confidence + contracts + annotations).
+    Audit {
+        /// The source file to audit.
+        #[arg()]
+        file: PathBuf,
+
+        /// Output as JSON (default is human-readable).
+        #[arg(long, default_value_t = false)]
+        json: bool,
+
+        /// Contract checking mode: static, runtime, both, none.
+        #[arg(long, default_value = "runtime")]
+        contracts: String,
+    },
 }
 
 fn main() {
@@ -197,6 +212,11 @@ fn main() {
         } => run_confidence_report(&file, json, threshold),
         Command::Fix { file, dry_run } => run_fix(&file, dry_run),
         Command::Describe { binary, json } => run_describe(&binary, json),
+        Command::Audit {
+            file,
+            json,
+            contracts,
+        } => run_audit(&file, json, &contracts),
     };
 
     std::process::exit(exit_code);
@@ -576,6 +596,8 @@ fn run_build(
                 &source,
                 binary_bytes.as_deref(),
                 parent_cert.as_ref(),
+                None,
+                None,
             );
             match cert.to_json() {
                 Ok(json) => {
@@ -2701,6 +2723,131 @@ fn run_confidence_report(file: &PathBuf, json: bool, threshold: f64) -> i32 {
             for (name, computed) in &below_threshold {
                 println!("  - {name} ({computed:.2})");
             }
+        }
+    }
+
+    0
+}
+
+/// Generates a consolidated audit report combining confidence, contracts, and annotations.
+fn run_audit(file: &PathBuf, json: bool, contracts_mode_str: &str) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    // Confidence report.
+    let confidence_data = checker.confidence_report(&module);
+
+    // Contract verification.
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    let mut total_static = 0_usize;
+    let mut total_runtime = 0_usize;
+    let mut total_failures = 0_usize;
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            Ok(result) => {
+                total_static += result.static_verified;
+                total_runtime += result.runtime_checks_needed;
+                total_failures += result.failures.len();
+            }
+            Err(e) => {
+                eprintln!("contract error: {e}");
+                return 1;
+            }
+        }
+    }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+                Ok(result) => {
+                    total_static += result.static_verified;
+                    total_runtime += result.runtime_checks_needed;
+                    total_failures += result.failures.len();
+                }
+                Err(e) => {
+                    eprintln!("contract error: {e}");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    let report = audit::build_audit_report(
+        &module,
+        &confidence_data,
+        total_static,
+        total_runtime,
+        total_failures,
+    );
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+        );
+    } else {
+        println!("Audit Report for module `{}`", report.module);
+        println!("{}", "=".repeat(60));
+        println!("Functions:       {}", report.summary.total_functions);
+        println!("Min confidence:  {:.2}", report.summary.min_confidence);
+        println!(
+            "Contracts:       {} total ({} static, {} runtime, {} failed)",
+            report.summary.contracts_total,
+            report.summary.contracts_static_verified,
+            report.summary.contracts_runtime,
+            report.summary.contracts_failed,
+        );
+        println!(
+            "Deployable:      {}",
+            if report.summary.deployable {
+                "yes"
+            } else {
+                "no"
+            }
+        );
+        println!();
+        println!(
+            "{:<30} {:>10} {:>10} {:>8} {:>8}",
+            "Function", "Declared", "Effective", "Req", "Ens"
+        );
+        println!("{}", "-".repeat(76));
+        for f in &report.functions {
+            println!(
+                "{:<30} {:>10.2} {:>10.2} {:>8} {:>8}",
+                f.name,
+                f.confidence_declared,
+                f.confidence_effective,
+                f.requires_count,
+                f.ensures_count,
+            );
         }
     }
 

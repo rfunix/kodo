@@ -148,6 +148,38 @@ fn offset_to_line_col(source: &str, offset: u32) -> (u32, u32) {
     (line, col)
 }
 
+/// Formats an annotation with its arguments for display.
+///
+/// Renders `@confidence(0.85)`, `@authored_by(agent: "claude")`, etc.
+fn format_annotation(ann: &kodo_ast::Annotation) -> String {
+    if ann.args.is_empty() {
+        return format!("@{}", ann.name);
+    }
+    let args: Vec<String> = ann
+        .args
+        .iter()
+        .map(|arg| match arg {
+            kodo_ast::AnnotationArg::Positional(expr) => format_annotation_expr(expr),
+            kodo_ast::AnnotationArg::Named(name, expr) => {
+                format!("{name}: {}", format_annotation_expr(expr))
+            }
+        })
+        .collect();
+    format!("@{}({})", ann.name, args.join(", "))
+}
+
+/// Formats an expression value for annotation display.
+fn format_annotation_expr(expr: &kodo_ast::Expr) -> String {
+    match expr {
+        kodo_ast::Expr::IntLit(n, _) => n.to_string(),
+        kodo_ast::Expr::FloatLit(f, _) => format!("{f}"),
+        kodo_ast::Expr::StringLit(s, _) => format!("\"{s}\""),
+        kodo_ast::Expr::BoolLit(b, _) => b.to_string(),
+        kodo_ast::Expr::Ident(name, _) => name.clone(),
+        _ => "...".to_string(),
+    }
+}
+
 /// Finds the function at a given position in the source and returns
 /// hover information including type, contracts, and annotations.
 fn hover_at_position(source: &str, position: Position) -> Option<String> {
@@ -190,7 +222,7 @@ fn hover_at_position(source: &str, position: Position) -> Option<String> {
 
             // Add annotations
             for ann in &func.annotations {
-                let _ = write!(info, "\n@{}", ann.name);
+                let _ = write!(info, "\n{}", format_annotation(ann));
             }
 
             return Some(info);
@@ -578,33 +610,53 @@ fn is_ident_char(b: u8) -> bool {
 
 /// Adds builtin function completions to the list.
 fn add_builtin_completions(items: &mut Vec<CompletionItem>) {
-    let builtins = [
-        "println",
-        "print",
-        "print_int",
-        "abs",
-        "min",
-        "max",
-        "clamp",
-        "file_exists",
-        "file_read",
-        "file_write",
-        "list_new",
-        "list_push",
-        "list_get",
-        "list_length",
-        "list_contains",
-        "map_new",
-        "map_insert",
-        "map_get",
-        "map_contains_key",
-        "map_length",
+    let builtins: &[(&str, &str)] = &[
+        ("println", "println(value) -> Unit"),
+        ("print", "print(value) -> Unit"),
+        ("print_int", "print_int(n: Int) -> Unit"),
+        ("abs", "abs(n: Int) -> Int"),
+        ("min", "min(a: Int, b: Int) -> Int"),
+        ("max", "max(a: Int, b: Int) -> Int"),
+        ("clamp", "clamp(val: Int, lo: Int, hi: Int) -> Int"),
+        ("file_exists", "file_exists(path: String) -> Bool"),
+        ("file_read", "file_read(path: String) -> String"),
+        (
+            "file_write",
+            "file_write(path: String, data: String) -> Unit",
+        ),
+        ("list_new", "list_new() -> List<T>"),
+        ("list_push", "list_push(list, value) -> Unit"),
+        ("list_get", "list_get(list, index: Int) -> T"),
+        ("list_length", "list_length(list) -> Int"),
+        ("list_contains", "list_contains(list, value) -> Bool"),
+        ("list_pop", "list_pop(list) -> T"),
+        ("list_remove", "list_remove(list, index: Int) -> T"),
+        ("list_set", "list_set(list, index: Int, value) -> Unit"),
+        ("list_is_empty", "list_is_empty(list) -> Bool"),
+        ("list_reverse", "list_reverse(list) -> Unit"),
+        ("map_new", "map_new() -> Map<K, V>"),
+        ("map_insert", "map_insert(map, key, value) -> Unit"),
+        ("map_get", "map_get(map, key) -> V"),
+        ("map_contains_key", "map_contains_key(map, key) -> Bool"),
+        ("map_length", "map_length(map) -> Int"),
+        ("map_remove", "map_remove(map, key) -> Bool"),
+        ("map_is_empty", "map_is_empty(map) -> Bool"),
+        ("json_stringify", "json_stringify(json) -> String"),
+        ("json_get_bool", "json_get_bool(json, key: String) -> Bool"),
+        (
+            "json_get_float",
+            "json_get_float(json, key: String) -> Float64",
+        ),
+        (
+            "json_get_array",
+            "json_get_array(json, key: String) -> List<Json>",
+        ),
     ];
-    for name in &builtins {
+    for (name, detail) in builtins {
         items.push(CompletionItem {
             label: (*name).to_string(),
             kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some("builtin".to_string()),
+            detail: Some((*detail).to_string()),
             ..Default::default()
         });
     }
@@ -741,10 +793,36 @@ fn completions_for_source(source: &str, position: Position) -> Vec<CompletionIte
     let _ = checker.check_module(&module);
 
     for func in &module.functions {
+        let params_str: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, format_type_expr(&p.ty)))
+            .collect();
+        let ret = format_type_expr(&func.return_type);
+        let detail = format!("fn {}({}) -> {}", func.name, params_str.join(", "), ret);
+
+        let mut doc_parts = Vec::new();
+        for req in &func.requires {
+            doc_parts.push(format!("requires {{ {req:?} }}"));
+        }
+        for ens in &func.ensures {
+            doc_parts.push(format!("ensures {{ {ens:?} }}"));
+        }
+        for ann in &func.annotations {
+            doc_parts.push(format_annotation(ann));
+        }
+
+        let documentation = if doc_parts.is_empty() {
+            None
+        } else {
+            Some(Documentation::String(doc_parts.join("\n")))
+        };
+
         items.push(CompletionItem {
             label: func.name.clone(),
             kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(format!("fn {}(...)", func.name)),
+            detail: Some(detail),
+            documentation,
             ..Default::default()
         });
     }
@@ -1193,6 +1271,9 @@ fn code_actions_for_source(source: &str, uri: &Url, range: &Range) -> CodeAction
         }
     }
 
+    // Code actions from FixPatch: type-check errors with machine-applicable patches.
+    add_fix_patch_actions(source, &module, uri, range, &mut actions);
+
     // Code action: "Add type annotation" for let bindings without explicit type
     for func in &module.functions {
         for stmt in &func.body.stmts {
@@ -1247,6 +1328,66 @@ fn code_actions_for_source(source: &str, uri: &Url, range: &Range) -> CodeAction
     }
 
     actions
+}
+
+/// Adds code actions from type error fix patches.
+///
+/// Runs the type checker on the module and converts any [`kodo_ast::FixPatch`] results
+/// into LSP `CodeAction` entries with `TextEdit` replacements.
+fn add_fix_patch_actions(
+    source: &str,
+    module: &kodo_ast::Module,
+    uri: &Url,
+    range: &Range,
+    actions: &mut CodeActionResponse,
+) {
+    let mut checker = kodo_types::TypeChecker::new();
+    let type_errors = checker.check_module_collecting(module);
+    for err in &type_errors {
+        if let Some(patch) = kodo_ast::Diagnostic::fix_patch(err) {
+            let (start_line, start_col) =
+                offset_to_line_col(source, u32::try_from(patch.start_offset).unwrap_or(0));
+            let (end_line, end_col) =
+                offset_to_line_col(source, u32::try_from(patch.end_offset).unwrap_or(0));
+
+            let patch_range = Range::new(
+                Position::new(start_line, start_col),
+                Position::new(end_line, end_col),
+            );
+
+            // Only include if the action is relevant to the requested range.
+            if range.start.line <= end_line && range.end.line >= start_line {
+                let mut changes = HashMap::new();
+                changes.insert(
+                    uri.clone(),
+                    vec![TextEdit {
+                        range: patch_range,
+                        new_text: patch.replacement.clone(),
+                    }],
+                );
+
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: patch.description.clone(),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![Diagnostic {
+                        range: patch_range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: Some(NumberOrString::String(
+                            kodo_ast::Diagnostic::code(err).to_string(),
+                        )),
+                        source: Some("kodo".to_string()),
+                        message: err.to_string(),
+                        ..Default::default()
+                    }]),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            }
+        }
+    }
 }
 
 /// Infers a type hint string from an expression for the "Add type annotation" code action.
@@ -1803,16 +1944,39 @@ mod tests {
             );
         }
 
-        // Verify builtins have "builtin" detail
-        let builtin_items: Vec<&CompletionItem> = items
-            .iter()
-            .filter(|i| i.detail.as_deref() == Some("builtin"))
-            .collect();
-        assert!(
-            builtin_items.len() >= 18,
-            "should have at least 18 builtin completions, got {}",
-            builtin_items.len()
-        );
+        // Verify builtins have signature detail (not just "builtin")
+        let builtin_names = [
+            "println",
+            "print",
+            "abs",
+            "min",
+            "max",
+            "clamp",
+            "list_new",
+            "list_push",
+            "list_get",
+            "list_pop",
+            "list_remove",
+            "list_set",
+            "list_is_empty",
+            "list_reverse",
+            "list_length",
+            "list_contains",
+            "map_new",
+            "map_insert",
+            "map_get",
+            "map_remove",
+            "map_is_empty",
+            "map_contains_key",
+            "map_length",
+            "json_stringify",
+            "json_get_bool",
+            "json_get_float",
+            "json_get_array",
+        ];
+        for name in &builtin_names {
+            assert!(labels.contains(name), "should contain builtin: {name}",);
+        }
     }
 
     #[test]
@@ -2469,5 +2633,179 @@ mod tests {
         let uri = Url::parse("file:///test.ko").unwrap();
         let symbols = workspace_symbols_for_source(source, &uri);
         assert_eq!(symbols.len(), 2, "should return all functions");
+    }
+
+    #[test]
+    fn hover_shows_annotation_args() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    @confidence(0.85)
+    @authored_by(agent: "claude")
+    fn process(x: Int) -> Int {
+        return x
+    }
+}"#;
+        let hover = hover_at_position(source, Position::new(9, 10));
+        assert!(hover.is_some(), "should find hover");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("@confidence(0.85)"),
+            "hover should show @confidence with args, got: {info}"
+        );
+        assert!(
+            info.contains("@authored_by(agent: \"claude\")"),
+            "hover should show @authored_by with named args, got: {info}"
+        );
+    }
+
+    #[test]
+    fn format_annotation_no_args() {
+        let ann = kodo_ast::Annotation {
+            name: "deprecated".to_string(),
+            args: vec![],
+            span: kodo_ast::Span::new(0, 10),
+        };
+        assert_eq!(format_annotation(&ann), "@deprecated");
+    }
+
+    #[test]
+    fn format_annotation_positional() {
+        let ann = kodo_ast::Annotation {
+            name: "confidence".to_string(),
+            args: vec![kodo_ast::AnnotationArg::Positional(
+                kodo_ast::Expr::FloatLit(0.95, kodo_ast::Span::new(0, 4)),
+            )],
+            span: kodo_ast::Span::new(0, 20),
+        };
+        assert_eq!(format_annotation(&ann), "@confidence(0.95)");
+    }
+
+    #[test]
+    fn format_annotation_named() {
+        let ann = kodo_ast::Annotation {
+            name: "authored_by".to_string(),
+            args: vec![kodo_ast::AnnotationArg::Named(
+                "agent".to_string(),
+                kodo_ast::Expr::StringLit("claude".to_string(), kodo_ast::Span::new(0, 8)),
+            )],
+            span: kodo_ast::Span::new(0, 30),
+        };
+        assert_eq!(format_annotation(&ann), "@authored_by(agent: \"claude\")");
+    }
+
+    #[test]
+    fn completions_include_new_builtins() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x: Int = 1
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        for builtin in &[
+            "list_pop",
+            "list_remove",
+            "list_set",
+            "list_is_empty",
+            "list_reverse",
+            "map_remove",
+            "map_is_empty",
+            "json_stringify",
+            "json_get_bool",
+            "json_get_float",
+            "json_get_array",
+        ] {
+            assert!(
+                labels.contains(builtin),
+                "should contain new builtin: {builtin}"
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_shows_contracts() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    @confidence(0.9)
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+        ensures { result >= 0 }
+    {
+        return a
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let divide_item = items.iter().find(|i| i.label == "divide");
+        assert!(divide_item.is_some(), "should find divide in completions");
+        let item = divide_item.unwrap();
+        assert!(
+            item.detail
+                .as_deref()
+                .unwrap_or("")
+                .contains("fn divide(a: Int, b: Int)"),
+            "detail should show full signature"
+        );
+        let doc = match &item.documentation {
+            Some(Documentation::String(s)) => s.clone(),
+            _ => String::new(),
+        };
+        assert!(
+            doc.contains("requires"),
+            "documentation should show contracts"
+        );
+        assert!(
+            doc.contains("@confidence"),
+            "documentation should show annotations"
+        );
+    }
+
+    #[test]
+    fn code_actions_from_fix_patch() {
+        // Source without meta block — triggers MissingMeta type error with FixPatch
+        let source = r#"module test {
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let full_range = Range::new(Position::new(0, 0), Position::new(4, 1));
+        let actions = code_actions_for_source(source, &uri, &full_range);
+        let fix_patch_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.diagnostics.is_some() {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !fix_patch_actions.is_empty(),
+            "should generate at least one code action from fix patches"
+        );
+        // Verify the action has an edit
+        for action in &fix_patch_actions {
+            assert!(
+                action.edit.is_some(),
+                "fix patch action should have an edit"
+            );
+        }
     }
 }

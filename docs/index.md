@@ -32,7 +32,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 
 ### Tools
 
-- [CLI Reference](guide/cli-reference.md) — all `kodoc` commands, flags, and environment variables, including `confidence-report` and `fix`
+- [CLI Reference](guide/cli-reference.md) — all `kodoc` commands, flags, and environment variables, including `confidence-report`, `fix`, and `audit`
 
 ## Reference
 

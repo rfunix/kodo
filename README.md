@@ -222,8 +222,8 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
-| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline; LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
-| **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes |
+| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline; LSP server with diagnostics, hover (full annotations), goto-definition, contract-aware completions (31 builtins), and code actions from FixPatch; JSON error output; `kodoc explain` for any error code; `kodoc audit` for consolidated trust reports |
+| **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes, per-function confidence scores, and contract verification stats (static vs runtime) |
 
 ---
 
