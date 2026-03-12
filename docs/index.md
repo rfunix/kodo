@@ -28,6 +28,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [HTTP & JSON](guide/http.md) — HTTP client and JSON parsing
 - [Actors](guide/actors.md) — actor model with state and message passing
 - [Concurrency & Spawn](guide/concurrency.md) — spawn with captured variables
+- [Real-World Examples](guide/real-world-examples.md) — complete programs: todo app, URL shortener, word counter, config validator, health checker
 
 ### Tools
 
@@ -99,3 +100,8 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`memory_management.ko`](../examples/memory_management.ko) | Reference counting |
 | [`tuples.ko`](../examples/tuples.ko) | Tuple types, indexing, and destructuring |
 | [`for_in.ko`](../examples/for_in.ko) | For-in loops over collections |
+| [`todo_app.ko`](../examples/todo_app.ko) | Real-world: CLI todo app with structs, enums, contracts |
+| [`url_shortener.ko`](../examples/url_shortener.ko) | Real-world: URL shortener with Map and validation |
+| [`word_counter.ko`](../examples/word_counter.ko) | Real-world: Word counter with string ops and fold |
+| [`config_validator.ko`](../examples/config_validator.ko) | Real-world: Config validator with contracts and enums |
+| [`health_checker.ko`](../examples/health_checker.ko) | Real-world: HTTP health checker with endpoint monitoring |

@@ -6,7 +6,7 @@ Kōdo lets you define custom data types using `struct` and `enum`. Pattern match
 
 A struct groups related values under named fields:
 
-```
+```rust
 struct Point {
     x: Int,
     y: Int
@@ -17,7 +17,7 @@ struct Point {
 
 Create a struct value by providing all fields:
 
-```
+```rust
 let origin: Point = Point { x: 0, y: 0 }
 let p: Point = Point { x: 3, y: 4 }
 ```
@@ -26,7 +26,7 @@ let p: Point = Point { x: 3, y: 4 }
 
 Use dot notation to access individual fields:
 
-```
+```rust
 fn get_x(p: Point) -> Int {
     return p.x
 }
@@ -42,7 +42,7 @@ fn main() {
 
 Structs can be passed to and returned from functions:
 
-```
+```rust
 struct Point {
     x: Int,
     y: Int
@@ -61,7 +61,7 @@ fn main() {
 ```
 
 Output:
-```
+```rust
 11
 22
 ```
@@ -72,7 +72,7 @@ Internally, structs are passed by pointer — there is no copy overhead for larg
 
 An enum defines a type that can be one of several named variants. Each variant can optionally carry data:
 
-```
+```rust
 enum Color {
     Red,
     Green,
@@ -91,7 +91,7 @@ enum Shape {
 
 Use the `EnumName::Variant(args)` syntax:
 
-```
+```rust
 let s: Shape = Shape::Circle(5)
 let r: Shape = Shape::Rectangle(10, 20)
 ```
@@ -100,7 +100,7 @@ let r: Shape = Shape::Rectangle(10, 20)
 
 `match` is the primary way to work with enums. It destructures the value and binds contained data to variables:
 
-```
+```rust
 fn area(s: Shape) -> Int {
     match s {
         Shape::Circle(r) => {
@@ -123,7 +123,7 @@ Every `match` must cover all variants. If you forget one, the compiler will tell
 
 Like structs, enums can be passed to and returned from functions:
 
-```
+```rust
 enum Direction {
     Up,
     Down,
@@ -153,7 +153,7 @@ fn move_point(p: Point, dir: Direction, amount: Int) -> Point {
 
 Here's a program that combines structs, enums, and pattern matching:
 
-```
+```rust
 module geometry {
     meta {
         purpose: "Calculate areas of shapes"
@@ -198,7 +198,7 @@ module geometry {
 ```
 
 Output:
-```
+```rust
 75
 16
 21
@@ -208,7 +208,7 @@ Output:
 
 Kōdo supports 64-bit floating-point numbers with full arithmetic:
 
-```
+```rust
 let pi: Float64 = 3.14159
 let radius: Float64 = 5.0
 let area: Float64 = pi * radius * radius
@@ -222,7 +222,7 @@ All arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`
 
 Strings support concatenation with the `+` operator:
 
-```
+```rust
 let greeting: String = "Hello, " + "world!"
 println(greeting)
 
@@ -233,7 +233,7 @@ println(msg)
 
 Strings also support equality comparison with `==` and `!=`, which compares by content (not by pointer):
 
-```
+```rust
 let a: String = "hello"
 let b: String = "hello"
 if a == b {

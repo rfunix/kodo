@@ -31,7 +31,7 @@ cargo run -p kodoc -- --version
 
 Create a file called `hello.ko`:
 
-```
+```rust
 module hello {
     meta {
         purpose: "My first Kōdo program",
@@ -59,7 +59,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 You should see:
 
-```
+```rust
 Successfully compiled `hello` → hello
 Hello, World!
 ```
@@ -68,7 +68,7 @@ Hello, World!
 
 Let's write a program that computes Fibonacci numbers:
 
-```
+```rust
 module fibonacci {
     meta {
         purpose: "Compute Fibonacci numbers",

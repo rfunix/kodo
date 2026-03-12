@@ -6,7 +6,7 @@ Kōdo supports inherent impl blocks, which allow you to define methods directly 
 
 Use `impl TypeName { ... }` to add methods to a struct:
 
-```
+```rust
 struct Point {
     x: Int,
     y: Int,
@@ -31,7 +31,7 @@ impl Point {
 
 Methods are called using dot notation:
 
-```
+```rust
 let p: Point = Point { x: 3, y: 4 }
 let moved: Point = p.translate(1, 2)
 let dist: Int = moved.manhattan_distance()
@@ -41,7 +41,7 @@ let dist: Int = moved.manhattan_distance()
 
 Methods that don't take `self` as the first parameter act as static/associated functions:
 
-```
+```rust
 impl Counter {
     fn new() -> Counter {
         return Counter { value: 0 }

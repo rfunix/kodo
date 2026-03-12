@@ -1,0 +1,54 @@
+// Real-world example: HTTP Health Checker
+//
+// Checks health status of multiple endpoints using http_get,
+// collects results with List<Int> and fold, and reports summary.
+//
+// Run with: kodoc build examples/health_checker.ko -o health_checker && ./health_checker
+
+module health_checker {
+    meta {
+        purpose: "HTTP endpoint health checker"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    fn check_and_report(name: String, url: String) -> Int {
+        let status: Int = http_get(url)
+        if status == 0 {
+            println(f"  [OK] {name}")
+            return 1
+        } else {
+            println(f"  [FAIL] {name}")
+            return 0
+        }
+    }
+
+    fn main() -> Int {
+        println("=== Health Check Report ===")
+
+        // Check each endpoint and collect results
+        let results: List<Int> = list_new()
+
+        let r1: Int = check_and_report("API Gateway", "https://httpbin.org/status/200")
+        list_push(results, r1)
+
+        let r2: Int = check_and_report("Auth Service", "https://httpbin.org/status/200")
+        list_push(results, r2)
+
+        let r3: Int = check_and_report("Database Proxy", "https://httpbin.org/status/500")
+        list_push(results, r3)
+
+        // Summary using fold
+        let total: Int = list_length(results)
+        let healthy_count: Int = results.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        let unhealthy: Int = total - healthy_count
+        println(f"Healthy: {healthy_count.to_string()}/{total.to_string()}")
+        if unhealthy > 0 {
+            println(f"WARNING: {unhealthy.to_string()} endpoint(s) down!")
+        } else {
+            println("All systems operational.")
+        }
+
+        return 0
+    }
+}

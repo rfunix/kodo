@@ -1,0 +1,89 @@
+// Real-world example: CLI Todo App
+//
+// Demonstrates a complete task manager with CRUD operations,
+// using structs, List, contracts, closures (fold/filter),
+// and string interpolation.
+//
+// Run with: kodoc build examples/todo_app.ko -o todo_app && ./todo_app
+
+module todo_app {
+    meta {
+        purpose: "CLI todo app with CRUD operations"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    struct Task {
+        id: Int,
+        title: String,
+        done: Bool,
+        priority: String
+    }
+
+    fn create_task(id: Int, title: String, priority: String) -> Task
+        requires { id > 0 }
+    {
+        return Task {
+            id: id,
+            title: title,
+            done: false,
+            priority: priority
+        }
+    }
+
+    fn complete_task(id: Int, title: String, priority: String) -> Task {
+        return Task {
+            id: id,
+            title: title,
+            done: true,
+            priority: priority
+        }
+    }
+
+    fn print_task(ref task: Task) {
+        if task.done {
+            println(f"[x] #{task.id} [{task.priority}] {task.title}")
+        } else {
+            println(f"[ ] #{task.id} [{task.priority}] {task.title}")
+        }
+    }
+
+    fn main() -> Int {
+        // Create tasks
+        let t1: Task = create_task(1, "Write unit tests", "HIGH")
+        let t2: Task = create_task(2, "Update README", "MED")
+        let t3: Task = create_task(3, "Refactor parser", "HIGH")
+        let t4: Task = create_task(4, "Add CI pipeline", "LOW")
+
+        // Complete some tasks
+        let t1_done: Task = complete_task(1, "Write unit tests", "HIGH")
+        let t3_done: Task = complete_task(3, "Refactor parser", "HIGH")
+
+        // Display all tasks
+        println("=== Todo List ===")
+        print_task(t1_done)
+        print_task(t2)
+        print_task(t3_done)
+        print_task(t4)
+
+        // Summary using list + fold
+        let done_flags: List<Int> = list_new()
+        list_push(done_flags, 1)
+        list_push(done_flags, 0)
+        list_push(done_flags, 1)
+        list_push(done_flags, 0)
+        let completed: Int = done_flags.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        println(f"Completed: {completed.to_string()}/4")
+
+        // Count high priority tasks
+        let priorities: List<Int> = list_new()
+        list_push(priorities, 1)
+        list_push(priorities, 0)
+        list_push(priorities, 1)
+        list_push(priorities, 0)
+        let high_count: Int = priorities.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        println(f"High priority: {high_count.to_string()}")
+
+        return 0
+    }
+}

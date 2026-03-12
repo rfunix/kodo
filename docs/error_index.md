@@ -21,7 +21,7 @@ Every Kōdo compiler error has a unique code for easy reference and machine cons
 ### E0001: Unexpected Character
 An unrecognized character was found in the source code.
 
-```
+```rust
 error[E0001]: unexpected character `@`
   --> src/main.ko:3:15
    |
@@ -32,7 +32,7 @@ error[E0001]: unexpected character `@`
 ### E0002: Unterminated String Literal
 A string literal was opened but never closed.
 
-```
+```rust
 error[E0002]: unterminated string literal
   --> src/main.ko:5:10
    |
@@ -71,7 +71,7 @@ A value was called as a function but its type is not a function type.
 ### E0204: For Loop Non-Integer Range
 A `for` loop range bound is not of type `Int`. Both `start` and `end` must be `Int`.
 
-```
+```rust
 error[E0204]: type mismatch: expected `Int`, found `Bool`
   --> src/main.ko:5:18
    |
@@ -94,7 +94,7 @@ The `meta` block does not contain a `purpose` field.
 ### E0213: Unknown Struct
 A struct type was referenced but has not been defined in the current module or any imported module.
 
-```
+```rust
 error[E0213]: unknown struct `Point` at 5:20
   --> src/main.ko:5:20
    |
@@ -105,7 +105,7 @@ error[E0213]: unknown struct `Point` at 5:20
 ### E0214: Missing Struct Field
 A required field is missing from a struct literal.
 
-```
+```rust
 error[E0214]: missing field `y` in struct `Point` at 5:20
   --> src/main.ko:5:20
    |
@@ -116,7 +116,7 @@ error[E0214]: missing field `y` in struct `Point` at 5:20
 ### E0215: Extra Struct Field
 An unknown field was provided in a struct literal.
 
-```
+```rust
 error[E0215]: unknown field `z` in struct `Point` at 5:20
   --> src/main.ko:5:20
    |
@@ -127,7 +127,7 @@ error[E0215]: unknown field `z` in struct `Point` at 5:20
 ### E0216: Duplicate Struct Field
 A field was specified more than once in a struct literal.
 
-```
+```rust
 error[E0216]: duplicate field `x` in struct `Point` at 5:20
   --> src/main.ko:5:20
    |
@@ -138,7 +138,7 @@ error[E0216]: duplicate field `x` in struct `Point` at 5:20
 ### E0217: No Such Field
 A field access was attempted on a non-existent field.
 
-```
+```rust
 error[E0217]: no field `z` on type `Point` at 6:20
   --> src/main.ko:6:20
    |
@@ -149,7 +149,7 @@ error[E0217]: no field `z` on type `Point` at 6:20
 ### E0218: Unknown Enum
 An enum type was referenced but has not been defined.
 
-```
+```rust
 error[E0218]: unknown enum `Color` at 5:20
   --> src/main.ko:5:20
    |
@@ -160,7 +160,7 @@ error[E0218]: unknown enum `Color` at 5:20
 ### E0219: Unknown Variant
 A variant was referenced that does not exist in the enum.
 
-```
+```rust
 error[E0219]: unknown variant `Purple` in enum `Color` at 5:20
   --> src/main.ko:5:20
    |
@@ -171,7 +171,7 @@ error[E0219]: unknown variant `Purple` in enum `Color` at 5:20
 ### E0220: Non-Exhaustive Match
 A match expression does not cover all variants of an enum.
 
-```
+```rust
 error[E0220]: non-exhaustive match on `Color`: missing variants ["Blue"] at 6:5
   --> src/main.ko:6:5
    |
@@ -185,7 +185,7 @@ A generic type was instantiated with the wrong number of type arguments.
 ### E0222: Undefined Type Parameter
 A type parameter was referenced but not defined.
 
-```
+```rust
 error[E0222]: undefined type parameter `U` at 5:30
   --> src/main.ko:5:30
    |
@@ -199,7 +199,7 @@ A generic type was used without providing required type arguments.
 ### E0224: Try in Non-Result Function
 The try operator `?` was used in a function that does not return `Result`.
 
-```
+```rust
 error[E0224]: operator `?` can only be used in functions returning Result at 6:25
   --> src/main.ko:6:25
    |
@@ -210,7 +210,7 @@ error[E0224]: operator `?` can only be used in functions returning Result at 6:2
 ### E0225: Optional Chain on Non-Option
 Optional chaining `?.` was used on a non-Option type.
 
-```
+```rust
 error[E0225]: optional chaining `?.` requires Option type, found `Int` at 6:20
   --> src/main.ko:6:20
    |
@@ -221,7 +221,7 @@ error[E0225]: optional chaining `?.` requires Option type, found `Int` at 6:20
 ### E0226: Coalesce Type Mismatch
 Null coalescing `??` was used on a non-Option type.
 
-```
+```rust
 error[E0226]: null coalescing type mismatch: left must be Option, found `Int` at 6:20
   --> src/main.ko:6:20
    |
@@ -232,7 +232,7 @@ error[E0226]: null coalescing type mismatch: left must be Option, found `Int` at
 ### E0227: Closure Parameter Missing Type Annotation
 A closure parameter is missing its type annotation. In Kōdo v1, all closure parameters must have explicit type annotations.
 
-```
+```rust
 error[E0227]: closure parameter `x` is missing a type annotation
   --> src/main.ko:5:20
    |
@@ -245,7 +245,7 @@ error[E0227]: closure parameter `x` is missing a type annotation
 ### E0250: Await Outside Async
 An `.await` expression was used outside of an `async fn`. The `.await` syntax is only valid inside async functions.
 
-```
+```rust
 error[E0250]: `.await` can only be used inside an `async fn`
   --> src/main.ko:5:30
    |
@@ -259,7 +259,7 @@ A `spawn` block captures a mutable reference, which is not allowed in structured
 ### E0252: Actor Direct Field Access
 An actor's field was accessed directly from outside a handler. Actor fields are private to handler methods.
 
-```
+```rust
 error[E0252]: cannot access actor field `count` directly on `Counter`
   --> src/main.ko:10:20
    |
@@ -270,7 +270,7 @@ error[E0252]: cannot access actor field `count` directly on `Counter`
 ### E0230: Unknown Trait
 A trait was referenced but has not been defined.
 
-```
+```rust
 error[E0230]: unknown trait `Printable` at 5:10
   --> src/main.ko:5:10
    |
@@ -281,7 +281,7 @@ error[E0230]: unknown trait `Printable` at 5:10
 ### E0231: Missing Trait Method
 A required method from a trait is missing in an impl block.
 
-```
+```rust
 error[E0231]: missing trait method `to_string` for trait `Printable` at 5:1
   --> src/main.ko:5:1
    |
@@ -295,7 +295,7 @@ This implements bounded quantification (System F<:) — when a generic parameter
 declares trait bounds like `T: Ord + Display`, any concrete type argument must
 implement all specified traits.
 
-```
+```rust
 error[E0232]: type `Int` does not implement trait `Hashable` required by generic parameter `T` at 10:12
   --> src/main.ko:10:12
    |
@@ -311,7 +311,7 @@ An `impl` block for a trait is missing a required associated type binding. Every
 associated type declared in the trait must be bound to a concrete type via
 `type Name = ConcreteType` in the impl block.
 
-```
+```rust
 error[E0233]: missing associated type `Item` for trait `Iterator` at 8:1
   --> src/main.ko:8:1
    |
@@ -326,7 +326,7 @@ error[E0233]: missing associated type `Item` for trait `Iterator` at 8:1
 An `impl` block provides a `type` binding for a name that is not declared as an
 associated type in the trait.
 
-```
+```rust
 error[E0234]: unexpected associated type `Output` for trait `Iterator` at 8:1
   --> src/main.ko:8:1
    |
@@ -339,7 +339,7 @@ error[E0234]: unexpected associated type `Output` for trait `Iterator` at 8:1
 ### E0235: Method Not Found
 A method was called on a type that does not have it.
 
-```
+```rust
 error[E0235]: no method `length` on type `Int` at 6:20
   --> src/main.ko:6:20
    |
@@ -350,7 +350,7 @@ error[E0235]: no method `length` on type `Int` at 6:20
 ### E0240: Use After Move
 A variable was used after its ownership was transferred (moved). Once a value is moved, it cannot be accessed.
 
-```
+```rust
 error[E0240]: variable `x` was moved at line 5 and cannot be used here
   --> src/main.ko:6:15
    |
@@ -367,7 +367,7 @@ A value cannot be moved while it is currently borrowed by another variable.
 ### E0243: Break Outside of Loop
 A `break` statement was used outside of a `while`, `for`, or `for-in` loop.
 
-```
+```rust
 error[E0243]: `break` outside of loop
   --> src/main.ko:5:5
    |
@@ -378,7 +378,7 @@ error[E0243]: `break` outside of loop
 ### E0244: Continue Outside of Loop
 A `continue` statement was used outside of a `while`, `for`, or `for-in` loop.
 
-```
+```rust
 error[E0244]: `continue` outside of loop
   --> src/main.ko:5:5
    |
@@ -389,7 +389,7 @@ error[E0244]: `continue` outside of loop
 ### E0245: Mut Borrow While Ref Borrowed
 A mutable borrow (`mut`) was attempted on a variable that already has an active immutable borrow (`ref`). A `mut` borrow is exclusive and cannot coexist with any other borrow.
 
-```
+```rust
 error[E0245]: cannot borrow `x` as mutable while it is immutably borrowed
   --> src/main.ko:6:20
    |
@@ -400,7 +400,7 @@ error[E0245]: cannot borrow `x` as mutable while it is immutably borrowed
 ### E0246: Ref Borrow While Mut Borrowed
 An immutable borrow (`ref`) was attempted on a variable that already has an active mutable borrow (`mut`). A `mut` borrow is exclusive.
 
-```
+```rust
 error[E0246]: cannot borrow `x` as `ref` while it is mutably borrowed
   --> src/main.ko:6:25
    |
@@ -411,7 +411,7 @@ error[E0246]: cannot borrow `x` as `ref` while it is mutably borrowed
 ### E0247: Double Mut Borrow
 A variable was mutably borrowed (`mut`) twice simultaneously. Only one `mut` borrow is allowed at a time.
 
-```
+```rust
 error[E0247]: cannot borrow `x` as mutable more than once
   --> src/main.ko:6:25
    |
@@ -422,7 +422,7 @@ error[E0247]: cannot borrow `x` as mutable more than once
 ### E0248: Assign Through Ref
 An assignment was attempted on a variable that is immutably borrowed (`ref`). Immutable borrows do not allow mutation.
 
-```
+```rust
 error[E0248]: cannot assign to `x` because it is borrowed as `ref`
   --> src/main.ko:6:5
    |
@@ -433,7 +433,7 @@ error[E0248]: cannot assign to `x` because it is borrowed as `ref`
 ### E0253: Tuple Index Out of Bounds
 A tuple index exceeds the number of elements in the tuple type.
 
-```
+```rust
 error[E0253]: tuple index 3 is out of bounds for tuple of length 2
   --> src/main.ko:6:20
    |
@@ -444,7 +444,7 @@ error[E0253]: tuple index 3 is out of bounds for tuple of length 2
 ### E0280: Spawn Captures Non-Send Type
 A `spawn` block captures a variable with a borrowed reference (`ref`), which cannot be safely sent to another thread. Only owned values can cross thread boundaries.
 
-```
+```rust
 error[E0280]: type `ref Int` cannot be sent between threads
   --> src/main.ko:8:20
    |
@@ -457,7 +457,7 @@ error[E0280]: type `ref Int` cannot be sent between threads
 ### E0260: Low Confidence Without Review
 A function annotated with `@confidence(X)` where X < 0.8 is missing a `@reviewed_by(human: "...")` annotation. Agent-generated code with low confidence must be reviewed by a human.
 
-```
+```rust
 error[E0260]: function `risky_fn` has @confidence(0.5) < 0.8 and is missing `@reviewed_by(human: "...")`
   --> src/main.ko:5:1
    |
@@ -468,7 +468,7 @@ error[E0260]: function `risky_fn` has @confidence(0.5) < 0.8 and is missing `@re
 ### E0261: Module Confidence Below Threshold
 The computed confidence of a function is below the `min_confidence` threshold declared in the module's `meta` block. Confidence propagates transitively through the call chain.
 
-```
+```rust
 error[E0261]: module confidence 0.50 is below threshold 0.90. Weakest link: fn `weak_link` at @confidence(0.50)
   --> src/main.ko:10:1
    |
@@ -479,7 +479,7 @@ error[E0261]: module confidence 0.50 is below threshold 0.90. Weakest link: fn `
 ### E0262: Security-Sensitive Without Contract
 A function marked `@security_sensitive` has no `requires` or `ensures` clauses. Security-sensitive code must have formal contracts documenting and enforcing security invariants.
 
-```
+```rust
 error[E0262]: function `process_input` is marked `@security_sensitive` but has no `requires` or `ensures` contracts
   --> src/main.ko:8:1
    |
@@ -505,7 +505,7 @@ A contract is provably violated by the implementation.
 The Z3 SMT solver found a counter-example disproving the contract. This occurs
 when using `--contracts=static` or `--contracts=both`.
 
-```
+```rust
 error[E0303]: contract refuted at 10..16: counter-example: b -> 0
   --> src/main.ko:3:9
    |
@@ -517,7 +517,7 @@ error[E0303]: contract refuted at 10..16: counter-example: b -> 0
 A module invariant condition does not evaluate to `Bool`. Invariant conditions
 must be boolean expressions.
 
-```
+```rust
 error[E0310]: invariant condition must be `Bool`, found `Int` at 42..50
   --> src/main.ko:4:5
    |
@@ -539,7 +539,7 @@ An unrecognized key was used in an intent block.
 ### E0403: Intent Config Type Mismatch
 A configuration value in an intent block has the wrong type. For example, passing a string where an integer is expected.
 
-```
+```rust
 error[E0403]: intent config type mismatch: expected Int for key `count`, found String
   --> src/main.ko:5:12
    |
@@ -552,7 +552,7 @@ error[E0403]: intent config type mismatch: expected Int for key `count`, found S
 ### E0600: Indirect Call Failure
 An indirect (function pointer) call failed during code generation. This typically occurs when referencing an unknown function.
 
-```
+```rust
 error[E0600]: indirect call failure: function reference to unknown function `missing_fn`
   --> src/main.ko:8:20
    |

@@ -8,7 +8,7 @@ Generics let you write types and functions that work with any type, without sacr
 
 Add type parameters in angle brackets after the type name:
 
-```
+```rust
 enum Option<T> {
     Some(T),
     None
@@ -17,7 +17,7 @@ enum Option<T> {
 
 This defines an `Option` that can hold a value of any type `T`. When you use it, you specify the concrete type:
 
-```
+```rust
 let x: Option<Int> = Option::Some(42)
 let y: Option<Int> = Option::None
 ```
@@ -28,7 +28,7 @@ The compiler generates a concrete `Option<Int>` type behind the scenes — there
 
 Structs can also be generic:
 
-```
+```rust
 struct Pair<T> {
     first: T,
     second: T
@@ -37,7 +37,7 @@ struct Pair<T> {
 
 Use it with a concrete type:
 
-```
+```rust
 let p: Pair<Int> = Pair { first: 1, second: 2 }
 print_int(p.first)
 print_int(p.second)
@@ -47,7 +47,7 @@ print_int(p.second)
 
 Types can have more than one type parameter:
 
-```
+```rust
 enum Result<T, E> {
     Ok(T),
     Err(E)
@@ -56,7 +56,7 @@ enum Result<T, E> {
 
 Each parameter is independent — `T` and `E` can be different types:
 
-```
+```rust
 let success: Result<Int, Int> = Result::Ok(42)
 let failure: Result<Int, Int> = Result::Err(1)
 ```
@@ -65,7 +65,7 @@ let failure: Result<Int, Int> = Result::Err(1)
 
 `match` works with generic types just like with concrete types:
 
-```
+```rust
 fn unwrap_or(opt: Option<Int>, default: Int) -> Int {
     match opt {
         Option::Some(v) => {
@@ -82,7 +82,7 @@ fn unwrap_or(opt: Option<Int>, default: Int) -> Int {
 
 Functions can also be parameterized with type variables:
 
-```
+```rust
 fn identity<T>(x: T) -> T {
     return x
 }
@@ -90,7 +90,7 @@ fn identity<T>(x: T) -> T {
 
 Call it with any type — the compiler infers the type argument from the actual argument:
 
-```
+```rust
 let a: Int = identity(42)
 let b: Int = identity(99)
 ```
@@ -103,7 +103,7 @@ You can constrain generic type parameters to require specific trait implementati
 
 ### Single Bound
 
-```
+```rust
 fn display<T: Printable>(item: T) -> String {
     return item.display()
 }
@@ -115,7 +115,7 @@ The `T: Printable` means "any type `T` that implements the `Printable` trait". I
 
 Use `+` to require multiple traits:
 
-```
+```rust
 fn process<T: Printable + Comparable>(item: T) -> Int {
     return item.compare()
 }
@@ -127,7 +127,7 @@ Here `T` must implement both `Printable` and `Comparable`.
 
 Structs and enums can also have trait bounds on their type parameters:
 
-```
+```rust
 enum SortedOption<T: Orderable> {
     Some(T),
     None
@@ -140,7 +140,7 @@ Any type used as the argument to `SortedOption` must implement `Orderable`.
 
 You can mix bounded and unbounded parameters:
 
-```
+```rust
 struct Pair<T: Ord, U> {
     first: T,
     second: U,
@@ -159,7 +159,7 @@ This is the same strategy used by Rust and C++. The tradeoff: compile time grows
 
 ## Complete Example
 
-```
+```rust
 module generics_demo {
     meta {
         purpose: "Demonstrate generic types and functions"
@@ -199,7 +199,7 @@ module generics_demo {
 ```
 
 Output:
-```
+```rust
 42
 none
 99

@@ -1,0 +1,87 @@
+// Real-world example: URL Shortener
+//
+// Demonstrates a URL shortening service using Map<Int, Int> for
+// visit count tracking, contracts for validation,
+// and string methods.
+//
+// Run with: kodoc build examples/url_shortener.ko -o url_shortener && ./url_shortener
+
+module url_shortener {
+    meta {
+        purpose: "URL shortener with validation and tracking"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    fn is_valid_url(url: String) -> Bool {
+        return url.starts_with("http://") || url.starts_with("https://")
+    }
+
+    fn register_url(tracker: Map<Int, Int>, code: Int)
+        requires { code > 0 }
+    {
+        map_insert(tracker, code, 0)
+    }
+
+    fn record_visit(tracker: Map<Int, Int>, code: Int)
+        requires { code > 0 }
+    {
+        let current: Int = map_get(tracker, code)
+        map_insert(tracker, code, current + 1)
+    }
+
+    fn get_visits(tracker: Map<Int, Int>, code: Int) -> Int
+        requires { code > 0 }
+    {
+        return map_get(tracker, code)
+    }
+
+    fn main() -> Int {
+        let tracker: Map<Int, Int> = map_new()
+
+        // Validate and register URLs
+        println("=== URL Shortener ===")
+
+        let valid1: Bool = is_valid_url("https://kodo-lang.dev/docs")
+        if valid1 {
+            register_url(tracker, 1)
+            println("Registered code 1: https://kodo-lang.dev/docs")
+        }
+
+        let valid2: Bool = is_valid_url("https://github.com/kodo-lang/kodo")
+        if valid2 {
+            register_url(tracker, 2)
+            println("Registered code 2: https://github.com/kodo-lang/kodo")
+        }
+
+        let valid3: Bool = is_valid_url("ftp://invalid.example.com")
+        if valid3 {
+            register_url(tracker, 3)
+            println("Registered code 3")
+        } else {
+            println("Rejected invalid URL: ftp://invalid.example.com")
+        }
+
+        // Simulate visits
+        record_visit(tracker, 1)
+        record_visit(tracker, 1)
+        record_visit(tracker, 1)
+        record_visit(tracker, 2)
+
+        // Report
+        let total: Int = map_length(tracker)
+        println(f"Total registered URLs: {total.to_string()}")
+
+        let visits1: Int = get_visits(tracker, 1)
+        let visits2: Int = get_visits(tracker, 2)
+        println(f"Code 1 visits: {visits1.to_string()}")
+        println(f"Code 2 visits: {visits2.to_string()}")
+
+        // Lookup missing code
+        if !map_contains_key(tracker, 99) {
+            println("Code 99: NOT FOUND")
+        }
+
+        return 0
+    }
+}

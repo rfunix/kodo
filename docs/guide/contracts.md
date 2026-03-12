@@ -10,7 +10,7 @@ A contract is a boolean expression attached to a function that must be true for 
 
 A `requires` block specifies conditions that must hold when a function is called:
 
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Int
     requires { b != 0 }
 {
@@ -24,7 +24,7 @@ This tells both humans and AI agents: "never call `safe_divide` with `b` equal t
 
 You can use logical operators to combine conditions:
 
-```
+```rust
 fn clamp(value: Int, min: Int, max: Int) -> Int
     requires { min <= max }
 {
@@ -42,7 +42,7 @@ fn clamp(value: Int, min: Int, max: Int) -> Int
 
 When a `requires` condition evaluates to `false` at runtime, the program **aborts immediately** with an error message:
 
-```
+```rust
 Contract violation: requires clause failed
 ```
 
@@ -52,7 +52,7 @@ The program terminates with a non-zero exit code. This is intentional — a cont
 
 Here is a complete program that demonstrates contracts passing and failing:
 
-```
+```rust
 module contracts_demo {
     meta {
         purpose: "Demonstrate contract behavior",
@@ -92,7 +92,7 @@ To see a contract failure, change the call to `safe_divide(10, 0)` and recompile
 
 An `ensures` block specifies conditions that must hold when a function returns:
 
-```
+```rust
 fn abs(x: Int) -> Int
     ensures { result >= 0 }
 {
@@ -111,7 +111,7 @@ Inside an `ensures` expression, the special name `result` refers to the function
 2. Before returning, the `ensures` expression is evaluated with `result` bound to the return value.
 3. If the expression evaluates to `false`, the program aborts with:
 
-```
+```rust
 Contract violation: ensures clause failed in function_name
 ```
 
@@ -119,7 +119,7 @@ Contract violation: ensures clause failed in function_name
 
 You can use both contracts on the same function:
 
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Int
     requires { b != 0 }
     ensures { result * b <= a }
@@ -172,7 +172,7 @@ Static verification supports:
 
 ### Example
 
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Int
     requires { b != 0 }
 {

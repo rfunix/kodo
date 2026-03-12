@@ -8,7 +8,7 @@ Kodo provides built-in functions for making HTTP requests and parsing JSON respo
 
 Performs an HTTP GET request and returns the response body as a String. The return value is an Int status code: 0 on success, -1 on error.
 
-```kodo
+```rust
 fn main() {
     let status: Int = http_get("http://httpbin.org/get")
     if status == 0 {
@@ -21,7 +21,7 @@ fn main() {
 
 Performs an HTTP POST request with a string body. Like `http_get`, it returns 0 on success and -1 on error.
 
-```kodo
+```rust
 fn main() {
     let payload: String = "{\"name\": \"kodo\"}"
     let status: Int = http_post("http://httpbin.org/post", payload)
@@ -41,7 +41,7 @@ Kodo represents parsed JSON as an opaque handle (an `Int`). You obtain a handle 
 
 Parses a JSON string and returns a handle. Returns 0 if parsing fails.
 
-```kodo
+```rust
 let handle: Int = json_parse("{\"count\": 42, \"name\": \"kodo\"}")
 if handle == 0 {
     println("parse error")
@@ -52,7 +52,7 @@ if handle == 0 {
 
 Extracts an integer value from the parsed JSON object by key. Returns 0 if the key does not exist or the value is not an integer.
 
-```kodo
+```rust
 let count: Int = json_get_int(handle, "count")
 print_int(count)  // 42
 ```
@@ -61,7 +61,7 @@ print_int(count)  // 42
 
 Extracts a string value from the parsed JSON object by key. Returns the string value on success.
 
-```kodo
+```rust
 let name: String = json_get_string(handle, "name")
 println(name)  // kodo
 ```
@@ -70,7 +70,7 @@ println(name)  // kodo
 
 Frees the memory associated with a parsed JSON handle. Every handle returned by `json_parse` must be freed when no longer needed. Using a handle after freeing it is undefined behavior.
 
-```kodo
+```rust
 json_free(handle)
 ```
 
@@ -80,7 +80,7 @@ Passing 0 (a null handle) to `json_free` is safe and does nothing.
 
 Here is a program that fetches data from an HTTP endpoint and parses the JSON response:
 
-```kodo
+```rust
 module http_client {
     meta {
         purpose: "HTTP client and JSON parsing demonstration",

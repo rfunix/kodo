@@ -14,7 +14,7 @@ Kōdo takes a different approach: if a function might not return a value, its re
 
 `Option<T>` represents an optional value. It has two variants:
 
-```
+```rust
 enum Option<T> {
     Some(T),   // a value is present
     None       // no value
@@ -25,7 +25,7 @@ enum Option<T> {
 
 Use `Option` when a function might not have a meaningful result:
 
-```
+```rust
 fn find_positive(a: Int, b: Int) -> Option<Int> {
     if a > 0 {
         return Option::Some(a)
@@ -41,7 +41,7 @@ fn find_positive(a: Int, b: Int) -> Option<Int> {
 
 Use `match` to handle both cases — the compiler ensures you never forget the `None` case:
 
-```
+```rust
 fn main() {
     let result: Option<Int> = find_positive(-1, 42)
     match result {
@@ -61,7 +61,7 @@ This is safer than checking for null: the type system **forces** you to handle t
 
 `Result<T, E>` represents an operation that can succeed with a value of type `T` or fail with an error of type `E`:
 
-```
+```rust
 enum Result<T, E> {
     Ok(T),    // success
     Err(E)    // failure
@@ -72,7 +72,7 @@ enum Result<T, E> {
 
 Use `Result` when a function can fail in a way the caller should handle:
 
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Result<Int, Int> {
     if b == 0 {
         return Result::Err(0)
@@ -85,7 +85,7 @@ fn safe_divide(a: Int, b: Int) -> Result<Int, Int> {
 
 Again, `match` forces you to handle both the success and error cases:
 
-```
+```rust
 fn main() {
     let result: Result<Int, Int> = safe_divide(100, 5)
     match result {
@@ -119,7 +119,7 @@ For example, a lookup in a list might legitimately return nothing (`Option::None
 
 ## Complete Example
 
-```
+```rust
 module error_handling {
     meta {
         purpose: "Demonstrate Option and Result"
@@ -163,7 +163,7 @@ module error_handling {
 ```
 
 Output:
-```
+```rust
 20
 42
 ```

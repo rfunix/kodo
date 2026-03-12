@@ -6,7 +6,7 @@ Kōdo supports f-strings for embedding expressions inside string literals.
 
 Prefix a string literal with `f` and use `{expression}` to embed values:
 
-```
+```rust
 let name: String = "World"
 let msg: String = f"Hello, {name}!"
 // msg == "Hello, World!"
@@ -16,7 +16,7 @@ let msg: String = f"Hello, {name}!"
 
 Any expression can be embedded, including function calls, arithmetic, and field access:
 
-```
+```rust
 let x: Int = 3
 let y: Int = 4
 let desc: String = f"Point({x}, {y})"
@@ -36,7 +36,7 @@ Non-string types are automatically converted using built-in `to_string` function
 
 F-strings are desugared during compilation into string concatenation:
 
-```
+```rust
 f"Hello, {name}!"
 // becomes:
 "Hello, " + name + "!"

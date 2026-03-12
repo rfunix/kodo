@@ -6,7 +6,7 @@ Kōdo programs can span multiple files. Each file contains a single module, and 
 
 Every `.ko` file contains exactly one module:
 
-```
+```rust
 module my_module {
     meta {
         purpose: "What this module does"
@@ -23,7 +23,7 @@ The module name should match the filename (e.g., `math.ko` contains `module math
 
 Use `import` to bring another module's definitions into scope:
 
-```
+```rust
 import math
 ```
 
@@ -37,7 +37,7 @@ When the compiler sees `import math`, it looks for `math.ko` in the same directo
 
 **`math.ko`** — a utility module:
 
-```
+```rust
 module math {
     meta {
         purpose: "Math utilities"
@@ -56,7 +56,7 @@ module math {
 
 **`main.ko`** — uses the math module:
 
-```
+```rust
 module main {
     meta {
         purpose: "Main program"
@@ -82,7 +82,7 @@ cargo run -p kodoc -- build main.ko -o main
 ```
 
 Output:
-```
+```rust
 7
 30
 ```
@@ -98,7 +98,7 @@ Kōdo's standard library provides two foundational types that are available in e
 
 These types are automatically injected before your code is type-checked. You can use them immediately:
 
-```
+```rust
 module my_program {
     meta {
         purpose: "Using stdlib types"
@@ -132,7 +132,7 @@ Kōdo provides built-in collection types available in every program:
 
 A dynamic array of elements, accessed via free functions:
 
-```
+```rust
 let nums: List<Int> = list_new()
 list_push(nums, 10)
 list_push(nums, 20)
@@ -162,7 +162,7 @@ A key-value hash map. Maps support both `Int` and `String` keys:
 
 #### Int-keyed Maps
 
-```
+```rust
 let scores: Map<Int, Int> = map_new()
 map_insert(scores, 1, 100)
 let val: Int = map_get(scores, 1)           // 100
@@ -172,7 +172,7 @@ let len: Int = map_length(scores)            // 1
 
 #### String-keyed Maps
 
-```
+```rust
 let config: Map<String, Int> = map_string_new()
 map_string_insert(config, "port", 8080)
 map_string_insert(config, "timeout", 30)
@@ -197,7 +197,7 @@ let len: Int = map_string_len(config)                      // 1
 
 Splits a string by a separator, returning a `List<String>`:
 
-```
+```rust
 let parts: List<String> = "a,b,c".split(",")
 ```
 
@@ -205,14 +205,14 @@ let parts: List<String> = "a,b,c".split(",")
 
 You can use `::` as a path separator for imports, particularly useful for standard library modules:
 
-```
+```rust
 import std::option
 import std::result
 ```
 
 The dot separator (`.`) is also supported for backward compatibility:
 
-```
+```rust
 import math.utils
 ```
 
@@ -222,7 +222,7 @@ Both forms resolve to the same module.
 
 To bring specific names from a module into scope, use the `from...import` syntax:
 
-```
+```rust
 from std::option import Some, None
 from math::utils import add, multiply
 ```
@@ -233,7 +233,7 @@ This imports only the named items, keeping the local scope clean.
 
 When importing a module, you can use qualified calls with dot notation or `::`:
 
-```
+```rust
 import math
 let result: Int = math.add(1, 2)
 let result2: Int = math::add(1, 2)

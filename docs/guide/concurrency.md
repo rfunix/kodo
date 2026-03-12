@@ -12,7 +12,7 @@ Tasks may spawn additional tasks. The scheduler loops until the queue is empty, 
 
 A `spawn` block runs a piece of code as a deferred task:
 
-```kodo
+```rust
 fn main() -> Int {
     spawn {
         println("hello from a task")
@@ -25,7 +25,7 @@ fn main() -> Int {
 
 Output:
 
-```
+```rust
 main finishing
 hello from a task
 ```
@@ -36,7 +36,7 @@ The spawned task runs after `main` returns, which is why "main finishing" appear
 
 Spawned blocks can reference variables from the enclosing scope. The compiler performs capture analysis and packs the captured values into an environment buffer that is passed to the task function at execution time.
 
-```kodo
+```rust
 fn main() -> Int {
     let greeting: Int = 42
     spawn {
@@ -56,7 +56,7 @@ fn main() -> Int {
 
 Output:
 
-```
+```rust
 all tasks queued
 42
 42
@@ -76,7 +76,7 @@ This means captures are by value -- the task receives a copy of each variable at
 
 You can spawn as many tasks as you need. They execute in the order they were enqueued:
 
-```kodo
+```rust
 fn main() -> Int {
     spawn {
         println("[Task 1] no captures")
@@ -100,7 +100,7 @@ fn main() -> Int {
 
 ## Complete Example
 
-```kodo
+```rust
 module async_tasks {
     meta {
         purpose: "Demonstrate spawn with captured variables",

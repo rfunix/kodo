@@ -1,0 +1,66 @@
+// Real-world example: Word Counter
+//
+// Counts words and characters in text using string methods,
+// for-in loops over split results, and fold for aggregation.
+//
+// Run with: kodoc build examples/word_counter.ko -o word_counter && ./word_counter
+
+module word_counter {
+    meta {
+        purpose: "Word and character counter using string operations"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    struct Stats {
+        words: Int,
+        chars: Int
+    }
+
+    fn count_words(ref text: String) -> Int {
+        let mut count: Int = 0
+        for word in text.split(" ") {
+            if word.length() > 0 {
+                count = count + 1
+            }
+        }
+        return count
+    }
+
+    fn analyze(ref text: String) -> Stats {
+        let w: Int = count_words(text)
+        let c: Int = text.length()
+        return Stats {
+            words: w,
+            chars: c
+        }
+    }
+
+    fn print_stats(ref label: String, ref stats: Stats) {
+        println(f"--- {label} ---")
+        println(f"  Words: {stats.words.to_string()}")
+        println(f"  Chars: {stats.chars.to_string()}")
+    }
+
+    fn main() -> Int {
+        // Analyze different text samples
+        let prose: String = "The quick brown fox jumps over the lazy dog"
+        let code_sample: String = "fn main() -> Int { return 0 }"
+
+        let stats1: Stats = analyze(prose)
+        let stats2: Stats = analyze(code_sample)
+
+        println("=== Word Counter ===")
+        print_stats("Prose", stats1)
+        print_stats("Code", stats2)
+
+        // Aggregate stats using fold
+        let word_counts: List<Int> = list_new()
+        list_push(word_counts, stats1.words)
+        list_push(word_counts, stats2.words)
+        let total_words: Int = word_counts.fold(0, |acc: Int, w: Int| -> Int { acc + w })
+        println(f"Total words across all samples: {total_words.to_string()}")
+
+        return 0
+    }
+}

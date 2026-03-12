@@ -6,7 +6,7 @@ Kōdo supports closures (anonymous functions) that can capture variables from th
 
 A closure is defined with `|params| { body }` syntax:
 
-```
+```rust
 let double = |x: Int| -> Int { return x * 2 }
 ```
 
@@ -14,7 +14,7 @@ let double = |x: Int| -> Int { return x * 2 }
 
 Closures are most useful when passed to higher-order functions:
 
-```
+```rust
 fn apply(f: (Int) -> Int, x: Int) -> Int {
     return f(x)
 }
@@ -29,7 +29,7 @@ fn main() {
 
 Function types use the `(ParamTypes) -> ReturnType` syntax:
 
-```
+```rust
 fn apply_twice(f: (Int) -> Int, x: Int) -> Int {
     let once: Int = f(x)
     return f(once)
@@ -45,7 +45,7 @@ fn main() {
 
 Named functions can also be passed where a function type is expected:
 
-```
+```rust
 fn square(x: Int) -> Int {
     return x * x
 }
@@ -64,7 +64,7 @@ fn main() {
 
 Closures can capture variables from their enclosing scope. The compiler performs **capture analysis** and transforms the closure into a top-level function with the captured variables passed as extra parameters (lambda lifting):
 
-```
+```rust
 fn make_adder(n: Int) -> (Int) -> Int {
     return |x: Int| -> Int { return x + n }
 }
@@ -89,7 +89,7 @@ This means closures have zero runtime overhead compared to regular function call
 
 ## Complete Example
 
-```
+```rust
 module closures_demo {
     meta {
         purpose: "Demonstrate closures and higher-order functions",

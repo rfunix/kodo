@@ -13,7 +13,7 @@ cargo run -p kodoc -- build program.ko -o program
 
 Every Kōdo program lives inside a module with a mandatory `meta` block:
 
-```
+```rust
 module greeter {
     meta {
         purpose: "Greet users by name"
@@ -32,7 +32,7 @@ The `meta` block isn't optional decoration — the compiler **rejects** modules 
 
 Functions have explicit type annotations on every parameter and return value. There is no type inference across function boundaries — every signature is self-documenting:
 
-```
+```rust
 fn add(a: Int, b: Int) -> Int {
     return a + b
 }
@@ -52,7 +52,7 @@ Kōdo supports three primitive types: `Int`, `Bool`, and `String`.
 
 Variables are immutable by default. Use `let mut` when you need to reassign:
 
-```
+```rust
 let x: Int = 42          // immutable
 let mut counter: Int = 0  // mutable
 counter = counter + 1     // reassignment
@@ -62,7 +62,7 @@ counter = counter + 1     // reassignment
 
 Kōdo has `if`/`else` and `while` loops:
 
-```
+```rust
 fn abs(x: Int) -> Int {
     if x < 0 {
         return -x
@@ -84,7 +84,7 @@ fn countdown(n: Int) {
 
 This is where Kōdo gets interesting. Functions can declare `requires` (preconditions) and `ensures` (postconditions) that are checked at runtime:
 
-```
+```rust
 fn safe_divide(a: Int, b: Int) -> Int
     requires { b != 0 }
     ensures { result * b <= a }
@@ -101,7 +101,7 @@ Contracts make assumptions explicit. Instead of a comment saying "b must not be 
 
 Structs group related data:
 
-```
+```rust
 struct Point {
     x: Int,
     y: Int
@@ -123,7 +123,7 @@ Structs can be passed to functions and returned from functions. They are passed 
 
 Enums represent values that can be one of several variants. Each variant can carry data:
 
-```
+```rust
 enum Shape {
     Circle(Int),
     Rectangle(Int, Int)
@@ -147,7 +147,7 @@ fn area(s: Shape) -> Int {
 
 Types and functions can be parameterized with type variables:
 
-```
+```rust
 enum Option<T> {
     Some(T),
     None
@@ -171,7 +171,7 @@ Generics are compiled via monomorphization — `Option<Int>` becomes a concrete 
 
 Kōdo includes `Option<T>` and `Result<T, E>` in its standard library prelude — they're available in every program without an explicit import:
 
-```
+```rust
 fn find_first_positive(a: Int, b: Int) -> Option<Int> {
     if a > 0 {
         return Option::Some(a)
@@ -195,7 +195,7 @@ fn main() {
 
 Programs can be split across multiple files using `import`:
 
-```
+```rust
 // math.ko
 module math {
     meta { purpose: "Math utilities", version: "0.1.0" }
@@ -206,7 +206,7 @@ module math {
 }
 ```
 
-```
+```rust
 // main.ko
 module main {
     meta { purpose: "Main program", version: "0.1.0" }
@@ -243,7 +243,7 @@ This makes every compiled artifact traceable and auditable — an AI agent can v
 
 Kōdo supports closures as values and passing functions as arguments:
 
-```
+```rust
 fn double(x: Int) -> Int {
     return x * 2
 }
@@ -265,7 +265,7 @@ Closures can capture variables from their enclosing scope. The compiler uses lam
 
 The prelude includes math functions with contracts:
 
-```
+```rust
 fn main() {
     print_int(abs(-42))       // 42
     print_int(min(10, 20))    // 10
@@ -278,7 +278,7 @@ fn main() {
 
 Kōdo's `intent` system lets you declare WHAT you want, and the compiler's resolvers generate the HOW:
 
-```
+```rust
 module my_app {
     meta {
         purpose: "Intent-driven demo",
@@ -299,7 +299,7 @@ Multiple intents can be composed in the same module, and generated code is verif
 
 Kōdo tracks WHO wrote each piece of code — human or AI:
 
-```
+```rust
 @authored_by(agent: "claude-3.5")
 @confidence(0.95)
 fn safe_add(a: Int, b: Int) -> Int {
@@ -322,7 +322,7 @@ fn risky_fn() -> Int {
 
 `spawn` creates tasks that run after the main function:
 
-```
+```rust
 fn main() {
     print_int(1)
     spawn { print_int(2) }

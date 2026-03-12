@@ -8,7 +8,7 @@ Kōdo is the first programming language with built-in support for tracking AI ag
 
 Declares who wrote a function — human or AI agent:
 
-```kodo
+```rust
 @authored_by(agent: "claude")
 fn ai_generated() -> Int {
     return 42
@@ -19,7 +19,7 @@ fn ai_generated() -> Int {
 
 Declares how confident the author is in the correctness of the code, on a scale from 0.0 to 1.0:
 
-```kodo
+```rust
 @confidence(0.95)
 fn well_tested() -> Int {
     return 42
@@ -30,7 +30,7 @@ fn well_tested() -> Int {
 
 Declares that a human has reviewed the code:
 
-```kodo
+```rust
 @reviewed_by(human: "alice")
 fn human_approved() -> Int {
     return 42
@@ -41,7 +41,7 @@ fn human_approved() -> Int {
 
 Marks a function as security-sensitive, requiring formal contracts:
 
-```kodo
+```rust
 @security_sensitive
 fn validate_input(data: String) -> Bool
     requires { data != "" }
@@ -56,7 +56,7 @@ fn validate_input(data: String) -> Bool
 
 Functions with `@confidence(X)` where X < 0.8 **must** have `@reviewed_by(human: "...")`:
 
-```kodo
+```rust
 // ERROR: @confidence(0.5) < 0.8 without review
 @confidence(0.5)
 fn risky() -> Int { return 42 }
@@ -83,7 +83,7 @@ This means confidence propagates through the call chain — a function is only a
 
 Set `min_confidence` in the `meta` block to enforce a minimum confidence level:
 
-```kodo
+```rust
 module secure_app {
     meta {
         purpose: "A security-critical application"

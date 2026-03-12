@@ -6,7 +6,7 @@ Actors in Kodo combine state and message handlers into a single unit. An actor h
 
 An actor is declared with the `actor` keyword. It contains typed fields (the state) and handler functions that operate on that state:
 
-```kodo
+```rust
 actor Counter {
     count: Int
 
@@ -22,7 +22,7 @@ The `self` parameter gives the handler access to the actor's fields. Fields are 
 
 Create an actor by providing initial values for all fields, similar to struct literals:
 
-```kodo
+```rust
 let c: Counter = Counter { count: 0 }
 ```
 
@@ -32,7 +32,7 @@ Under the hood, the runtime allocates the actor's state on the heap via `kodo_ac
 
 You can read an actor's fields using dot notation:
 
-```kodo
+```rust
 let c: Counter = Counter { count: 42 }
 let v: Int = c.count
 print_int(v)  // 42
@@ -44,7 +44,7 @@ Field access compiles to a `kodo_actor_get_field` call with the appropriate byte
 
 Calling a handler on an actor queues a message that the cooperative scheduler processes:
 
-```kodo
+```rust
 let c: Counter = Counter { count: 10 }
 c.increment(5)
 ```
@@ -64,7 +64,7 @@ This means handler calls are asynchronous -- the call returns immediately and th
 
 ## Complete Example
 
-```kodo
+```rust
 module actors {
     meta {
         purpose: "Demonstrate actors with state and message passing",

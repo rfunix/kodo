@@ -49,7 +49,7 @@ The core thesis: if we remove ambiguity, make intent explicit, embed contracts i
 
 ### Basic Syntax
 
-```
+```rust
 // Module declaration — every file is a module
 module hello_server
 
@@ -96,7 +96,7 @@ fn handle_greet(ctx: HttpContext) -> HttpResponse
 
 ### Type System
 
-```
+```rust
 // Primitive types
 Int, Int8, Int16, Int32, Int64
 Uint, Uint8, Uint16, Uint32, Uint64
@@ -137,7 +137,7 @@ impl Serializable for Greeting {
 
 ### Error Handling
 
-```
+```rust
 // No exceptions. No panic (except in debug builds).
 // Every error is explicit via Result<T, E>.
 
@@ -160,7 +160,7 @@ enum IoError {
 
 ### Ownership & Memory
 
-```
+```rust
 // Linear ownership model (inspired by Rust, simplified for agents)
 // Three modes:
 //   own  — exclusive ownership (default, can be omitted)
@@ -191,7 +191,7 @@ fn modify(data: mut Buffer) {
 
 > **V1 Status:** `spawn` with captured variables and `actor` with state/message passing are fully working in v1. `async`/`await` compiles to synchronous code. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are planned for v2.
 
-```
+```rust
 // Structured concurrency — no raw threads, no unstructured spawns
 // Async by default, sync is the special case
 // NOTE: This is the PLANNED v2 design. V1 compiles async/spawn synchronously.
@@ -224,7 +224,7 @@ fn pipeline() {
 
 ### Intent System (Deep Dive)
 
-```
+```rust
 // Intents are high-level declarations of WHAT the agent wants
 // The compiler's resolver maps them to concrete implementations
 
@@ -260,7 +260,7 @@ resolver my_resolver for intent cache {
 
 ### Agent Metadata & Traceability
 
-```
+```rust
 // Every code change is traceable to an agent or human
 @authored_by(agent("claude-code"), session: "abc123")
 @reviewed_by(human("rafael"))
@@ -283,7 +283,7 @@ fn critical_calculation(input: Float64) -> Float64
 
 ### Pipeline
 
-```
+```rust
 Source (.ko)
     │
     ▼
@@ -338,7 +338,7 @@ Kōdo uses a built-in build tool (`ko`) that reads `project.ko.toml`.
 
 > **Note:** Modules marked with **(implemented)** are available in v1. Others are planned.
 
-```
+```rust
 kodo::core        — Primitives, Result, Option, basic traits (implemented)
 kodo::collections — List, Map (implemented); Set, Queue, Stack (planned)
 kodo::string      — UTF-8 string operations (implemented)

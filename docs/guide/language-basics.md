@@ -6,7 +6,7 @@ This guide covers the core features of Kōdo that are available today.
 
 Every `.ko` file contains exactly one module. A module has a name, a `meta` block, and one or more functions:
 
-```
+```rust
 module my_program {
     meta {
         purpose: "What this module does",
@@ -34,7 +34,7 @@ The `meta` block is mandatory. It makes every module self-describing — any rea
 
 Functions are declared with `fn`, followed by a name, parameters, and an optional return type:
 
-```
+```rust
 fn add(a: Int, b: Int) -> Int {
     return a + b
 }
@@ -47,7 +47,7 @@ fn add(a: Int, b: Int) -> Int {
 
 ### Calling Functions
 
-```
+```rust
 fn double(x: Int) -> Int {
     return x * 2
 }
@@ -62,7 +62,7 @@ fn main() {
 
 Functions can call themselves:
 
-```
+```rust
 fn factorial(n: Int) -> Int {
     if n <= 1 {
         return 1
@@ -86,7 +86,7 @@ The full type system also includes `Int8`, `Int16`, `Int32`, `Int64`, `Float32`,
 
 Variables can have explicit type annotations or use **local type inference**:
 
-```
+```rust
 // Explicit type annotations
 let x: Int = 42
 let pi: Float64 = 3.14159
@@ -108,7 +108,7 @@ let tau = 6.28       // inferred as Float64
 
 By default, variables are immutable:
 
-```
+```rust
 let x: Int = 10
 // x = 20  — this would be an error
 ```
@@ -117,7 +117,7 @@ let x: Int = 10
 
 Use `let mut` to create a mutable variable. Mutable variables can be reassigned using `=`:
 
-```
+```rust
 let mut counter: Int = 0
 counter = counter + 1
 ```
@@ -162,7 +162,7 @@ Arithmetic operators work on both `Int` and `Float64` values. The `+` operator a
 
 ### if/else
 
-```
+```rust
 if x > 0 {
     println("positive")
 } else {
@@ -172,7 +172,7 @@ if x > 0 {
 
 `if`/`else` blocks can be nested:
 
-```
+```rust
 if x > 100 {
     println("large")
 } else {
@@ -188,7 +188,7 @@ if x > 100 {
 
 Use `while` to repeat a block while a condition is true:
 
-```
+```rust
 let mut i: Int = 5
 while i > 0 {
     print_int(i)
@@ -200,7 +200,7 @@ The condition must be a `Bool` expression. The loop body executes repeatedly unt
 
 Here's a complete example with a countdown function:
 
-```
+```rust
 fn countdown(n: Int) {
     let mut i: Int = n
     while i > 0 {
@@ -215,7 +215,7 @@ fn countdown(n: Int) {
 
 Use `return` to exit a function with a value:
 
-```
+```rust
 fn abs(x: Int) -> Int {
     if x < 0 {
         return -x
@@ -236,7 +236,7 @@ Kōdo provides builtin functions for output:
 | `print_float(f)` | `Float64` | Print a float without a newline |
 | `println_float(f)` | `Float64` | Print a float followed by a newline |
 
-```
+```rust
 fn main() {
     println("The answer is:")
     print_int(42)
@@ -248,7 +248,7 @@ fn main() {
 
 Here's a program that combines everything covered in this guide:
 
-```
+```rust
 module demo {
     meta {
         purpose: "Demonstrate Kōdo language basics",

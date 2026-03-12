@@ -1,0 +1,108 @@
+// Real-world example: Config Validator
+//
+// Validates application configuration using contracts,
+// string methods, and reports error counts.
+//
+// Run with: kodoc build examples/config_validator.ko -o config_validator && ./config_validator
+
+module config_validator {
+    meta {
+        purpose: "Configuration validator with contracts"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    struct AppConfig {
+        port: Int,
+        host: String,
+        max_connections: Int,
+        log_level: String,
+        app_name: String
+    }
+
+    fn validate_port(port: Int) -> Bool
+        requires { port >= 0 }
+    {
+        return port >= 1 && port <= 65535
+    }
+
+    fn validate_host(ref host: String) -> Bool {
+        return host.length() > 0
+    }
+
+    fn validate_connections(n: Int) -> Bool {
+        return n > 0 && n <= 10000
+    }
+
+    fn validate_config(ref config: AppConfig) -> Int {
+        let mut errors: Int = 0
+
+        if !validate_port(config.port) {
+            println("  ERROR: Port must be between 1 and 65535")
+            errors = errors + 1
+        }
+
+        if !validate_host(config.host) {
+            println("  ERROR: Host cannot be empty")
+            errors = errors + 1
+        }
+
+        if !validate_connections(config.max_connections) {
+            println("  ERROR: Max connections must be 1-10000")
+            errors = errors + 1
+        }
+
+        if config.app_name.length() == 0 {
+            println("  ERROR: App name cannot be empty")
+            errors = errors + 1
+        }
+
+        return errors
+    }
+
+    fn print_config(ref config: AppConfig) {
+        println(f"  host: {config.host}")
+        println(f"  port: {config.port.to_string()}")
+        println(f"  max_connections: {config.max_connections.to_string()}")
+        println(f"  log_level: {config.log_level}")
+        println(f"  app_name: {config.app_name}")
+    }
+
+    fn main() -> Int {
+        // Valid configuration
+        let good_config: AppConfig = AppConfig {
+            port: 8080,
+            host: "localhost",
+            max_connections: 100,
+            log_level: "info",
+            app_name: "my-service"
+        }
+
+        // Invalid configuration
+        let bad_config: AppConfig = AppConfig {
+            port: 0,
+            host: "",
+            max_connections: 50000,
+            log_level: "debug",
+            app_name: ""
+        }
+
+        println("=== Config Validator ===")
+
+        // Validate good config
+        println("Good config:")
+        print_config(good_config)
+        let good_errors: Int = validate_config(good_config)
+        if good_errors == 0 {
+            println("  -> VALID")
+        }
+
+        // Validate bad config
+        println("Bad config:")
+        print_config(bad_config)
+        let bad_errors: Int = validate_config(bad_config)
+        println(f"  -> INVALID ({bad_errors.to_string()} errors)")
+
+        return 0
+    }
+}
