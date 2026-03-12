@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-latest
             artifact: kodoc-linux-x86_64
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-13
             artifact: kodoc-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -52,7 +52,6 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} -p kodoc
 
       - name: Run tests
-        if: matrix.target != 'aarch64-apple-darwin' || runner.arch == 'ARM64'
         run: cargo test --workspace
 
       - name: Package binary
