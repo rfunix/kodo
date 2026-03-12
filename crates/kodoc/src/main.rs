@@ -7,6 +7,7 @@
 mod audit;
 mod certificate;
 mod diagnostics;
+mod embedded_runtime;
 mod explanations;
 mod formatter;
 mod repl;
@@ -2015,42 +2016,10 @@ fn link_executable(
     }
 }
 
-/// Locates `libkodo_runtime.a` by searching common paths.
+/// Locates `libkodo_runtime.a` — checks env, exe dir, cargo targets,
+/// and falls back to the embedded copy.
 fn find_runtime_lib() -> std::result::Result<PathBuf, String> {
-    // 1. Check KODO_RUNTIME_LIB env var
-    if let Ok(path) = std::env::var("KODO_RUNTIME_LIB") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-
-    // 2. Check relative to the current executable (workspace target/debug/)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("libkodo_runtime.a");
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-
-    // 3. Check common cargo target directories
-    let candidates = [
-        "target/debug/libkodo_runtime.a",
-        "target/release/libkodo_runtime.a",
-    ];
-    for candidate in &candidates {
-        let p = PathBuf::from(candidate);
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-
-    Err(
-        "could not find libkodo_runtime.a — build the workspace first with `cargo build`"
-            .to_string(),
-    )
+    embedded_runtime::find_runtime_lib()
 }
 
 /// Builds vtable definitions from the type checker's trait registries.
