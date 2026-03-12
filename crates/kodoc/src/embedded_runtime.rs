@@ -6,13 +6,9 @@
 
 use std::path::PathBuf;
 
-/// The embedded runtime bytes (set by build.rs).
-/// When the path is empty (runtime not found at build time), this is an empty slice.
-const EMBEDDED_RUNTIME: &[u8] = if env!("KODO_RUNTIME_LIB_PATH").is_empty() {
-    &[]
-} else {
-    include_bytes!(env!("KODO_RUNTIME_LIB_PATH"))
-};
+/// The embedded runtime bytes, copied to OUT_DIR by build.rs.
+/// Empty when the runtime was not found at build time.
+const EMBEDDED_RUNTIME: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/embedded_runtime.a"));
 
 /// Returns the path to `libkodo_runtime.a`, extracting from the embedded
 /// copy if necessary.

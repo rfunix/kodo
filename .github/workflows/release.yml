@@ -45,8 +45,10 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p kodoc
+      - name: Build workspace and kodoc
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p kodo_runtime
+          cargo build --release --target ${{ matrix.target }} -p kodoc
 
       - name: Package binary
         run: |
