@@ -1,0 +1,36 @@
+// Generic method dispatch — method calls on user-defined structs.
+//
+// Demonstrates inherent impl blocks with methods that accept
+// closures as parameters for flexible dispatch.
+//
+// Compile and run:
+//   kodoc build examples/generic_method_dispatch.ko -o generic_method_dispatch
+//   ./generic_method_dispatch
+
+module generic_method_dispatch {
+    meta {
+        purpose: "Demonstrate method dispatch for generic types"
+        version: "0.1.0"
+    }
+
+    struct Container {
+        value: Int
+    }
+
+    impl Container {
+        fn get_value(self) -> Int {
+            return self.value
+        }
+
+        fn apply(self, f: (Int) -> Int) -> Int {
+            return f(self.value)
+        }
+    }
+
+    fn main() -> Int {
+        let c: Container = Container { value: 42 }
+        let v: Int = c.get_value()
+        let doubled: Int = c.apply(|x: Int| -> Int { x * 2 })
+        return 0
+    }
+}

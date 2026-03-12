@@ -29,6 +29,7 @@ declaration     = function_decl
                 | trait_decl
                 | impl_block
                 | intent_decl
+                | invariant_decl
                 | import_decl ;
 
 (* ===== Imports ===== *)
@@ -97,6 +98,10 @@ annotation_arg  = IDENT ":" expr
 
 intent_decl     = "intent" IDENT "{" intent_config* "}" ;
 intent_config   = IDENT ":" expr ;
+
+(* ===== Module Invariants ===== *)
+
+invariant_decl  = "invariant" "{" expr "}" ;
 
 (* ===== Statements ===== *)
 

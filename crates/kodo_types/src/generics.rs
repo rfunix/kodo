@@ -90,6 +90,27 @@ impl TypeChecker {
         }
     }
 
+    /// Resolves the type of a `self` parameter in an impl block.
+    ///
+    /// Unlike [`resolve_type_mono`], this allows bare generic type names
+    /// (e.g. `Option`, `List`) without type arguments, returning the base
+    /// `Type::Enum` or `Type::Struct` directly.
+    pub(crate) fn resolve_self_type(
+        &mut self,
+        type_expr: &kodo_ast::TypeExpr,
+        span: Span,
+    ) -> crate::Result<Type> {
+        if let kodo_ast::TypeExpr::Named(name) = type_expr {
+            if self.generic_enums.contains_key(name) {
+                return Ok(Type::Enum(name.clone()));
+            }
+            if self.generic_structs.contains_key(name) {
+                return Ok(Type::Struct(name.clone()));
+            }
+        }
+        self.resolve_type_mono(type_expr, span)
+    }
+
     /// Checks if two enum types are compatible, considering generic enums
     /// with partially-inferred type params (e.g. `Option__Int` vs `Option__?`).
     pub(crate) fn compatible_enum_types(expected: &Type, found: &Type) -> bool {

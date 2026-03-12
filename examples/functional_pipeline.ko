@@ -1,0 +1,51 @@
+// Functional pipeline: chained map, filter, fold.
+// Phase 48 feature — idiomatic functional programming.
+
+module functional_pipeline {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates chained functional combinators"
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+        list_push(nums, 6)
+        list_push(nums, 7)
+        list_push(nums, 8)
+        list_push(nums, 9)
+        list_push(nums, 10)
+
+        // Pipeline: filter evens, double them, sum
+        // evens: 2, 4, 6, 8, 10
+        // doubled: 4, 8, 12, 16, 20
+        // sum: 60
+        let evens: List<Int> = nums.filter(|x: Int| -> Bool { x % 2 == 0 })
+        let doubled: List<Int> = evens.map(|x: Int| -> Int { x * 2 })
+        let result: Int = doubled.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        print_int(result)
+
+        // Check: any element in original > 9? yes
+        let has_big: Bool = nums.any(|x: Int| -> Bool { x > 9 })
+        if has_big {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+
+        // All elements in filtered result positive? yes
+        let all_pos: Bool = doubled.all(|x: Int| -> Bool { x > 0 })
+        if all_pos {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+
+        return 0
+    }
+}

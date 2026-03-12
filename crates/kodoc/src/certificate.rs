@@ -320,6 +320,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: func_names
                 .iter()
                 .map(|name| Function {

@@ -1,0 +1,53 @@
+// Functional combinators: fold, count, any, all.
+// Phase 48 feature — functional programming on List<Int>.
+
+module iterator_fold {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates fold, count, any, all combinators on List<Int>"
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        // fold: sum all elements (1+2+3+4+5 = 15)
+        let total: Int = nums.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        print_int(total)
+
+        // count: number of elements (5)
+        let n: Int = nums.count()
+        print_int(n)
+
+        // any: is there any element > 4? (true = 1)
+        let has_big: Bool = nums.any(|x: Int| -> Bool { x > 4 })
+        if has_big {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+
+        // all: are all elements > 0? (true = 1)
+        let all_positive: Bool = nums.all(|x: Int| -> Bool { x > 0 })
+        if all_positive {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+
+        // all: are all elements > 3? (false = 0)
+        let all_big: Bool = nums.all(|x: Int| -> Bool { x > 3 })
+        if all_big {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+
+        return 0
+    }
+}

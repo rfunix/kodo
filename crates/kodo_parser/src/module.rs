@@ -11,8 +11,8 @@
 //! *Crafting Interpreters* Ch. 6 and **\[EC\]** *Engineering a Compiler* Ch. 3.4.
 
 use kodo_ast::{
-    ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, Meta, MetaEntry, Module,
-    Span, TraitDecl, TypeAlias, TypeDecl,
+    ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl, Meta,
+    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl,
 };
 use kodo_lexer::TokenKind;
 
@@ -36,6 +36,8 @@ struct RecoveredDeclarations {
     actor_decls: Vec<ActorDecl>,
     /// Collected intent declarations.
     intent_decls: Vec<IntentDecl>,
+    /// Collected invariant declarations.
+    invariants: Vec<InvariantDecl>,
     /// Collected function declarations.
     functions: Vec<Function>,
 }
@@ -75,6 +77,7 @@ impl Parser {
         let mut actor_decls = Vec::new();
         let mut type_aliases = Vec::new();
         let mut intent_decls = Vec::new();
+        let mut invariants = Vec::new();
         let mut functions = Vec::new();
         while self.check(&TokenKind::Fn)
             || self.check(&TokenKind::At)
@@ -84,6 +87,7 @@ impl Parser {
             || self.check(&TokenKind::Impl)
             || self.check(&TokenKind::Actor)
             || self.check(&TokenKind::Async)
+            || self.check(&TokenKind::Invariant)
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
         {
@@ -99,6 +103,8 @@ impl Parser {
                 impl_blocks.push(self.parse_impl_block()?);
             } else if self.check(&TokenKind::Actor) {
                 actor_decls.push(self.parse_actor_decl()?);
+            } else if self.check(&TokenKind::Invariant) {
+                invariants.push(self.parse_invariant()?);
             } else if self.check(&TokenKind::Intent) {
                 intent_decls.push(self.parse_intent()?);
             } else {
@@ -122,6 +128,7 @@ impl Parser {
             impl_blocks,
             actor_decls,
             intent_decls,
+            invariants,
             functions,
         })
     }
@@ -181,6 +188,7 @@ impl Parser {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![],
         }
     }
@@ -241,6 +249,7 @@ impl Parser {
                 impl_blocks: module_body.impl_blocks,
                 actor_decls: module_body.actor_decls,
                 intent_decls: module_body.intent_decls,
+                invariants: module_body.invariants,
                 functions: module_body.functions,
             },
             errors,
@@ -293,6 +302,7 @@ impl Parser {
             || self.check(&TokenKind::Impl)
             || self.check(&TokenKind::Actor)
             || self.check(&TokenKind::Async)
+            || self.check(&TokenKind::Invariant)
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
         {
@@ -309,6 +319,8 @@ impl Parser {
                     decls.impl_blocks.push(self.parse_impl_block()?);
                 } else if self.check(&TokenKind::Actor) {
                     decls.actor_decls.push(self.parse_actor_decl()?);
+                } else if self.check(&TokenKind::Invariant) {
+                    decls.invariants.push(self.parse_invariant()?);
                 } else if self.check(&TokenKind::Intent) {
                     decls.intent_decls.push(self.parse_intent()?);
                 } else {
@@ -430,6 +442,7 @@ pub fn parse_with_recovery(source: &str) -> ParseOutput {
                     impl_blocks: vec![],
                     actor_decls: vec![],
                     intent_decls: vec![],
+                    invariants: vec![],
                     functions: vec![],
                 },
                 errors: vec![ParseError::from(e)],

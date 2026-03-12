@@ -1,0 +1,35 @@
+// Functional combinators: map and filter.
+// Phase 48 feature — functional programming on List<Int>.
+
+module iterator_map_filter {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates map and filter combinators on List<Int>"
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        // Map: double each element
+        let doubled: List<Int> = nums.map(|x: Int| -> Int { x * 2 })
+
+        // Print sum of doubled: 2+4+6+8+10 = 30
+        let mut total: Int = 0
+        for v in doubled {
+            total = total + v
+        }
+        print_int(total)
+
+        // Filter: keep only elements > 3
+        let big: List<Int> = nums.filter(|x: Int| -> Bool { x > 3 })
+        print_int(list_length(big))
+
+        return 0
+    }
+}

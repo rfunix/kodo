@@ -488,6 +488,48 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     fn_return_types
         .entry("channel_recv_string".to_string())
         .or_insert(Type::String);
+
+    // Iterator builtins — all return Int (opaque handles or 0/1 flags).
+    for name in &[
+        "list_iter",
+        "list_iterator_advance",
+        "list_iterator_value",
+        "list_new",
+        "String_chars",
+        "string_chars_advance",
+        "string_chars_value",
+        "Map_keys",
+        "map_keys_advance",
+        "map_keys_value",
+        "Map_values",
+        "map_values_advance",
+        "map_values_value",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+
+    // Combinator methods on List.
+    let list_int = Type::Generic("List".to_string(), vec![Type::Int]);
+    fn_return_types
+        .entry("List_map".to_string())
+        .or_insert(list_int.clone());
+    fn_return_types
+        .entry("List_filter".to_string())
+        .or_insert(list_int);
+    fn_return_types
+        .entry("List_fold".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("List_count".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("List_any".to_string())
+        .or_insert(Type::Bool);
+    fn_return_types
+        .entry("List_all".to_string())
+        .or_insert(Type::Bool);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
@@ -975,6 +1017,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![
                 make_fn(
                     "first",
@@ -1315,6 +1358,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
@@ -1368,6 +1412,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![make_fn(
                 "plain",
                 vec![],
@@ -1397,6 +1442,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
@@ -1456,6 +1502,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(0),
                 span: span(),
@@ -1854,6 +1901,17 @@ mod tests {
         assert_eq!(types.get("list_length"), Some(&Type::Int));
         assert_eq!(types.get("map_length"), Some(&Type::Int));
         assert_eq!(types.get("map_contains_key"), Some(&Type::Int));
+
+        // Iterator builtins
+        assert_eq!(types.get("String_chars"), Some(&Type::Int));
+        assert_eq!(types.get("string_chars_advance"), Some(&Type::Int));
+        assert_eq!(types.get("string_chars_value"), Some(&Type::Int));
+        assert_eq!(types.get("Map_keys"), Some(&Type::Int));
+        assert_eq!(types.get("map_keys_advance"), Some(&Type::Int));
+        assert_eq!(types.get("map_keys_value"), Some(&Type::Int));
+        assert_eq!(types.get("Map_values"), Some(&Type::Int));
+        assert_eq!(types.get("map_values_advance"), Some(&Type::Int));
+        assert_eq!(types.get("map_values_value"), Some(&Type::Int));
     }
 
     #[test]
@@ -1921,6 +1979,7 @@ mod tests {
                 TypeExpr::Named("Int".to_string()),
             )],
             intent_decls: vec![],
+            invariants: vec![],
             impl_blocks: vec![],
             trait_decls: vec![],
             actor_decls: vec![],
@@ -2127,6 +2186,7 @@ mod tests {
                 )],
             }],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![make_fn("main", vec![], main_body, TypeExpr::Unit)],
         }
     }
@@ -2372,6 +2432,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(3),
                 span: Span::new(0, 80),
@@ -2447,6 +2508,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(3),
                 span: Span::new(0, 80),
@@ -2568,6 +2630,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![Function {
                 id: NodeId(3),
                 span: Span::new(0, 80),

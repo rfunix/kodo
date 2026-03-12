@@ -456,6 +456,18 @@ error[E0303]: contract refuted at 10..16: counter-example: b -> 0
    |              ^^^^^^^^^^ Z3 found counter-example: b = 0
 ```
 
+### E0310: Invariant Not Bool
+A module invariant condition does not evaluate to `Bool`. Invariant conditions
+must be boolean expressions.
+
+```
+error[E0310]: invariant condition must be `Bool`, found `Int` at 42..50
+  --> src/main.ko:4:5
+   |
+ 4 |     invariant { 42 }
+   |                 ^^ expected Bool, found Int
+```
+
 ## Resolver Errors (E0400–E0499)
 
 ### E0400: No Resolver Found

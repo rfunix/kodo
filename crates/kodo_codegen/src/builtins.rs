@@ -69,6 +69,7 @@ pub(crate) fn declare_builtins(
     declare_channel_builtins(module, call_conv, &mut builtins)?;
     declare_rc_builtins(module, call_conv, &mut builtins)?;
     declare_async_builtins(module, call_conv, &mut builtins)?;
+    declare_iterator_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -809,5 +810,98 @@ fn declare_async_builtins(
         types::I64
     );
     decl_ret!("kodo_await", "kodo_await", [types::I64], types::I64);
+    Ok(())
+}
+
+/// Declares iterator builtins for List, String chars, and Map keys/values.
+fn declare_iterator_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // List iterator
+    decl_ret!("kodo_list_iter", "list_iter", [types::I64], types::I64);
+    decl_ret!(
+        "kodo_list_iterator_advance",
+        "list_iterator_advance",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_iterator_value",
+        "list_iterator_value",
+        [types::I64],
+        types::I64
+    );
+    decl_void!("kodo_list_iterator_free", "list_iterator_free", types::I64);
+
+    // String chars iterator: takes (ptr, len) as i64 args
+    decl_ret!(
+        "kodo_string_chars",
+        "String_chars",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_string_chars_advance",
+        "string_chars_advance",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_string_chars_value",
+        "string_chars_value",
+        [types::I64],
+        types::I64
+    );
+    decl_void!("kodo_string_chars_free", "string_chars_free", types::I64);
+
+    // Map keys iterator
+    decl_ret!("kodo_map_keys", "Map_keys", [types::I64], types::I64);
+    decl_ret!(
+        "kodo_map_keys_advance",
+        "map_keys_advance",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_map_keys_value",
+        "map_keys_value",
+        [types::I64],
+        types::I64
+    );
+    decl_void!("kodo_map_keys_free", "map_keys_free", types::I64);
+
+    // Map values iterator
+    decl_ret!("kodo_map_values", "Map_values", [types::I64], types::I64);
+    decl_ret!(
+        "kodo_map_values_advance",
+        "map_values_advance",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_map_values_value",
+        "map_values_value",
+        [types::I64],
+        types::I64
+    );
+    decl_void!("kodo_map_values_free", "map_values_free", types::I64);
+
     Ok(())
 }

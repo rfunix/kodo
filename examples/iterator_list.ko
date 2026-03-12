@@ -1,0 +1,68 @@
+// For-in loops using the Iterator protocol.
+// Phase 47 feature — for-in desugars to list_iter/advance/value/free.
+
+module iterator_list {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates for-in loops over List<Int> via Iterator protocol"
+        author: "Kodo Team"
+    }
+
+    fn sum_list(items: List<Int>) -> Int {
+        let mut total: Int = 0
+        for x in items {
+            total = total + x
+        }
+        return total
+    }
+
+    fn find_max(items: List<Int>) -> Int {
+        let mut best: Int = 0
+        let mut first: Bool = true
+        for x in items {
+            if first {
+                best = x
+                first = false
+            } else {
+                if x > best {
+                    best = x
+                }
+            }
+        }
+        return best
+    }
+
+    fn count_positive(items: List<Int>) -> Int {
+        let mut count: Int = 0
+        for x in items {
+            if x > 0 {
+                count = count + 1
+            }
+        }
+        return count
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 3)
+        list_push(nums, 7)
+        list_push(nums, 1)
+        list_push(nums, 9)
+        list_push(nums, 2)
+
+        let total: Int = sum_list(nums)
+        print_int(total)
+
+        let mx: Int = find_max(nums)
+        print_int(mx)
+
+        let neg_list: List<Int> = list_new()
+        list_push(neg_list, 5)
+        list_push(neg_list, 0)
+        list_push(neg_list, 3)
+        let pos: Int = count_positive(neg_list)
+        print_int(pos)
+
+        return 0
+    }
+}

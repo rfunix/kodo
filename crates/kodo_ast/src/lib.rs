@@ -155,8 +155,25 @@ pub struct Module {
     pub actor_decls: Vec<ActorDecl>,
     /// Intent declarations.
     pub intent_decls: Vec<IntentDecl>,
+    /// Module invariant declarations.
+    pub invariants: Vec<InvariantDecl>,
     /// Functions defined in this module.
     pub functions: Vec<Function>,
+}
+
+/// A module invariant declaration: `invariant { condition_expr }`
+///
+/// Module invariants are boolean expressions that must hold for every public
+/// function in the module. They are checked statically via SMT when possible
+/// and injected as runtime checks at function entry/exit.
+///
+/// See **\[SF\]** Vol. 1–2 and **\[CC\]** Ch. 1–6 (Hoare logic).
+#[derive(Debug, Clone)]
+pub struct InvariantDecl {
+    /// Source span of the invariant declaration.
+    pub span: Span,
+    /// The boolean condition expression.
+    pub condition: Expr,
 }
 
 /// A trait declaration: `trait Name { type Item; fn method(self) -> Type }`

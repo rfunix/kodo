@@ -402,6 +402,11 @@ fn run_build(
         }
     }
 
+    // Inject synthetic stdlib method implementations (Option/Result methods).
+    // These are added after type checking since the type checker only registers
+    // their signatures in method_lookup; the bodies are generated here.
+    inject_stdlib_method_functions(&mut module);
+
     // Generate monomorphized function instances from generic functions.
     let mut generated_fns: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (base_name, type_args, mono_name) in checker.fn_instances() {
@@ -725,6 +730,670 @@ fn print_metadata_human(json_str: &str) {
             // If not valid JSON, just print raw
             println!("{json_str}");
         }
+    }
+}
+
+/// Injects synthetic AST functions for stdlib enum methods (Option/Result).
+///
+/// These are generated after type checking because the type checker registers
+/// their signatures in `method_lookup` but cannot type-check bodies that use
+/// bare generic enum names. The generated functions use match expressions to
+/// inspect the enum discriminant.
+fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
+    let s = kodo_ast::Span::new(0, 0);
+
+    // Helper: build a match-based bool-returning method for an enum.
+    // `positive_variant` is the variant for which the method returns `true`.
+    let make_bool_method =
+        |name: &str, enum_name: &str, positive_variant: &str, _negative_variant: &str| {
+            kodo_ast::Function {
+                id: kodo_ast::NodeId(0),
+                name: name.to_string(),
+                params: vec![kodo_ast::Param {
+                    name: "self".to_string(),
+                    ty: kodo_ast::TypeExpr::Named(enum_name.to_string()),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                }],
+                return_type: kodo_ast::TypeExpr::Named("Bool".to_string()),
+                body: kodo_ast::Block {
+                    span: s,
+                    stmts: vec![kodo_ast::Stmt::Return {
+                        span: s,
+                        value: Some(kodo_ast::Expr::Match {
+                            span: s,
+                            expr: Box::new(kodo_ast::Expr::Ident("self".to_string(), s)),
+                            arms: vec![
+                                kodo_ast::MatchArm {
+                                    pattern: kodo_ast::Pattern::Variant {
+                                        enum_name: Some(enum_name.to_string()),
+                                        variant: positive_variant.to_string(),
+                                        bindings: vec!["_v".to_string()],
+                                        span: s,
+                                    },
+                                    body: kodo_ast::Expr::BoolLit(true, s),
+                                    span: s,
+                                },
+                                kodo_ast::MatchArm {
+                                    pattern: kodo_ast::Pattern::Wildcard(s),
+                                    body: kodo_ast::Expr::BoolLit(false, s),
+                                    span: s,
+                                },
+                            ],
+                        }),
+                    }],
+                },
+                span: s,
+                is_async: false,
+                annotations: Vec::new(),
+                generic_params: Vec::new(),
+                requires: Vec::new(),
+                ensures: Vec::new(),
+            }
+        };
+
+    // Helper: build unwrap_or method that returns the payload or a default.
+    let make_unwrap_or = |name: &str, enum_name: &str, success_variant: &str| kodo_ast::Function {
+        id: kodo_ast::NodeId(0),
+        name: name.to_string(),
+        params: vec![
+            kodo_ast::Param {
+                name: "self".to_string(),
+                ty: kodo_ast::TypeExpr::Named(enum_name.to_string()),
+                span: s,
+                ownership: kodo_ast::Ownership::Owned,
+            },
+            kodo_ast::Param {
+                name: "default".to_string(),
+                ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                span: s,
+                ownership: kodo_ast::Ownership::Owned,
+            },
+        ],
+        return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+        body: kodo_ast::Block {
+            span: s,
+            stmts: vec![kodo_ast::Stmt::Return {
+                span: s,
+                value: Some(kodo_ast::Expr::Match {
+                    span: s,
+                    expr: Box::new(kodo_ast::Expr::Ident("self".to_string(), s)),
+                    arms: vec![
+                        kodo_ast::MatchArm {
+                            pattern: kodo_ast::Pattern::Variant {
+                                enum_name: Some(enum_name.to_string()),
+                                variant: success_variant.to_string(),
+                                bindings: vec!["_v".to_string()],
+                                span: s,
+                            },
+                            body: kodo_ast::Expr::Ident("_v".to_string(), s),
+                            span: s,
+                        },
+                        kodo_ast::MatchArm {
+                            pattern: kodo_ast::Pattern::Wildcard(s),
+                            body: kodo_ast::Expr::Ident("default".to_string(), s),
+                            span: s,
+                        },
+                    ],
+                }),
+            }],
+        },
+        span: s,
+        is_async: false,
+        annotations: Vec::new(),
+        generic_params: Vec::new(),
+        requires: Vec::new(),
+        ensures: Vec::new(),
+    };
+
+    // Option methods: is_some matches Some(v) → true, _ → false
+    module
+        .functions
+        .push(make_bool_method("Option_is_some", "Option", "Some", "None"));
+    // is_none: match Some(v) → false, _ → true (note: positive_variant returns true)
+    // For is_none, we want None→true, Some→false. Use Wildcard for simplicity.
+    module.functions.push({
+        let mut f = make_bool_method("Option_is_none", "Option", "Some", "None");
+        // Swap the bool values: Some→false, _→true
+        if let Some(kodo_ast::Stmt::Return {
+            value: Some(kodo_ast::Expr::Match { arms, .. }),
+            ..
+        }) = f.body.stmts.first_mut()
+        {
+            arms[0].body = kodo_ast::Expr::BoolLit(false, s);
+            arms[1].body = kodo_ast::Expr::BoolLit(true, s);
+        }
+        f
+    });
+    module
+        .functions
+        .push(make_unwrap_or("Option_unwrap_or", "Option", "Some"));
+
+    // Result methods
+    module
+        .functions
+        .push(make_bool_method("Result_is_ok", "Result", "Ok", "Err"));
+    module.functions.push({
+        let mut f = make_bool_method("Result_is_err", "Result", "Ok", "Err");
+        if let Some(kodo_ast::Stmt::Return {
+            value: Some(kodo_ast::Expr::Match { arms, .. }),
+            ..
+        }) = f.body.stmts.first_mut()
+        {
+            arms[0].body = kodo_ast::Expr::BoolLit(false, s);
+            arms[1].body = kodo_ast::Expr::BoolLit(true, s);
+        }
+        f
+    });
+    module
+        .functions
+        .push(make_unwrap_or("Result_unwrap_or", "Result", "Ok"));
+
+    // ── Phase 48: Functional combinators on List<Int> ──────────────────
+
+    let list_param = kodo_ast::Param {
+        name: "self".to_string(),
+        ty: kodo_ast::TypeExpr::Generic(
+            "List".to_string(),
+            vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+        ),
+        span: s,
+        ownership: kodo_ast::Ownership::Owned,
+    };
+
+    let fn_int_int_ty = kodo_ast::TypeExpr::Function(
+        vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+        Box::new(kodo_ast::TypeExpr::Named("Int".to_string())),
+    );
+    let fn_int_bool_ty = kodo_ast::TypeExpr::Function(
+        vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+        Box::new(kodo_ast::TypeExpr::Named("Bool".to_string())),
+    );
+
+    // Helper: creates an iterator-based loop body with setup and teardown.
+    // Returns (iter_var_name, setup_stmts_before_while, while_condition).
+    let iter_var = "__comb_iter";
+    let elem_var = "__comb_elem";
+
+    let make_iter_setup = || -> Vec<kodo_ast::Stmt> {
+        vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: iter_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::Call {
+                callee: Box::new(kodo_ast::Expr::Ident("list_iter".to_string(), s)),
+                args: vec![kodo_ast::Expr::Ident("self".to_string(), s)],
+                span: s,
+            },
+        }]
+    };
+
+    let make_iter_condition = || -> kodo_ast::Expr {
+        kodo_ast::Expr::BinaryOp {
+            left: Box::new(kodo_ast::Expr::Call {
+                callee: Box::new(kodo_ast::Expr::Ident(
+                    "list_iterator_advance".to_string(),
+                    s,
+                )),
+                args: vec![kodo_ast::Expr::Ident(iter_var.to_string(), s)],
+                span: s,
+            }),
+            op: kodo_ast::BinOp::Gt,
+            right: Box::new(kodo_ast::Expr::IntLit(0, s)),
+            span: s,
+        }
+    };
+
+    let make_elem_let = || -> kodo_ast::Stmt {
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: elem_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::Call {
+                callee: Box::new(kodo_ast::Expr::Ident("list_iterator_value".to_string(), s)),
+                args: vec![kodo_ast::Expr::Ident(iter_var.to_string(), s)],
+                span: s,
+            },
+        }
+    };
+
+    let make_iter_free = || -> kodo_ast::Stmt {
+        kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+            callee: Box::new(kodo_ast::Expr::Ident("list_iterator_free".to_string(), s)),
+            args: vec![kodo_ast::Expr::Ident(iter_var.to_string(), s)],
+            span: s,
+        })
+    };
+
+    let list_ret = kodo_ast::TypeExpr::Generic(
+        "List".to_string(),
+        vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+    );
+
+    // List_map(self: List<Int>, f: (Int) -> Int) -> List<Int>
+    {
+        let result_var = "__map_result";
+        let val_var = "__map_val";
+        let mut body_stmts = make_iter_setup();
+        // let __map_result = list_new()
+        body_stmts.insert(
+            0,
+            kodo_ast::Stmt::Let {
+                span: s,
+                mutable: false,
+                name: result_var.to_string(),
+                ty: None,
+                value: kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::Ident("list_new".to_string(), s)),
+                    args: vec![],
+                    span: s,
+                },
+            },
+        );
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                // let __map_val = f(__comb_elem)
+                kodo_ast::Stmt::Let {
+                    span: s,
+                    mutable: false,
+                    name: val_var.to_string(),
+                    ty: None,
+                    value: kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![kodo_ast::Expr::Ident(elem_var.to_string(), s)],
+                        span: s,
+                    },
+                },
+                // list_push(__map_result, __map_val)
+                kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::Ident("list_push".to_string(), s)),
+                    args: vec![
+                        kodo_ast::Expr::Ident(result_var.to_string(), s),
+                        kodo_ast::Expr::Ident(val_var.to_string(), s),
+                    ],
+                    span: s,
+                }),
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(result_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_map".to_string(),
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: fn_int_int_ty.clone(),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: list_ret.clone(),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_filter(self: List<Int>, f: (Int) -> Bool) -> List<Int>
+    {
+        let result_var = "__filter_result";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: result_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::Call {
+                callee: Box::new(kodo_ast::Expr::Ident("list_new".to_string(), s)),
+                args: vec![],
+                span: s,
+            },
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                // if f(__comb_elem) { list_push(__filter_result, __comb_elem) }
+                kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                    span: s,
+                    condition: Box::new(kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![kodo_ast::Expr::Ident(elem_var.to_string(), s)],
+                        span: s,
+                    }),
+                    then_branch: kodo_ast::Block {
+                        span: s,
+                        stmts: vec![kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+                            callee: Box::new(kodo_ast::Expr::Ident("list_push".to_string(), s)),
+                            args: vec![
+                                kodo_ast::Expr::Ident(result_var.to_string(), s),
+                                kodo_ast::Expr::Ident(elem_var.to_string(), s),
+                            ],
+                            span: s,
+                        })],
+                    },
+                    else_branch: None,
+                }),
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(result_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_filter".to_string(),
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: fn_int_bool_ty.clone(),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: list_ret.clone(),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_fold(self: List<Int>, init: Int, f: (Int, Int) -> Int) -> Int
+    {
+        let acc_var = "__fold_acc";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: acc_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::Ident("init".to_string(), s),
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                // __fold_acc = f(__fold_acc, __comb_elem)
+                kodo_ast::Stmt::Assign {
+                    span: s,
+                    name: acc_var.to_string(),
+                    value: kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![
+                            kodo_ast::Expr::Ident(acc_var.to_string(), s),
+                            kodo_ast::Expr::Ident(elem_var.to_string(), s),
+                        ],
+                        span: s,
+                    },
+                },
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(acc_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_fold".to_string(),
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "init".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: kodo_ast::TypeExpr::Function(
+                        vec![
+                            kodo_ast::TypeExpr::Named("Int".to_string()),
+                            kodo_ast::TypeExpr::Named("Int".to_string()),
+                        ],
+                        Box::new(kodo_ast::TypeExpr::Named("Int".to_string())),
+                    ),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_count(self: List<Int>) -> Int
+    {
+        // Simply calls list_length(self)
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_count".to_string(),
+            params: vec![list_param.clone()],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: s,
+                    value: Some(kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("list_length".to_string(), s)),
+                        args: vec![kodo_ast::Expr::Ident("self".to_string(), s)],
+                        span: s,
+                    }),
+                }],
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_any(self: List<Int>, f: (Int) -> Bool) -> Bool
+    {
+        let result_var = "__any_result";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: result_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::BoolLit(false, s),
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                // if f(__comb_elem) { __any_result = true; break }
+                kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                    span: s,
+                    condition: Box::new(kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![kodo_ast::Expr::Ident(elem_var.to_string(), s)],
+                        span: s,
+                    }),
+                    then_branch: kodo_ast::Block {
+                        span: s,
+                        stmts: vec![
+                            kodo_ast::Stmt::Assign {
+                                span: s,
+                                name: result_var.to_string(),
+                                value: kodo_ast::Expr::BoolLit(true, s),
+                            },
+                            kodo_ast::Stmt::Break { span: s },
+                        ],
+                    },
+                    else_branch: None,
+                }),
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(result_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_any".to_string(),
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: fn_int_bool_ty.clone(),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: kodo_ast::TypeExpr::Named("Bool".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_all(self: List<Int>, f: (Int) -> Bool) -> Bool
+    {
+        let result_var = "__all_result";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: result_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::BoolLit(true, s),
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                // if !f(__comb_elem) { __all_result = false; break }
+                kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                    span: s,
+                    condition: Box::new(kodo_ast::Expr::UnaryOp {
+                        op: kodo_ast::UnaryOp::Not,
+                        operand: Box::new(kodo_ast::Expr::Call {
+                            callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                            args: vec![kodo_ast::Expr::Ident(elem_var.to_string(), s)],
+                            span: s,
+                        }),
+                        span: s,
+                    }),
+                    then_branch: kodo_ast::Block {
+                        span: s,
+                        stmts: vec![
+                            kodo_ast::Stmt::Assign {
+                                span: s,
+                                name: result_var.to_string(),
+                                value: kodo_ast::Expr::BoolLit(false, s),
+                            },
+                            kodo_ast::Stmt::Break { span: s },
+                        ],
+                    },
+                    else_branch: None,
+                }),
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(result_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_all".to_string(),
+            params: vec![
+                list_param,
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: fn_int_bool_ty,
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: kodo_ast::TypeExpr::Named("Bool".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
     }
 }
 
@@ -1478,6 +2147,9 @@ fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
             module.functions.push(func);
         }
     }
+
+    // Inject synthetic stdlib method implementations for MIR lowering.
+    inject_stdlib_method_functions(&mut module);
 
     // MIR lowering.
     let mir_functions = match kodo_mir::lowering::lower_module_with_type_info(

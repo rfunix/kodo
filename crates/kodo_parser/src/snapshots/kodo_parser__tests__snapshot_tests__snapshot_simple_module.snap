@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: module
 ---
 Module {
@@ -40,5 +40,6 @@ Module {
     impl_blocks: [],
     actor_decls: [],
     intent_decls: [],
+    invariants: [],
     functions: [],
 }

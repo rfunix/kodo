@@ -35,21 +35,45 @@ pub(crate) use stmt::desugar_block;
 /// Desugars an entire module in-place.
 ///
 /// This function walks all functions in the module and transforms
-/// syntactic sugar into simpler AST forms.
+/// syntactic sugar into simpler AST forms.  Module-level `invariant`
+/// conditions are injected as `requires` clauses into every function.
 pub fn desugar_module(module: &mut Module) {
+    // Collect invariant conditions to inject into every function.
+    let invariant_conditions: Vec<kodo_ast::Expr> = module
+        .invariants
+        .iter()
+        .map(|inv| inv.condition.clone())
+        .collect();
+
     for func in &mut module.functions {
+        inject_invariants(&invariant_conditions, func);
         desugar_block(&mut func.body);
     }
     for impl_block in &mut module.impl_blocks {
         for method in &mut impl_block.methods {
+            inject_invariants(&invariant_conditions, method);
             desugar_block(&mut method.body);
         }
     }
     for actor_decl in &mut module.actor_decls {
         for handler in &mut actor_decl.handlers {
+            inject_invariants(&invariant_conditions, handler);
             desugar_block(&mut handler.body);
         }
     }
+}
+
+/// Injects module-level invariant conditions as `requires` clauses
+/// into a function.  Each invariant expression is prepended to the
+/// function's existing `requires` list so that MIR lowering emits
+/// the corresponding `kodo_contract_fail` calls.
+fn inject_invariants(invariants: &[kodo_ast::Expr], func: &mut kodo_ast::Function) {
+    if invariants.is_empty() {
+        return;
+    }
+    let mut combined = invariants.to_vec();
+    combined.append(&mut func.requires);
+    func.requires = combined;
 }
 
 #[cfg(test)]
@@ -80,6 +104,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![kodo_ast::Function {
                 id: id_gen.next_id(),
                 span: Span::new(0, 100),
@@ -628,6 +653,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![
                 kodo_ast::Function {
                     id: id_gen.next_id(),
@@ -809,10 +835,11 @@ mod tests {
         };
         desugar_block(&mut block);
 
+        // Iterator-based desugaring: let __iter_x = list_iter(...), while, free
         assert_eq!(block.stmts.len(), 3);
-        assert!(matches!(&block.stmts[0], Stmt::Let { name, .. } if name == "__forin_idx_x"));
-        assert!(matches!(&block.stmts[1], Stmt::Let { name, .. } if name == "__forin_len_x"));
-        assert!(matches!(&block.stmts[2], Stmt::While { .. }));
+        assert!(matches!(&block.stmts[0], Stmt::Let { name, .. } if name == "__iter_x"));
+        assert!(matches!(&block.stmts[1], Stmt::While { .. }));
+        assert!(matches!(&block.stmts[2], Stmt::Expr(Expr::Call { .. })));
     }
 
     #[test]
@@ -832,6 +859,7 @@ mod tests {
             impl_blocks: vec![],
             actor_decls: vec![],
             intent_decls: vec![],
+            invariants: vec![],
             functions: vec![kodo_ast::Function {
                 id: id_gen.next_id(),
                 span,
@@ -881,12 +909,12 @@ mod tests {
         };
         desugar_block(&mut block);
 
-        if let Stmt::While { body, .. } = &block.stmts[2] {
+        // Iterator-based: stmts[0] = let __iter_item, stmts[1] = while, stmts[2] = free
+        if let Stmt::While { body, .. } = &block.stmts[1] {
+            // while body: [let item = list_iterator_value(...), <original body>]
             assert!(matches!(&body.stmts[0], Stmt::Let { name, .. } if name == "item"));
             assert!(matches!(&body.stmts[1], Stmt::Expr(Expr::IntLit(42, _))));
-            assert!(
-                matches!(&body.stmts[2], Stmt::Assign { name, .. } if name == "__forin_idx_item")
-            );
+            assert_eq!(body.stmts.len(), 2); // no more increment stmt
         } else {
             panic!("expected While statement");
         }
@@ -951,5 +979,150 @@ mod tests {
         } else {
             panic!("expected Call expression");
         }
+    }
+
+    // ── Phase 49: Invariant injection ────────────────────────────────
+
+    #[test]
+    fn desugar_invariant_injected_as_requires() {
+        let mut id_gen = NodeIdGen::new();
+        let span = Span::new(0, 100);
+        let mut module = Module {
+            id: id_gen.next_id(),
+            span,
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: id_gen.next_id(),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![kodo_ast::InvariantDecl {
+                span,
+                condition: Expr::BoolLit(true, span),
+            }],
+            functions: vec![kodo_ast::Function {
+                id: id_gen.next_id(),
+                span,
+                name: "f".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span,
+                    stmts: vec![Stmt::Return {
+                        span,
+                        value: Some(Expr::IntLit(1, span)),
+                    }],
+                },
+            }],
+        };
+
+        assert!(module.functions[0].requires.is_empty());
+        desugar_module(&mut module);
+        assert_eq!(
+            module.functions[0].requires.len(),
+            1,
+            "invariant should be injected as requires"
+        );
+        assert!(matches!(
+            module.functions[0].requires[0],
+            Expr::BoolLit(true, _)
+        ));
+    }
+
+    #[test]
+    fn desugar_invariant_prepended_before_existing_requires() {
+        let mut id_gen = NodeIdGen::new();
+        let span = Span::new(0, 100);
+        let mut module = Module {
+            id: id_gen.next_id(),
+            span,
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(kodo_ast::Meta {
+                id: id_gen.next_id(),
+                span: Span::new(0, 50),
+                entries: vec![kodo_ast::MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span: Span::new(0, 20),
+                }],
+            }),
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![kodo_ast::InvariantDecl {
+                span,
+                condition: Expr::BoolLit(true, span),
+            }],
+            functions: vec![kodo_ast::Function {
+                id: id_gen.next_id(),
+                span,
+                name: "f".to_string(),
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+                requires: vec![Expr::BoolLit(false, span)],
+                ensures: vec![],
+                body: Block {
+                    span,
+                    stmts: vec![Stmt::Return {
+                        span,
+                        value: Some(Expr::IntLit(1, span)),
+                    }],
+                },
+            }],
+        };
+
+        desugar_module(&mut module);
+        assert_eq!(
+            module.functions[0].requires.len(),
+            2,
+            "should have invariant + original requires"
+        );
+        // Invariant comes first.
+        assert!(matches!(
+            module.functions[0].requires[0],
+            Expr::BoolLit(true, _)
+        ));
+        // Original requires preserved.
+        assert!(matches!(
+            module.functions[0].requires[1],
+            Expr::BoolLit(false, _)
+        ));
+    }
+
+    #[test]
+    fn desugar_no_invariant_no_change() {
+        let mut module = make_test_module(vec![Stmt::Return {
+            span: Span::new(0, 10),
+            value: Some(Expr::IntLit(1, Span::new(0, 10))),
+        }]);
+        assert!(module.invariants.is_empty());
+        let original_requires_len = module.functions[0].requires.len();
+        desugar_module(&mut module);
+        assert_eq!(module.functions[0].requires.len(), original_requires_len);
     }
 }

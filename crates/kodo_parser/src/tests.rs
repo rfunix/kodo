@@ -3294,3 +3294,77 @@ fn parse_break_and_continue_mixed() {
         panic!("expected While");
     }
 }
+
+// ── Phase 49: Module invariant parsing ───────────────────────────────
+
+#[test]
+fn parse_invariant_simple() {
+    let source = r#"module m {
+        meta { purpose: "test" }
+        invariant { true }
+        fn main() {}
+    }"#;
+
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.invariants.len(), 1);
+    assert!(matches!(
+        module.invariants[0].condition,
+        Expr::BoolLit(true, _)
+    ));
+}
+
+#[test]
+fn parse_invariant_comparison() {
+    let source = r#"module m {
+        meta { purpose: "test" }
+        invariant { 1 > 0 }
+        fn main() {}
+    }"#;
+
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.invariants.len(), 1);
+    assert!(matches!(
+        module.invariants[0].condition,
+        Expr::BinaryOp { op: BinOp::Gt, .. }
+    ));
+}
+
+#[test]
+fn parse_multiple_invariants() {
+    let source = r#"module m {
+        meta { purpose: "test" }
+        invariant { true }
+        invariant { 1 == 1 }
+        fn main() {}
+    }"#;
+
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.invariants.len(), 2);
+}
+
+#[test]
+fn parse_invariant_with_recovery() {
+    let source = r#"module m {
+        meta { purpose: "test" }
+        invariant { true }
+        fn main() {}
+    }"#;
+
+    let output = parse_with_recovery(source);
+    assert!(output.errors.is_empty(), "errors: {:?}", output.errors);
+    assert_eq!(output.module.invariants.len(), 1);
+}
+
+#[test]
+fn parse_invariant_between_functions() {
+    let source = r#"module m {
+        meta { purpose: "test" }
+        fn a() {}
+        invariant { true }
+        fn b() {}
+    }"#;
+
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e:?}"));
+    assert_eq!(module.invariants.len(), 1);
+    assert_eq!(module.functions.len(), 2);
+}

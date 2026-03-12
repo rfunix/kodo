@@ -1,0 +1,47 @@
+// Map iterator example.
+// Phase 50 feature — iterate over Map keys and values.
+
+module iterator_map {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates Map.keys() and Map.values() iterators"
+        author: "Kodo Team"
+    }
+
+    fn sum_keys(m: Map<Int, Int>) -> Int {
+        let iter: Int = m.keys()
+        let mut total: Int = 0
+        while map_keys_advance(iter) == 1 {
+            let k: Int = map_keys_value(iter)
+            total = total + k
+        }
+        map_keys_free(iter)
+        return total
+    }
+
+    fn sum_values(m: Map<Int, Int>) -> Int {
+        let iter: Int = m.values()
+        let mut total: Int = 0
+        while map_values_advance(iter) == 1 {
+            let v: Int = map_values_value(iter)
+            total = total + v
+        }
+        map_values_free(iter)
+        return total
+    }
+
+    fn main() -> Int {
+        let scores: Map<Int, Int> = map_new()
+        map_insert(scores, 1, 100)
+        map_insert(scores, 2, 200)
+        map_insert(scores, 3, 300)
+
+        let key_sum: Int = sum_keys(scores)
+        print_int(key_sum)
+
+        let val_sum: Int = sum_values(scores)
+        print_int(val_sum)
+
+        return 0
+    }
+}

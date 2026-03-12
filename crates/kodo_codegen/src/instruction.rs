@@ -41,6 +41,7 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "String_concat"
             | "String_index_of"
             | "String_replace"
+            | "String_chars"
             | "Int_to_string"
             | "Float64_to_string"
             | "file_exists"

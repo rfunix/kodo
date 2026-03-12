@@ -7,8 +7,8 @@
 
 use kodo_ast::{
     ActorDecl, Annotation, AnnotationArg, AssociatedType, EnumDecl, EnumVariant, FieldDef,
-    Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, Ownership, Param, Span,
-    TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
+    Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, InvariantDecl,
+    Ownership, Param, Span, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
 };
 use kodo_lexer::TokenKind;
 
@@ -583,6 +583,22 @@ impl Parser {
             span: start.merge(end),
             name,
             config,
+        })
+    }
+
+    /// Parses a module invariant: `invariant { condition_expr }`
+    ///
+    /// Module invariants declare boolean conditions that must hold for every
+    /// public function in the module. They are verified statically when
+    /// possible and injected as runtime checks otherwise.
+    pub(crate) fn parse_invariant(&mut self) -> Result<InvariantDecl> {
+        let start = self.expect(&TokenKind::Invariant)?.span;
+        self.expect(&TokenKind::LBrace)?;
+        let condition = self.parse_expr()?;
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(InvariantDecl {
+            span: start.merge(end),
+            condition,
         })
     }
 

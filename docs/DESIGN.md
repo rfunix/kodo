@@ -379,7 +379,7 @@ kodo::ffi         — C FFI for interop (planned)
 - [x] `requires`/`ensures` parsing and AST representation
 - [x] Runtime contract checking (`requires` + `ensures` inject runtime checks)
 - [x] SMT solver integration (Z3) for static verification (feature-gated behind `smt`)
-- [ ] Module-level invariants
+- [x] Module-level invariants
 - [x] Contract-aware error messages (ariadne source-span rendering)
 
 ### Phase 4 — Intent System

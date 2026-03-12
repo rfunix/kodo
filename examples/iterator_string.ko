@@ -1,0 +1,42 @@
+// String character iterator example.
+// Phase 50 feature — iterate over String codepoints using .chars().
+
+module iterator_string {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates String.chars() iterator"
+        author: "Kodo Team"
+    }
+
+    fn count_chars(s: String) -> Int {
+        let iter: Int = s.chars()
+        let mut count: Int = 0
+        while string_chars_advance(iter) == 1 {
+            count = count + 1
+        }
+        string_chars_free(iter)
+        return count
+    }
+
+    fn sum_codepoints(s: String) -> Int {
+        let iter: Int = s.chars()
+        let mut total: Int = 0
+        while string_chars_advance(iter) == 1 {
+            let cp: Int = string_chars_value(iter)
+            total = total + cp
+        }
+        string_chars_free(iter)
+        return total
+    }
+
+    fn main() -> Int {
+        let msg: String = "hello"
+        let char_count: Int = count_chars(msg)
+        print_int(char_count)
+
+        let total: Int = sum_codepoints("ABC")
+        print_int(total)
+
+        return 0
+    }
+}

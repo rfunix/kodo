@@ -54,5 +54,6 @@ Module {
     impl_blocks: [],
     actor_decls: [],
     intent_decls: [],
+    invariants: [],
     functions: [],
 }

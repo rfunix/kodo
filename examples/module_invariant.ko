@@ -1,0 +1,33 @@
+// Module Invariant — demonstrates module-level invariant declarations.
+//
+// Module invariants are boolean conditions that must hold true.
+// They are injected as `requires` clauses into every function in the module,
+// checked at function entry via the contract system.
+//
+// Compile and run:
+//   kodoc build examples/module_invariant.ko -o module_invariant
+//   ./module_invariant
+//
+// Expected output:
+//   10
+//   20
+
+module module_invariant {
+    meta {
+        purpose: "Demonstrate module-level invariant declarations"
+    }
+
+    // This invariant is checked at the entry of every function.
+    invariant { 1 > 0 }
+
+    fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() {
+        let a: Int = double(5)
+        print_int(a)
+        let b: Int = double(10)
+        print_int(b)
+    }
+}

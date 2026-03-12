@@ -1,0 +1,33 @@
+// Enum methods — calling methods on Option and Result types.
+//
+// Demonstrates is_some, is_none, unwrap_or on Option,
+// and is_ok, is_err, unwrap_or on Result.
+//
+// Compile and run:
+//   kodoc build examples/enum_methods.ko -o enum_methods
+//   ./enum_methods
+
+module enum_methods {
+    meta {
+        purpose: "Demonstrate enum methods on Option and Result"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let opt: Option<Int> = Option::Some(42)
+        let is_some: Bool = opt.is_some()
+        let is_none: Bool = opt.is_none()
+        let val: Int = opt.unwrap_or(0)
+
+        let none_opt: Option<Int> = Option::None
+        let none_is_some: Bool = none_opt.is_some()
+        let none_val: Int = none_opt.unwrap_or(99)
+
+        let ok_res: Result<Int, String> = Result::Ok(10)
+        let is_ok: Bool = ok_res.is_ok()
+        let is_err: Bool = ok_res.is_err()
+        let ok_val: Int = ok_res.unwrap_or(0)
+
+        return 0
+    }
+}

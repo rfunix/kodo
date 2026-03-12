@@ -59,17 +59,16 @@ pub(crate) fn desugar_for_stmt(
     new_stmts.push(while_stmt);
 }
 
-/// Desugars a `for-in` loop over a collection into indexed access with a `while` loop.
+/// Desugars a `for-in` loop over a collection using the Iterator protocol.
 ///
 /// Transforms `for x in iterable { body }` into:
 /// ```text
-/// let mut __forin_idx_x = 0
-/// let __forin_len_x = len(iterable)
-/// while __forin_idx_x < __forin_len_x {
-///     let x = get(iterable, __forin_idx_x)
+/// let __iter_x = list_iter(iterable)
+/// while list_iterator_advance(__iter_x) > 0 {
+///     let x = list_iterator_value(__iter_x)
 ///     body
-///     __forin_idx_x = __forin_idx_x + 1
 /// }
+/// list_iterator_free(__iter_x)
 /// ```
 pub(crate) fn desugar_for_in_stmt(
     new_stmts: &mut Vec<Stmt>,
@@ -81,61 +80,48 @@ pub(crate) fn desugar_for_in_stmt(
     desugar_block(&mut body);
     let iterable = desugar_expr(iterable);
 
-    let idx_name = format!("__forin_idx_{name}");
-    let let_idx = Stmt::Let {
-        span,
-        mutable: true,
-        name: idx_name.clone(),
-        ty: None,
-        value: Expr::IntLit(0, span),
-    };
+    let iter_name = format!("__iter_{name}");
 
-    let len_name = format!("__forin_len_{name}");
-    let let_len = Stmt::Let {
+    // let __iter_x = list_iter(iterable)
+    let let_iter = Stmt::Let {
         span,
         mutable: false,
-        name: len_name.clone(),
+        name: iter_name.clone(),
         ty: None,
         value: Expr::Call {
-            callee: Box::new(Expr::Ident("len".to_string(), span)),
-            args: vec![iterable.clone()],
+            callee: Box::new(Expr::Ident("list_iter".to_string(), span)),
+            args: vec![iterable],
             span,
         },
     };
 
+    // while list_iterator_advance(__iter_x) > 0 { ... }
     let condition = Expr::BinaryOp {
-        left: Box::new(Expr::Ident(idx_name.clone(), span)),
-        op: BinOp::Lt,
-        right: Box::new(Expr::Ident(len_name, span)),
+        left: Box::new(Expr::Call {
+            callee: Box::new(Expr::Ident("list_iterator_advance".to_string(), span)),
+            args: vec![Expr::Ident(iter_name.clone(), span)],
+            span,
+        }),
+        op: BinOp::Gt,
+        right: Box::new(Expr::IntLit(0, span)),
         span,
     };
 
+    // let x = list_iterator_value(__iter_x)
     let let_elem = Stmt::Let {
         span,
         mutable: false,
         name: name.to_string(),
         ty: None,
         value: Expr::Call {
-            callee: Box::new(Expr::Ident("get".to_string(), span)),
-            args: vec![iterable, Expr::Ident(idx_name.clone(), span)],
-            span,
-        },
-    };
-
-    let increment = Stmt::Assign {
-        span,
-        name: idx_name.clone(),
-        value: Expr::BinaryOp {
-            left: Box::new(Expr::Ident(idx_name, span)),
-            op: BinOp::Add,
-            right: Box::new(Expr::IntLit(1, span)),
+            callee: Box::new(Expr::Ident("list_iterator_value".to_string(), span)),
+            args: vec![Expr::Ident(iter_name.clone(), span)],
             span,
         },
     };
 
     let mut while_stmts = vec![let_elem];
     while_stmts.extend(body.stmts);
-    while_stmts.push(increment);
 
     let while_stmt = Stmt::While {
         span,
@@ -146,7 +132,14 @@ pub(crate) fn desugar_for_in_stmt(
         },
     };
 
-    new_stmts.push(let_idx);
-    new_stmts.push(let_len);
+    // list_iterator_free(__iter_x)
+    let free_iter = Stmt::Expr(Expr::Call {
+        callee: Box::new(Expr::Ident("list_iterator_free".to_string(), span)),
+        args: vec![Expr::Ident(iter_name, span)],
+        span,
+    });
+
+    new_stmts.push(let_iter);
     new_stmts.push(while_stmt);
+    new_stmts.push(free_iter);
 }

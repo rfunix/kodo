@@ -83,6 +83,7 @@ fn make_module(functions: Vec<Function>) -> Module {
         impl_blocks: vec![],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions,
     }
 }
@@ -805,6 +806,7 @@ fn make_module_with_policy(functions: Vec<Function>, policy: Option<&str>) -> Mo
         impl_blocks: vec![],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions,
     }
 }
@@ -986,6 +988,7 @@ fn make_module_with_decls(
         impl_blocks: vec![],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions,
     }
 }
@@ -1638,6 +1641,7 @@ fn check_trait_and_impl_basic() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![Function {
             id: NodeId(5),
             span: Span::new(180, 200),
@@ -1698,6 +1702,7 @@ fn check_unknown_trait_error() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![],
     };
     let mut checker = TypeChecker::new();
@@ -1765,6 +1770,7 @@ fn check_missing_trait_method_error() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![],
     };
     let mut checker = TypeChecker::new();
@@ -1863,6 +1869,7 @@ fn check_inherent_impl_registers_methods() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![Function {
             id: NodeId(4),
             span: Span::new(160, 200),
@@ -1966,6 +1973,7 @@ fn check_inherent_impl_no_trait_required() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![Function {
             id: NodeId(4),
             span: Span::new(140, 180),
@@ -2130,6 +2138,7 @@ fn check_inherent_and_trait_impl_same_type() {
         ],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![Function {
             id: NodeId(7),
             span: Span::new(230, 270),
@@ -2564,6 +2573,7 @@ fn confidence_threshold_violation() {
         impl_blocks: vec![],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![func_weak, func_main],
     };
     let mut checker = TypeChecker::new();
@@ -3824,6 +3834,7 @@ fn missing_associated_type_error() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -3925,6 +3936,7 @@ fn unexpected_associated_type_error() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -4045,6 +4057,7 @@ fn default_method_not_required_in_impl() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -4149,6 +4162,7 @@ fn associated_type_provided_passes() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -4250,6 +4264,7 @@ fn default_method_collecting_not_required() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -4315,6 +4330,7 @@ fn missing_associated_type_collecting() {
         }],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![make_function(
             "main",
             vec![],
@@ -4359,6 +4375,7 @@ fn make_module_with_body(stmts: Vec<Stmt>) -> Module {
         impl_blocks: vec![],
         actor_decls: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         functions: vec![Function {
             id: NodeId(2),
             span: Span::new(0, 100),
@@ -4533,4 +4550,994 @@ fn continue_error_has_suggestion() {
     let suggestion = err.suggestion();
     assert!(suggestion.is_some());
     assert!(suggestion.unwrap().contains("loop"));
+}
+
+// --- Phase 46: Generic method dispatch + Option/Result methods ---
+
+/// Option.is_some is registered in method_lookup.
+#[test]
+fn option_is_some_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Option".to_string(), "is_some".to_string()));
+    assert!(entry.is_some(), "Option.is_some should be in method_lookup");
+    let (mangled, _params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Option_is_some");
+    assert_eq!(*ret, Type::Bool);
+}
+
+/// Option.is_none is registered in method_lookup.
+#[test]
+fn option_is_none_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Option".to_string(), "is_none".to_string()));
+    assert!(entry.is_some(), "Option.is_none should be in method_lookup");
+    let (mangled, _params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Option_is_none");
+    assert_eq!(*ret, Type::Bool);
+}
+
+/// Option.unwrap_or is registered in method_lookup.
+#[test]
+fn option_unwrap_or_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Option".to_string(), "unwrap_or".to_string()));
+    assert!(entry.is_some());
+    let (mangled, params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Option_unwrap_or");
+    assert_eq!(params.len(), 2); // self + default
+    assert_eq!(*ret, Type::Int);
+}
+
+/// Result.is_ok is registered in method_lookup.
+#[test]
+fn result_is_ok_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Result".to_string(), "is_ok".to_string()));
+    assert!(entry.is_some());
+    let (mangled, _params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Result_is_ok");
+    assert_eq!(*ret, Type::Bool);
+}
+
+/// Result.is_err is registered in method_lookup.
+#[test]
+fn result_is_err_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Result".to_string(), "is_err".to_string()));
+    assert!(entry.is_some());
+    let (mangled, _params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Result_is_err");
+    assert_eq!(*ret, Type::Bool);
+}
+
+/// Result.unwrap_or is registered in method_lookup.
+#[test]
+fn result_unwrap_or_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Result".to_string(), "unwrap_or".to_string()));
+    assert!(entry.is_some());
+    let (mangled, params, ret) = entry.unwrap();
+    assert_eq!(mangled, "Result_unwrap_or");
+    assert_eq!(params.len(), 2);
+    assert_eq!(*ret, Type::Int);
+}
+
+/// Generic type name extraction works: Generic("Option", [Int]) → "Option".
+#[test]
+fn generic_type_extracts_base_name() {
+    let ty = Type::Generic("Option".to_string(), vec![Type::Int]);
+    let name = match &ty {
+        Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) => n.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(name, "Option");
+}
+
+/// Monomorphized enum names fall back to base name for method lookup.
+#[test]
+fn monomorphized_base_name_extraction() {
+    let mono = "Option__Int";
+    let base = mono.split("__").next().unwrap();
+    assert_eq!(base, "Option");
+}
+
+/// Option methods type-check correctly on Option<Int>.
+#[test]
+fn option_methods_typecheck() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let opt: Option<Int> = Option::Some(42)
+            let s: Bool = opt.is_some()
+            let n: Bool = opt.is_none()
+            let v: Int = opt.unwrap_or(0)
+            return 0
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Option methods should type-check: {result:?}"
+    );
+}
+
+/// Result methods type-check correctly on Result<Int, String>.
+#[test]
+fn result_methods_typecheck() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let r: Result<Int, String> = Result::Ok(42)
+            let ok: Bool = r.is_ok()
+            let err: Bool = r.is_err()
+            let v: Int = r.unwrap_or(0)
+            return 0
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Result methods should type-check: {result:?}"
+    );
+}
+
+/// Method on struct with closure parameter type-checks.
+#[test]
+fn method_with_closure_param_typechecks() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        struct Box { value: Int }
+        impl Box {
+            fn apply(self, f: (Int) -> Int) -> Int {
+                return f(self.value)
+            }
+        }
+        fn main() -> Int {
+            let b: Box = Box { value: 10 }
+            let result: Int = b.apply(|x: Int| -> Int { x * 2 })
+            return result
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Closure as method arg should type-check: {result:?}"
+    );
+}
+
+/// Generic struct method dispatch works.
+#[test]
+fn struct_method_dispatch_typechecks() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        struct Counter { value: Int }
+        impl Counter {
+            fn get(self) -> Int {
+                return self.value
+            }
+            fn increment(self) -> Counter {
+                return Counter { value: self.value + 1 }
+            }
+        }
+        fn main() -> Int {
+            let c: Counter = Counter { value: 0 }
+            let c2: Counter = c.increment()
+            return c2.get()
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Struct method dispatch should type-check: {result:?}"
+    );
+}
+
+/// resolve_self_type returns base enum for generic enum name.
+#[test]
+fn resolve_self_type_generic_enum() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int { return 0 }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    // Register Option prelude to populate generic_enums.
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    // resolve_self_type should return Enum("Option") for Named("Option").
+    let ty = checker
+        .resolve_self_type(&TypeExpr::Named("Option".to_string()), Span::new(0, 6))
+        .unwrap();
+    assert_eq!(ty, Type::Enum("Option".to_string()));
+}
+
+/// resolve_self_type returns normal type for non-generic types.
+#[test]
+fn resolve_self_type_non_generic() {
+    let mut checker = TypeChecker::new();
+    let ty = checker
+        .resolve_self_type(&TypeExpr::Named("Int".to_string()), Span::new(0, 3))
+        .unwrap();
+    assert_eq!(ty, Type::Int);
+}
+
+/// Option.is_some on Option::None type-checks correctly.
+#[test]
+fn option_none_methods_typecheck() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let opt: Option<Int> = Option::None
+            let s: Bool = opt.is_some()
+            let v: Int = opt.unwrap_or(99)
+            return v
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Option::None methods should type-check: {result:?}"
+    );
+}
+
+/// Result::Err methods type-check correctly.
+#[test]
+fn result_err_methods_typecheck() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let r: Result<Int, String> = Result::Err("fail")
+            let ok: Bool = r.is_ok()
+            let err: Bool = r.is_err()
+            let v: Int = r.unwrap_or(42)
+            return v
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Result::Err methods should type-check: {result:?}"
+    );
+}
+
+/// Self type compatibility: `Enum("Option")` matches `Generic("Option", [Int])`.
+///
+/// This tests the core dispatch rule in `try_check_method_call`: when
+/// self_ty is `Enum("Option")` (from method registration) and the actual
+/// object type is `Generic("Option", [Int])`, the base names match.
+#[test]
+fn self_type_compat_enum_matches_generic_same_base() {
+    let self_ty = Type::Enum("Option".to_string());
+    let obj_ty = Type::Generic("Option".to_string(), vec![Type::Int]);
+    let self_matches = match (&self_ty, &obj_ty) {
+        (Type::Enum(a) | Type::Struct(a), Type::Generic(b, _)) => a == b,
+        _ => false,
+    };
+    assert!(
+        self_matches,
+        "Enum(\"Option\") should be compatible with Generic(\"Option\", [Int])"
+    );
+}
+
+/// Self type compatibility rejects different base names.
+#[test]
+fn self_type_compat_rejects_different_base() {
+    let self_ty = Type::Enum("Option".to_string());
+    let obj_ty = Type::Generic("Result".to_string(), vec![Type::Int]);
+    let self_matches = match (&self_ty, &obj_ty) {
+        (Type::Enum(a) | Type::Struct(a), Type::Generic(b, _)) => a == b,
+        _ => false,
+    };
+    assert!(
+        !self_matches,
+        "Enum(\"Option\") should NOT match Generic(\"Result\", [Int])"
+    );
+}
+
+/// Self type compatibility: `Struct` base matches `Generic` with same name.
+#[test]
+fn self_type_compat_struct_matches_generic() {
+    let self_ty = Type::Struct("List".to_string());
+    let obj_ty = Type::Generic("List".to_string(), vec![Type::Int]);
+    let self_matches = match (&self_ty, &obj_ty) {
+        (Type::Enum(a) | Type::Struct(a), Type::Generic(b, _)) => a == b,
+        _ => false,
+    };
+    assert!(
+        self_matches,
+        "Struct(\"List\") should be compatible with Generic(\"List\", [Int])"
+    );
+}
+
+/// Non-generic type (Int) does not match via self_ty compatibility.
+#[test]
+fn self_type_compat_non_generic_no_match() {
+    let self_ty = Type::Enum("Option".to_string());
+    let obj_ty = Type::Int;
+    let self_matches = match (&self_ty, &obj_ty) {
+        (Type::Enum(a) | Type::Struct(a), Type::Generic(b, _)) => a == b,
+        _ => false,
+    };
+    assert!(!self_matches, "Enum(\"Option\") should NOT match Int");
+}
+
+/// Calling a nonexistent method on `Option<Int>` should fail with an error.
+#[test]
+fn generic_option_unknown_method_fails() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Bool {
+            let opt: Option<Int> = Option::Some(1)
+            return opt.nonexistent()
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    if let Ok(prelude_mod) = kodo_parser::parse(option_src) {
+        let _ = checker.check_module(&prelude_mod);
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "calling nonexistent method on Option<Int> should fail"
+    );
+}
+
+/// `unwrap_or` with wrong argument type (Bool instead of Int) is rejected.
+#[test]
+fn option_unwrap_or_wrong_arg_type_rejected() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let opt: Option<Int> = Option::Some(10)
+            return opt.unwrap_or(true)
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    if let Ok(prelude_mod) = kodo_parser::parse(option_src) {
+        let _ = checker.check_module(&prelude_mod);
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "unwrap_or(true) on Option<Int> should fail — expected Int default"
+    );
+}
+
+/// Generic method lookup resolves using base name from `Type::Generic`.
+///
+/// Ensures that when a `Type::Generic("Option", [Int])` is encountered,
+/// method lookup uses `"Option"` as the key (not `"Option__Int"`).
+#[test]
+fn generic_method_lookup_resolves_via_base_name() {
+    let checker = TypeChecker::new();
+    let obj_ty = Type::Generic("Option".to_string(), vec![Type::Int]);
+    let type_name = match &obj_ty {
+        Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) => n.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(type_name, "Option");
+    // All three Option methods should be found via base name.
+    for method in &["is_some", "is_none", "unwrap_or"] {
+        let entry = checker
+            .method_lookup
+            .get(&(type_name.clone(), method.to_string()));
+        assert!(
+            entry.is_some(),
+            "Option.{method} should be resolvable via base name"
+        );
+    }
+}
+
+/// Generic method lookup for Result resolves all three methods.
+#[test]
+fn generic_result_method_lookup_resolves_via_base_name() {
+    let checker = TypeChecker::new();
+    let obj_ty = Type::Generic("Result".to_string(), vec![Type::Int, Type::String]);
+    let type_name = match &obj_ty {
+        Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) => n.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(type_name, "Result");
+    for method in &["is_ok", "is_err", "unwrap_or"] {
+        let entry = checker
+            .method_lookup
+            .get(&(type_name.clone(), method.to_string()));
+        assert!(
+            entry.is_some(),
+            "Result.{method} should be resolvable via base name"
+        );
+    }
+}
+
+// ── Phase 47: Iterator protocol builtins ──────────────────────────────
+
+#[test]
+fn iterator_builtins_registered() {
+    let checker = TypeChecker::new();
+
+    // list_iter should be in method_lookup for List
+    let list_iter = checker
+        .method_lookup
+        .get(&("List".to_string(), "iter".to_string()));
+    assert!(list_iter.is_some(), "List.iter should be registered");
+
+    // list_iter free function in env
+    let list_iter_fn = checker.env.lookup("list_iter");
+    assert!(list_iter_fn.is_some(), "list_iter should be in environment");
+
+    // list_iterator_advance in env
+    let advance_fn = checker.env.lookup("list_iterator_advance");
+    assert!(
+        advance_fn.is_some(),
+        "list_iterator_advance should be in environment"
+    );
+
+    // list_iterator_value in env
+    let value_fn = checker.env.lookup("list_iterator_value");
+    assert!(
+        value_fn.is_some(),
+        "list_iterator_value should be in environment"
+    );
+
+    // list_iterator_free in env
+    let free_fn = checker.env.lookup("list_iterator_free");
+    assert!(
+        free_fn.is_some(),
+        "list_iterator_free should be in environment"
+    );
+}
+
+#[test]
+fn iterator_advance_returns_int() {
+    let checker = TypeChecker::new();
+
+    let advance_ty = checker.env.lookup("list_iterator_advance").unwrap();
+    match advance_ty {
+        Type::Function(params, ret) => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0], Type::Int);
+            assert_eq!(**ret, Type::Int);
+        }
+        _ => panic!("expected Function type for list_iterator_advance"),
+    }
+}
+
+#[test]
+fn iterator_value_returns_int() {
+    let checker = TypeChecker::new();
+
+    let value_ty = checker.env.lookup("list_iterator_value").unwrap();
+    match value_ty {
+        Type::Function(params, ret) => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0], Type::Int);
+            assert_eq!(**ret, Type::Int);
+        }
+        _ => panic!("expected Function type for list_iterator_value"),
+    }
+}
+
+#[test]
+fn iterator_free_returns_unit() {
+    let checker = TypeChecker::new();
+
+    let free_ty = checker.env.lookup("list_iterator_free").unwrap();
+    match free_ty {
+        Type::Function(params, ret) => {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0], Type::Int);
+            assert_eq!(**ret, Type::Unit);
+        }
+        _ => panic!("expected Function type for list_iterator_free"),
+    }
+}
+
+#[test]
+fn for_in_type_checks_list() {
+    let span = Span::new(0, 100);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "for_in_test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            entries: vec![
+                MetaEntry {
+                    key: "version".to_string(),
+                    value: "1.0.0".to_string(),
+                    span,
+                },
+                MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span,
+                },
+            ],
+            span,
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![],
+        functions: vec![Function {
+            id: NodeId(1),
+            span,
+            name: "test_fn".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![kodo_ast::Param {
+                name: "items".to_string(),
+                ty: kodo_ast::TypeExpr::Generic(
+                    "List".to_string(),
+                    vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+                ),
+                span,
+                ownership: kodo_ast::Ownership::Owned,
+            }],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span,
+                stmts: vec![
+                    Stmt::Let {
+                        span,
+                        mutable: true,
+                        name: "total".to_string(),
+                        ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(0, span),
+                    },
+                    Stmt::ForIn {
+                        span,
+                        name: "x".to_string(),
+                        iterable: Expr::Ident("items".to_string(), span),
+                        body: Block {
+                            span,
+                            stmts: vec![Stmt::Assign {
+                                span,
+                                name: "total".to_string(),
+                                value: Expr::BinaryOp {
+                                    left: Box::new(Expr::Ident("total".to_string(), span)),
+                                    op: BinOp::Add,
+                                    right: Box::new(Expr::Ident("x".to_string(), span)),
+                                    span,
+                                },
+                            }],
+                        },
+                    },
+                    Stmt::Return {
+                        span,
+                        value: Some(Expr::Ident("total".to_string(), span)),
+                    },
+                ],
+            },
+        }],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "for-in over List<Int> should type-check: {result:?}"
+    );
+}
+
+#[test]
+fn for_in_rejects_non_list() {
+    let span = Span::new(0, 100);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "for_in_err_test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(98),
+            entries: vec![
+                MetaEntry {
+                    key: "version".to_string(),
+                    value: "1.0.0".to_string(),
+                    span,
+                },
+                MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test".to_string(),
+                    span,
+                },
+            ],
+            span,
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![],
+        functions: vec![Function {
+            id: NodeId(1),
+            span,
+            name: "bad_fn".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![kodo_ast::Param {
+                name: "x".to_string(),
+                ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                span,
+                ownership: kodo_ast::Ownership::Owned,
+            }],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span,
+                stmts: vec![Stmt::ForIn {
+                    span,
+                    name: "item".to_string(),
+                    iterable: Expr::Ident("x".to_string(), span),
+                    body: Block {
+                        span,
+                        stmts: vec![],
+                    },
+                }],
+            },
+        }],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "for-in over Int should fail type-check");
+}
+
+// ── Phase 49: Module invariants ──────────────────────────────────────
+
+#[test]
+fn invariant_bool_condition_passes() {
+    let span = Span::new(0, 10);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span,
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test invariant".to_string(),
+                span,
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![kodo_ast::InvariantDecl {
+            span,
+            condition: Expr::BoolLit(true, span),
+        }],
+        functions: vec![make_function(
+            "f",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(1, span)),
+            }],
+        )],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "Bool invariant should pass: {result:?}");
+}
+
+#[test]
+fn invariant_non_bool_condition_fails() {
+    let span = Span::new(0, 10);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span,
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test invariant".to_string(),
+                span,
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![kodo_ast::InvariantDecl {
+            span,
+            condition: Expr::IntLit(42, span),
+        }],
+        functions: vec![make_function(
+            "f",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(1, span)),
+            }],
+        )],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "Int invariant should fail type-check");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0310");
+}
+
+#[test]
+fn invariant_comparison_expr_passes() {
+    let span = Span::new(0, 10);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span,
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test invariant".to_string(),
+                span,
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![kodo_ast::InvariantDecl {
+            span,
+            condition: Expr::BinaryOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::IntLit(10, span)),
+                right: Box::new(Expr::IntLit(5, span)),
+                span,
+            },
+        }],
+        functions: vec![make_function(
+            "f",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(1, span)),
+            }],
+        )],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "comparison invariant should pass: {result:?}"
+    );
+}
+
+#[test]
+fn invariant_collecting_reports_error() {
+    let span = Span::new(0, 10);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span,
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test invariant".to_string(),
+                span,
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![kodo_ast::InvariantDecl {
+            span,
+            condition: Expr::IntLit(42, span),
+        }],
+        functions: vec![make_function(
+            "f",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(1, span)),
+            }],
+        )],
+    };
+
+    let mut checker = TypeChecker::new();
+    let errors = checker.check_module_collecting(&module);
+    assert!(
+        errors.iter().any(|e| e.code() == "E0310"),
+        "collecting should include E0310, got: {errors:?}"
+    );
+}
+
+#[test]
+fn invariant_multiple_conditions() {
+    let span = Span::new(0, 10);
+    let module = Module {
+        id: NodeId(0),
+        span,
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span,
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test invariant".to_string(),
+                span,
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![
+            kodo_ast::InvariantDecl {
+                span,
+                condition: Expr::BoolLit(true, span),
+            },
+            kodo_ast::InvariantDecl {
+                span,
+                condition: Expr::BinaryOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::IntLit(1, span)),
+                    right: Box::new(Expr::IntLit(1, span)),
+                    span,
+                },
+            },
+        ],
+        functions: vec![make_function(
+            "f",
+            vec![],
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(1, span)),
+            }],
+        )],
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "multiple Bool invariants should pass: {result:?}"
+    );
 }

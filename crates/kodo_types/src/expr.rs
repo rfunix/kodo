@@ -839,18 +839,27 @@ impl TypeChecker {
     ) -> crate::Result<Option<Type>> {
         let obj_ty = self.infer_expr(object)?;
         let type_name = match &obj_ty {
-            Type::Struct(n) | Type::Enum(n) => n.clone(),
+            Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) => n.clone(),
             Type::String => "String".to_string(),
             Type::Int => "Int".to_string(),
             Type::Float64 => "Float64".to_string(),
             _ => return Ok(None),
         };
 
-        if let Some((mangled_name, param_types, ret_type)) = self
+        // Try exact type name first, then fall back to base name for monomorphized
+        // types (e.g. "Option__Int" → "Option") so builtin methods resolve.
+        let lookup_result = self
             .method_lookup
             .get(&(type_name.clone(), method.to_string()))
             .cloned()
-        {
+            .or_else(|| {
+                type_name.split("__").next().and_then(|base| {
+                    self.method_lookup
+                        .get(&(base.to_string(), method.to_string()))
+                        .cloned()
+                })
+            });
+        if let Some((mangled_name, param_types, ret_type)) = lookup_result {
             let method_params = if param_types.len() > 1 {
                 &param_types[1..]
             } else {
@@ -868,7 +877,17 @@ impl TypeChecker {
                 TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
             }
             if let Some(self_ty) = param_types.first() {
-                TypeEnv::check_eq(self_ty, &obj_ty, span)?;
+                // For generic types, allow base type match: e.g. Enum("Option") matches
+                // Generic("Option", [Int]). The impl is registered with the base name.
+                let self_matches = match (self_ty, &obj_ty) {
+                    (Type::Enum(a) | Type::Struct(a), Type::Generic(b, _)) => a == b,
+                    // Monomorphized enums: Enum("Option") matches Enum("Option__Int")
+                    (Type::Enum(a), Type::Enum(b)) => a == b || b.starts_with(&format!("{a}__")),
+                    _ => false,
+                };
+                if !self_matches {
+                    TypeEnv::check_eq(self_ty, &obj_ty, span)?;
+                }
             }
             self.method_resolutions.insert(span.start, mangled_name);
             return Ok(Some(ret_type));

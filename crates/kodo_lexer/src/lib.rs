@@ -90,6 +90,9 @@ pub enum TokenKind {
     /// The `ensures` keyword (postcondition contract).
     #[token("ensures")]
     Ensures,
+    /// The `invariant` keyword (module invariant).
+    #[token("invariant")]
+    Invariant,
     /// The `intent` keyword.
     #[token("intent")]
     Intent,
@@ -898,7 +901,7 @@ mod tests {
                     ("else", TokenKind::Else), ("return", TokenKind::Return),
                     ("true", TokenKind::True), ("false", TokenKind::False),
                     ("requires", TokenKind::Requires), ("ensures", TokenKind::Ensures),
-                    ("intent", TokenKind::Intent), ("struct", TokenKind::Struct),
+                    ("invariant", TokenKind::Invariant), ("intent", TokenKind::Intent), ("struct", TokenKind::Struct),
                     ("enum", TokenKind::Enum), ("match", TokenKind::Match),
                     ("import", TokenKind::Import), ("while", TokenKind::While),
                     ("for", TokenKind::For), ("trait", TokenKind::Trait),

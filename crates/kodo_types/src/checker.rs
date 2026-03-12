@@ -245,6 +245,7 @@ impl TypeChecker {
         self.register_actors(module)?;
         self.register_function_signatures(module)?;
         self.check_function_bodies(module)?;
+        self.check_invariants(module)?;
         self.validate_module_policies(module)?;
         Ok(())
     }
@@ -490,10 +491,24 @@ impl TypeChecker {
             }
             for method in &impl_block.methods {
                 let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                // For `self` params on generic types (e.g. `impl Option`), resolve
+                // directly to the base enum/struct type to avoid MissingTypeArgs errors.
+                let is_generic_type = self.generic_enums.contains_key(&impl_block.type_name)
+                    || self.generic_structs.contains_key(&impl_block.type_name);
                 let param_types: std::result::Result<Vec<_>, _> = method
                     .params
                     .iter()
-                    .map(|p| self.resolve_type_mono(&p.ty, p.span))
+                    .map(|p| {
+                        if p.name == "self" && is_generic_type {
+                            if self.generic_enums.contains_key(&impl_block.type_name) {
+                                Ok(Type::Enum(impl_block.type_name.clone()))
+                            } else {
+                                Ok(Type::Struct(impl_block.type_name.clone()))
+                            }
+                        } else {
+                            self.resolve_type_mono(&p.ty, p.span)
+                        }
+                    })
                     .collect();
                 let param_types = param_types?;
                 let ret_type = self.resolve_type_mono(&method.return_type, method.span)?;
@@ -637,6 +652,20 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Type-checks module invariant conditions, verifying each is `Bool`.
+    fn check_invariants(&mut self, module: &Module) -> crate::Result<()> {
+        for inv in &module.invariants {
+            let ty = self.infer_expr(&inv.condition)?;
+            if ty != Type::Bool {
+                return Err(TypeError::InvariantNotBool {
+                    found: ty.to_string(),
+                    span: inv.span,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Validates trust policies, annotation policies, and confidence thresholds.
     fn validate_module_policies(&self, module: &Module) -> crate::Result<()> {
         let trust_policy = module
@@ -716,6 +745,7 @@ impl TypeChecker {
         self.register_actors_collecting(module, &mut errors);
         self.register_signatures_collecting(module, &mut errors);
         self.check_bodies_collecting(module, &mut errors);
+        self.check_invariants_collecting(module, &mut errors);
         self.validate_policies_collecting(module, &mut errors);
 
         errors
@@ -1138,6 +1168,22 @@ impl TypeChecker {
         }
     }
 
+    /// Type-checks module invariant conditions, collecting errors.
+    fn check_invariants_collecting(&mut self, module: &Module, errors: &mut Vec<TypeError>) {
+        for inv in &module.invariants {
+            match self.infer_expr(&inv.condition) {
+                Ok(ty) if ty != Type::Bool => {
+                    errors.push(TypeError::InvariantNotBool {
+                        found: ty.to_string(),
+                        span: inv.span,
+                    });
+                }
+                Err(e) => errors.push(e),
+                _ => {}
+            }
+        }
+    }
+
     /// Validates trust policies, annotation policies, and confidence thresholds, collecting errors.
     fn validate_policies_collecting(&self, module: &Module, errors: &mut Vec<TypeError>) {
         let trust_policy = module
@@ -1220,7 +1266,11 @@ impl TypeChecker {
 
         // Bind parameters in the function scope.
         for param in &func.params {
-            let ty = self.resolve_type_mono(&param.ty, param.span)?;
+            let ty = if param.name == "self" {
+                self.resolve_self_type(&param.ty, param.span)?
+            } else {
+                self.resolve_type_mono(&param.ty, param.span)?
+            };
             self.env.insert(param.name.clone(), ty);
             // Track ownership based on parameter qualifier.
             match param.ownership {

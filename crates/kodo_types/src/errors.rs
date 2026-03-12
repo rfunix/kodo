@@ -401,6 +401,14 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A module invariant condition is not of type `Bool`.
+    #[error("invariant condition must be `Bool`, found `{found}` at {span:?}")]
+    InvariantNotBool {
+        /// The actual type found.
+        found: String,
+        /// Source location of the invariant.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -447,7 +455,8 @@ impl TypeError {
             | Self::MoveWhileBorrowed { span, .. }
             | Self::BreakOutsideLoop { span, .. }
             | Self::ContinueOutsideLoop { span, .. }
-            | Self::TupleIndexOutOfBounds { span, .. } => Some(*span),
+            | Self::TupleIndexOutOfBounds { span, .. }
+            | Self::InvariantNotBool { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -497,6 +506,7 @@ impl TypeError {
             Self::BreakOutsideLoop { .. } => "E0243",
             Self::ContinueOutsideLoop { .. } => "E0244",
             Self::TupleIndexOutOfBounds { .. } => "E0253",
+            Self::InvariantNotBool { .. } => "E0310",
         }
     }
 }
@@ -787,6 +797,9 @@ fn suggestion_for_policy_error(err: &TypeError) -> Option<String> {
         TypeError::SecuritySensitiveWithoutContract { name, .. } => Some(format!(
             "add `requires {{ ... }}` or `ensures {{ ... }}` to function `{name}`"
         )),
+        TypeError::InvariantNotBool { .. } => {
+            Some("invariant conditions must evaluate to `Bool`".to_string())
+        }
         _ => None,
     }
 }

@@ -181,6 +181,82 @@ pub unsafe extern "C" fn kodo_list_free(list_ptr: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// List Iterator
+// ---------------------------------------------------------------------------
+
+/// Iterator over a `KodoList`, walking elements sequentially.
+#[repr(C)]
+struct KodoListIterator {
+    /// Pointer to the list being iterated (not owned).
+    list: *mut KodoList,
+    /// Current index into the list data array.
+    index: usize,
+}
+
+/// Creates a new iterator over a list.
+///
+/// Returns a pointer (as i64) to a heap-allocated `KodoListIterator`.
+/// The iterator does **not** own the list — the caller must keep the list
+/// alive for the lifetime of the iterator.
+#[no_mangle]
+pub extern "C" fn kodo_list_iter(list_handle: i64) -> i64 {
+    let iter = Box::new(KodoListIterator {
+        list: list_handle as *mut KodoList,
+        index: 0,
+    });
+    Box::into_raw(iter) as i64
+}
+
+/// Advances the iterator to the next element.
+///
+/// Returns 1 if an element is available (call `kodo_list_iterator_value`
+/// to retrieve it), or 0 if the iterator is exhausted.
+#[no_mangle]
+pub extern "C" fn kodo_list_iterator_advance(iter_handle: i64) -> i64 {
+    // SAFETY: caller guarantees iter_handle was returned by kodo_list_iter.
+    let iter = unsafe { &mut *(iter_handle as *mut KodoListIterator) };
+    // SAFETY: iter.list was a valid KodoList pointer when the iterator was created.
+    let list = unsafe { &*iter.list };
+    if iter.index < list.len {
+        iter.index += 1;
+        1
+    } else {
+        0
+    }
+}
+
+/// Returns the current element value after a successful `advance`.
+///
+/// Must only be called after `kodo_list_iterator_advance` returned 1.
+/// The element is at `index - 1` because `advance` increments before returning.
+#[no_mangle]
+pub extern "C" fn kodo_list_iterator_value(iter_handle: i64) -> i64 {
+    // SAFETY: caller guarantees iter_handle was returned by kodo_list_iter.
+    let iter = unsafe { &*(iter_handle as *mut KodoListIterator) };
+    // SAFETY: iter.list was a valid KodoList pointer when the iterator was created.
+    let list = unsafe { &*iter.list };
+    let idx = iter.index.saturating_sub(1);
+    if idx < list.len {
+        // SAFETY: data[idx] is within the allocated region of the list.
+        unsafe { *list.data.add(idx) }
+    } else {
+        0
+    }
+}
+
+/// Frees a list iterator.
+///
+/// Does nothing if the handle is 0 (null).
+#[no_mangle]
+pub extern "C" fn kodo_list_iterator_free(iter_handle: i64) {
+    if iter_handle == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees iter_handle was returned by kodo_list_iter.
+    let _ = unsafe { Box::from_raw(iter_handle as *mut KodoListIterator) };
+}
+
+// ---------------------------------------------------------------------------
 // Map (hash map with open addressing)
 // ---------------------------------------------------------------------------
 
@@ -446,6 +522,201 @@ pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// Map iterator builtins
+// ---------------------------------------------------------------------------
+
+/// Internal state for an iterator over map keys.
+///
+/// Scans the map's entry array, skipping unoccupied slots. Each call to
+/// `advance` moves to the next occupied entry.
+struct KodoMapKeysIterator {
+    /// Pointer to the owning map (for access to entries).
+    map_ptr: *const KodoMap,
+    /// Current scan index in the entry array.
+    index: usize,
+    /// Current key value.
+    current_key: i64,
+}
+
+/// Internal state for an iterator over map values.
+struct KodoMapValuesIterator {
+    /// Pointer to the owning map (for access to entries).
+    map_ptr: *const KodoMap,
+    /// Current scan index in the entry array.
+    index: usize,
+    /// Current value.
+    current_value: i64,
+}
+
+/// Creates a new key iterator for a map.
+///
+/// Returns an opaque handle (as i64) to a heap-allocated `KodoMapKeysIterator`.
+/// The iterator starts before the first key; call `advance` to move to
+/// the first element.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_keys(map_ptr: i64) -> i64 {
+    if map_ptr == 0 {
+        return 0;
+    }
+    let iter = Box::new(KodoMapKeysIterator {
+        map_ptr: map_ptr as *const KodoMap,
+        index: 0,
+        current_key: 0,
+    });
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    // Freed by `kodo_map_keys_free`.
+    Box::into_raw(iter) as i64
+}
+
+/// Advances the map key iterator to the next occupied entry.
+///
+/// Returns 1 if a key was found, 0 if the iterator is exhausted.
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_keys`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_keys_advance(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_keys.
+    let iter = unsafe { &mut *(iter_ptr as *mut KodoMapKeysIterator) };
+    // SAFETY: caller guarantees map_ptr is a valid KodoMap pointer.
+    let map = unsafe { &*iter.map_ptr };
+    while iter.index < map.capacity {
+        // SAFETY: index < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(iter.index) };
+        iter.index += 1;
+        if entry.occupied {
+            iter.current_key = entry.key;
+            return 1;
+        }
+    }
+    0
+}
+
+/// Returns the current key from the map key iterator.
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_keys`.
+/// Must be called after a successful `kodo_map_keys_advance` call.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_keys_value(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_keys.
+    let iter = unsafe { &*(iter_ptr as *const KodoMapKeysIterator) };
+    iter.current_key
+}
+
+/// Frees a map key iterator previously allocated by `kodo_map_keys`.
+///
+/// Does nothing if `iter_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_keys`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_keys_free(iter_ptr: i64) {
+    if iter_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_keys
+    // (i.e. Box::into_raw on a Box<KodoMapKeysIterator>).
+    let _ = unsafe { Box::from_raw(iter_ptr as *mut KodoMapKeysIterator) };
+}
+
+/// Creates a new value iterator for a map.
+///
+/// Returns an opaque handle (as i64) to a heap-allocated `KodoMapValuesIterator`.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_values(map_ptr: i64) -> i64 {
+    if map_ptr == 0 {
+        return 0;
+    }
+    let iter = Box::new(KodoMapValuesIterator {
+        map_ptr: map_ptr as *const KodoMap,
+        index: 0,
+        current_value: 0,
+    });
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    // Freed by `kodo_map_values_free`.
+    Box::into_raw(iter) as i64
+}
+
+/// Advances the map value iterator to the next occupied entry.
+///
+/// Returns 1 if a value was found, 0 if the iterator is exhausted.
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_values`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_values_advance(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_values.
+    let iter = unsafe { &mut *(iter_ptr as *mut KodoMapValuesIterator) };
+    // SAFETY: caller guarantees map_ptr is a valid KodoMap pointer.
+    let map = unsafe { &*iter.map_ptr };
+    while iter.index < map.capacity {
+        // SAFETY: index < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(iter.index) };
+        iter.index += 1;
+        if entry.occupied {
+            iter.current_value = entry.value;
+            return 1;
+        }
+    }
+    0
+}
+
+/// Returns the current value from the map value iterator.
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_values`.
+/// Must be called after a successful `kodo_map_values_advance` call.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_values_value(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_values.
+    let iter = unsafe { &*(iter_ptr as *const KodoMapValuesIterator) };
+    iter.current_value
+}
+
+/// Frees a map value iterator previously allocated by `kodo_map_values`.
+///
+/// Does nothing if `iter_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_map_values`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_values_free(iter_ptr: i64) {
+    if iter_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_map_values
+    // (i.e. Box::into_raw on a Box<KodoMapValuesIterator>).
+    let _ = unsafe { Box::from_raw(iter_ptr as *mut KodoMapValuesIterator) };
+}
+
+// ---------------------------------------------------------------------------
 // Actor runtime builtins
 // ---------------------------------------------------------------------------
 
@@ -673,5 +944,117 @@ mod tests {
         assert_eq!(kodo_actor_get_field(0, 0), 0);
         kodo_actor_set_field(0, 0, 42);
         kodo_actor_free(0, 8);
+    }
+
+    #[test]
+    fn map_keys_iterator_basic() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 10, 100);
+            kodo_map_insert(map, 20, 200);
+            kodo_map_insert(map, 30, 300);
+        }
+        let iter = unsafe { kodo_map_keys(map) };
+        assert_ne!(iter, 0);
+
+        let mut keys = Vec::new();
+        while unsafe { kodo_map_keys_advance(iter) } == 1 {
+            keys.push(unsafe { kodo_map_keys_value(iter) });
+        }
+        keys.sort();
+        assert_eq!(keys, vec![10, 20, 30]);
+
+        unsafe { kodo_map_keys_free(iter) };
+    }
+
+    #[test]
+    fn map_values_iterator_basic() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 2, 200);
+            kodo_map_insert(map, 3, 300);
+        }
+        let iter = unsafe { kodo_map_values(map) };
+        assert_ne!(iter, 0);
+
+        let mut values = Vec::new();
+        while unsafe { kodo_map_values_advance(iter) } == 1 {
+            values.push(unsafe { kodo_map_values_value(iter) });
+        }
+        values.sort();
+        assert_eq!(values, vec![100, 200, 300]);
+
+        unsafe { kodo_map_values_free(iter) };
+    }
+
+    #[test]
+    fn map_keys_empty_map() {
+        let map = kodo_map_new();
+        let iter = unsafe { kodo_map_keys(map) };
+        assert_eq!(unsafe { kodo_map_keys_advance(iter) }, 0);
+        unsafe { kodo_map_keys_free(iter) };
+    }
+
+    #[test]
+    fn map_values_empty_map() {
+        let map = kodo_map_new();
+        let iter = unsafe { kodo_map_values(map) };
+        assert_eq!(unsafe { kodo_map_values_advance(iter) }, 0);
+        unsafe { kodo_map_values_free(iter) };
+    }
+
+    #[test]
+    fn map_keys_free_null_does_not_crash() {
+        unsafe { kodo_map_keys_free(0) };
+    }
+
+    #[test]
+    fn map_values_free_null_does_not_crash() {
+        unsafe { kodo_map_values_free(0) };
+    }
+
+    #[test]
+    fn map_keys_null_map_returns_zero() {
+        let iter = unsafe { kodo_map_keys(0) };
+        assert_eq!(iter, 0);
+    }
+
+    #[test]
+    fn map_values_null_map_returns_zero() {
+        let iter = unsafe { kodo_map_values(0) };
+        assert_eq!(iter, 0);
+    }
+
+    #[test]
+    fn map_keys_overwritten_value() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 1, 200); // overwrite
+        }
+        let iter = unsafe { kodo_map_keys(map) };
+        let mut keys = Vec::new();
+        while unsafe { kodo_map_keys_advance(iter) } == 1 {
+            keys.push(unsafe { kodo_map_keys_value(iter) });
+        }
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0], 1);
+        unsafe { kodo_map_keys_free(iter) };
+    }
+
+    #[test]
+    fn map_keys_many_entries() {
+        let map = kodo_map_new();
+        for i in 0..50 {
+            unsafe { kodo_map_insert(map, i, i * 10) };
+        }
+        let iter = unsafe { kodo_map_keys(map) };
+        let mut count = 0;
+        while unsafe { kodo_map_keys_advance(iter) } == 1 {
+            count += 1;
+        }
+        assert_eq!(count, 50);
+        unsafe { kodo_map_keys_free(iter) };
     }
 }

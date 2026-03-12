@@ -1,0 +1,47 @@
+// Basic iterator protocol usage.
+// Phase 47 feature — Iterator protocol with list_iter/advance/value/free.
+
+module iterator_basic {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates the Iterator protocol on List<Int>"
+        author: "Kodo Team"
+    }
+
+    fn sum_via_iterator(items: List<Int>) -> Int {
+        let mut total: Int = 0
+        let iter: Int = list_iter(items)
+        while list_iterator_advance(iter) > 0 {
+            let val: Int = list_iterator_value(iter)
+            total = total + val
+        }
+        list_iterator_free(iter)
+        return total
+    }
+
+    fn count_items(items: List<Int>) -> Int {
+        let mut count: Int = 0
+        let iter: Int = list_iter(items)
+        while list_iterator_advance(iter) > 0 {
+            let _val: Int = list_iterator_value(iter)
+            count = count + 1
+        }
+        list_iterator_free(iter)
+        return count
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 10)
+        list_push(nums, 20)
+        list_push(nums, 30)
+
+        let total: Int = sum_via_iterator(nums)
+        print_int(total)
+
+        let n: Int = count_items(nums)
+        print_int(n)
+
+        return 0
+    }
+}

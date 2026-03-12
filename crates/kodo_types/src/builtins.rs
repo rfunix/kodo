@@ -80,7 +80,11 @@ impl TypeChecker {
         self.register_string_methods();
         self.register_int_methods();
         self.register_float_methods();
+        self.register_option_methods();
+        self.register_result_methods();
         self.register_list_functions();
+        self.register_iterator_functions();
+        self.register_combinator_methods();
         self.register_map_functions();
         self.register_http_functions();
         self.register_json_functions();
@@ -278,6 +282,106 @@ impl TypeChecker {
         );
     }
 
+    /// Registers builtin methods for `Option<T>`.
+    ///
+    /// Methods: `is_some`, `is_none`, `unwrap_or`.
+    /// These are implemented in the runtime and work on the enum tag.
+    fn register_option_methods(&mut self) {
+        let option_ty = Type::Enum("Option".to_string());
+
+        // Option.is_some() -> Bool
+        self.method_lookup.insert(
+            ("Option".to_string(), "is_some".to_string()),
+            (
+                "Option_is_some".to_string(),
+                vec![option_ty.clone()],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "Option_is_some".to_string(),
+            Type::Function(vec![option_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Option.is_none() -> Bool
+        self.method_lookup.insert(
+            ("Option".to_string(), "is_none".to_string()),
+            (
+                "Option_is_none".to_string(),
+                vec![option_ty.clone()],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "Option_is_none".to_string(),
+            Type::Function(vec![option_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Option.unwrap_or(default: Int) -> Int
+        self.method_lookup.insert(
+            ("Option".to_string(), "unwrap_or".to_string()),
+            (
+                "Option_unwrap_or".to_string(),
+                vec![option_ty.clone(), Type::Int],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "Option_unwrap_or".to_string(),
+            Type::Function(vec![option_ty, Type::Int], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers builtin methods for `Result<T, E>`.
+    ///
+    /// Methods: `is_ok`, `is_err`, `unwrap_or`.
+    /// These are implemented in the runtime and work on the enum tag.
+    fn register_result_methods(&mut self) {
+        let result_ty = Type::Enum("Result".to_string());
+
+        // Result.is_ok() -> Bool
+        self.method_lookup.insert(
+            ("Result".to_string(), "is_ok".to_string()),
+            (
+                "Result_is_ok".to_string(),
+                vec![result_ty.clone()],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "Result_is_ok".to_string(),
+            Type::Function(vec![result_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Result.is_err() -> Bool
+        self.method_lookup.insert(
+            ("Result".to_string(), "is_err".to_string()),
+            (
+                "Result_is_err".to_string(),
+                vec![result_ty.clone()],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "Result_is_err".to_string(),
+            Type::Function(vec![result_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Result.unwrap_or(default: Int) -> Int
+        self.method_lookup.insert(
+            ("Result".to_string(), "unwrap_or".to_string()),
+            (
+                "Result_unwrap_or".to_string(),
+                vec![result_ty.clone(), Type::Int],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "Result_unwrap_or".to_string(),
+            Type::Function(vec![result_ty, Type::Int], Box::new(Type::Int)),
+        );
+    }
+
     /// Registers builtin functions for `List<T>` operations.
     ///
     /// These are free functions (not methods) available to all Kōdo programs.
@@ -326,6 +430,226 @@ impl TypeChecker {
                 ],
                 Box::new(Type::Bool),
             ),
+        );
+    }
+
+    /// Registers builtin functions for the Iterator protocol.
+    ///
+    /// These are free functions used by the for-in desugaring and available
+    /// for user code. They provide the Iterator protocol over Lists.
+    fn register_iterator_functions(&mut self) {
+        let list_ty = Type::Generic("List".to_string(), vec![Type::Int]);
+
+        // List.iter() -> Int (returns opaque iterator handle)
+        self.method_lookup.insert(
+            ("List".to_string(), "iter".to_string()),
+            ("list_iter".to_string(), vec![list_ty.clone()], Type::Int),
+        );
+        self.env.insert(
+            "list_iter".to_string(),
+            Type::Function(vec![list_ty], Box::new(Type::Int)),
+        );
+
+        // list_iterator_next(iter_handle: Int) -> Int (returns value, uses out-params at runtime)
+        self.env.insert(
+            "list_iterator_next".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+
+        // list_iterator_advance(iter_handle: Int) -> Int (1 if element available, 0 if done)
+        self.env.insert(
+            "list_iterator_advance".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+
+        // list_iterator_value(iter_handle: Int) -> Int (current element after advance)
+        self.env.insert(
+            "list_iterator_value".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+
+        // list_iterator_free(iter_handle: Int) -> ()
+        self.env.insert(
+            "list_iterator_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+
+        // String.chars() -> Int (opaque iterator handle)
+        self.method_lookup.insert(
+            ("String".to_string(), "chars".to_string()),
+            ("String_chars".to_string(), vec![Type::String], Type::Int),
+        );
+        self.env.insert(
+            "String_chars".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // String char iterator advance/value/free
+        self.env.insert(
+            "string_chars_advance".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "string_chars_value".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "string_chars_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+
+        let map_ty = Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]);
+
+        // Map.keys() -> Int (opaque iterator handle)
+        self.method_lookup.insert(
+            ("Map".to_string(), "keys".to_string()),
+            ("Map_keys".to_string(), vec![map_ty.clone()], Type::Int),
+        );
+        self.env.insert(
+            "Map_keys".to_string(),
+            Type::Function(vec![map_ty.clone()], Box::new(Type::Int)),
+        );
+
+        // Map key iterator advance/value/free
+        self.env.insert(
+            "map_keys_advance".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "map_keys_value".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "map_keys_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+
+        // Map.values() -> Int (opaque iterator handle)
+        self.method_lookup.insert(
+            ("Map".to_string(), "values".to_string()),
+            ("Map_values".to_string(), vec![map_ty.clone()], Type::Int),
+        );
+        self.env.insert(
+            "Map_values".to_string(),
+            Type::Function(vec![map_ty], Box::new(Type::Int)),
+        );
+
+        // Map value iterator advance/value/free
+        self.env.insert(
+            "map_values_advance".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "map_values_value".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "map_values_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers functional combinator methods on `List<Int>`.
+    ///
+    /// These methods are resolved by the type checker and implemented as
+    /// synthetic AST functions injected in the compiler pipeline. They use
+    /// the Iterator protocol internally.
+    fn register_combinator_methods(&mut self) {
+        let list_ty = Type::Generic("List".to_string(), vec![Type::Int]);
+        let fn_int_to_int = Type::Function(vec![Type::Int], Box::new(Type::Int));
+        let fn_int_to_bool = Type::Function(vec![Type::Int], Box::new(Type::Bool));
+        let fn_acc_int_to_int = Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int));
+
+        // List.map(f: (Int) -> Int) -> List<Int>
+        self.method_lookup.insert(
+            ("List".to_string(), "map".to_string()),
+            (
+                "List_map".to_string(),
+                vec![list_ty.clone(), fn_int_to_int.clone()],
+                list_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "List_map".to_string(),
+            Type::Function(
+                vec![list_ty.clone(), fn_int_to_int],
+                Box::new(list_ty.clone()),
+            ),
+        );
+
+        // List.filter(f: (Int) -> Bool) -> List<Int>
+        self.method_lookup.insert(
+            ("List".to_string(), "filter".to_string()),
+            (
+                "List_filter".to_string(),
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                list_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "List_filter".to_string(),
+            Type::Function(
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                Box::new(list_ty.clone()),
+            ),
+        );
+
+        // List.fold(init: Int, f: (Int, Int) -> Int) -> Int
+        self.method_lookup.insert(
+            ("List".to_string(), "fold".to_string()),
+            (
+                "List_fold".to_string(),
+                vec![list_ty.clone(), Type::Int, fn_acc_int_to_int.clone()],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "List_fold".to_string(),
+            Type::Function(
+                vec![list_ty.clone(), Type::Int, fn_acc_int_to_int],
+                Box::new(Type::Int),
+            ),
+        );
+
+        // List.count() -> Int
+        self.method_lookup.insert(
+            ("List".to_string(), "count".to_string()),
+            ("List_count".to_string(), vec![list_ty.clone()], Type::Int),
+        );
+        self.env.insert(
+            "List_count".to_string(),
+            Type::Function(vec![list_ty.clone()], Box::new(Type::Int)),
+        );
+
+        // List.any(f: (Int) -> Bool) -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "any".to_string()),
+            (
+                "List_any".to_string(),
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "List_any".to_string(),
+            Type::Function(
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                Box::new(Type::Bool),
+            ),
+        );
+
+        // List.all(f: (Int) -> Bool) -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "all".to_string()),
+            (
+                "List_all".to_string(),
+                vec![list_ty.clone(), fn_int_to_bool],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "List_all".to_string(),
+            Type::Function(vec![list_ty], Box::new(Type::Bool)),
         );
     }
 

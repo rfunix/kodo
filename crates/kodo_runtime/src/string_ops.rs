@@ -604,6 +604,128 @@ pub unsafe extern "C" fn kodo_contract_fail(ptr: *const u8, len: usize) {
     std::process::abort();
 }
 
+// ---------------------------------------------------------------------------
+// String character iterator
+// ---------------------------------------------------------------------------
+
+/// Internal state for a character iterator over a string.
+///
+/// Iterates over UTF-8 codepoints. Each call to `advance` moves to the
+/// next codepoint; `value` returns the current codepoint as an `i64`.
+struct StringCharsIterator {
+    /// Pointer to the start of the string bytes.
+    ptr: *const u8,
+    /// Total length of the string in bytes.
+    len: usize,
+    /// Current byte offset in the string.
+    offset: usize,
+    /// Current character value (Unicode codepoint as i64).
+    current: i64,
+}
+
+/// Creates a new character iterator for a string.
+///
+/// Returns an opaque handle (as i64) to a heap-allocated `StringCharsIterator`.
+/// The iterator starts before the first character; call `advance` to move to
+/// the first element.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_chars(ptr: i64, len: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let byte_len = len as usize;
+    let iter = Box::new(StringCharsIterator {
+        ptr: ptr as *const u8,
+        len: byte_len,
+        offset: 0,
+        current: 0,
+    });
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    // Freed by `kodo_string_chars_free`.
+    Box::into_raw(iter) as i64
+}
+
+/// Advances the string character iterator to the next codepoint.
+///
+/// Returns 1 if a character was available, 0 if the iterator is exhausted.
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_string_chars`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_chars_advance(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_string_chars.
+    let iter = unsafe { &mut *(iter_ptr as *mut StringCharsIterator) };
+    if iter.offset >= iter.len {
+        return 0;
+    }
+    // SAFETY: caller guarantees ptr/len form a valid byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(iter.ptr, iter.len) };
+    // Decode the next UTF-8 codepoint.
+    let b0 = bytes[iter.offset];
+    let (codepoint, char_len) = if b0 < 0x80 {
+        (i64::from(b0), 1)
+    } else if b0 < 0xE0 && iter.offset + 1 < iter.len {
+        let cp = (i64::from(b0 & 0x1F) << 6) | i64::from(bytes[iter.offset + 1] & 0x3F);
+        (cp, 2)
+    } else if b0 < 0xF0 && iter.offset + 2 < iter.len {
+        let cp = (i64::from(b0 & 0x0F) << 12)
+            | (i64::from(bytes[iter.offset + 1] & 0x3F) << 6)
+            | i64::from(bytes[iter.offset + 2] & 0x3F);
+        (cp, 3)
+    } else if iter.offset + 3 < iter.len {
+        let cp = (i64::from(b0 & 0x07) << 18)
+            | (i64::from(bytes[iter.offset + 1] & 0x3F) << 12)
+            | (i64::from(bytes[iter.offset + 2] & 0x3F) << 6)
+            | i64::from(bytes[iter.offset + 3] & 0x3F);
+        (cp, 4)
+    } else {
+        // Invalid or truncated UTF-8: skip one byte and use replacement char.
+        (0xFFFD, 1)
+    };
+    iter.current = codepoint;
+    iter.offset += char_len;
+    1
+}
+
+/// Returns the current character value from the iterator as an Int (codepoint).
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_string_chars`.
+/// Must be called after a successful `kodo_string_chars_advance` call.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_chars_value(iter_ptr: i64) -> i64 {
+    if iter_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_string_chars.
+    let iter = unsafe { &*(iter_ptr as *const StringCharsIterator) };
+    iter.current
+}
+
+/// Frees a string character iterator previously allocated by `kodo_string_chars`.
+///
+/// Does nothing if `iter_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `iter_ptr` must be a valid pointer returned by `kodo_string_chars`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_chars_free(iter_ptr: i64) {
+    if iter_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees iter_ptr was returned by kodo_string_chars
+    // (i.e. Box::into_raw on a Box<StringCharsIterator>).
+    let _ = unsafe { Box::from_raw(iter_ptr as *mut StringCharsIterator) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,5 +884,110 @@ mod tests {
     fn string_free_null_does_not_crash() {
         unsafe { kodo_string_free(std::ptr::null_mut(), 0) };
         unsafe { kodo_string_free(std::ptr::null_mut(), 42) };
+    }
+
+    #[test]
+    fn string_chars_ascii() {
+        let s = "abc";
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+        assert_ne!(iter, 0);
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 97); // 'a'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 98); // 'b'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 99); // 'c'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0); // exhausted
+
+        unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_chars_unicode() {
+        let s = "a\u{00E9}"; // "aé" — 'a' is 1 byte, 'é' is 2 bytes (U+00E9)
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 97); // 'a'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0xE9); // 'é'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
+
+        unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_chars_emoji() {
+        let s = "\u{1F600}"; // 😀 — 4-byte UTF-8
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0x1F600);
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
+
+        unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_chars_empty() {
+        let s = "";
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
+
+        unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_chars_free_null_does_not_crash() {
+        unsafe { kodo_string_chars_free(0) };
+    }
+
+    #[test]
+    fn string_chars_three_byte_utf8() {
+        let s = "\u{4E16}"; // '世' — 3-byte UTF-8 (U+4E16)
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0x4E16);
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
+
+        unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_chars_mixed_lengths() {
+        let s = "A\u{00F1}\u{4E16}\u{1F600}"; // A (1), ñ (2), 世 (3), 😀 (4)
+        #[allow(clippy::cast_possible_wrap)]
+        let iter = unsafe { kodo_string_chars(s.as_ptr() as i64, s.len() as i64) };
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 65); // 'A'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0xF1); // 'ñ'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0x4E16); // '世'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 1);
+        assert_eq!(unsafe { kodo_string_chars_value(iter) }, 0x1F600); // '😀'
+
+        assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
+
+        unsafe { kodo_string_chars_free(iter) };
     }
 }

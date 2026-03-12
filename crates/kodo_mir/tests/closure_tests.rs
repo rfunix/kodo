@@ -41,6 +41,7 @@ fn make_module(functions: Vec<Function>) -> Module {
         trait_decls: vec![],
         impl_blocks: vec![],
         intent_decls: vec![],
+        invariants: vec![],
         actor_decls: vec![],
     }
 }

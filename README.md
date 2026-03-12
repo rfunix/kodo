@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-934%2B%20passing-brightgreen" alt="Tests: 934+ passing">
+  <img src="https://img.shields.io/badge/tests-1002%2B%20passing-brightgreen" alt="Tests: 1002+ passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -212,13 +212,14 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), functional reference counting (automatic deallocation) |
-| **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback |
+| **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, module-level `invariant` blocks |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
 | **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
 | **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
+| **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`; functional combinators (`map`, `filter`, `fold`, `count`, `any`, `all`); functional pipelines |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
 | **Developer tools** | LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
@@ -270,7 +271,7 @@ cargo run -p kodoc -- build hello.ko -o hello
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 63 compilable programs:
+The [`examples/`](examples/) directory contains 79 compilable programs:
 
 ### Core Language
 
@@ -332,6 +333,7 @@ The [`examples/`](examples/) directory contains 63 compilable programs:
 | [`refinement_smt.ko`](examples/refinement_smt.ko) | SMT-verified refinement types |
 | [`struct_predicates.ko`](examples/struct_predicates.ko) | Struct field predicates in contracts |
 | [`memory_management.ko`](examples/memory_management.ko) | Reference counting for heap-allocated values |
+| [`module_invariant.ko`](examples/module_invariant.ko) | Module-level `invariant` blocks for global properties |
 
 ### Intent System
 
@@ -357,6 +359,20 @@ The [`examples/`](examples/) directory contains 63 compilable programs:
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
 | [`http_client.ko`](examples/http_client.ko) | HTTP GET and JSON parsing |
 | [`time_env.ko`](examples/time_env.ko) | Time functions and environment variables |
+
+### Iterators, Functional Combinators & Methods
+
+| File | What it demonstrates |
+|------|---------------------|
+| [`iterator_basic.ko`](examples/iterator_basic.ko) | Basic iterator protocol |
+| [`iterator_list.ko`](examples/iterator_list.ko) | Iterating over `List<T>` |
+| [`iterator_string.ko`](examples/iterator_string.ko) | Iterating over `String` characters |
+| [`iterator_map.ko`](examples/iterator_map.ko) | Iterating over `Map<K,V>` entries |
+| [`iterator_map_filter.ko`](examples/iterator_map_filter.ko) | `map` and `filter` combinators on iterators |
+| [`iterator_fold.ko`](examples/iterator_fold.ko) | `fold` combinator for aggregation |
+| [`functional_pipeline.ko`](examples/functional_pipeline.ko) | Functional pipelines with chained combinators (`map`/`filter`/`fold`/`count`/`any`/`all`) |
+| [`enum_methods.ko`](examples/enum_methods.ko) | Methods on `Option<T>` and `Result<T,E>` enum types |
+| [`generic_method_dispatch.ko`](examples/generic_method_dispatch.ko) | Generic method dispatch on parameterized types |
 
 ### Concurrency & Multi-File
 
