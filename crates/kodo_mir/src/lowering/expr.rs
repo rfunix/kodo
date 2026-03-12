@@ -161,6 +161,12 @@ impl MirBuilder {
             }
         }
 
+        // Check for virtual dispatch (dyn Trait method call).
+        // Virtual dispatch names have the form: __dyn_TraitName_methodName_vtableIndex
+        if callee_name.starts_with("__dyn_") {
+            return self.lower_virtual_call(&callee_name, args);
+        }
+
         // Check if the callee is a mangled actor handler name
         // (e.g. "Counter_increment"). If so, emit kodo_actor_send.
         if self.is_actor_handler(&callee_name) {
@@ -250,6 +256,45 @@ impl MirBuilder {
             args: arg_values,
             return_type: ret_type.clone(),
             param_types: param_types.to_vec(),
+        });
+        Ok(Value::Local(dest))
+    }
+
+    /// Lowers a virtual method call on a `dyn Trait` value.
+    ///
+    /// The callee name encodes the trait and vtable index as
+    /// `__dyn_TraitName_methodName_vtableIndex`. The first argument (args\[0\])
+    /// is the dyn Trait object (fat pointer).
+    fn lower_virtual_call(&mut self, callee_name: &str, args: &[Expr]) -> Result<Value> {
+        // Parse vtable index from the callee name: __dyn_Trait_method_INDEX
+        let parts: Vec<&str> = callee_name.rsplitn(2, '_').collect();
+        let vtable_index: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // First arg is the dyn Trait object (self).
+        let object_val = self.lower_expr(&args[0])?;
+        let object_local = match object_val {
+            Value::Local(id) => id,
+            other => {
+                let tmp = self.alloc_local(Type::Unknown, false);
+                self.emit(Instruction::Assign(tmp, other));
+                tmp
+            }
+        };
+
+        // Remaining args are the method arguments.
+        let mut arg_values = Vec::with_capacity(args.len().saturating_sub(1));
+        for arg in args.iter().skip(1) {
+            arg_values.push(self.lower_expr(arg)?);
+        }
+
+        let dest = self.alloc_local(Type::Unknown, false);
+        self.emit(Instruction::VirtualCall {
+            dest,
+            object: object_local,
+            vtable_index,
+            args: arg_values,
+            return_type: Type::Unknown,
+            param_types: vec![],
         });
         Ok(Value::Local(dest))
     }

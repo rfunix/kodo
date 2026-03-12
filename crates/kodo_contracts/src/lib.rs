@@ -95,6 +95,12 @@ pub enum ContractMode {
     Both,
     /// Skip all contract checking.
     None,
+    /// Insert runtime checks that log warnings but do not abort.
+    ///
+    /// In this mode, contract violations print a warning to stderr and
+    /// execution continues with a default return value. Useful for production
+    /// services that should not crash on contract violations.
+    Recoverable,
 }
 
 /// A contract attached to a function.

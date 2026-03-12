@@ -253,6 +253,22 @@ fn declare_locals(
                 var_map.vars.insert(local.id, var);
                 var_map.var_types.insert(local.id, types::I64);
             }
+            Type::DynTrait(ref _trait_name) => {
+                // Allocate a 16-byte stack slot for dyn Trait fat pointer:
+                // (data_ptr: i64, vtable_ptr: i64).
+                let slot =
+                    builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                        crate::layout::DYN_TRAIT_LAYOUT_SIZE,
+                        0,
+                    ));
+                var_map
+                    .stack_slots
+                    .insert(local.id, (slot, "_DynTrait".to_string()));
+                let var = builder.declare_var(types::I64);
+                var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, types::I64);
+            }
             _ => {
                 let cl_ty = cranelift_type(&local.ty);
                 let var = builder.declare_var(cl_ty);

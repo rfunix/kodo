@@ -209,6 +209,71 @@ Primitives: `Int`, `Int8`-`Int64`, `Uint`, `Uint8`-`Uint64`, `Float32`, `Float64
 
 No null. `Option<T>` only. No exceptions. `Result<T, E>` only.
 
+## Agent-First Design Principles
+
+Kōdo exists for AI agents. Every feature, error message, and tool decision should be evaluated from the agent's perspective. These principles guide development priorities:
+
+### 1. The Error→Fix→Recompile Loop is Everything
+
+The #1 value proposition of Kōdo is the closed-loop repair cycle. Every compiler error should be:
+- **Machine-parseable**: JSON with structured fields, not prose
+- **Auto-fixable when possible**: `FixPatch` with byte offsets, not just suggestions
+- **Classifiable**: agents need to know instantly if they can fix it alone (`auto`), need context (`assisted`), or need a human (`manual`)
+
+**When adding new errors**: ALWAYS implement `fix_patch()` alongside the diagnostic. A suggestion without a patch is a half-finished feature. Target: >80% of errors should have machine-applicable patches.
+
+**Key files**: `crates/kodo_types/src/errors.rs` (fix_patch), `crates/kodoc/src/diagnostics.rs` (JSON output), `crates/kodo_parser/src/error.rs` (parser patches).
+
+### 2. Every CLI Output Must Have a `--json` Mode
+
+Agents don't read prose — they parse structured data. Every `kodoc` subcommand that produces output should support `--json`:
+- `kodoc check --json-errors` ✓ (done)
+- `kodoc confidence-report --json` ✓ (done)
+- `kodoc explain --json` ✗ (needed)
+- `kodoc repl --json` ✗ (needed)
+- `kodoc intent-explain --json` ✗ (needed)
+- `kodoc describe --json` ✓ (done)
+
+### 3. Contracts Are the Killer Feature — Double Down
+
+Contracts (`requires`/`ensures`) verified by Z3 are what no other language offers agents. Prioritize:
+- More errors with contract-aware fix patches (e.g., "add `requires { x > 0 }` to satisfy callee's precondition")
+- Contract status in compilation certificates (`verified_static` vs `runtime_only`)
+- Recoverable contract mode (`--contracts=recoverable`) so services don't crash on violations
+- Contract-aware LSP completions (show `requires`/`ensures` in hover and autocomplete)
+
+### 4. Confidence + Certificates = Automated Trust
+
+The `@confidence` → `@reviewed_by` enforcement is unique. Make it operationally useful:
+- Store transitive confidence scores in `.ko.cert.json` (currently computed but not persisted)
+- Enable policy-based automation: "deploy if all functions > 0.9 confidence and all contracts statically verified"
+- `kodoc audit` command combining confidence + contracts + annotations in one report
+
+### 5. Collections Must Be Complete for Real Programs
+
+An agent can't write a real program if `List<T>` is append-only and `Map<K,V>` can't be iterated. Minimum viable collections:
+- **List**: pop, remove, set, slice, reverse, is_empty (not just push/get/length/contains)
+- **Map**: remove, is_empty, keys()/values()/entries() iteration via `for-in`
+- **JSON**: stringify (not just parse), get_bool, get_array, get_float
+- The runtime already has many of these (`kodo_map_keys`, `kodo_list_pop`, etc.) — they just need to be wired through type checker → codegen
+
+### 6. LSP Is the Agent's Eyes
+
+For agents operating via IDE/editor integration, LSP quality directly impacts productivity:
+- Hover MUST show full annotations: `@confidence(0.85)`, `@authored_by(agent: "claude")`, not just `@confidence`
+- Code actions should surface `FixPatch` as one-click fixes
+- Goto definition should work (currently a stub)
+- Completions should be contract-aware
+
+### 7. Known Limitations to Communicate Clearly
+
+When implementing features, be honest about current limitations in error messages and docs:
+- **Concurrency**: `spawn`/`async`/`await` compile but execute sequentially in v1
+- **Channels**: only `Int`, `Bool`, `String` — not generic
+- **Result<T, E>**: `E` is always `String` in practice — custom error enums don't work end-to-end yet
+- **String**: `substring` is byte-based, not Unicode-aware
+- **Contract violation**: calls `abort()` — no recovery mechanism yet
+
 ## Task Completion Checklist — MANDATORY
 
 After completing ANY task (feature, bugfix, refactor, etc.), you MUST execute ALL of the following steps before considering the task done. This is NON-NEGOTIABLE.

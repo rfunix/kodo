@@ -182,6 +182,34 @@ fn safe_divide(a: Int, b: Int) -> Int
 
 With `--contracts static`, Z3 verifies that callers satisfy `b != 0`. The compilation certificate records which contracts were statically verified.
 
+## Recoverable Contract Mode
+
+By default, a contract violation aborts the program. In production services, you may prefer graceful degradation over a hard crash. The `recoverable` contract mode changes this behavior:
+
+```bash
+kodoc build my_service.ko --contracts recoverable
+```
+
+When a contract fails in recoverable mode:
+
+1. A warning is logged to stderr with the function name and the failing clause.
+2. The function returns a default value for its return type (`0` for `Int`, `false` for `Bool`, `""` for `String`).
+3. Execution continues normally.
+
+This is useful for:
+
+- **Long-running services** that should not terminate on a single bad input
+- **Graceful degradation** where partial results are preferable to a crash
+- **Staging environments** where you want to log violations without blocking traffic
+
+The contract violation is still recorded in stderr, so monitoring tools can capture it:
+
+```
+[WARN] Contract violation: requires clause failed in validate_input (recoverable mode, returning default)
+```
+
+Use `recoverable` only when you have external monitoring in place. For development and testing, prefer the default `runtime` mode to catch bugs immediately.
+
 ## Next Steps
 
 - [Error Handling](error-handling.md) — using `Option<T>` and `Result<T, E>` for safe error handling

@@ -76,6 +76,9 @@ pub struct CodegenOptions {
     pub optimize: bool,
     /// Whether to emit debug information.
     pub debug_info: bool,
+    /// Whether contract failures should be recoverable (log + continue)
+    /// instead of aborting.
+    pub recoverable_contracts: bool,
 }
 
 impl Default for CodegenOptions {
@@ -83,6 +86,7 @@ impl Default for CodegenOptions {
         Self {
             optimize: false,
             debug_info: true,
+            recoverable_contracts: false,
         }
     }
 }
@@ -102,6 +106,7 @@ pub fn compile_module_with_structs(
     module::compile_module_inner(
         mir_functions,
         struct_defs,
+        &HashMap::new(),
         &HashMap::new(),
         options,
         metadata_json,
@@ -125,6 +130,40 @@ pub fn compile_module_with_types(
         mir_functions,
         struct_defs,
         enum_defs,
+        &HashMap::new(),
+        options,
+        metadata_json,
+    )
+}
+
+/// A vtable entry mapping `(concrete_type, trait_name)` to method function names.
+///
+/// The function names are ordered by trait method declaration order,
+/// matching the vtable slot indices used by [`kodo_mir::Instruction::VirtualCall`].
+pub type VtableDef = Vec<String>;
+
+/// Compiles MIR functions with struct, enum, and vtable definitions into a native object file.
+///
+/// The `vtable_defs` map keys are `(concrete_type, trait_name)` pairs, and values
+/// are ordered lists of function names corresponding to trait method declaration order.
+///
+/// # Errors
+///
+/// Returns [`CodegenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn compile_module_with_vtables(
+    mir_functions: &[MirFunction],
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    vtable_defs: &HashMap<(String, String), VtableDef>,
+    options: &CodegenOptions,
+    metadata_json: Option<&str>,
+) -> Result<Vec<u8>> {
+    module::compile_module_inner(
+        mir_functions,
+        struct_defs,
+        enum_defs,
+        vtable_defs,
         options,
         metadata_json,
     )
@@ -151,6 +190,7 @@ pub fn compile_module(
 ) -> Result<Vec<u8>> {
     module::compile_module_inner(
         mir_functions,
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
         options,

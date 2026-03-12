@@ -12,7 +12,7 @@
 
 use kodo_ast::{
     ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl, Meta,
-    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl,
+    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl, TypeExpr,
 };
 use kodo_lexer::TokenKind;
 
@@ -136,11 +136,11 @@ impl Parser {
     /// Returns `true` if `kind` is a token that can begin a new top-level
     /// declaration — i.e. a module-level synchronization point.
     ///
-    /// Note: `RBrace` is intentionally excluded.  During recovery we
-    /// want to land on the *start* of the next declaration, not on a
-    /// stray closing brace that belongs to a malformed block.  The
-    /// module-closing `}` is handled separately after the declaration
-    /// loop.
+    /// Note: `RBrace` is intentionally excluded from the primary check.
+    /// During recovery we want to land on the *start* of the next
+    /// declaration, not on a stray closing brace from a malformed block.
+    /// The module-closing `}` is handled via brace-depth tracking in
+    /// [`synchronize_to_declaration`].
     fn is_module_sync_token(kind: &TokenKind) -> bool {
         matches!(
             kind,
@@ -150,6 +150,7 @@ impl Parser {
                 | TokenKind::Trait
                 | TokenKind::Impl
                 | TokenKind::Intent
+                | TokenKind::Invariant
                 | TokenKind::Actor
                 | TokenKind::Module
                 | TokenKind::At
@@ -158,15 +159,69 @@ impl Parser {
         )
     }
 
+    /// Returns `true` if `kind` is a token that can begin a new statement
+    /// inside a block — i.e. a statement-level synchronization point.
+    ///
+    /// This is used for recovery inside function bodies. When a statement
+    /// fails to parse, we skip tokens until we land on one of these and
+    /// then resume parsing the next statement.
+    ///
+    /// # Academic Reference
+    ///
+    /// Statement-level panic-mode recovery as described in **\[CI\]**
+    /// *Crafting Interpreters* Ch. 6.3.3 and **\[EC\]** *Engineering a
+    /// Compiler* Ch. 3.4 — recovery at multiple granularity levels.
+    fn is_stmt_sync_token(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Let
+                | TokenKind::Return
+                | TokenKind::If
+                | TokenKind::While
+                | TokenKind::For
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::Spawn
+                | TokenKind::Parallel
+                | TokenKind::Fn
+                | TokenKind::Struct
+                | TokenKind::Enum
+                | TokenKind::Trait
+                | TokenKind::Impl
+                | TokenKind::Intent
+                | TokenKind::RBrace
+        )
+    }
+
     /// Advances the token stream until a module-level synchronization
-    /// token is found or the token stream is exhausted.
+    /// token is found, or the token stream is exhausted.
     ///
     /// This is the core of panic-mode recovery: after an error we skip
     /// the damaged portion of the input and resume at the next point
     /// where a fresh declaration can reasonably begin.
+    ///
+    /// `RBrace` is intentionally skipped over rather than stopping on it,
+    /// because during recovery the parser may have consumed an `LBrace`
+    /// before the error was detected, and stopping at the matching `}`
+    /// would prevent reaching the next valid declaration.
     fn synchronize_to_declaration(&mut self) {
         while let Some(token) = self.peek() {
             if Self::is_module_sync_token(&token.kind) {
+                return;
+            }
+            self.advance();
+        }
+    }
+
+    /// Advances the token stream until a statement-level synchronization
+    /// token is found or the token stream is exhausted.
+    ///
+    /// Used inside block parsing for statement-level recovery. After a
+    /// malformed statement, skip ahead to a token that can begin a new
+    /// statement (like `let`, `return`, etc.) or that ends the block (`}`).
+    pub(crate) fn synchronize_to_stmt(&mut self) {
+        while let Some(token) = self.peek() {
+            if Self::is_stmt_sync_token(&token.kind) {
                 return;
             }
             self.advance();
@@ -287,6 +342,12 @@ impl Parser {
     }
 
     /// Parses top-level declarations with recovery, collecting errors.
+    ///
+    /// Each declaration is parsed individually. If parsing fails, the error
+    /// is recorded and the parser synchronizes to the next module-level token.
+    /// For function declarations that parse successfully up to the body, we
+    /// additionally use statement-level recovery inside the body so that
+    /// multiple errors within a single function are all reported.
     #[allow(clippy::too_many_lines)]
     fn parse_declarations_with_recovery(
         &mut self,
@@ -324,7 +385,9 @@ impl Parser {
                 } else if self.check(&TokenKind::Intent) {
                     decls.intent_decls.push(self.parse_intent()?);
                 } else {
-                    decls.functions.push(self.parse_annotated_function()?);
+                    decls
+                        .functions
+                        .push(self.parse_annotated_function_with_recovery(errors)?);
                 }
                 Ok(())
             })();
@@ -336,6 +399,96 @@ impl Parser {
         }
 
         decls
+    }
+
+    /// Parses annotations followed by a function definition, using
+    /// statement-level recovery inside the function body.
+    ///
+    /// Signature errors still cause the whole function to fail (and the
+    /// caller will synchronize to the next declaration). Body errors are
+    /// collected in `errors` and parsing continues within the body.
+    fn parse_annotated_function_with_recovery(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Function> {
+        let annotations = self.parse_annotations()?;
+        let mut func = self.parse_function_with_recovery(errors)?;
+        func.annotations = annotations;
+        Ok(func)
+    }
+
+    /// Parses a function definition with statement-level recovery in the body.
+    ///
+    /// The function signature (name, params, return type, contracts) is parsed
+    /// without recovery — a malformed signature causes the whole function to
+    /// fail. The body, however, uses [`parse_block_with_recovery`] so that
+    /// errors in individual statements are collected and parsing continues.
+    fn parse_function_with_recovery(&mut self, errors: &mut Vec<ParseError>) -> Result<Function> {
+        let is_async = if self.check(&TokenKind::Async) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        let start = self.expect(&TokenKind::Fn)?.span;
+        let name = self.parse_ident()?;
+
+        let generic_params = self.parse_optional_generic_params()?;
+
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while !self.check(&TokenKind::RParen) {
+            if !params.is_empty() {
+                self.expect(&TokenKind::Comma)?;
+            }
+            params.push(self.parse_param()?);
+        }
+        self.expect(&TokenKind::RParen)?;
+
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            self.parse_type()?
+        } else {
+            TypeExpr::Unit
+        };
+
+        let mut requires = Vec::new();
+        let mut ensures = Vec::new();
+        loop {
+            if self.check(&TokenKind::Requires) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                requires.push(expr);
+            } else if self.check(&TokenKind::Ensures) {
+                self.advance();
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                ensures.push(expr);
+            } else {
+                break;
+            }
+        }
+
+        // Use recovery-aware block parsing for the body.
+        let body = self.parse_block_with_recovery(errors)?;
+        let end = self.prev_span();
+
+        Ok(Function {
+            id: self.next_id(),
+            span: start.merge(end),
+            name,
+            is_async,
+            generic_params,
+            annotations: vec![],
+            params,
+            return_type,
+            requires,
+            ensures,
+            body,
+        })
     }
 
     /// Parses an import declaration.

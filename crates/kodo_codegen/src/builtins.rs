@@ -99,6 +99,12 @@ fn declare_io_builtins(
         types::I64,
         types::I64
     );
+    decl_void!(
+        "kodo_contract_fail_recoverable",
+        "kodo_contract_fail_recoverable",
+        types::I64,
+        types::I64
+    );
     Ok(())
 }
 
@@ -235,6 +241,20 @@ fn declare_string_query_builtins(
         "kodo_string_split",
         "String_split",
         [types::I64, types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // string_lines: (ptr, len) -> i64 (list handle)
+    decl_ret!(
+        "kodo_string_lines",
+        "String_lines",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // string_parse_int: (ptr, len) -> i64
+    decl_ret!(
+        "kodo_string_parse_int",
+        "String_parse_int",
+        [types::I64, types::I64],
         types::I64
     );
     Ok(())
@@ -411,6 +431,17 @@ fn declare_collection_builtins(
     call_conv: CallConv,
     builtins: &mut HashMap<String, BuiltinInfo>,
 ) -> Result<()> {
+    declare_list_builtins(module, call_conv, builtins)?;
+    declare_map_builtins_impl(module, call_conv, builtins)?;
+    Ok(())
+}
+
+/// Declares list builtins (new, push, get, length, slice, sort, join, etc.).
+fn declare_list_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
     macro_rules! decl_void {
         ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
             let sig = sig_void(call_conv, &[$($param),*]);
@@ -426,7 +457,6 @@ fn declare_collection_builtins(
         }};
     }
 
-    // List operations
     decl_ret!("kodo_list_new", "list_new", [], types::I64);
     decl_void!("kodo_list_push", "list_push", types::I64, types::I64);
     decl_void!(
@@ -444,7 +474,6 @@ fn declare_collection_builtins(
         [types::I64, types::I64],
         types::I64
     );
-    // list_pop: (list_ptr, out_value, out_is_some) -> void
     decl_void!(
         "kodo_list_pop",
         "list_pop",
@@ -452,31 +481,65 @@ fn declare_collection_builtins(
         types::I64,
         types::I64
     );
-    // list_remove: (list_ptr, index) -> i64
     decl_ret!(
         "kodo_list_remove",
         "list_remove",
         [types::I64, types::I64],
         types::I64
     );
-    // list_set: (list_ptr, index, value) -> i64
     decl_ret!(
         "kodo_list_set",
         "list_set",
         [types::I64, types::I64, types::I64],
         types::I64
     );
-    // list_is_empty: (list_ptr) -> i64
     decl_ret!(
         "kodo_list_is_empty",
         "list_is_empty",
         [types::I64],
         types::I64
     );
-    // list_reverse: (list_ptr) -> void
     decl_void!("kodo_list_reverse", "list_reverse", types::I64);
+    decl_ret!(
+        "kodo_list_slice",
+        "list_slice",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_void!("kodo_list_sort", "list_sort", types::I64);
+    decl_void!(
+        "kodo_list_join",
+        "list_join",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    Ok(())
+}
 
-    // Map operations
+/// Declares map builtins (new, insert, get, etc.).
+fn declare_map_builtins_impl(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
     decl_ret!("kodo_map_new", "map_new", [], types::I64);
     decl_void!(
         "kodo_map_insert",
@@ -500,14 +563,12 @@ fn declare_collection_builtins(
         types::I64
     );
     decl_ret!("kodo_map_length", "map_length", [types::I64], types::I64);
-    // map_remove: (map_ptr, key) -> i64
     decl_ret!(
         "kodo_map_remove",
         "map_remove",
         [types::I64, types::I64],
         types::I64
     );
-    // map_is_empty: (map_ptr) -> i64
     decl_ret!(
         "kodo_map_is_empty",
         "map_is_empty",
@@ -776,6 +837,10 @@ fn declare_channel_builtins(
     }
 
     decl_ret!("kodo_channel_new", "channel_new", [], types::I64);
+    // channel_new_bool and channel_new_string map to the same runtime function
+    // (channels are type-erased at runtime — only the type checker differentiates).
+    decl_ret!("kodo_channel_new", "channel_new_bool", [], types::I64);
+    decl_ret!("kodo_channel_new", "channel_new_string", [], types::I64);
     decl_void!("kodo_channel_send", "channel_send", types::I64, types::I64);
     decl_ret!(
         "kodo_channel_recv",

@@ -234,6 +234,12 @@ pub(crate) fn translate_value(
                 )))
             }
         }
+        Value::MakeDynTrait { .. } => {
+            // MakeDynTrait is handled at the instruction level (Assign)
+            // where we have access to the stack slot for the fat pointer.
+            // If we get here, return a placeholder zero.
+            Ok(builder.ins().iconst(types::I64, 0))
+        }
     }
 }
 

@@ -191,6 +191,55 @@ impl Parser {
         })
     }
 
+    /// Parses a block with statement-level error recovery, collecting errors
+    /// instead of bailing on the first malformed statement.
+    ///
+    /// When a statement fails to parse, the error is recorded and the parser
+    /// synchronizes to the next statement-level token (`let`, `return`, `if`,
+    /// `while`, `for`, `}`, etc.) before resuming. This allows reporting
+    /// multiple errors within a single function body.
+    ///
+    /// # Academic Reference
+    ///
+    /// Multi-level panic-mode recovery: **\[CI\]** *Crafting Interpreters*
+    /// Ch. 6.3.3 — recovering at statement boundaries within blocks, not
+    /// just at declaration boundaries.
+    pub(crate) fn parse_block_with_recovery(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> std::result::Result<Block, ParseError> {
+        let start = self.expect(&TokenKind::LBrace)?.span;
+
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            if self.peek().is_none() {
+                errors.push(ParseError::UnexpectedEof {
+                    expected: "}".to_string(),
+                });
+                break;
+            }
+            match self.parse_stmt() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(e) => {
+                    errors.push(e);
+                    self.synchronize_to_stmt();
+                }
+            }
+        }
+
+        let end = if self.check(&TokenKind::RBrace) {
+            self.expect(&TokenKind::RBrace)
+                .map_or(self.prev_span(), |t| t.span)
+        } else {
+            self.prev_span()
+        };
+
+        Ok(Block {
+            span: start.merge(end),
+            stmts,
+        })
+    }
+
     /// Generates the next unique node ID for AST nodes.
     pub(crate) fn next_id(&mut self) -> kodo_ast::NodeId {
         self.id_gen.next_id()

@@ -68,14 +68,34 @@ impl TypeEnv {
     /// Returns [`TypeError::Mismatch`] if the types differ.
     pub fn check_eq(expected: &Type, found: &Type, span: Span) -> Result<()> {
         if expected == found {
-            Ok(())
-        } else {
-            Err(TypeError::Mismatch {
-                expected: expected.to_string(),
-                found: found.to_string(),
-                span,
-            })
+            return Ok(());
         }
+        // Channel<T> is an opaque Int handle at runtime. Allow Channel<T>
+        // wherever Int is expected and vice versa, enabling channel functions
+        // to accept both typed Channel<T> values and raw Int handles.
+        if Self::is_channel_int_compatible(expected, found) {
+            return Ok(());
+        }
+        // dyn Trait accepts any concrete type — trait bound validation
+        // is done separately by the type checker with access to trait_impl_set.
+        if matches!(expected, Type::DynTrait(_)) {
+            return Ok(());
+        }
+        Err(TypeError::Mismatch {
+            expected: expected.to_string(),
+            found: found.to_string(),
+            span,
+        })
+    }
+
+    /// Returns `true` if one type is `Channel<T>` and the other is `Int`,
+    /// which is allowed because channels are opaque integer handles at runtime.
+    fn is_channel_int_compatible(a: &Type, b: &Type) -> bool {
+        matches!(
+            (a, b),
+            (Type::Int, Type::Generic(name, _)) | (Type::Generic(name, _), Type::Int)
+            if name == "Channel"
+        )
     }
 }
 
@@ -157,6 +177,7 @@ pub fn resolve_type_with_enums(
                 .collect();
             Ok(Type::Tuple(resolved?))
         }
+        kodo_ast::TypeExpr::DynTrait(name) => Ok(Type::DynTrait(name.clone())),
     }
 }
 

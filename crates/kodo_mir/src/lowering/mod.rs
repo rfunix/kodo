@@ -167,6 +167,20 @@ impl MirBuilder {
             Value::StructLit { name, .. } => Type::Struct(name.clone()),
             Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
             Value::EnumPayload { .. } | Value::FieldGet { .. } | Value::FuncRef(_) => Type::Unknown,
+            Value::MakeDynTrait { trait_name, .. } => Type::DynTrait(trait_name.clone()),
+        }
+    }
+
+    /// Infers the concrete type name of a value, used when constructing
+    /// `dyn Trait` fat pointers to determine which vtable to use.
+    fn infer_value_concrete_type(&self, value: &Value) -> String {
+        match value {
+            Value::StructLit { name, .. } => name.clone(),
+            Value::Local(lid) => match self.local_types.get(lid) {
+                Some(Type::Struct(name) | Type::Enum(name)) => name.clone(),
+                _ => "Unknown".to_string(),
+            },
+            _ => "Unknown".to_string(),
         }
     }
 

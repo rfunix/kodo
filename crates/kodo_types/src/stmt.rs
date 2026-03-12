@@ -131,6 +131,8 @@ impl TypeChecker {
         } else {
             self.env.insert(name.to_string(), value_ty);
         }
+        // Register let binding definition for goto-definition.
+        self.definition_spans.insert(name.to_string(), span);
         let binding_ty = self.env.lookup(name).cloned();
         if let Expr::Ident(source_name, _) = value {
             self.track_owned(name);

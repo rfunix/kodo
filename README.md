@@ -208,21 +208,21 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 
 | Category | Features |
 |----------|----------|
-| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), local type inference, no implicit conversions |
+| **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), `dyn Trait` (dynamic dispatch with vtables), local type inference, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`/`mut`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), mut-borrow-while-ref-borrowed (E0245), ref-borrow-while-mut-borrowed (E0246), double-mut-borrow (E0247), assign-through-ref (E0248), functional reference counting (automatic deallocation) |
-| **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, module-level `invariant` blocks |
+| **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, `recoverable` mode, module-level `invariant` blocks |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude — no null, no exceptions |
 | **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
 | **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
 | **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`; functional combinators (`map`, `filter`, `fold`, `count`, `any`, `all`); functional pipelines |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`, `lines`, `parse_int`), `List<T>` (push, get, pop, remove, set, slice, sort, join), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
-| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline; LSP server with diagnostics, hover (full annotations), goto-definition, contract-aware completions (31 builtins), and code actions from FixPatch; JSON error output; `kodoc explain` for any error code; `kodoc audit` for consolidated trust reports |
+| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline and persistent history (`~/.kodo_history`); LSP server with diagnostics, hover (full annotations), goto-definition (functions, variables, params, structs, enums), find-references, contract-aware completions (31 builtins), and code actions from FixPatch; JSON error output; `kodoc explain` for any error code; `kodoc audit` for consolidated trust reports |
 | **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes, per-function confidence scores, and contract verification stats (static vs runtime) |
 
 ---

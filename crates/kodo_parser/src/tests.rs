@@ -3474,3 +3474,405 @@ fn parse_import_with_recovery_from_syntax() {
     assert_eq!(output.module.imports.len(), 1);
     assert_eq!(output.module.imports[0].path, vec!["std", "option"]);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 7.2 — Expanded error recovery tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn recovery_broken_fn_signature_still_parses_next_fn() {
+    // The parser should report the error in `foo` AND successfully parse `bar`.
+    let source = r#"module broken {
+        meta { version: "1.0" }
+
+        fn foo( -> Int {
+            let x: Int = 42
+            return x
+        }
+
+        fn bar(y: Int) -> Int {
+            return y + 1
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(
+        !output.errors.is_empty(),
+        "should have errors from broken fn foo"
+    );
+    assert!(
+        output.module.functions.iter().any(|f| f.name == "bar"),
+        "function bar should be recovered after broken foo, got: {:?}",
+        output
+            .module
+            .functions
+            .iter()
+            .map(|f| &f.name)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn recovery_multiple_broken_decls_reports_all_errors() {
+    // Three different broken declarations should each produce an error.
+    let source = r#"module multi_err {
+        struct Bad { x: }
+
+        fn broken( -> Int { return 1 }
+
+        enum E { A( }
+
+        fn good() {
+            let z: Int = 99
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(
+        output.errors.len() >= 3,
+        "should have >=3 errors from three broken decls, got {}",
+        output.errors.len()
+    );
+    assert!(
+        output.module.functions.iter().any(|f| f.name == "good"),
+        "function good should be recovered"
+    );
+}
+
+#[test]
+fn recovery_stmt_level_let_errors_in_body() {
+    // Two bad `let` statements in the same function body should both produce errors,
+    // and the valid `let` and `return` should still be in the AST.
+    let source = r#"module stmt_err {
+        fn compute() -> Int {
+            let a: Int = 10
+            let b: = 20
+            let c: Int = 30
+            return a + c
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(
+        !output.errors.is_empty(),
+        "should have error from `let b: = 20`"
+    );
+    // The function should still exist despite the body error.
+    assert_eq!(
+        output.module.functions.len(),
+        1,
+        "compute should be present"
+    );
+    assert_eq!(output.module.functions[0].name, "compute");
+    // The valid statements should be in the body.
+    let stmts = &output.module.functions[0].body.stmts;
+    assert!(
+        stmts.len() >= 2,
+        "should have at least 2 valid stmts (a and c/return), got {}",
+        stmts.len()
+    );
+}
+
+#[test]
+fn recovery_stmt_level_multiple_body_errors() {
+    // Multiple bad statements in the same function body.
+    let source = r#"module multi_stmt_err {
+        fn f() {
+            let ok1: Int = 1
+            let bad1: = 2
+            let ok2: Int = 3
+            let bad2: = 4
+            let ok3: Int = 5
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(
+        output.errors.len() >= 2,
+        "should have >=2 errors from bad lets, got {}",
+        output.errors.len()
+    );
+    assert_eq!(output.module.functions.len(), 1);
+    let stmts = &output.module.functions[0].body.stmts;
+    // At least the valid `let` statements should be present.
+    assert!(
+        stmts.len() >= 3,
+        "should have at least 3 valid stmts, got {}",
+        stmts.len()
+    );
+}
+
+#[test]
+fn recovery_sync_on_let_keyword() {
+    // After a malformed expression statement, the parser should sync to the
+    // next `let` and continue parsing.
+    let source = r#"module sync_let {
+        fn f() {
+            !!!
+            let x: Int = 42
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty(), "should have error from `!!!`");
+    assert_eq!(output.module.functions.len(), 1);
+}
+
+#[test]
+fn recovery_sync_on_fn_from_body_error() {
+    // A body error inside one function should not prevent parsing the next function.
+    let source = r#"module sync_fn {
+        fn first() {
+            let x: = bad
+        }
+        fn second() -> Int {
+            return 42
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    let fn_names: Vec<&str> = output
+        .module
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        fn_names.contains(&"second"),
+        "second should be recovered, got: {fn_names:?}"
+    );
+}
+
+#[test]
+fn recovery_sync_on_struct_keyword() {
+    // After a broken function, the parser should sync on `struct` and parse it.
+    let source = r#"module sync_struct {
+        fn bad( -> {}
+
+        struct Point {
+            x: Int,
+            y: Int,
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.type_decls.len(),
+        1,
+        "struct Point should be recovered"
+    );
+    assert_eq!(output.module.type_decls[0].name, "Point");
+}
+
+#[test]
+fn recovery_sync_on_enum_keyword() {
+    // After a broken function, the parser should sync on `enum` and parse it.
+    let source = r#"module sync_enum {
+        fn bad( -> {}
+
+        enum Color { Red, Green, Blue }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.enum_decls.len(),
+        1,
+        "enum Color should be recovered"
+    );
+    assert_eq!(output.module.enum_decls[0].name, "Color");
+}
+
+#[test]
+fn recovery_sync_on_trait_keyword() {
+    // After a broken function, the parser should sync on `trait`.
+    let source = r#"module sync_trait {
+        fn bad( -> {}
+
+        trait Show {
+            fn show(self) -> String
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.trait_decls.len(),
+        1,
+        "trait Show should be recovered"
+    );
+    assert_eq!(output.module.trait_decls[0].name, "Show");
+}
+
+#[test]
+fn recovery_sync_on_impl_keyword() {
+    // After a broken function, the parser should sync on `impl`.
+    let source = r#"module sync_impl {
+        struct S { x: Int }
+
+        fn bad( -> {}
+
+        impl S {
+            fn get(self) -> Int { return self.x }
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.impl_blocks.len(),
+        1,
+        "impl S should be recovered"
+    );
+}
+
+#[test]
+fn recovery_sync_on_intent_keyword() {
+    // After a broken function, the parser should sync on `intent`.
+    let source = r#"module sync_intent {
+        fn bad( -> {}
+
+        intent my_intent {
+            handler: some_fn
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.intent_decls.len(),
+        1,
+        "intent my_intent should be recovered"
+    );
+    assert_eq!(output.module.intent_decls[0].name, "my_intent");
+}
+
+#[test]
+fn recovery_sync_on_invariant_keyword() {
+    // After a broken function, the parser should sync on `invariant`.
+    let source = r#"module sync_invariant {
+        fn bad( -> {}
+
+        invariant { true }
+
+        fn good() {}
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert_eq!(
+        output.module.invariants.len(),
+        1,
+        "invariant should be recovered"
+    );
+    assert!(
+        output.module.functions.iter().any(|f| f.name == "good"),
+        "function good should also be recovered"
+    );
+}
+
+#[test]
+fn recovery_all_sync_tokens_in_one_module() {
+    // A single module with errors followed by every kind of declaration.
+    let source = r#"module everything {
+        fn bad1( -> {}
+
+        fn good_fn() -> Int { return 1 }
+
+        fn bad2( -> {}
+
+        struct S { x: Int }
+
+        enum E { A, B }
+
+        trait T { fn show(self) -> String }
+
+        impl T for S {
+            fn show(self) -> String { return "s" }
+        }
+
+        intent my_i { handler: good_fn }
+
+        invariant { true }
+
+        fn final_fn() { let z: Int = 0 }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(
+        output.errors.len() >= 2,
+        "should have >=2 errors, got {}",
+        output.errors.len()
+    );
+    // Check all valid declarations were recovered.
+    let fn_names: Vec<&str> = output
+        .module
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        fn_names.contains(&"good_fn"),
+        "good_fn should be present: {fn_names:?}"
+    );
+    assert!(
+        fn_names.contains(&"final_fn"),
+        "final_fn should be present: {fn_names:?}"
+    );
+    assert_eq!(output.module.type_decls.len(), 1, "struct S");
+    assert_eq!(output.module.enum_decls.len(), 1, "enum E");
+    assert_eq!(output.module.trait_decls.len(), 1, "trait T");
+    assert_eq!(output.module.impl_blocks.len(), 1, "impl T for S");
+    assert_eq!(output.module.intent_decls.len(), 1, "intent my_i");
+    assert_eq!(output.module.invariants.len(), 1, "invariant");
+}
+
+#[test]
+fn recovery_error_in_body_preserves_valid_stmts() {
+    // The function body has a broken statement sandwiched between valid ones.
+    // All valid statements should be preserved.
+    let source = r#"module body_recovery {
+        fn compute() -> Int {
+            let a: Int = 1
+            let b: Int = 2
+            let _bad: = oops
+            let c: Int = 3
+            return a + b + c
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty(), "should have body error");
+    assert_eq!(output.module.functions.len(), 1);
+    let stmts = &output.module.functions[0].body.stmts;
+    // Count valid statements: a, b, c, and return.
+    // The bad statement should be skipped but the others preserved.
+    assert!(
+        stmts.len() >= 3,
+        "should have >=3 valid stmts, got {}",
+        stmts.len()
+    );
+}
+
+#[test]
+fn recovery_error_codes_from_expanded_recovery() {
+    // All errors from recovery should have valid error codes.
+    let source = r#"module codes {
+        fn bad1( -> {}
+        fn bad2( -> {}
+        fn good() {}
+    }"#;
+    let output = parse_with_recovery(source);
+    for e in &output.errors {
+        let code = e.code();
+        assert!(
+            code == "E0100" || code == "E0101" || code == "E0001",
+            "unexpected error code: {code}"
+        );
+    }
+}
+
+#[test]
+fn recovery_error_spans_from_body_recovery() {
+    // Errors from statement-level recovery should carry spans.
+    let source = r#"module spans {
+        fn f() {
+            let bad: = 1
+            let ok: Int = 2
+        }
+    }"#;
+    let output = parse_with_recovery(source);
+    assert!(!output.errors.is_empty());
+    assert!(
+        output.errors.iter().any(|e| e.span().is_some()),
+        "body recovery errors should have spans"
+    );
+}

@@ -489,6 +489,11 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>),
     /// A tuple type, e.g. `(Int, String)`.
     Tuple(Vec<TypeExpr>),
+    /// A dynamic trait object type, e.g. `dyn Drawable`.
+    ///
+    /// Represents a vtable-based dynamically dispatched trait object.
+    /// At runtime, a `dyn Trait` value is a fat pointer: `(data_ptr, vtable_ptr)`.
+    DynTrait(String),
 }
 
 /// A parameter in a closure expression.

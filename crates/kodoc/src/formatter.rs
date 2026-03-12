@@ -651,5 +651,6 @@ fn format_type_expr(ty: &TypeExpr) -> String {
             let elems_str: Vec<String> = elems.iter().map(format_type_expr).collect();
             format!("({})", elems_str.join(", "))
         }
+        TypeExpr::DynTrait(name) => format!("dyn {name}"),
     }
 }

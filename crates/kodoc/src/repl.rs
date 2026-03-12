@@ -130,6 +130,60 @@ impl ReplState {
             || trimmed.starts_with("type ")
     }
 
+    /// Extracts the name from a function definition (`fn name(...)`).
+    fn extract_fn_name(input: &str) -> Option<&str> {
+        let trimmed = input.trim().strip_prefix("fn ")?;
+        trimmed
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+    }
+
+    /// Extracts the name from a type definition (`struct Name`, `enum Name`, `type Name`).
+    fn extract_type_name(input: &str) -> Option<&str> {
+        let trimmed = input.trim();
+        let rest = trimmed
+            .strip_prefix("struct ")
+            .or_else(|| trimmed.strip_prefix("enum "))
+            .or_else(|| trimmed.strip_prefix("type "))?;
+        rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+    }
+
+    /// Extracts the variable name from a `let` binding (`let name: Type = ...`).
+    fn extract_let_name(input: &str) -> Option<&str> {
+        let trimmed = input.trim().strip_prefix("let ")?;
+        trimmed
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+    }
+
+    /// Adds or replaces a function definition (by name).
+    pub fn upsert_definition(&mut self, input: &str) {
+        if let Some(name) = Self::extract_fn_name(input) {
+            self.definitions
+                .retain(|d| Self::extract_fn_name(d) != Some(name));
+        }
+        self.definitions.push(input.to_string());
+    }
+
+    /// Adds or replaces a type definition (by name).
+    pub fn upsert_type_def(&mut self, input: &str) {
+        if let Some(name) = Self::extract_type_name(input) {
+            self.type_defs
+                .retain(|d| Self::extract_type_name(d) != Some(name));
+        }
+        self.type_defs.push(input.to_string());
+    }
+
+    /// Adds or replaces a variable binding (by name).
+    pub fn upsert_binding(&mut self, input: &str) {
+        if let Some(name) = Self::extract_let_name(input) {
+            self.bindings
+                .retain(|b| Self::extract_let_name(b) != Some(name));
+        }
+        self.bindings.push(input.to_string());
+    }
+
     /// Builds the module preamble with accumulated type and function definitions.
     fn build_preamble(&self) -> String {
         let mut source = String::new();
@@ -564,6 +618,19 @@ pub fn run_repl_json() -> i32 {
     run_repl_with_mode(true)
 }
 
+/// Default history file name, stored in the user's home directory.
+const HISTORY_FILE: &str = ".kodo_history";
+
+/// Returns the path to the REPL history file (`~/.kodo_history`).
+///
+/// Falls back to a local `.kodo_history` in the current directory if the
+/// `HOME` environment variable is not set.
+fn history_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(|home| std::path::PathBuf::from(home).join(HISTORY_FILE))
+        .unwrap_or_else(|_| std::path::PathBuf::from(HISTORY_FILE))
+}
+
 /// Internal REPL loop shared between normal and JSON modes.
 fn run_repl_with_mode(json_mode: bool) -> i32 {
     if !json_mode {
@@ -583,6 +650,10 @@ fn run_repl_with_mode(json_mode: bool) -> i32 {
             return 1;
         }
     };
+
+    // Load previous history (ignore errors — file may not exist on first run).
+    let hist_path = history_path();
+    let _ = editor.load_history(&hist_path);
 
     let mut state = ReplState::new();
     let mut multiline_buffer = String::new();
@@ -635,7 +706,9 @@ fn run_repl_with_mode(json_mode: bool) -> i32 {
                 continue;
             }
             let input = std::mem::take(&mut multiline_buffer);
-            handle_input_with_mode(&input, &mut state, json_mode);
+            if !handle_input_with_mode(&input, &mut state, json_mode) {
+                break;
+            }
             continue;
         }
 
@@ -645,14 +718,21 @@ fn run_repl_with_mode(json_mode: bool) -> i32 {
             continue;
         }
 
-        handle_input_with_mode(&line, &mut state, json_mode);
+        if !handle_input_with_mode(&line, &mut state, json_mode) {
+            break;
+        }
     }
+
+    // Save history on exit (ignore errors — best-effort persistence).
+    let _ = editor.save_history(&hist_path);
 
     0
 }
 
 /// Handles a single complete input with optional JSON output mode.
-fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
+///
+/// Returns `true` if the REPL should continue, `false` if the user requested to quit.
+fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) -> bool {
     let command = parse_command(input);
 
     match command {
@@ -663,7 +743,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
                 print_help();
             }
         }
-        ReplCommand::Quit => std::process::exit(0),
+        ReplCommand::Quit => return false,
         ReplCommand::Reset => {
             state.reset();
             if json_mode {
@@ -674,7 +754,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
         }
         ReplCommand::Input(text) => {
             if text.is_empty() {
-                return;
+                return true;
             }
             handle_code_input_with_mode(&text, state, json_mode);
         }
@@ -685,7 +765,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
                 } else {
                     eprintln!("usage: :type <expression>");
                 }
-                return;
+                return true;
             }
             let ty = show_type_for_expr(state, &expr);
             if json_mode {
@@ -701,7 +781,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
                 } else {
                     eprintln!("usage: :ast <expression>");
                 }
-                return;
+                return true;
             }
             let source = state.wrap_expression(&expr);
             match show_ast(&source) {
@@ -728,7 +808,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
                 } else {
                     eprintln!("usage: :mir <expression>");
                 }
-                return;
+                return true;
             }
             let source = state.wrap_expression(&expr);
             match show_mir(&source) {
@@ -751,6 +831,7 @@ fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
     }
     // Flush stdout to ensure output appears before next prompt.
     let _ = std::io::stdout().flush();
+    true
 }
 
 /// Handles code input with optional JSON output mode.
@@ -760,7 +841,7 @@ fn handle_code_input_with_mode(input: &str, state: &mut ReplState, json_mode: bo
         let source = state.wrap_definition(input);
         match kodo_parser::parse(&source) {
             Ok(_) => {
-                state.type_defs.push(input.to_string());
+                state.upsert_type_def(input);
                 if json_mode {
                     emit_json_ok("defined", None, None);
                 } else {
@@ -788,7 +869,7 @@ fn handle_code_input_with_mode(input: &str, state: &mut ReplState, json_mode: bo
                 }
                 match checker.check_module(&module) {
                     Ok(()) => {
-                        state.definitions.push(input.to_string());
+                        state.upsert_definition(input);
                         if json_mode {
                             emit_json_ok("defined", None, None);
                         } else {
@@ -832,7 +913,7 @@ fn handle_code_input_with_mode(input: &str, state: &mut ReplState, json_mode: bo
                 }
                 match checker.check_module(&module) {
                     Ok(()) => {
-                        state.bindings.push(input.to_string());
+                        state.upsert_binding(input);
                         if json_mode {
                             emit_json_ok("bound", None, None);
                         } else {
@@ -1436,5 +1517,94 @@ mod tests {
 
         assert!(preamble.contains("struct Pt { x: Int }"));
         assert!(preamble.contains("fn id(x: Int) -> Int"));
+    }
+
+    // ─── extract names ──────────────────────────────────────────
+
+    #[test]
+    fn test_extract_fn_name() {
+        assert_eq!(
+            ReplState::extract_fn_name("fn double(x: Int) -> Int { return x * 2 }"),
+            Some("double")
+        );
+        assert_eq!(
+            ReplState::extract_fn_name("fn foo() -> Int { return 1 }"),
+            Some("foo")
+        );
+        assert_eq!(ReplState::extract_fn_name("not a function"), None);
+    }
+
+    #[test]
+    fn test_extract_type_name() {
+        assert_eq!(
+            ReplState::extract_type_name("struct Point { x: Int, y: Int }"),
+            Some("Point")
+        );
+        assert_eq!(
+            ReplState::extract_type_name("enum Color { Red, Blue }"),
+            Some("Color")
+        );
+        assert_eq!(ReplState::extract_type_name("type Age = Int"), Some("Age"));
+        assert_eq!(ReplState::extract_type_name("let x: Int = 42"), None);
+    }
+
+    #[test]
+    fn test_extract_let_name() {
+        assert_eq!(ReplState::extract_let_name("let x: Int = 42"), Some("x"));
+        assert_eq!(
+            ReplState::extract_let_name("let my_var: String = \"hello\""),
+            Some("my_var")
+        );
+        assert_eq!(ReplState::extract_let_name("fn foo() -> Int { 1 }"), None);
+    }
+
+    // ─── upsert (no duplicates) ─────────────────────────────────
+
+    #[test]
+    fn test_upsert_definition_replaces() {
+        let mut state = ReplState::new();
+        state.upsert_definition("fn foo() -> Int { return 1 }");
+        state.upsert_definition("fn foo() -> Int { return 2 }");
+
+        assert_eq!(state.definitions.len(), 1);
+        assert!(state.definitions[0].contains("return 2"));
+    }
+
+    #[test]
+    fn test_upsert_definition_keeps_different() {
+        let mut state = ReplState::new();
+        state.upsert_definition("fn foo() -> Int { return 1 }");
+        state.upsert_definition("fn bar() -> Int { return 2 }");
+
+        assert_eq!(state.definitions.len(), 2);
+    }
+
+    #[test]
+    fn test_upsert_type_def_replaces() {
+        let mut state = ReplState::new();
+        state.upsert_type_def("struct Point { x: Int }");
+        state.upsert_type_def("struct Point { x: Int, y: Int }");
+
+        assert_eq!(state.type_defs.len(), 1);
+        assert!(state.type_defs[0].contains("y: Int"));
+    }
+
+    #[test]
+    fn test_upsert_binding_replaces() {
+        let mut state = ReplState::new();
+        state.upsert_binding("let x: Int = 10");
+        state.upsert_binding("let x: Int = 20");
+
+        assert_eq!(state.bindings.len(), 1);
+        assert!(state.bindings[0].contains("20"));
+    }
+
+    #[test]
+    fn test_upsert_binding_keeps_different() {
+        let mut state = ReplState::new();
+        state.upsert_binding("let x: Int = 10");
+        state.upsert_binding("let y: Int = 20");
+
+        assert_eq!(state.bindings.len(), 2);
     }
 }

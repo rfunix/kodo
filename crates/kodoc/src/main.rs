@@ -40,7 +40,7 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json_errors: bool,
 
-        /// Contract checking mode: static, runtime, both, none.
+        /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
         contracts: String,
 
@@ -54,7 +54,7 @@ enum Command {
         #[arg()]
         file: PathBuf,
 
-        /// Contract checking mode: static, runtime, both, none.
+        /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
         contracts: String,
     },
@@ -68,9 +68,13 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json_errors: bool,
 
-        /// Contract checking mode: static, runtime, both, none.
+        /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
         contracts: String,
+
+        /// Emit a compilation certificate (`<file>.cert.json`) after a successful check.
+        #[arg(long, default_value_t = false)]
+        emit_cert: bool,
     },
     /// Tokenize a source file and print the token stream.
     Lex {
@@ -109,6 +113,10 @@ enum Command {
         /// The source file containing intents.
         #[arg()]
         file: PathBuf,
+
+        /// Output as JSON instead of human-readable format.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Start the Kōdo Language Server Protocol server.
     Lsp,
@@ -162,9 +170,19 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
 
-        /// Contract checking mode: static, runtime, both, none.
+        /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
         contracts: String,
+
+        /// Policy string for CI/CD gates (exit 1 on violation).
+        ///
+        /// Comma-separated key=value criteria. Supported keys:
+        /// - `min_confidence=<float>` — minimum effective confidence for all functions
+        /// - `contracts=all_verified` — all contracts must be statically verified
+        /// - `contracts=all_present` — all functions must have at least one contract
+        /// - `reviewed=all` — all functions must have `@reviewed_by` annotation
+        #[arg(long)]
+        policy: Option<String>,
     },
 }
 
@@ -191,12 +209,13 @@ fn main() {
             file,
             json_errors,
             contracts,
-        } => run_check(&file, json_errors, &contracts),
+            emit_cert,
+        } => run_check(&file, json_errors, &contracts, emit_cert),
         Command::Lex { file } => run_lex(&file),
         Command::Parse { file } => run_parse(&file),
         Command::Explain { code, json } => run_explain(&code, json),
         Command::Fmt { file, check } => run_fmt(&file, check),
-        Command::IntentExplain { file } => run_intent_explain(&file),
+        Command::IntentExplain { file, json } => run_intent_explain(&file, json),
         Command::Lsp => run_lsp(),
         Command::Repl { json } => {
             if json {
@@ -216,7 +235,8 @@ fn main() {
             file,
             json,
             contracts,
-        } => run_audit(&file, json, &contracts),
+            policy,
+        } => run_audit(&file, json, &contracts, policy.as_deref()),
     };
 
     std::process::exit(exit_code);
@@ -229,6 +249,7 @@ fn parse_contract_mode(value: &str) -> kodo_contracts::ContractMode {
         "runtime" => kodo_contracts::ContractMode::Runtime,
         "both" => kodo_contracts::ContractMode::Both,
         "none" => kodo_contracts::ContractMode::None,
+        "recoverable" => kodo_contracts::ContractMode::Recoverable,
         _ => {
             eprintln!("warning: unknown contract mode `{value}`, falling back to `runtime`");
             kodo_contracts::ContractMode::Runtime
@@ -259,7 +280,7 @@ fn run_build(
         Ok(m) => m,
         Err(e) => {
             if json_errors {
-                diagnostics::render_parse_error_json(&source, &filename, &e);
+                diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
             } else {
                 diagnostics::render_parse_error(&source, &filename, &e);
             }
@@ -337,10 +358,10 @@ fn run_build(
     }
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
-        for e in &type_errors {
-            if json_errors {
-                diagnostics::render_type_error_json(&source, &filename, e);
-            } else {
+        if json_errors {
+            diagnostics::render_type_errors_json(&source, &filename, &type_errors);
+        } else {
+            for e in &type_errors {
                 diagnostics::render_type_error(&source, &filename, e);
             }
         }
@@ -545,12 +566,28 @@ fn run_build(
     let enum_defs: std::collections::HashMap<String, Vec<(String, Vec<kodo_types::Type>)>> =
         checker.enum_registry().clone();
 
+    // Apply recoverable contract transformation if requested.
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    if contract_mode == kodo_contracts::ContractMode::Recoverable {
+        kodo_mir::apply_recoverable_contracts(&mut all_mir_functions);
+    }
+
     // Code generation
-    let options = kodo_codegen::CodegenOptions::default();
-    let object_bytes = match kodo_codegen::compile_module_with_types(
+    let is_recoverable = contract_mode == kodo_contracts::ContractMode::Recoverable;
+    let options = kodo_codegen::CodegenOptions {
+        recoverable_contracts: is_recoverable,
+        ..kodo_codegen::CodegenOptions::default()
+    };
+    // Build vtable definitions for dynamic dispatch.
+    // For each (concrete_type, trait_name) pair, collect the mangled method names
+    // in trait method declaration order.
+    let vtable_defs = build_vtable_defs(&checker);
+
+    let object_bytes = match kodo_codegen::compile_module_with_vtables(
         &all_mir_functions,
         &struct_defs,
         &enum_defs,
+        &vtable_defs,
         &options,
         Some(&metadata_json),
     ) {
@@ -1827,6 +1864,7 @@ fn substitute_type_expr_ast(
                 .map(|e| substitute_type_expr_ast(e, subst))
                 .collect(),
         ),
+        kodo_ast::TypeExpr::DynTrait(name) => kodo_ast::TypeExpr::DynTrait(name.clone()),
     }
 }
 
@@ -2013,6 +2051,40 @@ fn find_runtime_lib() -> std::result::Result<PathBuf, String> {
         "could not find libkodo_runtime.a — build the workspace first with `cargo build`"
             .to_string(),
     )
+}
+
+/// Builds vtable definitions from the type checker's trait registries.
+///
+/// For each `(concrete_type, trait_name)` pair found in the trait impl set,
+/// produces an ordered list of mangled function names matching the trait's
+/// method declaration order.
+fn build_vtable_defs(
+    checker: &kodo_types::TypeChecker,
+) -> std::collections::HashMap<(String, String), kodo_codegen::VtableDef> {
+    let mut vtable_defs = std::collections::HashMap::new();
+    let trait_impl_set = checker.trait_impl_set();
+    let trait_registry = checker.trait_registry();
+    let method_lookup = checker.method_lookup();
+
+    for (type_name, traits) in trait_impl_set {
+        for trait_name in traits {
+            if let Some(trait_methods) = trait_registry.get(trait_name) {
+                let mut method_names = Vec::with_capacity(trait_methods.len());
+                for (method_name, _, _) in trait_methods {
+                    // Look up the mangled name for this (type, method) pair.
+                    let key = (type_name.clone(), method_name.clone());
+                    if let Some((mangled_name, _, _)) = method_lookup.get(&key) {
+                        method_names.push(mangled_name.clone());
+                    } else {
+                        // Fallback: use a simple mangling scheme.
+                        method_names.push(format!("{type_name}_{method_name}"));
+                    }
+                }
+                vtable_defs.insert((type_name.clone(), trait_name.clone()), method_names);
+            }
+        }
+    }
+    vtable_defs
 }
 
 /// Builds a JSON string with module metadata for embedding in the binary.
@@ -2244,7 +2316,7 @@ fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
     0
 }
 
-fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32 {
+fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str, emit_cert: bool) -> i32 {
     tracing::info!("checking {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -2261,7 +2333,7 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
         Ok(m) => m,
         Err(e) => {
             if json_errors {
-                diagnostics::render_parse_error_json(&source, &filename, &e);
+                diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
             } else {
                 diagnostics::render_parse_error(&source, &filename, &e);
             }
@@ -2320,10 +2392,10 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
     // Type check — collect all errors for multi-error reporting.
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
-        for e in &type_errors {
-            if json_errors {
-                diagnostics::render_type_error_json(&source, &filename, e);
-            } else {
+        if json_errors {
+            diagnostics::render_type_errors_json(&source, &filename, &type_errors);
+        } else {
+            for e in &type_errors {
                 diagnostics::render_type_error(&source, &filename, e);
             }
         }
@@ -2390,6 +2462,44 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str) -> i32
             );
         }
     }
+
+    // Emit compilation certificate if requested (no binary hash since we're only checking).
+    if emit_cert {
+        let cert_path = file.with_extension("ko.cert.json");
+
+        // Read previous certificate if it exists (for chaining).
+        let parent_cert = std::fs::read_to_string(&cert_path).ok().and_then(|json| {
+            serde_json::from_str::<certificate::CompilationCertificate>(&json).ok()
+        });
+
+        let verification = if total_static > 0 || total_runtime > 0 {
+            Some((total_static, total_runtime, 0_usize))
+        } else {
+            None
+        };
+
+        let cert = certificate::CompilationCertificate::from_module(
+            &module,
+            &source,
+            None, // no binary bytes — check only
+            parent_cert.as_ref(),
+            None,
+            verification,
+        );
+        match cert.to_json() {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&cert_path, &json) {
+                    eprintln!("warning: could not write certificate: {e}");
+                } else {
+                    println!("Certificate written to {}", cert_path.display());
+                }
+            }
+            Err(e) => {
+                eprintln!("warning: {e}");
+            }
+        }
+    }
+
     0
 }
 
@@ -2536,7 +2646,7 @@ fn run_fmt(file: &PathBuf, check: bool) -> i32 {
     }
 }
 
-fn run_intent_explain(file: &PathBuf) -> i32 {
+fn run_intent_explain(file: &PathBuf, json: bool) -> i32 {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -2554,20 +2664,80 @@ fn run_intent_explain(file: &PathBuf) -> i32 {
     };
 
     if module.intent_decls.is_empty() {
-        println!("No intents found in module `{}`", module.name);
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "module": module.name,
+                    "intents": [],
+                    "count": 0
+                })
+            );
+        } else {
+            println!("No intents found in module `{}`", module.name);
+        }
         return 0;
     }
 
     let resolver = kodo_resolver::Resolver::with_builtins();
-    for intent in &module.intent_decls {
-        println!("Intent: `{}`", intent.name);
-        println!("{}", "-".repeat(40));
-        match resolver.resolve(intent) {
-            Ok(resolved) => {
-                println!("{}", kodo_resolver::format_resolved_intent(&resolved));
+
+    if json {
+        let mut intent_results = Vec::new();
+        for intent in &module.intent_decls {
+            match resolver.resolve(intent) {
+                Ok(resolved) => {
+                    let functions: Vec<serde_json::Value> = resolved
+                        .generated_functions
+                        .iter()
+                        .map(|f| {
+                            serde_json::json!({
+                                "name": f.name,
+                                "params": f.params.iter().map(|p| {
+                                    serde_json::json!({
+                                        "name": p.name,
+                                        "type": format!("{:?}", p.ty),
+                                    })
+                                }).collect::<Vec<_>>(),
+                                "return_type": format!("{:?}", f.return_type),
+                            })
+                        })
+                        .collect();
+                    intent_results.push(serde_json::json!({
+                        "name": intent.name,
+                        "description": resolved.description,
+                        "generated_functions": functions,
+                        "generated_types": resolved.generated_types,
+                        "generated_code": kodo_resolver::format_resolved_intent(&resolved),
+                    }));
+                }
+                Err(e) => {
+                    intent_results.push(serde_json::json!({
+                        "name": intent.name,
+                        "error": e.to_string(),
+                    }));
+                }
             }
-            Err(e) => {
-                eprintln!("  Error: {e}");
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "module": module.name,
+                "intents": intent_results,
+                "count": intent_results.len(),
+            }))
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+        );
+    } else {
+        for intent in &module.intent_decls {
+            println!("Intent: `{}`", intent.name);
+            println!("{}", "-".repeat(40));
+            match resolver.resolve(intent) {
+                Ok(resolved) => {
+                    println!("{}", kodo_resolver::format_resolved_intent(&resolved));
+                }
+                Err(e) => {
+                    eprintln!("  Error: {e}");
+                }
             }
         }
     }
@@ -2730,7 +2900,7 @@ fn run_confidence_report(file: &PathBuf, json: bool, threshold: f64) -> i32 {
 }
 
 /// Generates a consolidated audit report combining confidence, contracts, and annotations.
-fn run_audit(file: &PathBuf, json: bool, contracts_mode_str: &str) -> i32 {
+fn run_audit(file: &PathBuf, json: bool, contracts_mode_str: &str, policy: Option<&str>) -> i32 {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -2807,12 +2977,45 @@ fn run_audit(file: &PathBuf, json: bool, contracts_mode_str: &str) -> i32 {
         total_failures,
     );
 
+    // Validate policy if specified.
+    let policy_result = policy.map(|p| match audit::parse_policy(p) {
+        Ok(criteria) => audit::validate_policy(&report, &criteria),
+        Err(e) => {
+            eprintln!("policy parse error: {e}");
+            // Return a failed result so we exit with code 1.
+            audit::PolicyResult {
+                passed: false,
+                violations: vec![audit::PolicyViolation {
+                    criterion: "parse".to_string(),
+                    function: String::new(),
+                    expected: "valid policy string".to_string(),
+                    actual: e,
+                }],
+            }
+        }
+    });
+
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report)
-                .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
-        );
+        // When policy is present, wrap both report and policy result.
+        if let Some(ref pr) = policy_result {
+            let combined = serde_json::json!({
+                "report": report,
+                "policy": pr,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&combined).unwrap_or_else(|e| format!(
+                    "{{\"error\": \"json serialization failed: {e}\"}}"
+                ))
+            );
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_else(|e| format!(
+                    "{{\"error\": \"json serialization failed: {e}\"}}"
+                ))
+            );
+        }
     } else {
         println!("Audit Report for module `{}`", report.module);
         println!("{}", "=".repeat(60));
@@ -2848,6 +3051,38 @@ fn run_audit(file: &PathBuf, json: bool, contracts_mode_str: &str) -> i32 {
                 f.requires_count,
                 f.ensures_count,
             );
+        }
+
+        // Print policy results if present.
+        if let Some(ref pr) = policy_result {
+            println!();
+            println!("{}", "=".repeat(60));
+            if pr.passed {
+                println!("Policy: PASSED");
+            } else {
+                println!("Policy: FAILED");
+                println!();
+                for v in &pr.violations {
+                    if v.function.is_empty() {
+                        println!(
+                            "  [{}] expected: {}, actual: {}",
+                            v.criterion, v.expected, v.actual
+                        );
+                    } else {
+                        println!(
+                            "  [{}] function `{}`: expected: {}, actual: {}",
+                            v.criterion, v.function, v.expected, v.actual
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Exit 1 if policy was specified and failed.
+    if let Some(ref pr) = policy_result {
+        if !pr.passed {
+            return 1;
         }
     }
 

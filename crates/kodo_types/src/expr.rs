@@ -34,6 +34,11 @@ impl TypeChecker {
 
             Expr::Ident(name, span) => {
                 self.check_not_moved(name, *span)?;
+                // Record identifier usage for find-references.
+                self.reference_spans
+                    .entry(name.clone())
+                    .or_default()
+                    .push(*span);
                 self.env.lookup(name).cloned().ok_or_else(|| {
                     let similar = self.find_similar_name(name);
                     TypeError::Undefined {
@@ -825,7 +830,7 @@ impl TypeChecker {
         }
 
         // Check for generic function call.
-        if let Expr::Ident(name, _) = callee {
+        if let Expr::Ident(name, ident_span) = callee {
             if let Some(def) = self.generic_functions.get(name).cloned() {
                 if let Some(ref caller) = self.current_function_name.clone() {
                     self.call_graph
@@ -833,6 +838,11 @@ impl TypeChecker {
                         .or_default()
                         .insert(name.clone());
                 }
+                // Record generic function call reference.
+                self.reference_spans
+                    .entry(name.clone())
+                    .or_default()
+                    .push(*ident_span);
                 return self.check_generic_call(name, &def, args, span);
             }
         }
@@ -842,6 +852,7 @@ impl TypeChecker {
 
     /// Tries to resolve a method call. Returns `Some(type)` if successful,
     /// `None` if the object type has no methods.
+    #[allow(clippy::too_many_lines)]
     fn try_check_method_call(
         &mut self,
         object: &Expr,
@@ -851,7 +862,7 @@ impl TypeChecker {
     ) -> crate::Result<Option<Type>> {
         let obj_ty = self.infer_expr(object)?;
         let type_name = match &obj_ty {
-            Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) => n.clone(),
+            Type::Struct(n) | Type::Enum(n) | Type::Generic(n, _) | Type::DynTrait(n) => n.clone(),
             Type::String => "String".to_string(),
             Type::Int => "Int".to_string(),
             Type::Float64 => "Float64".to_string(),
@@ -904,6 +915,55 @@ impl TypeChecker {
             self.method_resolutions.insert(span.start, mangled_name);
             return Ok(Some(ret_type));
         }
+
+        // For dyn Trait types, look up methods from the trait_registry.
+        if let Type::DynTrait(trait_name) = &obj_ty {
+            if let Some(trait_methods) = self.trait_registry.get(trait_name).cloned() {
+                if let Some((_method_name, param_types, ret_type)) = trait_methods
+                    .iter()
+                    .find(|(name, _, _)| name == method)
+                    .cloned()
+                {
+                    // Skip the self parameter for arity checking.
+                    let method_params = if param_types.len() > 1 {
+                        &param_types[1..]
+                    } else {
+                        &[]
+                    };
+                    if method_params.len() != args.len() {
+                        return Err(TypeError::ArityMismatch {
+                            expected: method_params.len(),
+                            found: args.len(),
+                            span,
+                        });
+                    }
+                    for (param_ty, arg) in method_params.iter().zip(args) {
+                        let arg_ty = self.infer_expr(arg)?;
+                        TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
+                    }
+                    // Find the vtable index for this method.
+                    let vtable_index = trait_methods
+                        .iter()
+                        .position(|(name, _, _)| name == method)
+                        .unwrap_or(0);
+                    // Record virtual dispatch resolution: use a special mangled name
+                    // that encodes the trait name and vtable index.
+                    let virtual_name = format!("__dyn_{trait_name}_{method}_{vtable_index}");
+                    self.method_resolutions.insert(span.start, virtual_name);
+                    return Ok(Some(ret_type));
+                }
+            }
+            let similar = self.trait_registry.get(trait_name).and_then(|methods| {
+                find_similar_in(method, methods.iter().map(|(n, _, _)| n.as_str()))
+            });
+            return Err(TypeError::MethodNotFound {
+                method: method.to_string(),
+                type_name: format!("dyn {trait_name}"),
+                span,
+                similar,
+            });
+        }
+
         let similar = find_similar_in(
             method,
             self.method_lookup

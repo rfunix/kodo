@@ -230,6 +230,37 @@ impl TypeChecker {
                 Box::new(Type::Generic("List".to_string(), vec![Type::String])),
             ),
         );
+
+        // String.lines() -> List<String>
+        self.method_lookup.insert(
+            ("String".to_string(), "lines".to_string()),
+            (
+                "String_lines".to_string(),
+                vec![Type::String],
+                Type::Generic("List".to_string(), vec![Type::String]),
+            ),
+        );
+        self.env.insert(
+            "String_lines".to_string(),
+            Type::Function(
+                vec![Type::String],
+                Box::new(Type::Generic("List".to_string(), vec![Type::String])),
+            ),
+        );
+
+        // String.parse_int() -> Int
+        self.method_lookup.insert(
+            ("String".to_string(), "parse_int".to_string()),
+            (
+                "String_parse_int".to_string(),
+                vec![Type::String],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "String_parse_int".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
     }
 
     /// Registers builtin methods for the `Int` type.
@@ -387,6 +418,12 @@ impl TypeChecker {
     /// These are free functions (not methods) available to all Kōdo programs.
     /// At runtime, lists are opaque heap pointers managed by the runtime.
     fn register_list_functions(&mut self) {
+        self.register_list_core_functions();
+        self.register_list_methods();
+    }
+
+    /// Registers core list functions (new, push, get, length, etc.).
+    fn register_list_core_functions(&mut self) {
         self.env.insert(
             "list_new".to_string(),
             Type::Function(
@@ -476,6 +513,72 @@ impl TypeChecker {
             Type::Function(
                 vec![Type::Generic("List".to_string(), vec![Type::Int])],
                 Box::new(Type::Unit),
+            ),
+        );
+    }
+
+    /// Registers list method builtins (slice, sort, join).
+    fn register_list_methods(&mut self) {
+        // list_slice(List<Int>, Int, Int) -> List<Int>
+        self.method_lookup.insert(
+            ("List".to_string(), "slice".to_string()),
+            (
+                "list_slice".to_string(),
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                    Type::Int,
+                ],
+                Type::Generic("List".to_string(), vec![Type::Int]),
+            ),
+        );
+        self.env.insert(
+            "list_slice".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Generic("List".to_string(), vec![Type::Int])),
+            ),
+        );
+        // list_sort(List<Int>) -> ()  (sorts in place)
+        self.method_lookup.insert(
+            ("List".to_string(), "sort".to_string()),
+            (
+                "list_sort".to_string(),
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Type::Unit,
+            ),
+        );
+        self.env.insert(
+            "list_sort".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Box::new(Type::Unit),
+            ),
+        );
+        // list_join(List<String>, String) -> String
+        self.method_lookup.insert(
+            ("List".to_string(), "join".to_string()),
+            (
+                "list_join".to_string(),
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::String]),
+                    Type::String,
+                ],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "list_join".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::String]),
+                    Type::String,
+                ],
+                Box::new(Type::String),
             ),
         );
     }
@@ -883,35 +986,70 @@ impl TypeChecker {
     }
 
     /// Registers builtin functions for inter-thread channel communication.
+    ///
+    /// Channels support three element types: `Int`, `Bool`, and `String`.
+    /// At the type level, `channel_new` returns a `Channel<Int>` by default.
+    /// Typed send/recv functions accept both the opaque `Int` handle and the
+    /// generic `Channel<T>` type for flexibility:
+    ///
+    /// - `channel_send(ch, value: Int)` / `channel_recv(ch) -> Int`
+    /// - `channel_send_bool(ch, value: Bool)` / `channel_recv_bool(ch) -> Bool`
+    /// - `channel_send_string(ch, value: String)` / `channel_recv_string(ch) -> String`
     fn register_channel_functions(&mut self) {
+        let ch_int = Type::Generic("Channel".to_string(), vec![Type::Int]);
+        let ch_bool = Type::Generic("Channel".to_string(), vec![Type::Bool]);
+        let ch_string = Type::Generic("Channel".to_string(), vec![Type::String]);
+
+        // channel_new() -> Channel<Int>  (returns generic channel type)
         self.env.insert(
             "channel_new".to_string(),
-            Type::Function(vec![], Box::new(Type::Int)),
+            Type::Function(vec![], Box::new(ch_int.clone())),
         );
+        // channel_new_bool() -> Channel<Bool>
+        self.env.insert(
+            "channel_new_bool".to_string(),
+            Type::Function(vec![], Box::new(ch_bool.clone())),
+        );
+        // channel_new_string() -> Channel<String>
+        self.env.insert(
+            "channel_new_string".to_string(),
+            Type::Function(vec![], Box::new(ch_string.clone())),
+        );
+
+        // Int channel: channel_send(ch: Channel<Int>, value: Int) -> ()
         self.env.insert(
             "channel_send".to_string(),
-            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Unit)),
+            Type::Function(vec![ch_int.clone(), Type::Int], Box::new(Type::Unit)),
         );
+        // channel_recv(ch: Channel<Int>) -> Int
         self.env.insert(
             "channel_recv".to_string(),
-            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+            Type::Function(vec![ch_int], Box::new(Type::Int)),
         );
+
+        // Bool channel: channel_send_bool(ch: Channel<Bool>, value: Bool) -> ()
         self.env.insert(
             "channel_send_bool".to_string(),
-            Type::Function(vec![Type::Int, Type::Bool], Box::new(Type::Unit)),
+            Type::Function(vec![ch_bool.clone(), Type::Bool], Box::new(Type::Unit)),
         );
+        // channel_recv_bool(ch: Channel<Bool>) -> Bool
         self.env.insert(
             "channel_recv_bool".to_string(),
-            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+            Type::Function(vec![ch_bool], Box::new(Type::Bool)),
         );
+
+        // String channel: channel_send_string(ch: Channel<String>, value: String) -> ()
         self.env.insert(
             "channel_send_string".to_string(),
-            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Unit)),
+            Type::Function(vec![ch_string.clone(), Type::String], Box::new(Type::Unit)),
         );
+        // channel_recv_string(ch: Channel<String>) -> String
         self.env.insert(
             "channel_recv_string".to_string(),
-            Type::Function(vec![Type::Int], Box::new(Type::String)),
+            Type::Function(vec![ch_string], Box::new(Type::String)),
         );
+
+        // channel_free(ch: Int) -> ()  (works on all channel types via opaque handle)
         self.env.insert(
             "channel_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),

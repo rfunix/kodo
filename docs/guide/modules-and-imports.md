@@ -155,6 +155,8 @@ let has: Bool = list_contains(nums, 10)  // true
 | `list_remove(list, index)` | Remove element at index |
 | `list_set(list, index, value)` | Set value at index |
 | `list_slice(list, start, end)` | Get a sub-list from start to end (exclusive) |
+| `list_sort(list)` | Sort the list in ascending order (in place) |
+| `list_join(list, separator)` | Join list elements into a `String` with separator |
 
 ### Map\<K, V\>
 
@@ -193,12 +195,33 @@ let len: Int = map_string_len(config)                      // 1
 | `map_length(m)` | `map_string_len(m)` | Number of entries |
 | `map_remove(m, k)` | `map_string_remove(m, k)` | Remove a key-value pair |
 
-### String.split()
+### String Methods
+
+#### `split(separator)`
 
 Splits a string by a separator, returning a `List<String>`:
 
 ```rust
 let parts: List<String> = "a,b,c".split(",")
+```
+
+#### `lines()`
+
+Splits a string by newline characters, returning a `List<String>`:
+
+```rust
+let text: String = "line1\nline2\nline3"
+let all_lines: List<String> = text.lines()
+let count: Int = list_length(all_lines)  // 3
+```
+
+#### `parse_int()`
+
+Parses a string as an integer, returning an `Option<Int>`:
+
+```rust
+let valid: Option<Int> = "42".parse_int()     // Option::Some(42)
+let bad: Option<Int> = "hello".parse_int()     // Option::None
 ```
 
 ## Qualified Imports with `::`

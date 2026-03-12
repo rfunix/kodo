@@ -41,13 +41,18 @@ pub(crate) fn is_unit(ty: &Type) -> bool {
     matches!(ty, Type::Unit)
 }
 
-/// Returns `true` if the type is a struct, enum, or String (composite types passed by pointer).
+/// Returns `true` if the type is a struct, enum, String, or dyn Trait (composite types passed by pointer).
 ///
 /// `Type::String` is treated as composite because at the ABI level it is a
 /// 16-byte `(ptr: i64, len: i64)` pair — the same layout used by runtime
 /// builtins like `kodo_println`.
+///
+/// `Type::DynTrait` is a 16-byte fat pointer `(data_ptr: i64, vtable_ptr: i64)`.
 pub(crate) fn is_composite(ty: &Type) -> bool {
-    matches!(ty, Type::Struct(_) | Type::Enum(_) | Type::String)
+    matches!(
+        ty,
+        Type::Struct(_) | Type::Enum(_) | Type::String | Type::DynTrait(_)
+    )
 }
 
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
@@ -85,10 +90,12 @@ pub(crate) fn build_signature(mir_fn: &MirFunction, call_conv: CallConv) -> Sign
 }
 
 /// Inner implementation for module compilation.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn compile_module_inner(
     mir_functions: &[MirFunction],
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    vtable_defs: &HashMap<(String, String), crate::VtableDef>,
     _options: &CodegenOptions,
     metadata_json: Option<&str>,
 ) -> Result<Vec<u8>> {
@@ -142,6 +149,42 @@ pub(crate) fn compile_module_inner(
         .iter()
         .map(|(name, variants)| (name.clone(), compute_enum_layout(variants)))
         .collect();
+
+    // Emit vtable data sections for dynamic dispatch.
+    // Each vtable is a contiguous array of function pointers, one per trait method.
+    for ((concrete_type, trait_name), method_names) in vtable_defs {
+        let vtable_sym = format!("__vtable_{concrete_type}_{trait_name}");
+
+        // Collect FuncIds for each method in trait declaration order.
+        let mut fn_refs = Vec::with_capacity(method_names.len());
+        for method_name in method_names {
+            let fid = func_ids.get(method_name).ok_or_else(|| {
+                CodegenError::ModuleError(format!(
+                    "vtable method `{method_name}` not found for ({concrete_type}, {trait_name})"
+                ))
+            })?;
+            fn_refs.push(*fid);
+        }
+
+        // Declare the vtable data symbol.
+        let data_id = object_module
+            .declare_data(&vtable_sym, Linkage::Local, false, false)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+        let mut desc = DataDescription::new();
+        // Placeholder bytes: 8 bytes per function pointer slot.
+        let vtable_size = method_names.len() * 8;
+        desc.define(vec![0u8; vtable_size].into_boxed_slice());
+        // Write function references into the vtable data.
+        for (slot_idx, fid) in fn_refs.iter().enumerate() {
+            let func_ref = object_module.declare_func_in_data(*fid, &mut desc);
+            #[allow(clippy::cast_possible_truncation)]
+            let offset = (slot_idx * 8) as u32;
+            desc.write_function_addr(offset, func_ref);
+        }
+        object_module
+            .define_data(data_id, &desc)
+            .map_err(|e| CodegenError::ModuleError(e.to_string()))?;
+    }
 
     // Compile each function.
     for mir_fn in mir_functions {

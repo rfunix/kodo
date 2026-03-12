@@ -528,6 +528,77 @@ pub unsafe extern "C" fn kodo_string_split(
     list
 }
 
+/// Splits a string by newline characters and returns a `List<String>`.
+///
+/// Each resulting line is stored as a `(ptr, len)` pair on the heap,
+/// following the same format as `kodo_string_split`. Empty trailing
+/// lines are preserved.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_lines(ptr: *const u8, len: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let byte_len = len as usize;
+    // SAFETY: Caller guarantees ptr/len form a valid byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, byte_len) };
+
+    let list = crate::collections::kodo_list_new();
+
+    let mut start = 0;
+    while start <= byte_len {
+        // Find next newline.
+        let remaining = &bytes[start..];
+        let found = remaining.iter().position(|&b| b == b'\n');
+
+        if let Some(pos) = found {
+            // SAFETY: start + pos <= byte_len, so the pointer is within bounds.
+            let sub_ptr = unsafe { ptr.add(start) };
+            let sub_len = pos;
+            #[allow(clippy::cast_possible_wrap)]
+            let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            // SAFETY: intentionally leaks so the pair can be stored in the list.
+            let pair_ptr = Box::into_raw(pair) as i64;
+            // SAFETY: list is valid.
+            unsafe { crate::collections::kodo_list_push(list, pair_ptr) };
+            start += pos + 1;
+        } else {
+            // Last segment.
+            // SAFETY: start <= byte_len, so the pointer is within bounds.
+            let sub_ptr = unsafe { ptr.add(start) };
+            let sub_len = byte_len - start;
+            #[allow(clippy::cast_possible_wrap)]
+            let pair = Box::new([sub_ptr as i64, sub_len as i64]);
+            // SAFETY: intentionally leaks so the pair can be stored in the list.
+            let pair_ptr = Box::into_raw(pair) as i64;
+            // SAFETY: list is valid.
+            unsafe { crate::collections::kodo_list_push(list, pair_ptr) };
+            break;
+        }
+    }
+
+    list
+}
+
+/// Parses a string as a decimal integer.
+///
+/// Returns the parsed `i64` value, or 0 if the string is not a valid integer.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_parse_int(ptr: *const u8, len: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let byte_len = len as usize;
+    // SAFETY: Caller guarantees ptr/len form a valid byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, byte_len) };
+    let s = std::str::from_utf8(bytes).unwrap_or("");
+    let trimmed = s.trim();
+    trimmed.parse::<i64>().unwrap_or(0)
+}
+
 /// Prints a string followed by a newline to stdout.
 ///
 /// # Safety
@@ -602,6 +673,24 @@ pub unsafe extern "C" fn kodo_contract_fail(ptr: *const u8, len: usize) {
     let msg = std::str::from_utf8(bytes).unwrap_or("<invalid utf-8>");
     eprintln!("contract violation: {msg}");
     std::process::abort();
+}
+
+/// Contract failure handler for recoverable mode — logs warning but continues execution.
+///
+/// Unlike [`kodo_contract_fail`], this function does **not** abort the process.
+/// It prints a warning to stderr and returns normally, allowing execution to
+/// continue with a default return value. This is useful for production services
+/// that should not crash on contract violations.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_contract_fail_recoverable(ptr: *const u8, len: usize) {
+    // SAFETY: Caller guarantees ptr/len form a valid UTF-8 slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let msg = std::str::from_utf8(bytes).unwrap_or("<invalid utf-8>");
+    eprintln!("WARNING: contract violation (recoverable): {msg}");
 }
 
 // ---------------------------------------------------------------------------
@@ -989,5 +1078,87 @@ mod tests {
         assert_eq!(unsafe { kodo_string_chars_advance(iter) }, 0);
 
         unsafe { kodo_string_chars_free(iter) };
+    }
+
+    #[test]
+    fn string_parse_int_valid() {
+        let s = "42";
+        #[allow(clippy::cast_possible_wrap)]
+        let result = unsafe { kodo_string_parse_int(s.as_ptr(), s.len() as i64) };
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn string_parse_int_negative() {
+        let s = "-17";
+        #[allow(clippy::cast_possible_wrap)]
+        let result = unsafe { kodo_string_parse_int(s.as_ptr(), s.len() as i64) };
+        assert_eq!(result, -17);
+    }
+
+    #[test]
+    fn string_parse_int_invalid() {
+        let s = "not_a_number";
+        #[allow(clippy::cast_possible_wrap)]
+        let result = unsafe { kodo_string_parse_int(s.as_ptr(), s.len() as i64) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn string_parse_int_with_whitespace() {
+        let s = "  123  ";
+        #[allow(clippy::cast_possible_wrap)]
+        let result = unsafe { kodo_string_parse_int(s.as_ptr(), s.len() as i64) };
+        assert_eq!(result, 123);
+    }
+
+    #[test]
+    fn string_parse_int_empty() {
+        let s = "";
+        #[allow(clippy::cast_possible_wrap)]
+        let result = unsafe { kodo_string_parse_int(s.as_ptr(), s.len() as i64) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn string_lines_basic() {
+        let s = "hello\nworld\nfoo";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        assert_ne!(list, 0);
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+    }
+
+    #[test]
+    fn string_lines_trailing_newline() {
+        let s = "a\nb\n";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        // "a\nb\n" splits into ["a", "b", ""]
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+    }
+
+    #[test]
+    fn string_lines_empty() {
+        let s = "";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        // Empty string yields one empty line.
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+    }
+
+    #[test]
+    fn contract_fail_recoverable_does_not_abort() {
+        let msg = "test contract violation";
+        // This should NOT abort — it just prints a warning and returns.
+        unsafe { kodo_contract_fail_recoverable(msg.as_ptr(), msg.len()) };
+        // If we reach here, the test passes (function returned normally).
+    }
+
+    #[test]
+    fn contract_fail_recoverable_invalid_utf8() {
+        let bytes: [u8; 2] = [0xFF, 0xFE];
+        // Should handle invalid UTF-8 gracefully without aborting.
+        unsafe { kodo_contract_fail_recoverable(bytes.as_ptr(), bytes.len()) };
     }
 }

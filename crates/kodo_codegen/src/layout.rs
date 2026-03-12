@@ -14,6 +14,13 @@ pub(crate) const STRING_PTR_OFFSET: i32 = 0;
 /// Byte offset of the length field inside a String stack slot.
 pub(crate) const STRING_LEN_OFFSET: i32 = 8;
 
+/// Size in bytes of a dyn Trait fat pointer: `(data_ptr: i64, vtable_ptr: i64)`.
+pub(crate) const DYN_TRAIT_LAYOUT_SIZE: u32 = 16;
+/// Byte offset of the data pointer inside a dyn Trait fat pointer.
+pub(crate) const DYN_TRAIT_DATA_OFFSET: i32 = 0;
+/// Byte offset of the vtable pointer inside a dyn Trait fat pointer.
+pub(crate) const DYN_TRAIT_VTABLE_OFFSET: i32 = 8;
+
 /// Layout information for a struct type.
 pub(crate) struct StructLayout {
     /// Total size in bytes.

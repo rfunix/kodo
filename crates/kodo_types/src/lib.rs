@@ -95,6 +95,11 @@ pub enum Type {
     Function(Vec<Type>, Box<Type>),
     /// A tuple type, e.g. `(Int, String)`.
     Tuple(Vec<Type>),
+    /// A dynamic trait object type (e.g., `dyn Drawable`).
+    ///
+    /// At runtime, a `dyn Trait` value is a fat pointer: `(data_ptr: i64, vtable_ptr: i64)`.
+    /// Method calls on `dyn Trait` values are dispatched through the vtable.
+    DynTrait(std::string::String),
     /// An unresolved type (used during type checking).
     Unknown,
 }
@@ -198,6 +203,7 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, ")")
             }
+            Self::DynTrait(name) => write!(f, "dyn {name}"),
             Self::Unknown => write!(f, "?"),
         }
     }

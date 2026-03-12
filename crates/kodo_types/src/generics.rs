@@ -174,6 +174,7 @@ impl TypeChecker {
                     .collect();
                 Ok(Type::Tuple(resolved?))
             }
+            kodo_ast::TypeExpr::DynTrait(name) => Ok(Type::DynTrait(name.clone())),
         }
     }
 

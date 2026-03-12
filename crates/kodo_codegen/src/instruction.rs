@@ -9,7 +9,7 @@ use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::{AbiParam, InstBuilder, MemFlags, Signature};
 use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::FunctionBuilder;
-use cranelift_module::{FuncId, Module};
+use cranelift_module::{FuncId, Linkage, Module};
 use cranelift_object::ObjectModule;
 use kodo_mir::{Instruction, LocalId, Value};
 use kodo_types::Type;
@@ -29,6 +29,7 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
         "println"
             | "print"
             | "kodo_contract_fail"
+            | "kodo_contract_fail_recoverable"
             | "String_length"
             | "String_contains"
             | "String_starts_with"
@@ -38,10 +39,13 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "String_to_lower"
             | "String_substring"
             | "String_split"
+            | "String_lines"
+            | "String_parse_int"
             | "String_concat"
             | "String_index_of"
             | "String_replace"
             | "String_chars"
+            | "list_join"
             | "Int_to_string"
             | "Float64_to_string"
             | "file_exists"
@@ -80,12 +84,16 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "time_format"
             | "env_get"
             | "channel_recv_string"
+            | "list_join"
     )
 }
 
 /// Returns true if the builtin allocates a new list on the heap.
 pub(crate) fn is_list_allocating_builtin(callee: &str) -> bool {
-    matches!(callee, "list_new" | "String_split")
+    matches!(
+        callee,
+        "list_new" | "String_split" | "String_lines" | "list_slice"
+    )
 }
 
 /// Returns true if the builtin allocates a new map on the heap.
@@ -168,6 +176,27 @@ pub(crate) fn translate_instruction(
             var_map,
             struct_layouts,
         ),
+        Instruction::VirtualCall {
+            dest,
+            object,
+            vtable_index,
+            args,
+            return_type,
+            param_types,
+        } => translate_virtual_call(
+            *dest,
+            *object,
+            *vtable_index,
+            args,
+            return_type,
+            param_types,
+            builder,
+            module,
+            func_ids,
+            builtins,
+            var_map,
+            struct_layouts,
+        ),
     }
 }
 
@@ -200,6 +229,27 @@ fn translate_assign(
         if translate_string_const_assign(local_id, s, builder, module, var_map)? {
             return Ok(());
         }
+    }
+
+    // Handle MakeDynTrait: construct a fat pointer in a stack slot.
+    if let Value::MakeDynTrait {
+        value: inner_value,
+        concrete_type,
+        trait_name,
+    } = value
+    {
+        return translate_make_dyn_trait(
+            local_id,
+            inner_value,
+            concrete_type,
+            trait_name,
+            builder,
+            module,
+            func_ids,
+            builtins,
+            var_map,
+            struct_layouts,
+        );
     }
 
     // Dispatch to specialized handlers based on value type.
@@ -1338,4 +1388,185 @@ fn emit_file_io_call(
         var_map.def_var_with_cast(dest, discriminant, builder)?;
     }
     Ok(true)
+}
+
+/// Translates `MakeDynTrait`: constructs a fat pointer `(data_ptr, vtable_ptr)` in a stack slot.
+///
+/// The data pointer is the address of the concrete value (a pointer to its stack slot),
+/// and the vtable pointer is the address of the vtable for the `(concrete_type, trait)` pair.
+#[allow(clippy::too_many_arguments)]
+fn translate_make_dyn_trait(
+    dest: LocalId,
+    inner_value: &Value,
+    concrete_type: &str,
+    trait_name: &str,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    func_ids: &HashMap<String, FuncId>,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &mut VarMap,
+    struct_layouts: &HashMap<String, StructLayout>,
+) -> Result<()> {
+    use crate::layout::{DYN_TRAIT_DATA_OFFSET, DYN_TRAIT_LAYOUT_SIZE, DYN_TRAIT_VTABLE_OFFSET};
+
+    // Get the data pointer: if the inner value is a local with a stack slot,
+    // use the stack slot address. Otherwise, translate as a scalar.
+    let data_ptr = match inner_value {
+        Value::Local(id) => {
+            if let Some((slot, _)) = var_map.stack_slots.get(id) {
+                builder.ins().stack_addr(types::I64, *slot, 0)
+            } else {
+                let var = var_map.get(*id)?;
+                builder.use_var(var)
+            }
+        }
+        _ => translate_value(
+            inner_value,
+            builder,
+            module,
+            func_ids,
+            builtins,
+            var_map,
+            struct_layouts,
+        )?,
+    };
+
+    // Look up or create the vtable data symbol for (concrete_type, trait_name).
+    let vtable_name = format!("__vtable_{concrete_type}_{trait_name}");
+    let vtable_ptr = if let Ok(vtable_data_id) =
+        module.declare_data(&vtable_name, Linkage::Local, false, false)
+    {
+        let gv = module.declare_data_in_func(vtable_data_id, builder.func);
+        builder.ins().symbol_value(types::I64, gv)
+    } else {
+        // Vtable not found — use a null pointer (graceful fallback).
+        builder.ins().iconst(types::I64, 0)
+    };
+
+    // Create or reuse the stack slot for the fat pointer.
+    if let Some((slot, _)) = var_map.stack_slots.get(&dest) {
+        // Store data_ptr and vtable_ptr into the existing stack slot.
+        builder
+            .ins()
+            .stack_store(data_ptr, *slot, DYN_TRAIT_DATA_OFFSET);
+        builder
+            .ins()
+            .stack_store(vtable_ptr, *slot, DYN_TRAIT_VTABLE_OFFSET);
+        let addr = builder.ins().stack_addr(types::I64, *slot, 0);
+        let var = var_map.get(dest)?;
+        builder.def_var(var, addr);
+    } else {
+        // Create a new stack slot for the fat pointer.
+        let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            DYN_TRAIT_LAYOUT_SIZE,
+            0,
+        ));
+        builder
+            .ins()
+            .stack_store(data_ptr, slot, DYN_TRAIT_DATA_OFFSET);
+        builder
+            .ins()
+            .stack_store(vtable_ptr, slot, DYN_TRAIT_VTABLE_OFFSET);
+        var_map
+            .stack_slots
+            .insert(dest, (slot, "_DynTrait".to_string()));
+        let addr = builder.ins().stack_addr(types::I64, slot, 0);
+        let var = var_map.get(dest)?;
+        builder.def_var(var, addr);
+    }
+    Ok(())
+}
+
+/// Translates a `VirtualCall` instruction (dynamic dispatch through vtable).
+///
+/// The object is a fat pointer stored in a stack slot: `[data_ptr, vtable_ptr]`.
+/// We load the vtable pointer, index into it to get the function pointer,
+/// then perform an indirect call with the data pointer as the first argument (self).
+#[allow(clippy::too_many_arguments)]
+fn translate_virtual_call(
+    dest: LocalId,
+    object: LocalId,
+    vtable_index: u32,
+    args: &[Value],
+    return_type: &Type,
+    param_types: &[Type],
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    func_ids: &HashMap<String, FuncId>,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+    struct_layouts: &HashMap<String, StructLayout>,
+) -> Result<()> {
+    use crate::layout::{DYN_TRAIT_DATA_OFFSET, DYN_TRAIT_VTABLE_OFFSET};
+
+    // Load data_ptr and vtable_ptr from the fat pointer stack slot.
+    let (data_ptr, vtable_ptr) = if let Some((slot, _)) = var_map.stack_slots.get(&object) {
+        let data = builder
+            .ins()
+            .stack_load(types::I64, *slot, DYN_TRAIT_DATA_OFFSET);
+        let vtable = builder
+            .ins()
+            .stack_load(types::I64, *slot, DYN_TRAIT_VTABLE_OFFSET);
+        (data, vtable)
+    } else {
+        // Fallback: if the object is a scalar variable, treat it as the data pointer
+        // and assume vtable is zero (this shouldn't happen in well-formed MIR).
+        let var = var_map.get(object)?;
+        let val = builder.use_var(var);
+        let zero = builder.ins().iconst(types::I64, 0);
+        (val, zero)
+    };
+
+    // Index into the vtable to get the function pointer.
+    // vtable layout: [fn_ptr_0, fn_ptr_1, ...]
+    // Each vtable slot is 8 bytes (one function pointer).
+    // vtable_index is bounded by the number of trait methods, so this won't overflow.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let fn_ptr_offset = (i64::from(vtable_index) * 8) as i32;
+    let fn_ptr = builder
+        .ins()
+        .load(types::I64, MemFlags::trusted(), vtable_ptr, fn_ptr_offset);
+
+    // Build the signature: first param is data_ptr (self), then the method args.
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(types::I64)); // self (data_ptr)
+    for pt in param_types {
+        sig.params.push(AbiParam::new(cranelift_type(pt)));
+    }
+    if !is_unit(return_type) {
+        sig.returns.push(AbiParam::new(cranelift_type(return_type)));
+    }
+    let sig_ref = builder.import_signature(sig);
+
+    // Build argument list: data_ptr first, then the user-provided args.
+    let mut arg_vals = Vec::with_capacity(1 + args.len());
+    arg_vals.push(data_ptr);
+    for arg in args {
+        arg_vals.push(translate_value(
+            arg,
+            builder,
+            module,
+            func_ids,
+            builtins,
+            var_map,
+            struct_layouts,
+        )?);
+    }
+
+    let call = builder.ins().call_indirect(sig_ref, fn_ptr, &arg_vals);
+    let var = var_map.get(dest)?;
+    if is_unit(return_type) {
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.def_var(var, zero);
+    } else {
+        let results = builder.inst_results(call);
+        if results.is_empty() {
+            let zero = builder.ins().iconst(types::I64, 0);
+            builder.def_var(var, zero);
+        } else {
+            builder.def_var(var, results[0]);
+        }
+    }
+    Ok(())
 }

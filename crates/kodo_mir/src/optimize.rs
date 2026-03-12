@@ -282,6 +282,29 @@ fn remap_instruction(
         }
         Instruction::IncRef(id) => Instruction::IncRef(remap_local_id(*id, local_remap)),
         Instruction::DecRef(id) => Instruction::DecRef(remap_local_id(*id, local_remap)),
+        Instruction::VirtualCall {
+            dest,
+            object,
+            vtable_index,
+            args,
+            return_type,
+            param_types,
+        } => {
+            let new_dest = remap_local_id(*dest, local_remap);
+            let new_object = remap_local_id(*object, local_remap);
+            let new_args: Vec<Value> = args
+                .iter()
+                .map(|a| remap_value(a, param_map, local_remap))
+                .collect();
+            Instruction::VirtualCall {
+                dest: new_dest,
+                object: new_object,
+                vtable_index: *vtable_index,
+                args: new_args,
+                return_type: return_type.clone(),
+                param_types: param_types.clone(),
+            }
+        }
     }
 }
 
@@ -361,6 +384,15 @@ fn remap_value(
         | Value::StringConst(_)
         | Value::Unit
         | Value::FuncRef(_) => value.clone(),
+        Value::MakeDynTrait {
+            value: inner,
+            concrete_type,
+            trait_name,
+        } => Value::MakeDynTrait {
+            value: Box::new(remap_value(inner, param_map, local_remap)),
+            concrete_type: concrete_type.clone(),
+            trait_name: trait_name.clone(),
+        },
     }
 }
 
@@ -385,7 +417,7 @@ fn fold_block(block: &mut BasicBlock) {
             Instruction::Assign(_, value) => {
                 *value = fold_value(value.clone());
             }
-            Instruction::Call { args, .. } => {
+            Instruction::Call { args, .. } | Instruction::VirtualCall { args, .. } => {
                 for arg in args.iter_mut() {
                     *arg = fold_value(arg.clone());
                 }
@@ -525,6 +557,7 @@ fn dead_code_eliminate(func: &mut MirFunction) {
             Instruction::Assign(local_id, _) => used.contains(local_id),
             Instruction::Call { .. }
             | Instruction::IndirectCall { .. }
+            | Instruction::VirtualCall { .. }
             | Instruction::IncRef(_)
             | Instruction::DecRef(_) => true,
         });
@@ -545,6 +578,12 @@ fn collect_used_locals(func: &MirFunction) -> HashSet<LocalId> {
                 }
                 Instruction::IndirectCall { callee, args, .. } => {
                     collect_value_locals(callee, &mut used);
+                    for arg in args {
+                        collect_value_locals(arg, &mut used);
+                    }
+                }
+                Instruction::VirtualCall { object, args, .. } => {
+                    used.insert(*object);
                     for arg in args {
                         collect_value_locals(arg, &mut used);
                     }
@@ -577,7 +616,8 @@ fn collect_value_locals(value: &Value, used: &mut HashSet<LocalId>) {
         Value::Not(inner)
         | Value::Neg(inner)
         | Value::EnumDiscriminant(inner)
-        | Value::EnumPayload { value: inner, .. } => {
+        | Value::EnumPayload { value: inner, .. }
+        | Value::MakeDynTrait { value: inner, .. } => {
             collect_value_locals(inner, used);
         }
         Value::FieldGet { object, .. } => {
@@ -656,7 +696,7 @@ fn copy_propagate(func: &mut MirFunction) {
         for instr in &mut block.instructions {
             match instr {
                 Instruction::Assign(_, value) => substitute_value(value, &resolved),
-                Instruction::Call { args, .. } => {
+                Instruction::Call { args, .. } | Instruction::VirtualCall { args, .. } => {
                     for arg in args.iter_mut() {
                         substitute_value(arg, &resolved);
                     }
@@ -694,7 +734,8 @@ fn substitute_value(value: &mut Value, copies: &HashMap<LocalId, LocalId>) {
         Value::Not(inner)
         | Value::Neg(inner)
         | Value::EnumDiscriminant(inner)
-        | Value::EnumPayload { value: inner, .. } => {
+        | Value::EnumPayload { value: inner, .. }
+        | Value::MakeDynTrait { value: inner, .. } => {
             substitute_value(inner, copies);
         }
         Value::FieldGet { object, .. } => {

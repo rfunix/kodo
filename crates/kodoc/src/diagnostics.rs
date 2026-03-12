@@ -3,9 +3,10 @@
 //! Uses [`ariadne`] to render type errors and parse errors with coloured
 //! source spans, providing a high-quality developer experience.
 //!
-//! The unified [`render`] and [`render_json`] functions accept any type
+//! The unified [`render`] and [`render_json_envelope`] functions accept any type
 //! implementing [`kodo_ast::Diagnostic`], enabling consistent rendering
-//! across all compiler phases.
+//! across all compiler phases. The envelope format collects all errors into
+//! a single JSON object with `{"errors": [...], "count": N}` for easy agent parsing.
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use kodo_ast::Diagnostic;
@@ -67,47 +68,6 @@ pub fn render(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
     }
 }
 
-/// Renders any diagnostic as structured JSON to stdout.
-///
-/// Accepts any type implementing [`kodo_ast::Diagnostic`] and produces
-/// a single-error JSON output suitable for consumption by AI agents.
-pub fn render_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
-    let fix_patch = diagnostic.fix_patch().map(|p| JsonFixPatch {
-        description: p.description,
-        file: p.file,
-        start_offset: p.start_offset,
-        end_offset: p.end_offset,
-        replacement: p.replacement,
-    });
-    let json_diag = JsonDiagnostic {
-        code: diagnostic.code(),
-        severity: match diagnostic.severity() {
-            kodo_ast::Severity::Error => "error",
-            kodo_ast::Severity::Warning => "warning",
-            kodo_ast::Severity::Note => "note",
-        },
-        message: diagnostic.message(),
-        span: diagnostic
-            .span()
-            .map(|s| make_json_span(source, filename, s)),
-        suggestion: diagnostic.suggestion(),
-        fixability: diagnostic.fixability(),
-        fix_patch,
-        see_also: diagnostic.see_also(),
-    };
-    let output = JsonOutput {
-        errors: vec![json_diag],
-        warnings: vec![],
-        status: "failed".to_string(),
-        meta: None,
-    };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output)
-            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
-    );
-}
-
 /// Renders a [`kodo_types::TypeError`] with source spans using ariadne.
 ///
 /// Falls back to plain `eprintln` if the error has no span.
@@ -159,12 +119,22 @@ struct JsonDiagnostic {
     see_also: Option<String>,
 }
 
-/// The top-level JSON diagnostics output.
+/// The top-level JSON diagnostics output with error count.
+///
+/// This is the envelope format used when collecting multiple errors into
+/// a single JSON output, providing agents with a parseable array of all
+/// errors and a total count.
 #[derive(Serialize)]
-pub struct JsonOutput {
+pub struct JsonOutputEnvelope {
+    /// All error-level diagnostics.
     errors: Vec<JsonDiagnostic>,
+    /// All warning-level diagnostics.
     warnings: Vec<JsonDiagnostic>,
+    /// Overall status: `"ok"` or `"failed"`.
     status: String,
+    /// Total number of diagnostics emitted.
+    count: usize,
+    /// Optional module metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     meta: Option<JsonMeta>,
 }
@@ -211,18 +181,84 @@ fn make_json_span(source: &str, filename: &str, span: kodo_ast::Span) -> JsonSpa
     }
 }
 
-/// Renders a [`kodo_parser::ParseError`] as JSON to stdout.
+/// Converts a [`Diagnostic`] into a [`JsonDiagnostic`] without printing.
 ///
-/// Delegates to the unified [`render_json`] function.
-pub fn render_parse_error_json(source: &str, filename: &str, error: &kodo_parser::ParseError) {
-    render_json(source, filename, error);
+/// This is used by [`render_json_envelope`] to collect multiple diagnostics
+/// into a single JSON output envelope.
+fn diagnostic_to_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) -> JsonDiagnostic {
+    let fix_patch = diagnostic.fix_patch().map(|p| JsonFixPatch {
+        description: p.description,
+        file: p.file,
+        start_offset: p.start_offset,
+        end_offset: p.end_offset,
+        replacement: p.replacement,
+    });
+    JsonDiagnostic {
+        code: diagnostic.code(),
+        severity: match diagnostic.severity() {
+            kodo_ast::Severity::Error => "error",
+            kodo_ast::Severity::Warning => "warning",
+            kodo_ast::Severity::Note => "note",
+        },
+        message: diagnostic.message(),
+        span: diagnostic
+            .span()
+            .map(|s| make_json_span(source, filename, s)),
+        suggestion: diagnostic.suggestion(),
+        fixability: diagnostic.fixability(),
+        fix_patch,
+        see_also: diagnostic.see_also(),
+    }
 }
 
-/// Renders a [`kodo_types::TypeError`] as JSON to stdout.
+/// Renders multiple diagnostics as a single JSON envelope to stdout.
 ///
-/// Delegates to the unified [`render_json`] function.
-pub fn render_type_error_json(source: &str, filename: &str, error: &kodo_types::TypeError) {
-    render_json(source, filename, error);
+/// Agents need all errors in a single JSON object rather than N separate
+/// objects, so this function collects all diagnostics into the
+/// `{"errors": [...], "warnings": [], "status": "failed", "count": N}` format.
+pub fn render_json_envelope(source: &str, filename: &str, diagnostics: &[&dyn Diagnostic]) {
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    for diag in diagnostics {
+        let json_diag = diagnostic_to_json(source, filename, *diag);
+        match diag.severity() {
+            kodo_ast::Severity::Warning => warnings.push(json_diag),
+            _ => errors.push(json_diag),
+        }
+    }
+    let status = if errors.is_empty() { "ok" } else { "failed" };
+    let output = JsonOutputEnvelope {
+        errors,
+        warnings,
+        status: status.to_string(),
+        count: diagnostics.len(),
+        meta: None,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output)
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+    );
+}
+
+/// Renders multiple type errors as a single JSON envelope to stdout.
+///
+/// Convenience wrapper around [`render_json_envelope`] for type errors.
+pub fn render_type_errors_json(source: &str, filename: &str, errors: &[kodo_types::TypeError]) {
+    let diagnostics: Vec<&dyn Diagnostic> = errors.iter().map(|e| e as &dyn Diagnostic).collect();
+    render_json_envelope(source, filename, &diagnostics);
+}
+
+/// Renders a parse error as a single JSON envelope to stdout.
+///
+/// Convenience wrapper around [`render_json_envelope`] for a parse error.
+pub fn render_parse_error_json_envelope(
+    source: &str,
+    filename: &str,
+    error: &kodo_parser::ParseError,
+) {
+    let diagnostics: Vec<&dyn Diagnostic> = vec![error as &dyn Diagnostic];
+    render_json_envelope(source, filename, &diagnostics);
 }
 
 /// Renders a success JSON output to stdout.
@@ -244,10 +280,11 @@ pub fn render_success_json(module: &kodo_ast::Module) {
             version,
         }
     });
-    let output = JsonOutput {
+    let output = JsonOutputEnvelope {
         errors: vec![],
         warnings: vec![],
         status: "ok".to_string(),
+        count: 0,
         meta,
     };
     println!(

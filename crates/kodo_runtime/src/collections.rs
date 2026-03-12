@@ -265,6 +265,114 @@ pub unsafe extern "C" fn kodo_list_reverse(list_ptr: i64) {
     }
 }
 
+/// Returns a new list containing elements from `start` (inclusive) to `end` (exclusive).
+///
+/// Indices are clamped to the valid range `[0, len]`. If `start >= end` after
+/// clamping, an empty list is returned.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_slice(list_ptr: i64, start: i64, end: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let start_idx = (start.max(0) as usize).min(list.len);
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let end_idx = (end.max(0) as usize).min(list.len);
+    let actual_end = end_idx.max(start_idx);
+
+    let new_list = kodo_list_new();
+    for i in start_idx..actual_end {
+        // SAFETY: i < list.len, data is valid.
+        let val = unsafe { *list.data.add(i) };
+        // SAFETY: new_list is valid, just created above.
+        unsafe { kodo_list_push(new_list, val) };
+    }
+    new_list
+}
+
+/// Sorts the elements of a list of `Int` values in ascending order (in place).
+///
+/// Uses the standard library's sort algorithm on the underlying i64 array.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_sort(list_ptr: i64) {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len <= 1 || list.data.is_null() {
+        return;
+    }
+    // SAFETY: list.data points to list.len valid i64 elements.
+    let slice = unsafe { std::slice::from_raw_parts_mut(list.data, list.len) };
+    slice.sort_unstable();
+}
+
+/// Joins a `List<String>` into a single string with the given separator.
+///
+/// Each element in the list is an opaque pointer to a heap-allocated `[i64; 2]`
+/// pair `(ptr, len)` representing a string. This follows the same storage format
+/// as `kodo_string_split`.
+///
+/// Returns a pointer to a heap-allocated `[i64; 2]` pair `(ptr, len)` for the
+/// resulting joined string (same format as string split elements).
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `sep_ptr` must point to `sep_len` valid bytes.
+/// Each element in the list must be a valid pointer to a `[i64; 2]` pair.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_join(
+    list_ptr: i64,
+    sep_ptr: *const u8,
+    sep_len: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let separator_len = sep_len as usize;
+    // SAFETY: caller guarantees sep_ptr points to sep_len valid bytes.
+    let separator = unsafe { std::slice::from_raw_parts(sep_ptr, separator_len) };
+
+    let mut result = Vec::new();
+
+    for i in 0..list.len {
+        if i > 0 {
+            result.extend_from_slice(separator);
+        }
+        // SAFETY: i < list.len, data[i] is a valid pointer to [i64; 2].
+        let pair_ptr = unsafe { *list.data.add(i) } as *const i64;
+        if !pair_ptr.is_null() {
+            // SAFETY: pair_ptr points to a valid [i64; 2] pair.
+            let str_ptr = unsafe { *pair_ptr } as *const u8;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let str_len = unsafe { *pair_ptr.add(1) } as usize;
+            if !str_ptr.is_null() && str_len > 0 {
+                // SAFETY: str_ptr points to str_len valid bytes.
+                let bytes = unsafe { std::slice::from_raw_parts(str_ptr, str_len) };
+                result.extend_from_slice(bytes);
+            }
+        }
+    }
+
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
 /// Frees a heap-allocated `KodoList` and its backing data array.
 ///
 /// Does nothing if `list_ptr` is zero (null handle).
@@ -1260,5 +1368,82 @@ mod tests {
     #[test]
     fn map_is_empty_null_map() {
         assert_eq!(unsafe { kodo_map_is_empty(0) }, 1);
+    }
+
+    #[test]
+    fn list_slice_basic() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+            kodo_list_push(list, 40);
+            kodo_list_push(list, 50);
+        }
+        let sliced = unsafe { kodo_list_slice(list, 1, 4) };
+        assert_eq!(unsafe { kodo_list_length(sliced) }, 3);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(sliced, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 20);
+        unsafe { kodo_list_get(sliced, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 30);
+        unsafe { kodo_list_get(sliced, 2, &mut val, &mut is_some) };
+        assert_eq!(val, 40);
+    }
+
+    #[test]
+    fn list_slice_clamped() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+        }
+        // Out-of-range indices should be clamped.
+        let sliced = unsafe { kodo_list_slice(list, -5, 100) };
+        assert_eq!(unsafe { kodo_list_length(sliced) }, 2);
+    }
+
+    #[test]
+    fn list_slice_empty_range() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 1) };
+        let sliced = unsafe { kodo_list_slice(list, 3, 1) };
+        assert_eq!(unsafe { kodo_list_length(sliced) }, 0);
+    }
+
+    #[test]
+    fn list_sort_ascending() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 5);
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 4);
+        }
+        unsafe { kodo_list_sort(list) };
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        for i in 0..5 {
+            unsafe { kodo_list_get(list, i, &mut val, &mut is_some) };
+            assert_eq!(val, i + 1);
+        }
+    }
+
+    #[test]
+    fn list_sort_empty() {
+        let list = kodo_list_new();
+        // Should not crash on empty list.
+        unsafe { kodo_list_sort(list) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 0);
+    }
+
+    #[test]
+    fn list_sort_single_element() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 42) };
+        unsafe { kodo_list_sort(list) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 1);
     }
 }

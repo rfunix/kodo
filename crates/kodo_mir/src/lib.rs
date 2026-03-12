@@ -153,6 +153,24 @@ pub enum Instruction {
         /// The parameter types of the function being called.
         param_types: Vec<Type>,
     },
+    /// Virtual method call through a vtable (dynamic dispatch on `dyn Trait`).
+    ///
+    /// The `object` local holds the fat pointer `(data_ptr, vtable_ptr)`.
+    /// The `vtable_index` specifies which method slot to call.
+    VirtualCall {
+        /// Where to store the result.
+        dest: LocalId,
+        /// The local holding the dyn Trait fat pointer.
+        object: LocalId,
+        /// The index into the vtable for the method being called.
+        vtable_index: u32,
+        /// The arguments (excluding self, which is extracted from the fat pointer).
+        args: Vec<Value>,
+        /// The return type of the method.
+        return_type: Type,
+        /// The parameter types of the method (excluding self).
+        param_types: Vec<Type>,
+    },
     /// Increment reference count for a heap-allocated value.
     IncRef(LocalId),
     /// Decrement reference count for a heap-allocated value (may free).
@@ -218,6 +236,19 @@ pub enum Value {
     Unit,
     /// A reference to a named function, yielding a function pointer.
     FuncRef(String),
+    /// Construct a dyn Trait fat pointer from a concrete value.
+    ///
+    /// Produces `(data_ptr, vtable_ptr)` where `data_ptr` points to the
+    /// concrete value and `vtable_ptr` points to the vtable for the
+    /// `(concrete_type, trait_name)` pair.
+    MakeDynTrait {
+        /// The concrete value to wrap.
+        value: Box<Value>,
+        /// The concrete type name (for vtable lookup).
+        concrete_type: String,
+        /// The trait name (for vtable lookup).
+        trait_name: String,
+    },
 }
 
 /// How a basic block transfers control flow.
@@ -261,6 +292,63 @@ impl MirFunction {
     }
 }
 
+/// Transforms MIR functions for recoverable contract mode.
+///
+/// In recoverable mode, contract violations log a warning and continue
+/// execution instead of aborting. This function rewrites the MIR by:
+///
+/// 1. Renaming `kodo_contract_fail` calls to `kodo_contract_fail_recoverable`.
+/// 2. Changing `Unreachable` terminators in fail blocks to `Goto` the
+///    corresponding continue block, so execution resumes after the warning.
+///
+/// The continue block is inferred from the `Branch` terminator that targets
+/// the fail block: the `true_block` of that branch is the continue target.
+pub fn apply_recoverable_contracts(functions: &mut [MirFunction]) {
+    for func in functions.iter_mut() {
+        // First pass: build a map from fail_block -> continue_block.
+        // A "fail block" is any block targeted as the false_block of a Branch,
+        // AND that block contains a kodo_contract_fail call.
+        let mut fail_to_continue: std::collections::HashMap<BlockId, BlockId> =
+            std::collections::HashMap::new();
+        for block in &func.blocks {
+            if let Terminator::Branch {
+                true_block,
+                false_block,
+                ..
+            } = &block.terminator
+            {
+                fail_to_continue.insert(*false_block, *true_block);
+            }
+        }
+
+        // Second pass: transform fail blocks.
+        for block in &mut func.blocks {
+            let has_contract_fail = block.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
+            );
+            if !has_contract_fail {
+                continue;
+            }
+
+            // Rename the callee.
+            for instr in &mut block.instructions {
+                if let Instruction::Call { callee, .. } = instr {
+                    if callee == "kodo_contract_fail" {
+                        *callee = "kodo_contract_fail_recoverable".to_string();
+                    }
+                }
+            }
+
+            // Change Unreachable -> Goto(continue_block).
+            if block.terminator == Terminator::Unreachable {
+                if let Some(&continue_block) = fail_to_continue.get(&block.id) {
+                    block.terminator = Terminator::Goto(continue_block);
+                }
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -276,6 +364,12 @@ impl std::fmt::Display for Instruction {
                 write!(f, ")")
             }
             Self::IndirectCall { dest, .. } => write!(f, "{dest} = <indirect_call>(...)"),
+            Self::VirtualCall {
+                dest,
+                object,
+                vtable_index,
+                ..
+            } => write!(f, "{dest} = <virtual_call[{vtable_index}]>({object}, ...)"),
             Self::IncRef(local) => write!(f, "inc_ref {local}"),
             Self::DecRef(local) => write!(f, "dec_ref {local}"),
         }
@@ -448,5 +542,94 @@ mod tests {
             .filter(|i| matches!(i, Instruction::IncRef(_) | Instruction::DecRef(_)))
             .count();
         assert_eq!(rc_count, 3);
+    }
+
+    #[test]
+    fn recoverable_contracts_renames_callee() {
+        let mut func = MirFunction {
+            name: "test_recoverable".to_string(),
+            return_type: Type::Int,
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Unit,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::BoolConst(true),
+                        true_block: BlockId(2),
+                        false_block: BlockId(1),
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![Instruction::Call {
+                        dest: LocalId(1),
+                        callee: "kodo_contract_fail".to_string(),
+                        args: vec![Value::StringConst("test".to_string())],
+                    }],
+                    terminator: Terminator::Unreachable,
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::Local(LocalId(0))),
+                },
+            ],
+            entry: BlockId(0),
+        };
+
+        apply_recoverable_contracts(std::slice::from_mut(&mut func));
+
+        // Callee should be renamed.
+        assert!(func.blocks[1].instructions.iter().any(
+            |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail_recoverable")
+        ));
+
+        // Terminator should be Goto(continue_block) instead of Unreachable.
+        assert_eq!(func.blocks[1].terminator, Terminator::Goto(BlockId(2)));
+    }
+
+    #[test]
+    fn recoverable_contracts_ignores_non_contract_blocks() {
+        let mut func = MirFunction {
+            name: "test_no_contract".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Unit,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "println".to_string(),
+                    args: vec![Value::StringConst("hello".to_string())],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+
+        apply_recoverable_contracts(std::slice::from_mut(&mut func));
+
+        // println should not be renamed.
+        assert!(func.blocks[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "println")));
     }
 }

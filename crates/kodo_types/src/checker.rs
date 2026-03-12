@@ -110,6 +110,10 @@ pub struct TypeChecker {
     ///
     /// Used by the LSP for goto-definition. Built during `check_module`.
     pub(crate) definition_spans: std::collections::HashMap<String, Span>,
+    /// Reference index: maps identifiers to all usage spans.
+    ///
+    /// Used by the LSP for find-references. Built during type checking.
+    pub(crate) reference_spans: std::collections::HashMap<String, Vec<Span>>,
     /// Trait implementations: maps type name to set of trait names it implements.
     ///
     /// Populated from `impl Trait for Type` blocks. Used for trait bound checking
@@ -155,6 +159,7 @@ impl TypeChecker {
             imported_module_names: std::collections::HashSet::new(),
             type_alias_registry: std::collections::HashMap::new(),
             definition_spans: std::collections::HashMap::new(),
+            reference_spans: std::collections::HashMap::new(),
             trait_impl_set: std::collections::HashMap::new(),
             loop_depth: 0,
         };
@@ -174,6 +179,15 @@ impl TypeChecker {
     #[must_use]
     pub fn definition_spans(&self) -> &std::collections::HashMap<String, Span> {
         &self.definition_spans
+    }
+
+    /// Returns the reference spans index built during type checking.
+    ///
+    /// Maps identifier names to all their usage spans in the source.
+    /// Used by the LSP for find-references.
+    #[must_use]
+    pub fn reference_spans(&self) -> &std::collections::HashMap<String, Vec<Span>> {
+        &self.reference_spans
     }
 
     /// Returns the type alias registry built during type checking.
@@ -211,6 +225,23 @@ impl TypeChecker {
         &self,
     ) -> &std::collections::HashMap<(String, String), (String, Vec<Type>, Type)> {
         &self.method_lookup
+    }
+
+    /// Returns the trait registry: trait name to list of `(method_name, param_types, return_type)`.
+    #[must_use]
+    #[allow(clippy::type_complexity)]
+    pub fn trait_registry(
+        &self,
+    ) -> &std::collections::HashMap<String, Vec<(String, Vec<Type>, Type)>> {
+        &self.trait_registry
+    }
+
+    /// Returns the trait impl set: type name to set of trait names it implements.
+    #[must_use]
+    pub fn trait_impl_set(
+        &self,
+    ) -> &std::collections::HashMap<String, std::collections::HashSet<String>> {
+        &self.trait_impl_set
     }
 
     /// Returns method call resolutions: call span start position to mangled
@@ -322,6 +353,8 @@ impl TypeChecker {
 
         for enum_decl in &module.enum_decls {
             self.enum_names.insert(enum_decl.name.clone());
+            self.definition_spans
+                .insert(enum_decl.name.clone(), enum_decl.span);
             if enum_decl.generic_params.is_empty() {
                 let mut variants = Vec::new();
                 for variant in &enum_decl.variants {
@@ -818,6 +851,8 @@ impl TypeChecker {
 
         for enum_decl in &module.enum_decls {
             self.enum_names.insert(enum_decl.name.clone());
+            self.definition_spans
+                .insert(enum_decl.name.clone(), enum_decl.span);
             if enum_decl.generic_params.is_empty() {
                 let mut variants = Vec::new();
                 let mut variant_ok = true;
@@ -1282,6 +1317,8 @@ impl TypeChecker {
                 self.resolve_type_mono(&param.ty, param.span)?
             };
             self.env.insert(param.name.clone(), ty);
+            // Register parameter definition for goto-definition.
+            self.definition_spans.insert(param.name.clone(), param.span);
             // Track ownership based on parameter qualifier.
             match param.ownership {
                 kodo_ast::Ownership::Owned => self.track_owned(&param.name),

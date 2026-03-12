@@ -100,6 +100,11 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`memory_management.ko`](../examples/memory_management.ko) | Reference counting |
 | [`tuples.ko`](../examples/tuples.ko) | Tuple types, indexing, and destructuring |
 | [`for_in.ko`](../examples/for_in.ko) | For-in loops over collections |
+| [`iterator_basic.ko`](../examples/iterator_basic.ko) | Basic iterator protocol |
+| [`iterator_list.ko`](../examples/iterator_list.ko) | Iterating over `List<T>` |
+| [`iterator_map_filter.ko`](../examples/iterator_map_filter.ko) | `map` and `filter` combinators on iterators |
+| [`iterator_fold.ko`](../examples/iterator_fold.ko) | `fold` combinator for aggregation |
+| [`functional_pipeline.ko`](../examples/functional_pipeline.ko) | Functional pipelines with chained combinators |
 | [`todo_app.ko`](../examples/todo_app.ko) | Real-world: CLI todo app with structs, enums, contracts |
 | [`url_shortener.ko`](../examples/url_shortener.ko) | Real-world: URL shortener with Map and validation |
 | [`word_counter.ko`](../examples/word_counter.ko) | Real-world: Word counter with string ops and fold |

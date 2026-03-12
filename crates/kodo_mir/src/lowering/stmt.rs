@@ -144,10 +144,22 @@ impl MirBuilder {
         // Check if the value is a closure — if so, we need to register
         // the variable name in the closure registry after lowering.
         let is_closure = matches!(value, Expr::Closure { .. });
-        let local_id = self.alloc_local(resolved_ty, mutable);
+        let local_id = self.alloc_local(resolved_ty.clone(), mutable);
         self.name_map.insert(name.to_string(), local_id);
         let val = self.lower_expr(value)?;
-        self.emit(Instruction::Assign(local_id, val));
+        // Wrap the value in a MakeDynTrait if assigning a concrete value
+        // to a dyn Trait variable.
+        let final_val = if let Type::DynTrait(ref trait_name) = resolved_ty {
+            let concrete_type = self.infer_value_concrete_type(&val);
+            Value::MakeDynTrait {
+                value: Box::new(val),
+                concrete_type,
+                trait_name: trait_name.clone(),
+            }
+        } else {
+            val
+        };
+        self.emit(Instruction::Assign(local_id, final_val));
 
         // If the value was a closure, the lift_closure method stored
         // the closure info under the generated name. Find it and also

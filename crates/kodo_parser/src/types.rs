@@ -23,6 +23,11 @@ impl Parser {
             return self.parse_paren_type();
         }
         let name = self.parse_ident()?;
+        // Check for `dyn TraitName` — dynamic trait object type.
+        if name == "dyn" {
+            let trait_name = self.parse_ident()?;
+            return Ok(TypeExpr::DynTrait(trait_name));
+        }
         // Check for generic type arguments: Name<Type, Type, ...>
         let base = if self.check(&TokenKind::Lt) {
             self.advance(); // consume '<'
