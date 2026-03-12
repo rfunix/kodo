@@ -23,7 +23,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Pattern Matching](guide/pattern-matching.md) — exhaustive match on enums
 - [Contracts](guide/contracts.md) — `requires` and `ensures` for runtime verification
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
-- [Ownership](guide/ownership.md) — linear ownership with `own` and `ref`
+- [Ownership](guide/ownership.md) — linear ownership with `own`, `ref`, and `mut`
 - [Agent Traceability](guide/agent-traceability.md) — annotations, trust policies, and confidence propagation
 - [HTTP & JSON](guide/http.md) — HTTP client and JSON parsing
 - [Actors](guide/actors.md) — actor model with state and message passing
@@ -71,6 +71,8 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
 | [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |
 | [`ownership.ko`](../examples/ownership.ko) | Linear ownership with `own` and `ref` |
+| [`borrow_rules.ko`](../examples/borrow_rules.ko) | Borrow rules: multiple `ref` borrows |
+| [`move_semantics.ko`](../examples/move_semantics.ko) | Move semantics, Copy vs non-Copy types |
 | [`list_demo.ko`](../examples/list_demo.ko) | `List<T>` built-in collection |
 | [`map_demo.ko`](../examples/map_demo.ko) | `Map<K,V>` built-in collection |
 | [`string_demo.ko`](../examples/string_demo.ko) | String methods including `split` |

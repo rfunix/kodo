@@ -4,20 +4,31 @@ Kōdo uses a linear ownership system inspired by Rust and based on substructural
 
 ## Ownership Qualifiers
 
-Kōdo has two ownership qualifiers for function parameters:
+Kōdo has three ownership qualifiers for function parameters:
 
 | Qualifier | Meaning | Caller retains access? |
 |-----------|---------|----------------------|
 | `own` | Ownership is transferred to the function | No --the value is moved |
-| `ref` | The value is borrowed | Yes --the caller keeps the value |
+| `ref` | The value is immutably borrowed (shared) | Yes --the caller keeps the value |
+| `mut` | The value is mutably borrowed (exclusive) | Yes --but no other borrows allowed |
 
 ### Default behavior
 
 By default, parameters use `own` (owned) semantics. When you pass a value to a function taking `own`, the value is **moved** --you cannot use it afterward.
 
+## Copy Types
+
+Primitive types (`Int`, `Bool`, `Float32`, `Float64`, `Byte`) are implicitly **Copy**. They are never moved --assigning or passing them always creates a copy:
+
+```kodo
+let x: Int = 42
+let y: Int = x    // x is copied, not moved
+let z: Int = x    // still fine --x was never moved
+```
+
 ## Use After Move (E0240)
 
-Once a value is moved, attempting to use it is a compile-time error:
+Once a non-Copy value is moved, attempting to use it is a compile-time error:
 
 ```kodo
 fn consume(own s: String) {
@@ -45,17 +56,59 @@ fn main() {
 }
 ```
 
-## Move While Borrowed (E0242)
+## Borrow Rules
 
-A value cannot be moved while it is actively borrowed:
+### Multiple `ref` borrows are OK
+
+Multiple shared (immutable) borrows of the same value can coexist:
 
 ```kodo
-fn consume(own s: String) { }
+fn read(ref s: String) { println(s) }
+
+fn main() {
+    let msg: String = "hello"
+    read(msg)    // first ref borrow
+    read(msg)    // second ref borrow -- OK
+    println(msg) // msg is still alive
+}
+```
+
+### `mut` borrows are exclusive (E0245, E0246, E0247)
+
+A `mut` borrow grants exclusive mutable access. No other borrows (`ref` or `mut`) may coexist with it:
+
+```kodo
+fn two_args(mut a: String, ref b: String) -> Int { return 0 }
+
+fn main() {
+    let x: String = "hi"
+    two_args(x, x)  // ERROR E0246: cannot borrow 'x' as ref while mutably borrowed
+}
+```
+
+Two simultaneous `mut` borrows of the same variable are also forbidden (E0247).
+
+### Assign through `ref` is forbidden (E0248)
+
+A `ref` parameter cannot be reassigned --it is an immutable borrow:
+
+```kodo
+fn bad(ref x: Int) -> Int {
+    x = 42       // ERROR E0248: cannot assign to 'x' because it is borrowed as ref
+    return x
+}
+```
+
+## Move While Borrowed (E0242)
+
+A value cannot be moved while it is actively borrowed within the same expression:
+
+```kodo
+fn take(ref a: String, own b: String) -> Int { return 0 }
 
 fn main() {
     let s: String = "hello"
-    let r: ref String = s    // s is now borrowed
-    consume(s)               // ERROR E0242: cannot move 's' while it is borrowed
+    take(s, s)   // ERROR E0242: cannot move 's' while it is borrowed
 }
 ```
 
@@ -64,17 +117,11 @@ fn main() {
 A borrowed reference cannot outlive the scope of the value it references:
 
 ```kodo
-fn escape() -> ref String {
-    let s: String = "local"
-    return s                 // ERROR E0241: reference cannot escape scope
+fn escape(ref s: String) -> String {
+    return s     // ERROR E0241: reference cannot escape scope
 }
 ```
 
 ## Design Philosophy
 
-Kōdo's ownership system is deliberately simpler than Rust's borrow checker. The goal is to catch the most common ownership bugs (use-after-move, dangling references) while keeping the rules simple enough for AI agents to reason about deterministically.
-
-Future versions may add:
-- Copy semantics for primitive types (Int, Bool, etc.)
-- Lifetime annotations for complex borrow patterns
-- Mutable borrowing with exclusivity rules
+Kōdo's ownership system catches the most common ownership bugs (use-after-move, dangling references, aliasing violations) while keeping the rules simple enough for AI agents to reason about deterministically. The borrow rules follow [ATAPL] Ch. 1 on linear and affine type systems.

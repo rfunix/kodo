@@ -1,0 +1,31 @@
+// Demonstrates Kōdo's borrow rules: ref (shared) and mut (exclusive).
+//
+// - Multiple `ref` borrows of the same variable are allowed.
+// - A `mut` borrow is exclusive: no other borrows may coexist.
+// - A variable cannot be moved while any borrow is active.
+//
+// Compile and run:
+//   kodoc build examples/borrow_rules.ko -o borrow_rules
+//   ./borrow_rules
+
+module borrow_rules {
+    meta {
+        purpose: "Demonstrate ref/mut borrow rules"
+        version: "0.1.0"
+    }
+
+    // Takes a shared reference — caller retains ownership.
+    fn read_value(ref x: String) {
+        println(x)
+    }
+
+    fn main() {
+        // Multiple ref borrows are OK.
+        let msg: String = "hello borrow rules"
+        read_value(msg)
+        read_value(msg)
+
+        // After two borrows, the value is still alive and usable.
+        println(msg)
+    }
+}

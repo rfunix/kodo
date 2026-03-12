@@ -2929,4 +2929,1055 @@ mod tests {
         // Nested loops should produce more blocks.
         assert!(mir.blocks.len() >= 5);
     }
+
+    // -----------------------------------------------------------------
+    // Phase 51 — Additional lowering coverage tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn lower_string_literal() {
+        // fn greet() -> String { return "hello" }
+        let func = make_fn(
+            "greet",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::StringLit("hello".to_string(), span())),
+                }],
+            },
+            TypeExpr::Named("String".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        assert!(matches!(
+            mir.blocks[0].terminator,
+            Terminator::Return(Value::StringConst(ref s)) if s == "hello"
+        ));
+    }
+
+    #[test]
+    fn lower_float_literal() {
+        // fn pi() -> Float64 { return 3.14 }
+        let func = make_fn(
+            "pi",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::FloatLit(3.14, span())),
+                }],
+            },
+            TypeExpr::Named("Float64".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        match &mir.blocks[0].terminator {
+            Terminator::Return(Value::FloatConst(f)) => {
+                assert!((*f - 3.14).abs() < f64::EPSILON);
+            }
+            other => panic!("expected Return(FloatConst(3.14)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_bool_literal() {
+        // fn truthy() -> Bool { return true }
+        let func = make_fn(
+            "truthy",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::BoolLit(true, span())),
+                }],
+            },
+            TypeExpr::Named("Bool".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        assert!(matches!(
+            mir.blocks[0].terminator,
+            Terminator::Return(Value::BoolConst(true))
+        ));
+    }
+
+    #[test]
+    fn lower_multiple_params() {
+        // fn add3(a: Int, b: Int, c: Int) -> Int { return a + b + c }
+        let func = make_fn(
+            "add3",
+            vec![
+                Param {
+                    name: "a".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+                Param {
+                    name: "b".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+                Param {
+                    name: "c".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+            ],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::BinaryOp {
+                        left: Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("a".to_string(), span())),
+                            op: BinOp::Add,
+                            right: Box::new(Expr::Ident("b".to_string(), span())),
+                            span: span(),
+                        }),
+                        op: BinOp::Add,
+                        right: Box::new(Expr::Ident("c".to_string(), span())),
+                        span: span(),
+                    }),
+                }],
+            },
+            TypeExpr::Named("Int".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        assert_eq!(mir.param_count, 3);
+        assert_eq!(mir.locals.len(), 3);
+        assert_eq!(mir.locals[0].ty, Type::Int);
+        assert_eq!(mir.locals[1].ty, Type::Int);
+        assert_eq!(mir.locals[2].ty, Type::Int);
+    }
+
+    #[test]
+    fn lower_if_without_else() {
+        // fn maybe(x: Bool) { if x { print_int(1) } }
+        let func = make_fn(
+            "maybe",
+            vec![Param {
+                name: "x".to_string(),
+                ty: TypeExpr::Named("Bool".to_string()),
+                span: span(),
+                ownership: Ownership::Owned,
+            }],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Expr(Expr::If {
+                    condition: Box::new(Expr::Ident("x".to_string(), span())),
+                    then_branch: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                            args: vec![Expr::IntLit(1, span())],
+                            span: span(),
+                        })],
+                    },
+                    else_branch: None,
+                    span: span(),
+                })],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have: entry (Branch), then, else (empty), merge
+        assert!(mir.blocks.len() >= 4);
+        assert!(matches!(
+            mir.blocks[0].terminator,
+            Terminator::Branch { .. }
+        ));
+    }
+
+    #[test]
+    fn lower_nested_if_else() {
+        // fn nested(a: Bool, b: Bool) -> Int {
+        //   if a { if b { return 1 } else { return 2 } } else { return 3 }
+        // }
+        let func = make_fn(
+            "nested",
+            vec![
+                Param {
+                    name: "a".to_string(),
+                    ty: TypeExpr::Named("Bool".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+                Param {
+                    name: "b".to_string(),
+                    ty: TypeExpr::Named("Bool".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+            ],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Expr(Expr::If {
+                    condition: Box::new(Expr::Ident("a".to_string(), span())),
+                    then_branch: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Expr(Expr::If {
+                            condition: Box::new(Expr::Ident("b".to_string(), span())),
+                            then_branch: Block {
+                                span: span(),
+                                stmts: vec![Stmt::Return {
+                                    span: span(),
+                                    value: Some(Expr::IntLit(1, span())),
+                                }],
+                            },
+                            else_branch: Some(Block {
+                                span: span(),
+                                stmts: vec![Stmt::Return {
+                                    span: span(),
+                                    value: Some(Expr::IntLit(2, span())),
+                                }],
+                            }),
+                            span: span(),
+                        })],
+                    },
+                    else_branch: Some(Block {
+                        span: span(),
+                        stmts: vec![Stmt::Return {
+                            span: span(),
+                            value: Some(Expr::IntLit(3, span())),
+                        }],
+                    }),
+                    span: span(),
+                })],
+            },
+            TypeExpr::Named("Int".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Nested if/else creates many blocks
+        assert!(
+            mir.blocks.len() >= 7,
+            "nested if/else should produce >= 7 blocks, got {}",
+            mir.blocks.len()
+        );
+    }
+
+    #[test]
+    fn lower_comparison_operators() {
+        // fn cmp(a: Int, b: Int) -> Bool { return a >= b }
+        let func = make_fn(
+            "cmp",
+            vec![
+                Param {
+                    name: "a".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+                Param {
+                    name: "b".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                    ownership: Ownership::Owned,
+                },
+            ],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident("a".to_string(), span())),
+                        op: BinOp::Ge,
+                        right: Box::new(Expr::Ident("b".to_string(), span())),
+                        span: span(),
+                    }),
+                }],
+            },
+            TypeExpr::Named("Bool".to_string()),
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        match &mir.blocks[0].terminator {
+            Terminator::Return(Value::BinOp(BinOp::Ge, _, _)) => {}
+            other => panic!("expected Return(BinOp(Ge, ...)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_mutable_let_and_reassign() {
+        // fn mutate() { let mut x: Int = 0; x = 1; x = 2 }
+        let func = make_fn(
+            "mutate",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        mutable: true,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(0, span()),
+                    },
+                    Stmt::Assign {
+                        span: span(),
+                        name: "x".to_string(),
+                        value: Expr::IntLit(1, span()),
+                    },
+                    Stmt::Assign {
+                        span: span(),
+                        name: "x".to_string(),
+                        value: Expr::IntLit(2, span()),
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // 3 assignments in one block
+        assert_eq!(mir.blocks[0].instructions.len(), 3);
+    }
+
+    #[test]
+    fn lower_return_without_value() {
+        // fn noop() { return }
+        let func = make_fn(
+            "noop",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: None,
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        assert!(matches!(
+            mir.blocks[0].terminator,
+            Terminator::Return(Value::Unit)
+        ));
+    }
+
+    #[test]
+    fn lower_while_with_body_assignments() {
+        // fn countdown() { let mut n: Int = 5; while n > 0 { n = n - 1 } return }
+        let func = make_fn(
+            "countdown",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        mutable: true,
+                        name: "n".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(5, span()),
+                    },
+                    Stmt::While {
+                        span: span(),
+                        condition: Expr::BinaryOp {
+                            left: Box::new(Expr::Ident("n".to_string(), span())),
+                            op: BinOp::Gt,
+                            right: Box::new(Expr::IntLit(0, span())),
+                            span: span(),
+                        },
+                        body: Block {
+                            span: span(),
+                            stmts: vec![Stmt::Assign {
+                                span: span(),
+                                name: "n".to_string(),
+                                value: Expr::BinaryOp {
+                                    left: Box::new(Expr::Ident("n".to_string(), span())),
+                                    op: BinOp::Sub,
+                                    right: Box::new(Expr::IntLit(1, span())),
+                                    span: span(),
+                                },
+                            }],
+                        },
+                    },
+                    Stmt::Return {
+                        span: span(),
+                        value: None,
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // While loop: entry -> header -> body -> exit -> return
+        assert!(mir.blocks.len() >= 4);
+        // Body block should have an Assign instruction (n = n - 1)
+        let body_block = &mir.blocks[2]; // loop body is typically block 2
+        assert!(
+            !body_block.instructions.is_empty(),
+            "loop body should have assignment"
+        );
+    }
+
+    #[test]
+    fn lower_for_with_body_call() {
+        // fn repeat() { for i in 0..3 { print_int(i) } }
+        let func = make_fn(
+            "repeat",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::For {
+                    span: span(),
+                    name: "i".to_string(),
+                    start: Expr::IntLit(0, span()),
+                    end: Expr::IntLit(3, span()),
+                    inclusive: false,
+                    body: Block {
+                        span: span(),
+                        stmts: vec![Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                            args: vec![Expr::Ident("i".to_string(), span())],
+                            span: span(),
+                        })],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Verify loop structure: entry Goto header
+        assert!(matches!(mir.blocks[0].terminator, Terminator::Goto(_)));
+        // Header should have Branch
+        assert!(matches!(
+            mir.blocks[1].terminator,
+            Terminator::Branch { .. }
+        ));
+    }
+
+    #[test]
+    fn lower_multiple_function_calls_in_sequence() {
+        // fn multi() { print_int(1); print_int(2); print_int(3) }
+        let func = make_fn(
+            "multi",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                        args: vec![Expr::IntLit(1, span())],
+                        span: span(),
+                    }),
+                    Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                        args: vec![Expr::IntLit(2, span())],
+                        span: span(),
+                    }),
+                    Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("print_int".to_string(), span())),
+                        args: vec![Expr::IntLit(3, span())],
+                        span: span(),
+                    }),
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have 3 Call instructions
+        let call_count = mir.blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::Call { .. }))
+            .count();
+        assert_eq!(call_count, 3);
+    }
+
+    #[test]
+    fn lower_struct_literal_module() {
+        // Module with struct type and a function that creates it
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "struct_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![TypeDecl {
+                id: NodeId(0),
+                name: "Point".to_string(),
+                span: span(),
+                generic_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "x".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                    FieldDef {
+                        name: "y".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                ],
+            }],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![make_fn(
+                "make_point",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![Stmt::Let {
+                        span: span(),
+                        mutable: false,
+                        name: "p".to_string(),
+                        ty: None,
+                        value: Expr::StructLit {
+                            name: "Point".to_string(),
+                            fields: vec![
+                                FieldInit {
+                                    name: "x".to_string(),
+                                    value: Expr::IntLit(10, span()),
+                                    span: span(),
+                                },
+                                FieldInit {
+                                    name: "y".to_string(),
+                                    value: Expr::IntLit(20, span()),
+                                    span: span(),
+                                },
+                            ],
+                            span: span(),
+                        },
+                    }],
+                },
+                TypeExpr::Unit,
+            )],
+        };
+        let fns = lower_module(&module).unwrap();
+        assert_eq!(fns.len(), 1);
+        let mir = &fns[0];
+        mir.validate().unwrap();
+        // Should have a StructLit assignment
+        let has_struct_lit = mir.blocks[0].instructions.iter().any(|i| {
+            matches!(i, Instruction::Assign(_, Value::StructLit { name, .. }) if name == "Point")
+        });
+        assert!(has_struct_lit, "expected StructLit assignment for Point");
+    }
+
+    #[test]
+    fn lower_struct_field_access_module() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "field_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![TypeDecl {
+                id: NodeId(0),
+                name: "Pair".to_string(),
+                span: span(),
+                generic_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "a".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                    FieldDef {
+                        name: "b".to_string(),
+                        ty: TypeExpr::Named("Int".to_string()),
+                        span: span(),
+                    },
+                ],
+            }],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![make_fn(
+                "get_a",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![
+                        Stmt::Let {
+                            span: span(),
+                            mutable: false,
+                            name: "p".to_string(),
+                            ty: Some(TypeExpr::Named("Pair".to_string())),
+                            value: Expr::StructLit {
+                                name: "Pair".to_string(),
+                                fields: vec![
+                                    FieldInit {
+                                        name: "a".to_string(),
+                                        value: Expr::IntLit(42, span()),
+                                        span: span(),
+                                    },
+                                    FieldInit {
+                                        name: "b".to_string(),
+                                        value: Expr::IntLit(99, span()),
+                                        span: span(),
+                                    },
+                                ],
+                                span: span(),
+                            },
+                        },
+                        Stmt::Return {
+                            span: span(),
+                            value: Some(Expr::FieldAccess {
+                                object: Box::new(Expr::Ident("p".to_string(), span())),
+                                field: "a".to_string(),
+                                span: span(),
+                            }),
+                        },
+                    ],
+                },
+                TypeExpr::Named("Int".to_string()),
+            )],
+        };
+        let fns = lower_module(&module).unwrap();
+        let mir = &fns[0];
+        mir.validate().unwrap();
+        // Should have a FieldGet in instructions
+        let has_field_get = mir.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::Assign(_, Value::FieldGet { field, .. }) if field == "a"))
+        });
+        assert!(has_field_get, "expected FieldGet for field 'a'");
+    }
+
+    #[test]
+    fn lower_enum_variant_and_match_module() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "enum_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![kodo_ast::EnumDecl {
+                id: NodeId(0),
+                name: "Color".to_string(),
+                span: span(),
+                generic_params: vec![],
+                variants: vec![
+                    kodo_ast::EnumVariant {
+                        name: "Red".to_string(),
+                        fields: vec![],
+                        span: span(),
+                    },
+                    kodo_ast::EnumVariant {
+                        name: "Green".to_string(),
+                        fields: vec![],
+                        span: span(),
+                    },
+                    kodo_ast::EnumVariant {
+                        name: "Blue".to_string(),
+                        fields: vec![],
+                        span: span(),
+                    },
+                ],
+            }],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![make_fn(
+                "make_red",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![Stmt::Let {
+                        span: span(),
+                        mutable: false,
+                        name: "c".to_string(),
+                        ty: None,
+                        value: Expr::EnumVariantExpr {
+                            enum_name: "Color".to_string(),
+                            variant: "Red".to_string(),
+                            args: vec![],
+                            span: span(),
+                        },
+                    }],
+                },
+                TypeExpr::Unit,
+            )],
+        };
+        let fns = lower_module(&module).unwrap();
+        let mir = &fns[0];
+        mir.validate().unwrap();
+        let has_enum = mir.blocks[0].instructions.iter().any(|i| {
+            matches!(i, Instruction::Assign(_, Value::EnumVariant { variant, discriminant, .. })
+                if variant == "Red" && *discriminant == 0)
+        });
+        assert!(has_enum, "expected EnumVariant assignment for Red");
+    }
+
+    #[test]
+    fn lower_match_with_wildcard() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "match_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![kodo_ast::EnumDecl {
+                id: NodeId(0),
+                name: "Dir".to_string(),
+                span: span(),
+                generic_params: vec![],
+                variants: vec![
+                    kodo_ast::EnumVariant {
+                        name: "Up".to_string(),
+                        fields: vec![],
+                        span: span(),
+                    },
+                    kodo_ast::EnumVariant {
+                        name: "Down".to_string(),
+                        fields: vec![],
+                        span: span(),
+                    },
+                ],
+            }],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![make_fn(
+                "dir_to_int",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![
+                        Stmt::Let {
+                            span: span(),
+                            mutable: false,
+                            name: "d".to_string(),
+                            ty: None,
+                            value: Expr::EnumVariantExpr {
+                                enum_name: "Dir".to_string(),
+                                variant: "Up".to_string(),
+                                args: vec![],
+                                span: span(),
+                            },
+                        },
+                        Stmt::Expr(Expr::Match {
+                            expr: Box::new(Expr::Ident("d".to_string(), span())),
+                            arms: vec![
+                                kodo_ast::MatchArm {
+                                    pattern: kodo_ast::Pattern::Variant {
+                                        enum_name: Some("Dir".to_string()),
+                                        variant: "Up".to_string(),
+                                        bindings: vec![],
+                                        span: span(),
+                                    },
+                                    body: Expr::IntLit(1, span()),
+                                    span: span(),
+                                },
+                                kodo_ast::MatchArm {
+                                    pattern: kodo_ast::Pattern::Wildcard(span()),
+                                    body: Expr::IntLit(0, span()),
+                                    span: span(),
+                                },
+                            ],
+                            span: span(),
+                        }),
+                    ],
+                },
+                TypeExpr::Unit,
+            )],
+        };
+        let fns = lower_module(&module).unwrap();
+        let mir = &fns[0];
+        mir.validate().unwrap();
+        // Match creates multiple blocks for discriminant checking
+        assert!(
+            mir.blocks.len() >= 3,
+            "match should create >= 3 blocks, got {}",
+            mir.blocks.len()
+        );
+    }
+
+    #[test]
+    fn lower_actor_with_handler_module() {
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "actor_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![ActorDecl {
+                id: NodeId(0),
+                name: "Counter".to_string(),
+                span: span(),
+                fields: vec![FieldDef {
+                    name: "count".to_string(),
+                    ty: TypeExpr::Named("Int".to_string()),
+                    span: span(),
+                }],
+                handlers: vec![make_fn(
+                    "increment",
+                    vec![],
+                    Block {
+                        span: span(),
+                        stmts: vec![],
+                    },
+                    TypeExpr::Unit,
+                )],
+            }],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![],
+        };
+        let fns = lower_module(&module).unwrap();
+        // Handler should be lowered with mangled name Counter_increment
+        assert!(
+            fns.iter().any(|f| f.name == "Counter_increment"),
+            "expected mangled handler name Counter_increment"
+        );
+    }
+
+    #[test]
+    fn lower_decref_emitted_for_string_locals() {
+        // fn with_strings() { let s: String = "hello"; return }
+        let func = make_fn(
+            "with_strings",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![
+                    Stmt::Let {
+                        span: span(),
+                        mutable: false,
+                        name: "s".to_string(),
+                        ty: Some(TypeExpr::Named("String".to_string())),
+                        value: Expr::StringLit("hello".to_string(), span()),
+                    },
+                    Stmt::Return {
+                        span: span(),
+                        value: None,
+                    },
+                ],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Should have DecRef for the string local before return
+        let has_decref = mir.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::DecRef(_)))
+        });
+        assert!(has_decref, "expected DecRef for string local");
+    }
+
+    #[test]
+    fn lower_requires_injects_contract_check() {
+        // fn positive(x: Int) -> Int requires { x > 0 } { return x }
+        let func = Function {
+            id: NodeId(0),
+            span: span(),
+            name: "positive".to_string(),
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![Param {
+                name: "x".to_string(),
+                ty: TypeExpr::Named("Int".to_string()),
+                span: span(),
+                ownership: Ownership::Owned,
+            }],
+            return_type: TypeExpr::Named("Int".to_string()),
+            requires: vec![Expr::BinaryOp {
+                left: Box::new(Expr::Ident("x".to_string(), span())),
+                op: BinOp::Gt,
+                right: Box::new(Expr::IntLit(0, span())),
+                span: span(),
+            }],
+            ensures: vec![],
+            body: Block {
+                span: span(),
+                stmts: vec![Stmt::Return {
+                    span: span(),
+                    value: Some(Expr::Ident("x".to_string(), span())),
+                }],
+            },
+        };
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Contract injection creates additional blocks (branch on condition)
+        assert!(
+            mir.blocks.len() >= 3,
+            "requires should add >= 3 blocks, got {}",
+            mir.blocks.len()
+        );
+        // Should have a call to kodo_contract_fail in some block
+        let has_contract_fail = mir.blocks.iter().any(|b| {
+            b.instructions.iter().any(
+                |i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_contract_fail"),
+            )
+        });
+        assert!(
+            has_contract_fail,
+            "expected kodo_contract_fail call for requires"
+        );
+    }
+
+    #[test]
+    fn lower_module_with_struct_type_registers_fields() {
+        // Module with struct → function that creates and accesses the struct
+        let module = Module {
+            id: NodeId(0),
+            span: span(),
+            name: "reg_test".to_string(),
+            imports: vec![],
+            meta: None,
+            type_aliases: vec![],
+            type_decls: vec![TypeDecl {
+                id: NodeId(0),
+                name: "Vec2".to_string(),
+                span: span(),
+                generic_params: vec![],
+                fields: vec![
+                    FieldDef {
+                        name: "x".to_string(),
+                        ty: TypeExpr::Named("Float64".to_string()),
+                        span: span(),
+                    },
+                    FieldDef {
+                        name: "y".to_string(),
+                        ty: TypeExpr::Named("Float64".to_string()),
+                        span: span(),
+                    },
+                ],
+            }],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![make_fn(
+                "origin",
+                vec![],
+                Block {
+                    span: span(),
+                    stmts: vec![Stmt::Let {
+                        span: span(),
+                        mutable: false,
+                        name: "v".to_string(),
+                        ty: None,
+                        value: Expr::StructLit {
+                            name: "Vec2".to_string(),
+                            fields: vec![
+                                FieldInit {
+                                    name: "x".to_string(),
+                                    value: Expr::FloatLit(0.0, span()),
+                                    span: span(),
+                                },
+                                FieldInit {
+                                    name: "y".to_string(),
+                                    value: Expr::FloatLit(0.0, span()),
+                                    span: span(),
+                                },
+                            ],
+                            span: span(),
+                        },
+                    }],
+                },
+                TypeExpr::Unit,
+            )],
+        };
+        let fns = lower_module(&module).unwrap();
+        let mir = &fns[0];
+        mir.validate().unwrap();
+        // Verify StructLit with float fields
+        let has_vec2 = mir.blocks[0].instructions.iter().any(|i| {
+            matches!(i, Instruction::Assign(_, Value::StructLit { name, fields })
+                if name == "Vec2" && fields.len() == 2)
+        });
+        assert!(has_vec2, "expected Vec2 struct literal");
+    }
+
+    #[test]
+    fn lower_tuple_literal() {
+        // fn pair() { let t = (1, 2) }
+        let func = make_fn(
+            "pair",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::Let {
+                    span: span(),
+                    mutable: false,
+                    name: "t".to_string(),
+                    ty: None,
+                    value: Expr::TupleLit(
+                        vec![Expr::IntLit(1, span()), Expr::IntLit(2, span())],
+                        span(),
+                    ),
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Tuple is stored as EnumVariant with __Tuple name
+        let has_tuple = mir.blocks[0].instructions.iter().any(|i| {
+            matches!(i, Instruction::Assign(_, Value::EnumVariant { enum_name, .. })
+                if enum_name == "__Tuple")
+        });
+        assert!(has_tuple, "expected __Tuple variant for tuple literal");
+    }
+
+    #[test]
+    fn lower_empty_while_loop() {
+        // fn spin() { while true { } }
+        let func = make_fn(
+            "spin",
+            vec![],
+            Block {
+                span: span(),
+                stmts: vec![Stmt::While {
+                    span: span(),
+                    condition: Expr::BoolLit(true, span()),
+                    body: Block {
+                        span: span(),
+                        stmts: vec![],
+                    },
+                }],
+            },
+            TypeExpr::Unit,
+        );
+        let mir = lower_function(&func).unwrap();
+        mir.validate().unwrap();
+        // Loop: entry -> header -> body -> exit
+        assert!(mir.blocks.len() >= 4);
+    }
 }

@@ -227,8 +227,10 @@ pub(crate) enum OwnershipState {
     Owned,
     /// The variable's value has been moved away at the given source line.
     Moved(u32),
-    /// The variable is borrowed (not consumed).
+    /// The variable is immutably borrowed (shared reference).
     Borrowed,
+    /// The variable is mutably borrowed (exclusive reference).
+    MutBorrowed,
 }
 
 /// Definition of a generic struct (before monomorphization).

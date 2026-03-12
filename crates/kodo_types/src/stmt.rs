@@ -169,7 +169,9 @@ impl TypeChecker {
         };
         TypeEnv::check_eq(&self.current_return_type, &value_ty, span)?;
         if let Some(Expr::Ident(name, _)) = value {
-            if let Some(OwnershipState::Borrowed) = self.ownership_map.get(name) {
+            if let Some(OwnershipState::Borrowed | OwnershipState::MutBorrowed) =
+                self.ownership_map.get(name)
+            {
                 return Err(TypeError::BorrowEscapesScope {
                     name: name.clone(),
                     span,
@@ -195,6 +197,15 @@ impl TypeChecker {
                 similar,
             }
         })?;
+        // Cannot assign through an immutable borrow (ref parameter).
+        if let Some(OwnershipState::Borrowed) = self.ownership_map.get(name) {
+            return Err(TypeError::AssignThroughRef {
+                name: name.to_string(),
+                span,
+            });
+        }
+        // Cannot assign to a moved variable.
+        self.check_not_moved(name, span)?;
         TypeEnv::check_eq(&existing_ty, &value_ty, span)?;
         Ok(())
     }

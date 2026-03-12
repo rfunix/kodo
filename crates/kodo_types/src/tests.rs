@@ -4785,7 +4785,7 @@ fn resolve_self_type_generic_enum() {
         meta { purpose: "test" version: "0.1.0" }
         fn main() -> Int { return 0 }
     }"#;
-    let module = kodo_parser::parse(source).unwrap();
+    let _module = kodo_parser::parse(source).unwrap();
     let mut checker = TypeChecker::new();
     // Register Option prelude to populate generic_enums.
     let option_src = r#"module option {
@@ -5540,4 +5540,492 @@ fn invariant_multiple_conditions() {
         result.is_ok(),
         "multiple Bool invariants should pass: {result:?}"
     );
+}
+
+// ── Phase 52: Borrow Checking Tests ──────────────────────────────────
+
+#[test]
+fn mut_param_tracked_as_mut_borrowed() {
+    // fn take_mut(mut x: String) -> String { return x }
+    let func = make_function(
+        "take_mut",
+        vec![Param {
+            name: "x".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            ownership: kodo_ast::Ownership::Mut,
+            span: Span::new(0, 10),
+        }],
+        TypeExpr::Named("String".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::Ident("x".to_string(), Span::new(57, 58))),
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    // mut parameter should be usable — returning a mut borrow is allowed
+    // because borrow escapes scope only applies to ref borrows.
+    // However, returning a mut borrowed value also escapes scope.
+    let result = checker.check_module(&module);
+    // A mut parameter is a mutable reference — returning it escapes the scope.
+    assert!(result.is_err(), "returning mut borrow should escape scope");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0241", "expected E0241, got {}", err.code());
+}
+
+#[test]
+fn use_after_move_double_assign_detected() {
+    // fn bad() -> Int { let x: String = "hi"; let y: String = x; let z: String = x; return 0 }
+    let span = Span::new(0, 100);
+    let func = make_function(
+        "bad",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Let {
+                span: Span::new(30, 50),
+                mutable: false,
+                name: "y".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(40, 41)),
+            },
+            Stmt::Let {
+                span: Span::new(50, 70),
+                mutable: false,
+                name: "z".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(60, 61)),
+            },
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should detect use after move");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0240", "expected E0240, got {}", err.code());
+}
+
+#[test]
+fn move_while_borrowed_in_same_call() {
+    // fn two_args(ref a: String, own b: String) -> Int { return 0 }
+    // fn bad() -> Int { let x: String = "hi"; two_args(x, x); return 0 }
+    // The ref borrow on x is active when the own move is attempted.
+    let span = Span::new(0, 100);
+    let callee = make_function(
+        "two_args",
+        vec![
+            Param {
+                name: "a".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Ref,
+                span: Span::new(0, 10),
+            },
+            Param {
+                name: "b".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Owned,
+                span: Span::new(12, 22),
+            },
+        ],
+        TypeExpr::Named("Int".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::IntLit(0, span)),
+        }],
+    );
+    let caller = make_function(
+        "bad",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("two_args".to_string(), Span::new(30, 38))),
+                args: vec![
+                    Expr::Ident("x".to_string(), Span::new(39, 40)),
+                    Expr::Ident("x".to_string(), Span::new(42, 43)),
+                ],
+                span: Span::new(30, 44),
+            }),
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![callee, caller]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should detect move while borrowed");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0242", "expected E0242, got {}", err.code());
+}
+
+#[test]
+fn ref_borrow_while_mut_borrowed_in_same_call() {
+    // fn two_args(mut a: String, ref b: String) -> Int { return 0 }
+    // fn bad() -> Int { let x: String = "hi"; two_args(x, x); return 0 }
+    let span = Span::new(0, 100);
+    let callee = make_function(
+        "two_args",
+        vec![
+            Param {
+                name: "a".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Mut,
+                span: Span::new(0, 10),
+            },
+            Param {
+                name: "b".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Ref,
+                span: Span::new(12, 22),
+            },
+        ],
+        TypeExpr::Named("Int".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::IntLit(0, span)),
+        }],
+    );
+    let caller = make_function(
+        "bad",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("two_args".to_string(), Span::new(30, 38))),
+                args: vec![
+                    Expr::Ident("x".to_string(), Span::new(39, 40)),
+                    Expr::Ident("x".to_string(), Span::new(42, 43)),
+                ],
+                span: Span::new(30, 44),
+            }),
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![callee, caller]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "should detect ref borrow while mut borrowed"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0246", "expected E0246, got {}", err.code());
+}
+
+#[test]
+fn double_mut_borrow_in_same_call() {
+    // fn two_args(mut a: String, mut b: String) -> Int { return 0 }
+    // fn bad() -> Int { let x: String = "hi"; two_args(x, x); return 0 }
+    let span = Span::new(0, 100);
+    let callee = make_function(
+        "two_args",
+        vec![
+            Param {
+                name: "a".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Mut,
+                span: Span::new(0, 10),
+            },
+            Param {
+                name: "b".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Mut,
+                span: Span::new(12, 22),
+            },
+        ],
+        TypeExpr::Named("Int".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::IntLit(0, span)),
+        }],
+    );
+    let caller = make_function(
+        "bad",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("two_args".to_string(), Span::new(30, 38))),
+                args: vec![
+                    Expr::Ident("x".to_string(), Span::new(39, 40)),
+                    Expr::Ident("x".to_string(), Span::new(42, 43)),
+                ],
+                span: Span::new(30, 44),
+            }),
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![callee, caller]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should detect double mut borrow");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0247", "expected E0247, got {}", err.code());
+}
+
+#[test]
+fn mut_borrow_while_ref_borrowed_in_same_call() {
+    // fn two_args(ref a: String, mut b: String) -> Int { return 0 }
+    // fn bad() -> Int { let x: String = "hi"; two_args(x, x); return 0 }
+    let span = Span::new(0, 100);
+    let callee = make_function(
+        "two_args",
+        vec![
+            Param {
+                name: "a".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Ref,
+                span: Span::new(0, 10),
+            },
+            Param {
+                name: "b".to_string(),
+                ty: TypeExpr::Named("String".to_string()),
+                ownership: kodo_ast::Ownership::Mut,
+                span: Span::new(12, 22),
+            },
+        ],
+        TypeExpr::Named("Int".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::IntLit(0, span)),
+        }],
+    );
+    let caller = make_function(
+        "bad",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("two_args".to_string(), Span::new(30, 38))),
+                args: vec![
+                    Expr::Ident("x".to_string(), Span::new(39, 40)),
+                    Expr::Ident("x".to_string(), Span::new(42, 43)),
+                ],
+                span: Span::new(30, 44),
+            }),
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![callee, caller]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "should detect mut borrow while ref borrowed"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0245", "expected E0245, got {}", err.code());
+}
+
+#[test]
+fn multiple_ref_borrows_ok() {
+    // fn take_ref(ref s: String) -> Int { return 0 }
+    // fn ok() -> Int {
+    //   let x: String = "hi"
+    //   take_ref(ref x)   // first ref borrow
+    //   take_ref(ref x)   // second ref borrow — OK
+    //   return 0
+    // }
+    let span = Span::new(0, 100);
+    let take_ref = make_function(
+        "take_ref",
+        vec![Param {
+            name: "s".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            ownership: kodo_ast::Ownership::Ref,
+            span: Span::new(0, 10),
+        }],
+        TypeExpr::Named("Int".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::IntLit(0, span)),
+        }],
+    );
+    let caller = make_function(
+        "ok",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("String".to_string())),
+                value: Expr::StringLit("hi".to_string(), Span::new(20, 24)),
+            },
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("take_ref".to_string(), Span::new(30, 38))),
+                args: vec![Expr::Ident("x".to_string(), Span::new(39, 40))],
+                span: Span::new(30, 41),
+            }),
+            Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("take_ref".to_string(), Span::new(50, 58))),
+                args: vec![Expr::Ident("x".to_string(), Span::new(59, 60))],
+                span: Span::new(50, 61),
+            }),
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::IntLit(0, span)),
+            },
+        ],
+    );
+    let module = make_module(vec![take_ref, caller]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "multiple ref borrows should be allowed: {result:?}"
+    );
+}
+
+#[test]
+fn assign_through_ref_detected() {
+    // fn bad(ref x: Int) -> Int {
+    //   x = 42   // cannot assign through immutable borrow
+    //   return x
+    // }
+    let func = make_function(
+        "bad",
+        vec![Param {
+            name: "x".to_string(),
+            ty: TypeExpr::Named("Int".to_string()),
+            ownership: kodo_ast::Ownership::Ref,
+            span: Span::new(0, 10),
+        }],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Assign {
+                span: Span::new(30, 40),
+                name: "x".to_string(),
+                value: Expr::IntLit(42, Span::new(34, 36)),
+            },
+            Stmt::Return {
+                span: Span::new(50, 60),
+                value: Some(Expr::Ident("x".to_string(), Span::new(57, 58))),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_err(), "should detect assign through ref");
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0248", "expected E0248, got {}", err.code());
+}
+
+#[test]
+fn copy_types_not_moved() {
+    // Int is a copy type, so assigning it should not move it
+    // fn ok() -> Int { let x: Int = 42; let y: Int = x; let z: Int = x; return z }
+    let span = Span::new(0, 100);
+    let func = make_function(
+        "ok",
+        vec![],
+        TypeExpr::Named("Int".to_string()),
+        vec![
+            Stmt::Let {
+                span: Span::new(10, 30),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::IntLit(42, Span::new(20, 22)),
+            },
+            Stmt::Let {
+                span: Span::new(30, 50),
+                mutable: false,
+                name: "y".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(40, 41)),
+            },
+            Stmt::Let {
+                span: Span::new(50, 70),
+                mutable: false,
+                name: "z".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(60, 61)),
+            },
+            Stmt::Return {
+                span: Span::new(70, 80),
+                value: Some(Expr::Ident("z".to_string(), span)),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "copy types should not be moved: {result:?}");
+}
+
+#[test]
+fn owned_param_can_be_used() {
+    // fn ok(own x: String) -> String { return x }
+    let func = make_function(
+        "ok",
+        vec![Param {
+            name: "x".to_string(),
+            ty: TypeExpr::Named("String".to_string()),
+            ownership: kodo_ast::Ownership::Owned,
+            span: Span::new(0, 10),
+        }],
+        TypeExpr::Named("String".to_string()),
+        vec![Stmt::Return {
+            span: Span::new(50, 60),
+            value: Some(Expr::Ident("x".to_string(), Span::new(57, 58))),
+        }],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(result.is_ok(), "owned param should be usable: {result:?}");
 }

@@ -160,7 +160,7 @@ No `main()`, no boilerplate. The `intent` block is a **declaration of intent** �
 
 ### 5. Linear Ownership — Correct by Construction
 
-Kōdo enforces linear ownership at the type level. Every value has exactly one owner. When a value is moved, it cannot be used again. Borrow with `ref` to share without transferring ownership.
+Kōdo enforces linear ownership at the type level. Every value has exactly one owner. When a value is moved, it cannot be used again. Borrow with `ref` to share without transferring ownership. Use `mut` for exclusive mutable access — no other borrows may coexist.
 
 ```rust
 fn consume(own s: String) {
@@ -211,7 +211,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), local type inference, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
 | **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
-| **Ownership** | Linear ownership (`own`/`ref`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), functional reference counting (automatic deallocation) |
+| **Ownership** | Linear ownership (`own`/`ref`/`mut`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), mut-borrow-while-ref-borrowed (E0245), ref-borrow-while-mut-borrowed (E0246), double-mut-borrow (E0247), assign-through-ref (E0248), functional reference counting (automatic deallocation) |
 | **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, module-level `invariant` blocks |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
@@ -326,6 +326,8 @@ The [`examples/`](examples/) directory contains 79 compilable programs:
 | [`contracts_smt_demo.ko`](examples/contracts_smt_demo.ko) | SMT solver contract verification demo |
 | [`smt_verified.ko`](examples/smt_verified.ko) | SMT contract verification |
 | [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref`, move semantics for structs |
+| [`borrow_rules.ko`](examples/borrow_rules.ko) | Borrow rules: multiple `ref` borrows, `mut` exclusivity |
+| [`move_semantics.ko`](examples/move_semantics.ko) | Move semantics, Copy vs non-Copy types |
 | [`copy_semantics.ko`](examples/copy_semantics.ko) | Implicit Copy for primitives vs move for compounds |
 | [`confidence_demo.ko`](examples/confidence_demo.ko) | Transitive confidence propagation through call graph |
 | [`agent_traceability.ko`](examples/agent_traceability.ko) | `@authored_by`, `@confidence`, `@reviewed_by`, `@security_sensitive` |

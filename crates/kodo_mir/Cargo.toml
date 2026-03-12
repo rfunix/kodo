@@ -10,3 +10,6 @@ description = "Mid-level intermediate representation for the Kōdo compiler"
 kodo_ast.workspace = true
 kodo_types.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

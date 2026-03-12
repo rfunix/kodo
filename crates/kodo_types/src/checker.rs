@@ -8,6 +8,13 @@ use crate::types::{GenericEnumDef, GenericFunctionDef, GenericStructDef, Ownersh
 use crate::{resolve_type, resolve_type_with_enums, Type, TypeError};
 use kodo_ast::{Module, Span};
 
+/// Saved ownership state for scope management.
+pub(crate) type OwnershipScope = (
+    std::collections::HashMap<String, OwnershipState>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+);
+
 /// The type checker walks an AST and verifies that all expressions and
 /// statements are well-typed according to Kōdo's type system.
 ///
@@ -74,16 +81,18 @@ pub struct TypeChecker {
     /// Maps variable name to its current ownership state. Used for
     /// use-after-move and move-while-borrowed detection.
     pub(crate) ownership_map: std::collections::HashMap<String, OwnershipState>,
-    /// Set of variable names that currently have active borrows.
+    /// Set of variable names that currently have active immutable borrows.
     ///
     /// When a variable is borrowed (via `ref`), it is added here.
     /// It cannot be moved until the borrow is released (scope exit).
     pub(crate) active_borrows: std::collections::HashSet<String>,
+    /// Set of variable names that currently have active mutable borrows.
+    ///
+    /// When a variable is mutably borrowed (via `mut`), it is added here.
+    /// No other borrows (ref or mut) may coexist, and it cannot be moved.
+    pub(crate) active_mut_borrows: std::collections::HashSet<String>,
     /// Saved ownership map states, used for scope management.
-    pub(crate) ownership_scopes: Vec<(
-        std::collections::HashMap<String, OwnershipState>,
-        std::collections::HashSet<String>,
-    )>,
+    pub(crate) ownership_scopes: Vec<OwnershipScope>,
     /// Parameter ownership qualifiers per function.
     ///
     /// Maps function name to a list of ownership qualifiers for each parameter.
@@ -140,6 +149,7 @@ impl TypeChecker {
             declared_confidence: std::collections::HashMap::new(),
             ownership_map: std::collections::HashMap::new(),
             active_borrows: std::collections::HashSet::new(),
+            active_mut_borrows: std::collections::HashSet::new(),
             ownership_scopes: Vec::new(),
             fn_param_ownership: std::collections::HashMap::new(),
             imported_module_names: std::collections::HashSet::new(),
@@ -1283,6 +1293,13 @@ impl TypeChecker {
                     // source variable to protect within this scope).
                     self.ownership_map
                         .insert(param.name.clone(), OwnershipState::Borrowed);
+                }
+                kodo_ast::Ownership::Mut => {
+                    // `mut` parameters are exclusive mutable references —
+                    // the caller retains ownership but grants exclusive
+                    // write access. Cannot coexist with other borrows.
+                    self.ownership_map
+                        .insert(param.name.clone(), OwnershipState::MutBorrowed);
                 }
             }
         }

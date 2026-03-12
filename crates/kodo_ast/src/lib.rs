@@ -491,12 +491,18 @@ pub struct ClosureParam {
 }
 
 /// Ownership qualifier for a parameter.
+///
+/// Based on **\[ATAPL\]** Ch. 1 — substructural type systems.
+/// Kōdo supports three ownership modes: owned (move), shared
+/// reference (immutable borrow), and mutable reference (exclusive borrow).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ownership {
     /// Owned value (default) — caller transfers ownership.
     Owned,
-    /// Borrowed reference — caller retains ownership.
+    /// Borrowed reference — caller retains ownership, callee gets read-only access.
     Ref,
+    /// Mutable borrow — caller retains ownership, callee gets exclusive read-write access.
+    Mut,
 }
 
 /// A function parameter.

@@ -386,6 +386,50 @@ error[E0244]: `continue` outside of loop
    |     ^^^^^^^^ `continue` can only be used inside `while`, `for`, or `for-in` loops
 ```
 
+### E0245: Mut Borrow While Ref Borrowed
+A mutable borrow (`mut`) was attempted on a variable that already has an active immutable borrow (`ref`). A `mut` borrow is exclusive and cannot coexist with any other borrow.
+
+```
+error[E0245]: cannot borrow `x` as mutable while it is immutably borrowed
+  --> src/main.ko:6:20
+   |
+ 6 |     two_args(ref x, mut x)
+   |                     ^^^^^ `x` is already borrowed as `ref`
+```
+
+### E0246: Ref Borrow While Mut Borrowed
+An immutable borrow (`ref`) was attempted on a variable that already has an active mutable borrow (`mut`). A `mut` borrow is exclusive.
+
+```
+error[E0246]: cannot borrow `x` as `ref` while it is mutably borrowed
+  --> src/main.ko:6:25
+   |
+ 6 |     two_args(mut x, ref x)
+   |                     ^^^^^ `x` is already borrowed as `mut`
+```
+
+### E0247: Double Mut Borrow
+A variable was mutably borrowed (`mut`) twice simultaneously. Only one `mut` borrow is allowed at a time.
+
+```
+error[E0247]: cannot borrow `x` as mutable more than once
+  --> src/main.ko:6:25
+   |
+ 6 |     two_args(mut x, mut x)
+   |                     ^^^^^ `x` is already borrowed as `mut`
+```
+
+### E0248: Assign Through Ref
+An assignment was attempted on a variable that is immutably borrowed (`ref`). Immutable borrows do not allow mutation.
+
+```
+error[E0248]: cannot assign to `x` because it is borrowed as `ref`
+  --> src/main.ko:6:5
+   |
+ 6 |     x = 42
+   |     ^^^^^^ `x` is an immutable reference
+```
+
 ### E0253: Tuple Index Out of Bounds
 A tuple index exceeds the number of elements in the tuple type.
 

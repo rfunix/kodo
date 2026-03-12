@@ -165,6 +165,9 @@ impl Parser {
         } else if self.check(&TokenKind::Ref) {
             self.advance();
             Ownership::Ref
+        } else if self.check(&TokenKind::Mut) {
+            self.advance();
+            Ownership::Mut
         } else {
             Ownership::Owned
         };

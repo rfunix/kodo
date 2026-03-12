@@ -1687,6 +1687,25 @@ fn parse_ownership_qualifiers() {
 }
 
 #[test]
+fn parse_mut_ownership_qualifier() {
+    let source = r#"module test {
+        fn mutate(mut x: Int, ref y: Int, own z: Int) -> Int {
+            return x
+        }
+    }"#;
+
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+    let params = &module.functions[0].params;
+    assert_eq!(params.len(), 3);
+    assert_eq!(params[0].name, "x");
+    assert_eq!(params[0].ownership, Ownership::Mut);
+    assert_eq!(params[1].name, "y");
+    assert_eq!(params[1].ownership, Ownership::Ref);
+    assert_eq!(params[2].name, "z");
+    assert_eq!(params[2].ownership, Ownership::Owned);
+}
+
+#[test]
 fn parse_default_ownership_is_owned() {
     let source = r#"module test {
         fn foo(x: Int) -> Int {

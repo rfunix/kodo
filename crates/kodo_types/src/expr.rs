@@ -940,23 +940,48 @@ impl TypeChecker {
                     .as_ref()
                     .and_then(|n| self.fn_param_ownership.get(n))
                     .cloned();
+                // Track temporary borrows created by this call so they can
+                // be released after the callee returns (scope-based lifetime).
+                let mut temp_borrows: Vec<String> = Vec::new();
+                let mut temp_mut_borrows: Vec<String> = Vec::new();
                 for (i, (param_ty, arg)) in param_types.iter().zip(args).enumerate() {
                     let arg_ty = self.infer_expr(arg)?;
                     TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
-                    let is_own = qualifiers
-                        .as_ref()
-                        .and_then(|q| q.get(i))
-                        .is_none_or(|o| *o == kodo_ast::Ownership::Owned);
+                    let qualifier = qualifiers.as_ref().and_then(|q| q.get(i)).copied();
                     if let Expr::Ident(arg_name, arg_span) = arg {
-                        if is_own && !arg_ty.is_copy() {
-                            if let Some(OwnershipState::Owned) = self.ownership_map.get(arg_name) {
-                                self.check_can_move(arg_name, *arg_span)?;
-                                self.track_moved(arg_name, Self::span_to_line(arg_span.start));
+                        match qualifier {
+                            None | Some(kodo_ast::Ownership::Owned) => {
+                                if !arg_ty.is_copy() {
+                                    if let Some(OwnershipState::Owned) =
+                                        self.ownership_map.get(arg_name)
+                                    {
+                                        self.check_can_move(arg_name, *arg_span)?;
+                                        self.track_moved(
+                                            arg_name,
+                                            Self::span_to_line(arg_span.start),
+                                        );
+                                    }
+                                }
                             }
-                        } else if !is_own {
-                            self.track_borrowed(arg_name, arg_name);
+                            Some(kodo_ast::Ownership::Ref) => {
+                                self.check_can_ref_borrow(arg_name, *arg_span)?;
+                                self.active_borrows.insert(arg_name.clone());
+                                temp_borrows.push(arg_name.clone());
+                            }
+                            Some(kodo_ast::Ownership::Mut) => {
+                                self.check_can_mut_borrow(arg_name, *arg_span)?;
+                                self.active_mut_borrows.insert(arg_name.clone());
+                                temp_mut_borrows.push(arg_name.clone());
+                            }
                         }
                     }
+                }
+                // Release temporary borrows — the callee has returned.
+                for name in &temp_borrows {
+                    self.active_borrows.remove(name);
+                }
+                for name in &temp_mut_borrows {
+                    self.active_mut_borrows.remove(name);
                 }
                 Ok(*ret_type)
             }

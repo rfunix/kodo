@@ -347,15 +347,49 @@ pub enum TypeError {
     ///
     /// Once a value is moved (e.g. passed to a function taking `own`),
     /// it can no longer be accessed. Use `ref` to borrow instead.
-    #[error(
-        "variable `{name}` was moved at line {moved_at_line} and cannot be used here at {span:?}"
-    )]
+    #[error("cannot use `{name}` after move (moved at line {moved_at_line}) at {span:?}")]
     UseAfterMove {
         /// The variable name.
         name: String,
         /// The line where the move occurred.
         moved_at_line: u32,
         /// Source location of the invalid use.
+        span: Span,
+    },
+    /// Cannot borrow a variable as mutable while it is already immutably borrowed.
+    ///
+    /// Mutable borrows are exclusive — no other references can exist.
+    #[error("cannot borrow `{name}` as mutable while it is immutably borrowed at {span:?}")]
+    MutBorrowWhileRefBorrowed {
+        /// The variable name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// Cannot borrow a variable as immutable while it is already mutably borrowed.
+    ///
+    /// A mutable borrow is exclusive — no shared references are allowed.
+    #[error("cannot borrow `{name}` as immutable while it is mutably borrowed at {span:?}")]
+    RefBorrowWhileMutBorrowed {
+        /// The variable name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// Cannot borrow a variable mutably more than once at the same time.
+    #[error("cannot borrow `{name}` as mutable more than once at a time at {span:?}")]
+    DoubleMutBorrow {
+        /// The variable name.
+        name: String,
+        /// Source location.
+        span: Span,
+    },
+    /// Cannot assign to a variable through an immutable reference.
+    #[error("cannot assign to `{name}` through immutable reference at {span:?}")]
+    AssignThroughRef {
+        /// The variable name.
+        name: String,
+        /// Source location.
         span: Span,
     },
     /// A borrowed reference cannot escape the scope that created it.
@@ -451,6 +485,10 @@ impl TypeError {
             | Self::ConfidenceThreshold { span, .. }
             | Self::SecuritySensitiveWithoutContract { span, .. }
             | Self::UseAfterMove { span, .. }
+            | Self::MutBorrowWhileRefBorrowed { span, .. }
+            | Self::RefBorrowWhileMutBorrowed { span, .. }
+            | Self::DoubleMutBorrow { span, .. }
+            | Self::AssignThroughRef { span, .. }
             | Self::BorrowEscapesScope { span, .. }
             | Self::MoveWhileBorrowed { span, .. }
             | Self::BreakOutsideLoop { span, .. }
@@ -503,6 +541,10 @@ impl TypeError {
             Self::UseAfterMove { .. } => "E0240",
             Self::BorrowEscapesScope { .. } => "E0241",
             Self::MoveWhileBorrowed { .. } => "E0242",
+            Self::MutBorrowWhileRefBorrowed { .. } => "E0245",
+            Self::RefBorrowWhileMutBorrowed { .. } => "E0246",
+            Self::DoubleMutBorrow { .. } => "E0247",
+            Self::AssignThroughRef { .. } => "E0248",
             Self::BreakOutsideLoop { .. } => "E0243",
             Self::ContinueOutsideLoop { .. } => "E0244",
             Self::TupleIndexOutOfBounds { .. } => "E0253",
@@ -638,6 +680,18 @@ fn suggestion_for_type_mismatch(err: &TypeError) -> Option<String> {
         TypeError::MoveWhileBorrowed { name, .. } => {
             Some(format!("drop the borrow of `{name}` before moving it"))
         }
+        TypeError::MutBorrowWhileRefBorrowed { name, .. } => Some(format!(
+            "cannot borrow `{name}` as mutable while it has active immutable references — drop the `ref` borrows first"
+        )),
+        TypeError::RefBorrowWhileMutBorrowed { name, .. } => Some(format!(
+            "cannot borrow `{name}` as immutable while it is mutably borrowed — drop the `mut` borrow first"
+        )),
+        TypeError::DoubleMutBorrow { name, .. } => Some(format!(
+            "only one mutable borrow of `{name}` is allowed at a time — use `ref` for read-only access"
+        )),
+        TypeError::AssignThroughRef { name, .. } => Some(format!(
+            "cannot assign to `{name}` because it is borrowed as immutable — use `mut` instead of `ref`"
+        )),
         TypeError::TupleIndexOutOfBounds { length, .. } => Some(format!(
             "valid indices for this tuple are 0..{}",
             length.saturating_sub(1)

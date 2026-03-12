@@ -1,0 +1,49 @@
+// Demonstrates Kōdo's move semantics for non-Copy types.
+//
+// Non-Copy types (like String, structs) are moved when assigned
+// or passed by value. After a move, the original variable cannot
+// be used. Copy types (Int, Bool, Float) are implicitly copied.
+//
+// Compile and run:
+//   kodoc build examples/move_semantics.ko -o move_semantics
+//   ./move_semantics
+
+module move_semantics {
+    meta {
+        purpose: "Demonstrate move semantics and Copy vs non-Copy types"
+        version: "0.1.0"
+    }
+
+    struct Data {
+        value: Int
+    }
+
+    fn consume(own d: Data) -> Int {
+        return d.value
+    }
+
+    fn borrow(ref d: Data) -> Int {
+        return d.value
+    }
+
+    fn main() {
+        // --- Copy types: Int is freely copied ---
+        let a: Int = 100
+        let b: Int = a
+        let c: Int = a + b
+        print_int(c)
+
+        // --- Non-Copy types: borrow to retain access ---
+        let d: Data = Data { value: 42 }
+        let v1: Int = borrow(d)
+        let v2: Int = borrow(d)
+        print_int(v1 + v2)
+
+        // --- Move transfers ownership ---
+        let result: Int = consume(d)
+        print_int(result)
+        // After consume(d), d is moved and cannot be used again.
+        // Uncommenting the next line would cause E0240 (use after move):
+        // let bad: Int = borrow(d)
+    }
+}
