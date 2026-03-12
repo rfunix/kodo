@@ -154,6 +154,117 @@ pub unsafe extern "C" fn kodo_list_contains(list_ptr: i64, value: i64) -> i64 {
     0
 }
 
+/// Removes and returns the last element from a list.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `out_value` and `out_is_some` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_pop(list_ptr: i64, out_value: *mut i64, out_is_some: *mut i64) {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len > 0 {
+        list.len -= 1;
+        // SAFETY: list.len was > 0, data is valid up to old len.
+        unsafe {
+            *out_value = *list.data.add(list.len);
+            *out_is_some = 1;
+        }
+    } else {
+        unsafe {
+            *out_value = 0;
+            *out_is_some = 0;
+        }
+    }
+}
+
+/// Removes the element at the given index, shifting subsequent elements left.
+///
+/// Returns 1 if the index was valid, 0 otherwise.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_remove(list_ptr: i64, index: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = index as usize;
+    if idx >= list.len {
+        return 0;
+    }
+    // SAFETY: idx < list.len, data is valid.
+    unsafe {
+        let src = list.data.add(idx + 1);
+        let dst = list.data.add(idx);
+        std::ptr::copy(src, dst, list.len - idx - 1);
+    }
+    list.len -= 1;
+    1
+}
+
+/// Sets the element at the given index.
+///
+/// Returns 1 if the index was valid, 0 otherwise.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_set(list_ptr: i64, index: i64, value: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = index as usize;
+    if idx >= list.len {
+        return 0;
+    }
+    // SAFETY: idx < list.len, data is valid.
+    unsafe { *list.data.add(idx) = value };
+    1
+}
+
+/// Returns 1 if the list is empty, 0 otherwise.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_is_empty(list_ptr: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    i64::from(list.len == 0)
+}
+
+/// Reverses the elements of a list in place.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_reverse(list_ptr: i64) {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len <= 1 {
+        return;
+    }
+    let mut i = 0;
+    let mut j = list.len - 1;
+    while i < j {
+        // SAFETY: i < j < list.len, data is valid.
+        unsafe {
+            let a = *list.data.add(i);
+            let b = *list.data.add(j);
+            *list.data.add(i) = b;
+            *list.data.add(j) = a;
+        }
+        i += 1;
+        j -= 1;
+    }
+}
+
 /// Frees a heap-allocated `KodoList` and its backing data array.
 ///
 /// Does nothing if `list_ptr` is zero (null handle).
@@ -491,6 +602,57 @@ pub unsafe extern "C" fn kodo_map_length(map_ptr: i64) -> i64 {
     #[allow(clippy::cast_possible_wrap)]
     let result = map.len as i64;
     result
+}
+
+/// Removes a key-value pair from the map.
+///
+/// Returns 1 if the key was found and removed, 0 otherwise.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_remove(map_ptr: i64, key: i64) -> i64 {
+    if map_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+    if map.entries.is_null() || map.capacity == 0 {
+        return 0;
+    }
+    let mut idx = map_hash(key, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            return 0; // Key not found
+        }
+        if entry.key == key {
+            entry.occupied = false;
+            entry.key = 0;
+            entry.value = 0;
+            map.len -= 1;
+            return 1;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    0
+}
+
+/// Returns 1 if the map is empty, 0 otherwise.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_is_empty(map_ptr: i64) -> i64 {
+    if map_ptr == 0 {
+        return 1;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    i64::from(map.len == 0)
 }
 
 /// Frees a heap-allocated `KodoMap` and its backing entries array.
@@ -1056,5 +1218,47 @@ mod tests {
         }
         assert_eq!(count, 50);
         unsafe { kodo_map_keys_free(iter) };
+    }
+
+    #[test]
+    fn map_remove_existing_key() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 2, 200);
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 2);
+        assert_eq!(unsafe { kodo_map_remove(map, 1) }, 1);
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        assert_eq!(unsafe { kodo_map_contains_key(map, 1) }, 0);
+        assert_eq!(unsafe { kodo_map_contains_key(map, 2) }, 1);
+    }
+
+    #[test]
+    fn map_remove_nonexistent_key() {
+        let map = kodo_map_new();
+        unsafe { kodo_map_insert(map, 1, 100) };
+        assert_eq!(unsafe { kodo_map_remove(map, 99) }, 0);
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+    }
+
+    #[test]
+    fn map_remove_null_map() {
+        assert_eq!(unsafe { kodo_map_remove(0, 1) }, 0);
+    }
+
+    #[test]
+    fn map_is_empty_works() {
+        let map = kodo_map_new();
+        assert_eq!(unsafe { kodo_map_is_empty(map) }, 1);
+        unsafe { kodo_map_insert(map, 1, 100) };
+        assert_eq!(unsafe { kodo_map_is_empty(map) }, 0);
+        unsafe { kodo_map_remove(map, 1) };
+        assert_eq!(unsafe { kodo_map_is_empty(map) }, 1);
+    }
+
+    #[test]
+    fn map_is_empty_null_map() {
+        assert_eq!(unsafe { kodo_map_is_empty(0) }, 1);
     }
 }

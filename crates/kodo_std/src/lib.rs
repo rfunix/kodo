@@ -326,6 +326,31 @@ fn collection_builtins() -> Vec<BuiltinFunction> {
             description: "Returns true if the list contains the given element".to_string(),
             param_count: 2,
         },
+        BuiltinFunction {
+            name: "kodo::list::pop".to_string(),
+            description: "Removes and returns the last element from a list".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::list::remove".to_string(),
+            description: "Removes the element at the given index".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::list::set".to_string(),
+            description: "Sets the element at the given index".to_string(),
+            param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::list::is_empty".to_string(),
+            description: "Returns true if the list has no elements".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::list::reverse".to_string(),
+            description: "Reverses the elements of a list in place".to_string(),
+            param_count: 1,
+        },
         // Map operations
         BuiltinFunction {
             name: "kodo::map::new".to_string(),
@@ -350,6 +375,16 @@ fn collection_builtins() -> Vec<BuiltinFunction> {
         BuiltinFunction {
             name: "kodo::map::length".to_string(),
             description: "Returns the number of entries in the map".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::map::remove".to_string(),
+            description: "Removes a key-value pair from the map".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::map::is_empty".to_string(),
+            description: "Returns true if the map has no entries".to_string(),
             param_count: 1,
         },
     ]
@@ -390,6 +425,26 @@ fn network_builtins() -> Vec<BuiltinFunction> {
             name: "kodo::json::free".to_string(),
             description: "Frees a parsed JSON handle".to_string(),
             param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::json::stringify".to_string(),
+            description: "Serializes a JSON value back to a string".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::json::get_bool".to_string(),
+            description: "Gets a boolean value from a JSON object by key".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::json::get_float".to_string(),
+            description: "Gets a float value from a JSON object by key".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::json::get_array".to_string(),
+            description: "Gets an array from a JSON object as a list of handles".to_string(),
+            param_count: 2,
         },
     ]
 }
@@ -504,7 +559,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 56);
+        assert_eq!(builtins.len(), 67);
     }
 
     #[test]

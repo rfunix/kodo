@@ -91,6 +91,7 @@ pub fn render_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic) {
             .span()
             .map(|s| make_json_span(source, filename, s)),
         suggestion: diagnostic.suggestion(),
+        fixability: diagnostic.fixability(),
         fix_patch,
         see_also: diagnostic.see_also(),
     };
@@ -151,6 +152,7 @@ struct JsonDiagnostic {
     message: String,
     span: Option<JsonSpan>,
     suggestion: Option<String>,
+    fixability: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     fix_patch: Option<JsonFixPatch>,
     #[serde(skip_serializing_if = "Option::is_none")]

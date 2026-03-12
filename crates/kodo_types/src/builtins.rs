@@ -431,6 +431,53 @@ impl TypeChecker {
                 Box::new(Type::Bool),
             ),
         );
+        // list_pop(List<Int>) -> Int (uses out-params at runtime, returns last element or 0)
+        self.env.insert(
+            "list_pop".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Box::new(Type::Int),
+            ),
+        );
+        // list_remove(List<Int>, Int) -> Bool (returns true if index was valid)
+        self.env.insert(
+            "list_remove".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
+        // list_set(List<Int>, Int, Int) -> Bool (returns true if index was valid)
+        self.env.insert(
+            "list_set".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
+        // list_is_empty(List<Int>) -> Bool
+        self.env.insert(
+            "list_is_empty".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Box::new(Type::Bool),
+            ),
+        );
+        // list_reverse(List<Int>) -> ()  (reverses in place)
+        self.env.insert(
+            "list_reverse".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int])],
+                Box::new(Type::Unit),
+            ),
+        );
     }
 
     /// Registers builtin functions for the Iterator protocol.
@@ -703,6 +750,44 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        // map_remove(Map<Int, Int>, Int) -> Bool
+        self.method_lookup.insert(
+            ("Map".to_string(), "remove".to_string()),
+            (
+                "map_remove".to_string(),
+                vec![
+                    Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]),
+                    Type::Int,
+                ],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "map_remove".to_string(),
+            Type::Function(
+                vec![
+                    Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]),
+                    Type::Int,
+                ],
+                Box::new(Type::Bool),
+            ),
+        );
+        // map_is_empty(Map<Int, Int>) -> Bool
+        self.method_lookup.insert(
+            ("Map".to_string(), "is_empty".to_string()),
+            (
+                "map_is_empty".to_string(),
+                vec![Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "map_is_empty".to_string(),
+            Type::Function(
+                vec![Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])],
+                Box::new(Type::Bool),
+            ),
+        );
     }
 
     /// Registers builtin functions for HTTP client operations.
@@ -739,6 +824,29 @@ impl TypeChecker {
         self.env.insert(
             "json_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+        // json_stringify(handle: Int) -> String
+        self.env.insert(
+            "json_stringify".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // json_get_bool(handle: Int, key: String) -> Int (-1 if not found)
+        self.env.insert(
+            "json_get_bool".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        // json_get_float(handle: Int, key: String) -> Float64
+        self.env.insert(
+            "json_get_float".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Float64)),
+        );
+        // json_get_array(handle: Int, key: String) -> List<Int> (list of JSON handles)
+        self.env.insert(
+            "json_get_array".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::String],
+                Box::new(Type::Generic("List".to_string(), vec![Type::Int])),
+            ),
         );
     }
 

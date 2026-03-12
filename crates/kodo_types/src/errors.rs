@@ -601,30 +601,202 @@ impl kodo_ast::Diagnostic for TypeError {
     }
 
     fn fix_patch(&self) -> Option<kodo_ast::FixPatch> {
-        match self {
-            Self::MissingMeta => Some(kodo_ast::FixPatch {
-                description: "add a meta block with a purpose field".to_string(),
-                file: std::string::String::new(),
-                start_offset: 0,
-                end_offset: 0,
-                replacement: "    meta { purpose: \"TODO: describe this module\" }\n".to_string(),
-            }),
-            Self::EmptyPurpose { span } => Some(kodo_ast::FixPatch {
-                description: "provide a non-empty purpose string".to_string(),
-                file: std::string::String::new(),
+        fix_patch_for_error(self)
+    }
+}
+
+/// Returns a machine-applicable fix patch for the given type error.
+///
+/// Covers ~22 error variants with auto-applicable patches that AI agents
+/// can use to fix code without human interpretation.
+fn fix_patch_for_error(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    fix_patch_meta_and_policy(err)
+        .or_else(|| fix_patch_names_and_fields(err))
+        .or_else(|| fix_patch_types_and_ownership(err))
+}
+
+/// Fix patches for meta block, confidence, and security errors.
+fn fix_patch_meta_and_policy(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
+        TypeError::MissingMeta => Some(kodo_ast::FixPatch {
+            description: "add a meta block with a purpose field".to_string(),
+            file: String::new(),
+            start_offset: 0,
+            end_offset: 0,
+            replacement: "    meta { purpose: \"TODO: describe this module\" }\n".to_string(),
+        }),
+        TypeError::EmptyPurpose { span } => Some(kodo_ast::FixPatch {
+            description: "provide a non-empty purpose string".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: "purpose: \"TODO: describe this module\"".to_string(),
+        }),
+        TypeError::MissingPurpose { span } => Some(kodo_ast::FixPatch {
+            description: "add purpose field to meta block".to_string(),
+            file: String::new(),
+            start_offset: span.end as usize,
+            end_offset: span.end as usize,
+            replacement: "\n    purpose: \"TODO: describe this module\"".to_string(),
+        }),
+        TypeError::LowConfidenceWithoutReview { span, .. } => Some(kodo_ast::FixPatch {
+            description: "add @reviewed_by annotation for human review".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: "@reviewed_by(human: \"reviewer\")\n    ".to_string(),
+        }),
+        TypeError::SecuritySensitiveWithoutContract { span, .. } => Some(kodo_ast::FixPatch {
+            description: "add requires/ensures contract block".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: "    requires { true }\n    ensures { true }\n".to_string(),
+        }),
+        _ => None,
+    }
+}
+
+/// Fix patches for name resolution, struct/enum fields, and trait methods.
+fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
+        TypeError::Undefined {
+            span,
+            similar: Some(suggestion),
+            ..
+        }
+        | TypeError::ExtraStructField {
+            span,
+            similar: Some(suggestion),
+            ..
+        }
+        | TypeError::NoSuchField {
+            span,
+            similar: Some(suggestion),
+            ..
+        }
+        | TypeError::MethodNotFound {
+            span,
+            similar: Some(suggestion),
+            ..
+        }
+        | TypeError::UnknownVariant {
+            span,
+            similar: Some(suggestion),
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("rename to `{suggestion}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: suggestion.clone(),
+        }),
+        TypeError::MissingStructField { field, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("add missing field `{field}`"),
+            file: String::new(),
+            start_offset: span.end as usize,
+            end_offset: span.end as usize,
+            replacement: format!("\n    {field}: TODO,"),
+        }),
+        TypeError::DuplicateStructField { field, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("remove duplicate field `{field}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::NonExhaustiveMatch { missing, span, .. } => {
+            use std::fmt::Write;
+            let mut arms = String::new();
+            for v in missing {
+                let _ = writeln!(arms, "        {v} => {{ TODO }},");
+            }
+            Some(kodo_ast::FixPatch {
+                description: format!("add missing match arms for: {}", missing.join(", ")),
+                file: String::new(),
+                start_offset: span.end as usize,
+                end_offset: span.end as usize,
+                replacement: format!("\n{arms}"),
+            })
+        }
+        TypeError::MissingTraitMethod {
+            method,
+            trait_name,
+            span,
+        } => Some(kodo_ast::FixPatch {
+            description: format!("add missing method `{method}` for trait `{trait_name}`"),
+            file: String::new(),
+            start_offset: span.end as usize,
+            end_offset: span.end as usize,
+            replacement: format!("\n    fn {method}() {{\n        TODO\n    }}\n"),
+        }),
+        TypeError::ArityMismatch { expected, span, .. } => {
+            let params = vec!["TODO"; *expected].join(", ");
+            Some(kodo_ast::FixPatch {
+                description: format!("provide {expected} argument(s)"),
+                file: String::new(),
                 start_offset: span.start as usize,
                 end_offset: span.end as usize,
-                replacement: "purpose: \"TODO: describe this module\"".to_string(),
-            }),
-            Self::LowConfidenceWithoutReview { span, .. } => Some(kodo_ast::FixPatch {
-                description: "add @reviewed_by annotation for human review".to_string(),
-                file: std::string::String::new(),
-                start_offset: span.start as usize,
-                end_offset: span.start as usize,
-                replacement: "@reviewed_by(human: \"reviewer\")\n    ".to_string(),
-            }),
-            _ => None,
+                replacement: format!("({params})"),
+            })
         }
+        _ => None,
+    }
+}
+
+/// Fix patches for type mismatches, ownership, and type annotation errors.
+fn fix_patch_types_and_ownership(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
+        TypeError::Mismatch { expected, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("change type to `{expected}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: expected.clone(),
+        }),
+        TypeError::UseAfterMove { name, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("change `{name}` to use `ref` instead of `own`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::AssignThroughRef { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("change `ref {name}` to `mut {name}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("mut {name}"),
+        }),
+        TypeError::ClosureParamTypeMissing { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("add type annotation to parameter `{name}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("{name}: TODO"),
+        }),
+        TypeError::TryInNonResultFn { span } => Some(kodo_ast::FixPatch {
+            description: "change return type to Result".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: "-> Result<TODO, String>".to_string(),
+        }),
+        TypeError::OptionalChainOnNonOption { found, span } => Some(kodo_ast::FixPatch {
+            description: format!("wrap `{found}` in Option"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("Option<{found}>"),
+        }),
+        TypeError::MissingTypeArgs { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("add type arguments to `{name}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("{name}<TODO>"),
+        }),
+        _ => None,
     }
 }
 

@@ -63,13 +63,19 @@ pub(crate) fn desugar_for_stmt(
 ///
 /// Transforms `for x in iterable { body }` into:
 /// ```text
-/// let __iter_x = list_iter(iterable)
-/// while list_iterator_advance(__iter_x) > 0 {
-///     let x = list_iterator_value(__iter_x)
+/// let __iter_x = init_fn(iterable)
+/// while advance_fn(__iter_x) > 0 {
+///     let x = value_fn(__iter_x)
 ///     body
 /// }
-/// list_iterator_free(__iter_x)
+/// free_fn(__iter_x)
 /// ```
+///
+/// The iterator protocol functions are selected based on the iterable
+/// expression. When the iterable is a call to `Map_keys(...)`,
+/// `Map_values(...)`, or `String_chars(...)` (as resolved by the type
+/// checker from method syntax), the corresponding map/string iterator
+/// functions are used instead of the default list iterator.
 pub(crate) fn desugar_for_in_stmt(
     new_stmts: &mut Vec<Stmt>,
     span: Span,
@@ -82,23 +88,32 @@ pub(crate) fn desugar_for_in_stmt(
 
     let iter_name = format!("__iter_{name}");
 
-    // let __iter_x = list_iter(iterable)
+    // Detect if iterating over map keys/values or string chars.
+    // The type checker resolves `map.keys()` to `Map_keys(map)` etc.
+    let (init_fn, advance_fn, value_fn, free_fn) = detect_iterator_protocol(&iterable);
+
+    // let __iter_x = init_fn(iterable)
     let let_iter = Stmt::Let {
         span,
         mutable: false,
         name: iter_name.clone(),
         ty: None,
-        value: Expr::Call {
-            callee: Box::new(Expr::Ident("list_iter".to_string(), span)),
-            args: vec![iterable],
-            span,
+        value: if is_already_iterator_call(&iterable) {
+            // The iterable is already a call like Map_keys(map) — use it directly
+            iterable
+        } else {
+            Expr::Call {
+                callee: Box::new(Expr::Ident(init_fn.to_string(), span)),
+                args: vec![iterable],
+                span,
+            }
         },
     };
 
-    // while list_iterator_advance(__iter_x) > 0 { ... }
+    // while advance_fn(__iter_x) > 0 { ... }
     let condition = Expr::BinaryOp {
         left: Box::new(Expr::Call {
-            callee: Box::new(Expr::Ident("list_iterator_advance".to_string(), span)),
+            callee: Box::new(Expr::Ident(advance_fn.to_string(), span)),
             args: vec![Expr::Ident(iter_name.clone(), span)],
             span,
         }),
@@ -107,14 +122,14 @@ pub(crate) fn desugar_for_in_stmt(
         span,
     };
 
-    // let x = list_iterator_value(__iter_x)
+    // let x = value_fn(__iter_x)
     let let_elem = Stmt::Let {
         span,
         mutable: false,
         name: name.to_string(),
         ty: None,
         value: Expr::Call {
-            callee: Box::new(Expr::Ident("list_iterator_value".to_string(), span)),
+            callee: Box::new(Expr::Ident(value_fn.to_string(), span)),
             args: vec![Expr::Ident(iter_name.clone(), span)],
             span,
         },
@@ -132,9 +147,9 @@ pub(crate) fn desugar_for_in_stmt(
         },
     };
 
-    // list_iterator_free(__iter_x)
+    // free_fn(__iter_x)
     let free_iter = Stmt::Expr(Expr::Call {
-        callee: Box::new(Expr::Ident("list_iterator_free".to_string(), span)),
+        callee: Box::new(Expr::Ident(free_fn.to_string(), span)),
         args: vec![Expr::Ident(iter_name, span)],
         span,
     });
@@ -142,4 +157,62 @@ pub(crate) fn desugar_for_in_stmt(
     new_stmts.push(let_iter);
     new_stmts.push(while_stmt);
     new_stmts.push(free_iter);
+}
+
+/// Detects which iterator protocol to use based on the iterable expression.
+///
+/// Returns `(init_fn, advance_fn, value_fn, free_fn)` names.
+fn detect_iterator_protocol(
+    iterable: &Expr,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    if let Expr::Call { callee, .. } = iterable {
+        if let Expr::Ident(name, _) = callee.as_ref() {
+            match name.as_str() {
+                "Map_keys" => {
+                    return (
+                        "Map_keys",
+                        "map_keys_advance",
+                        "map_keys_value",
+                        "map_keys_free",
+                    )
+                }
+                "Map_values" => {
+                    return (
+                        "Map_values",
+                        "map_values_advance",
+                        "map_values_value",
+                        "map_values_free",
+                    )
+                }
+                "String_chars" => {
+                    return (
+                        "String_chars",
+                        "string_chars_advance",
+                        "string_chars_value",
+                        "string_chars_free",
+                    )
+                }
+                _ => {}
+            }
+        }
+    }
+    (
+        "list_iter",
+        "list_iterator_advance",
+        "list_iterator_value",
+        "list_iterator_free",
+    )
+}
+
+/// Checks if the iterable expression is already an iterator creation call.
+///
+/// `Map_keys(map)` and `Map_values(map)` are already iterator constructors —
+/// we don't need to wrap them in another init call.
+fn is_already_iterator_call(iterable: &Expr) -> bool {
+    if let Expr::Call { callee, .. } = iterable {
+        if let Expr::Ident(name, _) = callee.as_ref() {
+            return matches!(name.as_str(), "Map_keys" | "Map_values" | "String_chars");
+        }
+    }
+    false
 }

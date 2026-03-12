@@ -88,6 +88,10 @@ enum Command {
         /// The error code to explain (e.g., E0200).
         #[arg()]
         code: String,
+
+        /// Output as JSON instead of human-readable format.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Format a Kōdo source file.
     Fmt {
@@ -108,7 +112,11 @@ enum Command {
     /// Start the Kōdo Language Server Protocol server.
     Lsp,
     /// Start an interactive REPL (Read-Eval-Print Loop).
-    Repl,
+    Repl {
+        /// Output all results as JSON (for AI agent consumption).
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Generate a confidence report for a module.
     ConfidenceReport {
         /// The source file to analyze.
@@ -171,11 +179,17 @@ fn main() {
         } => run_check(&file, json_errors, &contracts),
         Command::Lex { file } => run_lex(&file),
         Command::Parse { file } => run_parse(&file),
-        Command::Explain { code } => run_explain(&code),
+        Command::Explain { code, json } => run_explain(&code, json),
         Command::Fmt { file, check } => run_fmt(&file, check),
         Command::IntentExplain { file } => run_intent_explain(&file),
         Command::Lsp => run_lsp(),
-        Command::Repl => repl::run_repl(),
+        Command::Repl { json } => {
+            if json {
+                repl::run_repl_json()
+            } else {
+                repl::run_repl()
+            }
+        }
         Command::ConfidenceReport {
             file,
             json,
@@ -2410,24 +2424,53 @@ fn run_parse(file: &PathBuf) -> i32 {
     }
 }
 
-fn run_explain(code: &str) -> i32 {
+fn run_explain(code: &str, json: bool) -> i32 {
     match explanations::get_explanation(code) {
         Some(entry) => {
-            println!("Error {}: {}\n", entry.code, entry.title);
-            println!("{}\n", entry.explanation);
-            println!("Example of incorrect code:\n");
-            println!("```kodo");
-            println!("{}", entry.bad_example);
-            println!("```\n");
-            println!("Corrected code:\n");
-            println!("```kodo");
-            println!("{}", entry.good_example);
-            println!("```");
+            if json {
+                let json_output = serde_json::json!({
+                    "code": entry.code,
+                    "title": entry.title,
+                    "explanation": entry.explanation,
+                    "bad_example": entry.bad_example,
+                    "good_example": entry.good_example
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_output).unwrap_or_else(|e| format!(
+                        "{{\"error\": \"json serialization failed: {e}\"}}"
+                    ))
+                );
+            } else {
+                println!("Error {}: {}\n", entry.code, entry.title);
+                println!("{}\n", entry.explanation);
+                println!("Example of incorrect code:\n");
+                println!("```kodo");
+                println!("{}", entry.bad_example);
+                println!("```\n");
+                println!("Corrected code:\n");
+                println!("```kodo");
+                println!("{}", entry.good_example);
+                println!("```");
+            }
             0
         }
         None => {
-            eprintln!("error: unknown error code `{code}`");
-            eprintln!("hint: error codes range from E0001 to E0699");
+            if json {
+                let json_output = serde_json::json!({
+                    "error": format!("unknown error code `{code}`"),
+                    "hint": "error codes range from E0001 to E0699"
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_output).unwrap_or_else(|e| format!(
+                        "{{\"error\": \"json serialization failed: {e}\"}}"
+                    ))
+                );
+            } else {
+                eprintln!("error: unknown error code `{code}`");
+                eprintln!("hint: error codes range from E0001 to E0699");
+            }
             1
         }
     }

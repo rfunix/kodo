@@ -444,6 +444,37 @@ fn declare_collection_builtins(
         [types::I64, types::I64],
         types::I64
     );
+    // list_pop: (list_ptr, out_value, out_is_some) -> void
+    decl_void!(
+        "kodo_list_pop",
+        "list_pop",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // list_remove: (list_ptr, index) -> i64
+    decl_ret!(
+        "kodo_list_remove",
+        "list_remove",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // list_set: (list_ptr, index, value) -> i64
+    decl_ret!(
+        "kodo_list_set",
+        "list_set",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // list_is_empty: (list_ptr) -> i64
+    decl_ret!(
+        "kodo_list_is_empty",
+        "list_is_empty",
+        [types::I64],
+        types::I64
+    );
+    // list_reverse: (list_ptr) -> void
+    decl_void!("kodo_list_reverse", "list_reverse", types::I64);
 
     // Map operations
     decl_ret!("kodo_map_new", "map_new", [], types::I64);
@@ -469,6 +500,20 @@ fn declare_collection_builtins(
         types::I64
     );
     decl_ret!("kodo_map_length", "map_length", [types::I64], types::I64);
+    // map_remove: (map_ptr, key) -> i64
+    decl_ret!(
+        "kodo_map_remove",
+        "map_remove",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // map_is_empty: (map_ptr) -> i64
+    decl_ret!(
+        "kodo_map_is_empty",
+        "map_is_empty",
+        [types::I64],
+        types::I64
+    );
     Ok(())
 }
 
@@ -534,6 +579,35 @@ fn declare_network_builtins(
         types::I64
     );
     decl_void!("kodo_json_free", "json_free", types::I64);
+    // json_stringify: (handle, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_json_stringify",
+        "json_stringify",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // json_get_bool: (handle, key_ptr, key_len) -> i64
+    decl_ret!(
+        "kodo_json_get_bool",
+        "json_get_bool",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // json_get_float: (handle, key_ptr, key_len) -> f64
+    decl_ret!(
+        "kodo_json_get_float",
+        "json_get_float",
+        [types::I64, types::I64, types::I64],
+        types::F64
+    );
+    // json_get_array: (handle, key_ptr, key_len) -> i64
+    decl_ret!(
+        "kodo_json_get_array",
+        "json_get_array",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
     Ok(())
 }
 

@@ -347,6 +347,137 @@ pub unsafe extern "C" fn kodo_json_get_int(handle: i64, key_ptr: *const u8, key_
     }
 }
 
+/// Serializes a JSON handle back to a JSON string.
+///
+/// Returns the string via out parameters.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_stringify(handle: i64, out_ptr: *mut i64, out_len: *mut i64) {
+    if handle == 0 {
+        let empty = String::new();
+        let leaked = empty.into_bytes().leak();
+        // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe {
+            *out_ptr = leaked.as_ptr() as i64;
+            *out_len = 0;
+        }
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    let s = serde_json::to_string(value).unwrap_or_default();
+    let bytes = s.into_bytes();
+    let len = bytes.len();
+    let leaked = bytes.leak();
+    // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        #[allow(clippy::cast_possible_wrap)]
+        {
+            *out_ptr = leaked.as_ptr() as i64;
+            *out_len = len as i64;
+        }
+    }
+}
+
+/// Gets a boolean value from a JSON object by key.
+///
+/// Returns 1 for true, 0 for false, -1 if key not found or wrong type.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_get_bool(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+) -> i64 {
+    if handle == 0 || key_ptr.is_null() {
+        return -1;
+    }
+    // SAFETY: handle was returned by kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: key_ptr/key_len describe a valid UTF-8 string.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    match value.get(key).and_then(serde_json::Value::as_bool) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
+/// Gets a float value from a JSON object by key.
+///
+/// Returns the float value, or 0.0 if key not found or wrong type.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_get_float(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+) -> f64 {
+    if handle == 0 || key_ptr.is_null() {
+        return 0.0;
+    }
+    // SAFETY: handle was returned by kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: key_ptr/key_len describe a valid UTF-8 string.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0)
+}
+
+/// Gets an array from a JSON object by key, returning it as a List handle.
+///
+/// Each array element is stored as a new JSON handle in the list.
+/// Returns 0 if key not found or not an array.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_get_array(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+) -> i64 {
+    if handle == 0 || key_ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: handle was returned by kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: key_ptr/key_len describe a valid UTF-8 string.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    match value.get(key).and_then(|v| v.as_array()) {
+        Some(arr) => {
+            // Create a new list and push each element as a JSON handle.
+            let list_ptr = crate::collections::kodo_list_new();
+            for elem in arr {
+                let elem_handle = Box::into_raw(Box::new(elem.clone())) as i64;
+                // SAFETY: list_ptr was just created, elem_handle is valid.
+                unsafe { crate::collections::kodo_list_push(list_ptr, elem_handle) };
+            }
+            list_ptr
+        }
+        None => 0,
+    }
+}
+
 /// Frees a parsed JSON value previously returned by `kodo_json_parse`.
 ///
 /// Does nothing if `handle` is 0 (null handle).

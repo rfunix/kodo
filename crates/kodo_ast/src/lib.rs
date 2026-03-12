@@ -1007,6 +1007,20 @@ pub trait Diagnostic: std::fmt::Display {
     fn fix_patch(&self) -> Option<FixPatch> {
         None
     }
+    /// Returns the fixability classification for this diagnostic.
+    ///
+    /// - `"auto"`: the error has a machine-applicable fix patch
+    /// - `"assisted"`: the error has a suggestion but needs context
+    /// - `"manual"`: the error requires human judgment
+    fn fixability(&self) -> &'static str {
+        if self.fix_patch().is_some() {
+            "auto"
+        } else if self.suggestion().is_some() {
+            "assisted"
+        } else {
+            "manual"
+        }
+    }
     /// Returns a reference to the error index documentation.
     fn see_also(&self) -> Option<String> {
         Some(format!("docs/error_index.md#{}", self.code()))

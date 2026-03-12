@@ -15,6 +15,23 @@ const PROMPT: &str = "kōdo> ";
 /// The continuation prompt shown when multi-line input is expected.
 const CONTINUATION_PROMPT: &str = "  ... ";
 
+/// The type of a REPL expression, used to choose the correct print wrapper.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprType {
+    /// Integer expression — printed via `print_int`.
+    Int,
+    /// Float64 expression — printed via `println_float`.
+    Float64,
+    /// String expression — printed via `println`.
+    String,
+    /// Boolean expression — printed via conditional `println`.
+    Bool,
+    /// Unit/void expression (e.g. `println(...)`) — no result to print.
+    Unit,
+    /// Unknown or composite type — executed as a statement.
+    Other(std::string::String),
+}
+
 /// Special commands recognized by the REPL (prefixed with `:`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplCommand {
@@ -74,6 +91,8 @@ pub struct ReplState {
     pub definitions: Vec<String>,
     /// Struct/enum/type declarations accumulated across REPL inputs.
     pub type_defs: Vec<String>,
+    /// Variable bindings (`let` statements) accumulated across REPL inputs.
+    pub bindings: Vec<String>,
     /// Counter for generating unique wrapper function names.
     pub eval_counter: u64,
 }
@@ -88,6 +107,7 @@ impl ReplState {
     pub fn reset(&mut self) {
         self.definitions.clear();
         self.type_defs.clear();
+        self.bindings.clear();
         self.eval_counter = 0;
     }
 
@@ -95,6 +115,11 @@ impl ReplState {
     pub fn is_definition(input: &str) -> bool {
         let trimmed = input.trim();
         trimmed.starts_with("fn ")
+    }
+
+    /// Returns whether the input looks like a variable binding (`let`).
+    pub fn is_let_binding(input: &str) -> bool {
+        input.trim().starts_with("let ")
     }
 
     /// Returns whether the input looks like a type definition (struct/enum/type).
@@ -105,34 +130,124 @@ impl ReplState {
             || trimmed.starts_with("type ")
     }
 
-    /// Wraps an expression in a complete Kōdo module source for compilation.
-    ///
-    /// The generated module includes all accumulated definitions and wraps the
-    /// expression in a `main` function that prints the result.
-    pub fn wrap_expression(&mut self, expr: &str) -> String {
-        self.eval_counter += 1;
+    /// Builds the module preamble with accumulated type and function definitions.
+    fn build_preamble(&self) -> String {
         let mut source = String::new();
         source.push_str("module repl {\n");
         source.push_str("    meta { purpose: \"repl\" }\n\n");
 
-        // Include accumulated type definitions.
         for type_def in &self.type_defs {
             source.push_str("    ");
             source.push_str(type_def);
             source.push('\n');
         }
 
-        // Include accumulated function definitions.
         for def in &self.definitions {
             source.push_str("    ");
             source.push_str(def);
             source.push('\n');
         }
 
-        // Wrap expression in main function using print_int.
+        source
+    }
+
+    /// Emits accumulated `let` bindings into a function body.
+    fn emit_bindings(&self, source: &mut String) {
+        for binding in &self.bindings {
+            source.push_str("        ");
+            source.push_str(binding);
+            source.push('\n');
+        }
+    }
+
+    /// Infers the type of a REPL expression using a type-check probe.
+    ///
+    /// Wraps the expression with `let __probe: Int = {expr}` and type-checks.
+    /// If it succeeds, the type is `Int`. If it fails, the error message
+    /// reveals the actual type (e.g. `found \`String\``).
+    pub fn infer_expression_type(&self, expr: &str) -> ExprType {
+        let mut source = self.build_preamble();
+        source.push_str("\n    fn __repl_probe() -> Int {\n");
+        self.emit_bindings(&mut source);
+        source.push_str(&format!("        let __probe: Int = {expr}\n"));
+        source.push_str("        return __probe\n");
+        source.push_str("    }\n");
+        source.push_str("}\n");
+
+        let module = match kodo_parser::parse(&source) {
+            Ok(m) => m,
+            Err(_) => return ExprType::Other("parse error".to_string()),
+        };
+
+        let mut checker = kodo_types::TypeChecker::new();
+        for (_name, prelude_src) in kodo_std::prelude_sources() {
+            if let Ok(m) = kodo_parser::parse(prelude_src) {
+                let _ = checker.check_module(&m);
+            }
+        }
+
+        match checker.check_module(&module) {
+            Ok(()) => ExprType::Int,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("found `()`") {
+                    ExprType::Unit
+                } else if msg.contains("found `String`") {
+                    ExprType::String
+                } else if msg.contains("found `Float64`") {
+                    ExprType::Float64
+                } else if msg.contains("found `Bool`") {
+                    ExprType::Bool
+                } else {
+                    ExprType::Other(msg)
+                }
+            }
+        }
+    }
+
+    /// Wraps an expression in a complete Kōdo module source for compilation.
+    ///
+    /// The generated module includes all accumulated definitions and wraps the
+    /// expression in a `main` function that prints the result using the
+    /// appropriate builtin for the expression's type.
+    pub fn wrap_expression(&mut self, expr: &str) -> String {
+        let expr_type = self.infer_expression_type(expr);
+        self.wrap_expression_typed(expr, &expr_type)
+    }
+
+    /// Wraps an expression with a known type in a compilable module.
+    pub fn wrap_expression_typed(&mut self, expr: &str, expr_type: &ExprType) -> String {
+        self.eval_counter += 1;
+        let mut source = self.build_preamble();
+
         source.push_str("\n    fn main() -> Int {\n");
-        source.push_str(&format!("        let __result: Int = {expr}\n"));
-        source.push_str("        print_int(__result)\n");
+        self.emit_bindings(&mut source);
+
+        match expr_type {
+            ExprType::Int => {
+                source.push_str(&format!("        let __result: Int = {expr}\n"));
+                source.push_str("        print_int(__result)\n");
+            }
+            ExprType::Float64 => {
+                source.push_str(&format!("        let __result: Float64 = {expr}\n"));
+                source.push_str("        println_float(__result)\n");
+            }
+            ExprType::String => {
+                source.push_str(&format!("        let __result: String = {expr}\n"));
+                source.push_str("        println(__result)\n");
+            }
+            ExprType::Bool => {
+                source.push_str(&format!("        let __result: Bool = {expr}\n"));
+                source.push_str(
+                    "        if __result { println(\"true\") } else { println(\"false\") }\n",
+                );
+            }
+            ExprType::Unit | ExprType::Other(_) => {
+                // Execute as a statement — no result capture.
+                source.push_str(&format!("        {expr}\n"));
+            }
+        }
+
         source.push_str("        return 0\n");
         source.push_str("    }\n");
         source.push_str("}\n");
@@ -165,33 +280,6 @@ impl ReplState {
         // Add a dummy main so the module is complete.
         source.push_str("\n    fn main() -> Int {\n");
         source.push_str("        return 0\n");
-        source.push_str("    }\n");
-        source.push_str("}\n");
-
-        source
-    }
-
-    /// Wraps input for the `:type` command — parse and type-check only.
-    pub fn wrap_for_type_check(&self, expr: &str) -> String {
-        let mut source = String::new();
-        source.push_str("module repl {\n");
-        source.push_str("    meta { purpose: \"repl\" }\n\n");
-
-        for type_def in &self.type_defs {
-            source.push_str("    ");
-            source.push_str(type_def);
-            source.push('\n');
-        }
-
-        for def in &self.definitions {
-            source.push_str("    ");
-            source.push_str(def);
-            source.push('\n');
-        }
-
-        source.push_str("\n    fn __repl_type_check() -> Int {\n");
-        source.push_str(&format!("        let __val: Int = {expr}\n"));
-        source.push_str("        return __val\n");
         source.push_str("    }\n");
         source.push_str("}\n");
 
@@ -405,28 +493,16 @@ pub fn show_mir(source: &str) -> Result<String, String> {
     Ok(output)
 }
 
-/// Type-checks the source and returns type information.
-pub fn show_type(source: &str) -> Result<String, String> {
-    let module = kodo_parser::parse(source).map_err(|e| format!("parse error: {e}"))?;
-
-    let mut checker = kodo_types::TypeChecker::new();
-    for (_name, prelude_src) in kodo_std::prelude_sources() {
-        if let Ok(m) = kodo_parser::parse(prelude_src) {
-            let _ = checker.check_module(&m);
-        }
+/// Returns the inferred type of a REPL expression as a display string.
+pub fn show_type_for_expr(state: &ReplState, expr: &str) -> String {
+    match state.infer_expression_type(expr) {
+        ExprType::Int => "Int".to_string(),
+        ExprType::Float64 => "Float64".to_string(),
+        ExprType::String => "String".to_string(),
+        ExprType::Bool => "Bool".to_string(),
+        ExprType::Unit => "()".to_string(),
+        ExprType::Other(msg) => format!("unknown ({msg})"),
     }
-    checker
-        .check_module(&module)
-        .map_err(|e| format!("type error: {e}"))?;
-
-    // Return the return type of the __repl_type_check function.
-    for func in &module.functions {
-        if func.name == "__repl_type_check" {
-            return Ok(format!("{:?}", func.return_type));
-        }
-    }
-
-    Ok("()".to_string())
 }
 
 /// Locates `libkodo_runtime.a` for the REPL linker step.
@@ -471,14 +547,39 @@ fn find_runtime_lib_for_repl() -> Result<std::path::PathBuf, String> {
 ///
 /// Returns an exit code (0 for normal exit, 1 for error).
 pub fn run_repl() -> i32 {
-    print_banner();
+    run_repl_with_mode(false)
+}
+
+/// Runs the REPL in JSON mode: all output is structured JSON to stdout.
+///
+/// Each response is a single JSON object with fields:
+/// - `"status"`: `"ok"` or `"error"`
+/// - `"kind"`: `"result"`, `"defined"`, `"bound"`, `"type"`, `"ast"`, `"mir"`, `"help"`, `"reset"`
+/// - `"value"`: the result value (for expressions)
+/// - `"type"`: the inferred type (for expressions and `:type`)
+/// - `"error"`: the error message (when status is `"error"`)
+///
+/// Returns an exit code (0 for normal exit, 1 for error).
+pub fn run_repl_json() -> i32 {
+    run_repl_with_mode(true)
+}
+
+/// Internal REPL loop shared between normal and JSON modes.
+fn run_repl_with_mode(json_mode: bool) -> i32 {
+    if !json_mode {
+        print_banner();
+    }
 
     let config = rustyline::Config::builder().auto_add_history(true).build();
 
     let mut editor = match rustyline::DefaultEditor::with_config(config) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("error: could not initialize line editor: {e}");
+            if json_mode {
+                emit_json_error(&format!("could not initialize line editor: {e}"));
+            } else {
+                eprintln!("error: could not initialize line editor: {e}");
+            }
             return 1;
         }
     };
@@ -499,19 +600,29 @@ pub fn run_repl() -> i32 {
                 // Ctrl-C: clear current input buffer.
                 if !multiline_buffer.is_empty() {
                     multiline_buffer.clear();
-                    println!("(input cleared)");
+                    if !json_mode {
+                        println!("(input cleared)");
+                    }
                     continue;
                 }
-                println!("(use :quit to exit)");
+                if !json_mode {
+                    println!("(use :quit to exit)");
+                }
                 continue;
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 // Ctrl-D: exit.
-                println!();
+                if !json_mode {
+                    println!();
+                }
                 break;
             }
             Err(e) => {
-                eprintln!("readline error: {e}");
+                if json_mode {
+                    emit_json_error(&format!("readline error: {e}"));
+                } else {
+                    eprintln!("readline error: {e}");
+                }
                 break;
             }
         };
@@ -524,7 +635,7 @@ pub fn run_repl() -> i32 {
                 continue;
             }
             let input = std::mem::take(&mut multiline_buffer);
-            handle_input(&input, &mut state);
+            handle_input_with_mode(&input, &mut state, json_mode);
             continue;
         }
 
@@ -534,60 +645,107 @@ pub fn run_repl() -> i32 {
             continue;
         }
 
-        handle_input(&line, &mut state);
+        handle_input_with_mode(&line, &mut state, json_mode);
     }
 
     0
 }
 
-/// Handles a single complete input (after multi-line assembly).
-fn handle_input(input: &str, state: &mut ReplState) {
+/// Handles a single complete input with optional JSON output mode.
+fn handle_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
     let command = parse_command(input);
 
     match command {
-        ReplCommand::Help => print_help(),
+        ReplCommand::Help => {
+            if json_mode {
+                emit_json_ok("help", None, None);
+            } else {
+                print_help();
+            }
+        }
         ReplCommand::Quit => std::process::exit(0),
         ReplCommand::Reset => {
             state.reset();
-            println!("(state cleared)");
+            if json_mode {
+                emit_json_ok("reset", None, None);
+            } else {
+                println!("(state cleared)");
+            }
         }
         ReplCommand::Input(text) => {
             if text.is_empty() {
                 return;
             }
-            handle_code_input(&text, state);
+            handle_code_input_with_mode(&text, state, json_mode);
         }
         ReplCommand::Type(expr) => {
             if expr.is_empty() {
-                eprintln!("usage: :type <expression>");
+                if json_mode {
+                    emit_json_error("usage: :type <expression>");
+                } else {
+                    eprintln!("usage: :type <expression>");
+                }
                 return;
             }
-            let source = state.wrap_for_type_check(&expr);
-            match show_type(&source) {
-                Ok(ty) => println!("{ty}"),
-                Err(e) => eprintln!("{e}"),
+            let ty = show_type_for_expr(state, &expr);
+            if json_mode {
+                emit_json_ok("type", None, Some(&ty));
+            } else {
+                println!("{ty}");
             }
         }
         ReplCommand::Ast(expr) => {
             if expr.is_empty() {
-                eprintln!("usage: :ast <expression>");
+                if json_mode {
+                    emit_json_error("usage: :ast <expression>");
+                } else {
+                    eprintln!("usage: :ast <expression>");
+                }
                 return;
             }
             let source = state.wrap_expression(&expr);
             match show_ast(&source) {
-                Ok(ast) => println!("{ast}"),
-                Err(e) => eprintln!("{e}"),
+                Ok(ast) => {
+                    if json_mode {
+                        emit_json_ok("ast", Some(&ast), None);
+                    } else {
+                        println!("{ast}");
+                    }
+                }
+                Err(e) => {
+                    if json_mode {
+                        emit_json_error(&e);
+                    } else {
+                        eprintln!("{e}");
+                    }
+                }
             }
         }
         ReplCommand::Mir(expr) => {
             if expr.is_empty() {
-                eprintln!("usage: :mir <expression>");
+                if json_mode {
+                    emit_json_error("usage: :mir <expression>");
+                } else {
+                    eprintln!("usage: :mir <expression>");
+                }
                 return;
             }
             let source = state.wrap_expression(&expr);
             match show_mir(&source) {
-                Ok(mir) => println!("{mir}"),
-                Err(e) => eprintln!("{e}"),
+                Ok(mir) => {
+                    if json_mode {
+                        emit_json_ok("mir", Some(&mir), None);
+                    } else {
+                        println!("{mir}");
+                    }
+                }
+                Err(e) => {
+                    if json_mode {
+                        emit_json_error(&e);
+                    } else {
+                        eprintln!("{e}");
+                    }
+                }
             }
         }
     }
@@ -595,17 +753,27 @@ fn handle_input(input: &str, state: &mut ReplState) {
     let _ = std::io::stdout().flush();
 }
 
-/// Handles code input — either a definition or an expression.
-fn handle_code_input(input: &str, state: &mut ReplState) {
+/// Handles code input with optional JSON output mode.
+fn handle_code_input_with_mode(input: &str, state: &mut ReplState, json_mode: bool) {
     if ReplState::is_type_definition(input) {
         // Try to parse the type definition by wrapping it in a module.
         let source = state.wrap_definition(input);
         match kodo_parser::parse(&source) {
             Ok(_) => {
                 state.type_defs.push(input.to_string());
-                println!("(defined)");
+                if json_mode {
+                    emit_json_ok("defined", None, None);
+                } else {
+                    println!("(defined)");
+                }
             }
-            Err(e) => eprintln!("parse error: {e}"),
+            Err(e) => {
+                if json_mode {
+                    emit_json_error(&format!("parse error: {e}"));
+                } else {
+                    eprintln!("parse error: {e}");
+                }
+            }
         }
     } else if ReplState::is_definition(input) {
         // Try to parse and type-check the definition.
@@ -621,31 +789,166 @@ fn handle_code_input(input: &str, state: &mut ReplState) {
                 match checker.check_module(&module) {
                     Ok(()) => {
                         state.definitions.push(input.to_string());
-                        println!("(defined)");
+                        if json_mode {
+                            emit_json_ok("defined", None, None);
+                        } else {
+                            println!("(defined)");
+                        }
                     }
-                    Err(e) => eprintln!("type error: {e}"),
+                    Err(e) => {
+                        if json_mode {
+                            emit_json_error(&format!("type error: {e}"));
+                        } else {
+                            eprintln!("type error: {e}");
+                        }
+                    }
                 }
             }
-            Err(e) => eprintln!("parse error: {e}"),
+            Err(e) => {
+                if json_mode {
+                    emit_json_error(&format!("parse error: {e}"));
+                } else {
+                    eprintln!("parse error: {e}");
+                }
+            }
+        }
+    } else if ReplState::is_let_binding(input) {
+        // Validate the binding by wrapping in a module and type-checking.
+        let mut probe = state.build_preamble();
+        probe.push_str("\n    fn main() -> Int {\n");
+        state.emit_bindings(&mut probe);
+        probe.push_str(&format!("        {input}\n"));
+        probe.push_str("        return 0\n");
+        probe.push_str("    }\n");
+        probe.push_str("}\n");
+
+        match kodo_parser::parse(&probe) {
+            Ok(module) => {
+                let mut checker = kodo_types::TypeChecker::new();
+                for (_name, prelude_src) in kodo_std::prelude_sources() {
+                    if let Ok(m) = kodo_parser::parse(prelude_src) {
+                        let _ = checker.check_module(&m);
+                    }
+                }
+                match checker.check_module(&module) {
+                    Ok(()) => {
+                        state.bindings.push(input.to_string());
+                        if json_mode {
+                            emit_json_ok("bound", None, None);
+                        } else {
+                            println!("(bound)");
+                        }
+                    }
+                    Err(e) => {
+                        if json_mode {
+                            emit_json_error(&format!("type error: {e}"));
+                        } else {
+                            eprintln!("type error: {e}");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if json_mode {
+                    emit_json_error(&format!("parse error: {e}"));
+                } else {
+                    eprintln!("parse error: {e}");
+                }
+            }
         }
     } else {
         // Expression — compile and run.
-        let source = state.wrap_expression(input);
+        let expr_type = state.infer_expression_type(input);
+        let type_str = match &expr_type {
+            ExprType::Int => "Int",
+            ExprType::Float64 => "Float64",
+            ExprType::String => "String",
+            ExprType::Bool => "Bool",
+            ExprType::Unit => "()",
+            ExprType::Other(_) => "unknown",
+        };
+        let source = state.wrap_expression_typed(input, &expr_type);
         match compile_and_run(&source) {
             Ok(output) => {
                 let trimmed = output.trim();
-                if !trimmed.is_empty() {
+                if json_mode {
+                    let value = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                    emit_json_ok("result", value, Some(type_str));
+                } else if !trimmed.is_empty() {
                     println!("{trimmed}");
                 }
             }
-            Err(e) => eprintln!("{e}"),
+            Err(e) => {
+                if json_mode {
+                    emit_json_error(&e);
+                } else {
+                    eprintln!("{e}");
+                }
+            }
         }
     }
+}
+
+/// Emits a JSON success response to stdout.
+///
+/// Used in JSON REPL mode to provide structured output for AI agents.
+fn emit_json_ok(kind: &str, value: Option<&str>, type_name: Option<&str>) {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "status".to_string(),
+        serde_json::Value::String("ok".to_string()),
+    );
+    obj.insert(
+        "kind".to_string(),
+        serde_json::Value::String(kind.to_string()),
+    );
+    if let Some(v) = value {
+        obj.insert(
+            "value".to_string(),
+            serde_json::Value::String(v.to_string()),
+        );
+    }
+    if let Some(t) = type_name {
+        obj.insert("type".to_string(), serde_json::Value::String(t.to_string()));
+    }
+    let json = serde_json::Value::Object(obj);
+    println!(
+        "{}",
+        serde_json::to_string(&json)
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+    );
+}
+
+/// Emits a JSON error response to stdout.
+///
+/// Used in JSON REPL mode to provide structured error output for AI agents.
+fn emit_json_error(message: &str) {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "status".to_string(),
+        serde_json::Value::String("error".to_string()),
+    );
+    obj.insert(
+        "error".to_string(),
+        serde_json::Value::String(message.to_string()),
+    );
+    let json = serde_json::Value::Object(obj);
+    println!(
+        "{}",
+        serde_json::to_string(&json)
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── parse_command ──────────────────────────────────────────
 
     #[test]
     fn test_parse_command_help() {
@@ -710,6 +1013,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_command_unknown() {
+        // Unknown commands return empty Input.
+        assert_eq!(parse_command(":foobar"), ReplCommand::Input(String::new()));
+    }
+
+    #[test]
+    fn test_parse_command_with_extra_whitespace() {
+        assert_eq!(
+            parse_command("  :type   1 + 2  "),
+            ReplCommand::Type("1 + 2".to_string())
+        );
+        assert_eq!(parse_command("  :help  "), ReplCommand::Help);
+    }
+
+    // ─── has_balanced_braces ────────────────────────────────────
+
+    #[test]
     fn test_balanced_braces() {
         assert!(has_balanced_braces(""));
         assert!(has_balanced_braces("2 + 3"));
@@ -720,6 +1040,35 @@ mod tests {
     }
 
     #[test]
+    fn test_balanced_braces_deeply_nested() {
+        assert!(has_balanced_braces("{ { { } } }"));
+        assert!(!has_balanced_braces("{ { { } }"));
+        assert!(!has_balanced_braces("{ { } } }"));
+    }
+
+    #[test]
+    fn test_balanced_braces_only_closing() {
+        assert!(!has_balanced_braces("}"));
+        assert!(!has_balanced_braces("} }"));
+    }
+
+    #[test]
+    fn test_balanced_braces_empty_pairs() {
+        assert!(has_balanced_braces("{}{}{}"));
+    }
+
+    // ─── is_let_binding / is_definition / is_type_definition ──────
+
+    #[test]
+    fn test_is_let_binding() {
+        assert!(ReplState::is_let_binding("let x: Int = 42"));
+        assert!(ReplState::is_let_binding("  let name: String = \"hi\""));
+        assert!(!ReplState::is_let_binding("letter"));
+        assert!(!ReplState::is_let_binding("fn foo() -> Int { return 1 }"));
+        assert!(!ReplState::is_let_binding("2 + 3"));
+    }
+
+    #[test]
     fn test_is_definition() {
         assert!(ReplState::is_definition("fn foo() -> Int { return 1 }"));
         assert!(ReplState::is_definition(
@@ -727,6 +1076,12 @@ mod tests {
         ));
         assert!(!ReplState::is_definition("2 + 3"));
         assert!(!ReplState::is_definition("let x: Int = 42"));
+    }
+
+    #[test]
+    fn test_is_definition_not_fn_prefix() {
+        // "fnord" starts with "fn" but not "fn " — should NOT match.
+        assert!(!ReplState::is_definition("fnord"));
     }
 
     #[test]
@@ -743,10 +1098,20 @@ mod tests {
     }
 
     #[test]
+    fn test_is_type_definition_not_prefix() {
+        assert!(!ReplState::is_type_definition("structural"));
+        assert!(!ReplState::is_type_definition("enumerate"));
+        assert!(!ReplState::is_type_definition("typeof"));
+    }
+
+    // ─── ReplState basics ───────────────────────────────────────
+
+    #[test]
     fn test_repl_state_new() {
         let state = ReplState::new();
         assert!(state.definitions.is_empty());
         assert!(state.type_defs.is_empty());
+        assert!(state.bindings.is_empty());
         assert_eq!(state.eval_counter, 0);
     }
 
@@ -757,25 +1122,147 @@ mod tests {
             .definitions
             .push("fn foo() -> Int { return 1 }".to_string());
         state.type_defs.push("struct Pt { x: Int }".to_string());
+        state.bindings.push("let x: Int = 42".to_string());
         state.eval_counter = 5;
 
         state.reset();
 
         assert!(state.definitions.is_empty());
         assert!(state.type_defs.is_empty());
+        assert!(state.bindings.is_empty());
         assert_eq!(state.eval_counter, 0);
     }
 
     #[test]
-    fn test_wrap_expression() {
+    fn test_eval_counter_increments() {
+        let mut state = ReplState::new();
+        let _ = state.wrap_expression("1");
+        assert_eq!(state.eval_counter, 1);
+        let _ = state.wrap_expression("2");
+        assert_eq!(state.eval_counter, 2);
+    }
+
+    // ─── infer_expression_type ──────────────────────────────────
+
+    #[test]
+    fn test_infer_int_literal() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("42"), ExprType::Int);
+    }
+
+    #[test]
+    fn test_infer_int_arithmetic() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("2 + 3"), ExprType::Int);
+    }
+
+    #[test]
+    fn test_infer_string_literal() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("\"hello\""), ExprType::String);
+    }
+
+    #[test]
+    fn test_infer_bool_literal() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("true"), ExprType::Bool);
+        assert_eq!(state.infer_expression_type("false"), ExprType::Bool);
+    }
+
+    #[test]
+    fn test_infer_bool_comparison() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("1 > 2"), ExprType::Bool);
+        assert_eq!(state.infer_expression_type("1 == 1"), ExprType::Bool);
+    }
+
+    #[test]
+    fn test_infer_unit_println() {
+        let state = ReplState::new();
+        assert_eq!(
+            state.infer_expression_type("println(\"hello\")"),
+            ExprType::Unit
+        );
+    }
+
+    #[test]
+    fn test_infer_unit_print_int() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("print_int(42)"), ExprType::Unit);
+    }
+
+    #[test]
+    fn test_infer_float64_literal() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("3.14"), ExprType::Float64);
+    }
+
+    #[test]
+    fn test_infer_float64_arithmetic() {
+        let state = ReplState::new();
+        assert_eq!(state.infer_expression_type("1.0 + 2.5"), ExprType::Float64);
+    }
+
+    #[test]
+    fn test_infer_parse_error() {
+        let state = ReplState::new();
+        // Completely invalid syntax should return Other.
+        let result = state.infer_expression_type("@@@invalid!!!");
+        assert!(matches!(result, ExprType::Other(_)));
+    }
+
+    // ─── wrap_expression (typed) ────────────────────────────────
+
+    #[test]
+    fn test_wrap_expression_int() {
         let mut state = ReplState::new();
         let source = state.wrap_expression("2 + 3");
 
         assert!(source.contains("module repl"));
         assert!(source.contains("meta { purpose: \"repl\" }"));
         assert!(source.contains("fn main() -> Int"));
-        assert!(source.contains("2 + 3"));
+        assert!(source.contains("let __result: Int = 2 + 3"));
+        assert!(source.contains("print_int(__result)"));
         assert_eq!(state.eval_counter, 1);
+    }
+
+    #[test]
+    fn test_wrap_expression_string() {
+        let mut state = ReplState::new();
+        let source = state.wrap_expression("\"hello\"");
+
+        assert!(source.contains("let __result: String = \"hello\""));
+        assert!(source.contains("println(__result)"));
+    }
+
+    #[test]
+    fn test_wrap_expression_bool() {
+        let mut state = ReplState::new();
+        let source = state.wrap_expression("true");
+
+        assert!(source.contains("let __result: Bool = true"));
+        assert!(source.contains("println(\"true\")"));
+        assert!(source.contains("println(\"false\")"));
+    }
+
+    #[test]
+    fn test_wrap_expression_float64() {
+        let mut state = ReplState::new();
+        let source = state.wrap_expression("3.14");
+
+        assert!(source.contains("let __result: Float64 = 3.14"));
+        assert!(source.contains("println_float(__result)"));
+    }
+
+    #[test]
+    fn test_wrap_expression_unit_println() {
+        let mut state = ReplState::new();
+        let source = state.wrap_expression("println(\"Hello from the REPL!\")");
+
+        // Unit expressions are executed as statements — no `let __result`.
+        assert!(!source.contains("let __result"));
+        assert!(source.contains("println(\"Hello from the REPL!\")"));
+        assert!(source.contains("return 0"));
     }
 
     #[test]
@@ -805,6 +1292,51 @@ mod tests {
     }
 
     #[test]
+    fn test_wrap_expression_with_bindings() {
+        let mut state = ReplState::new();
+        state.bindings.push("let x: Int = 2 + 3".to_string());
+
+        let source = state.wrap_expression("x");
+
+        // Binding should appear inside main body before the expression.
+        assert!(source.contains("let x: Int = 2 + 3"));
+        assert!(source.contains("let __result: Int = x"));
+        assert!(source.contains("print_int(__result)"));
+    }
+
+    #[test]
+    fn test_wrap_expression_multiple_bindings() {
+        let mut state = ReplState::new();
+        state.bindings.push("let a: Int = 10".to_string());
+        state.bindings.push("let b: Int = 20".to_string());
+
+        let source = state.wrap_expression("a + b");
+
+        assert!(source.contains("let a: Int = 10"));
+        assert!(source.contains("let b: Int = 20"));
+        assert!(source.contains("a + b"));
+    }
+
+    #[test]
+    fn test_infer_with_bindings() {
+        let mut state = ReplState::new();
+        state.bindings.push("let x: Int = 42".to_string());
+
+        // `x` should be recognized as Int since binding is in scope.
+        assert_eq!(state.infer_expression_type("x"), ExprType::Int);
+    }
+
+    #[test]
+    fn test_infer_string_binding() {
+        let mut state = ReplState::new();
+        state.bindings.push("let s: String = \"hello\"".to_string());
+
+        assert_eq!(state.infer_expression_type("s"), ExprType::String);
+    }
+
+    // ─── wrap_definition ────────────────────────────────────────
+
+    #[test]
     fn test_wrap_definition() {
         let state = ReplState::new();
         let source = state.wrap_definition("fn add(a: Int, b: Int) -> Int { return a + b }");
@@ -815,23 +1347,53 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_for_type_check() {
-        let state = ReplState::new();
-        let source = state.wrap_for_type_check("42");
+    fn test_wrap_definition_includes_accumulated() {
+        let mut state = ReplState::new();
+        state
+            .definitions
+            .push("fn helper() -> Int { return 1 }".to_string());
+        state.type_defs.push("struct Foo { val: Int }".to_string());
 
-        assert!(source.contains("module repl"));
-        assert!(source.contains("fn __repl_type_check() -> Int"));
-        assert!(source.contains("42"));
+        let source = state.wrap_definition("fn bar(x: Int) -> Int { return helper() + x }");
+
+        assert!(source.contains("fn helper() -> Int"));
+        assert!(source.contains("struct Foo { val: Int }"));
+        assert!(source.contains("fn bar(x: Int) -> Int"));
+    }
+
+    // ─── show_type_for_expr ─────────────────────────────────────
+
+    #[test]
+    fn test_show_type_int() {
+        let state = ReplState::new();
+        assert_eq!(show_type_for_expr(&state, "42"), "Int");
     }
 
     #[test]
-    fn test_eval_counter_increments() {
-        let mut state = ReplState::new();
-        let _ = state.wrap_expression("1");
-        assert_eq!(state.eval_counter, 1);
-        let _ = state.wrap_expression("2");
-        assert_eq!(state.eval_counter, 2);
+    fn test_show_type_string() {
+        let state = ReplState::new();
+        assert_eq!(show_type_for_expr(&state, "\"hello\""), "String");
     }
+
+    #[test]
+    fn test_show_type_bool() {
+        let state = ReplState::new();
+        assert_eq!(show_type_for_expr(&state, "true"), "Bool");
+    }
+
+    #[test]
+    fn test_show_type_float64() {
+        let state = ReplState::new();
+        assert_eq!(show_type_for_expr(&state, "3.14"), "Float64");
+    }
+
+    #[test]
+    fn test_show_type_unit() {
+        let state = ReplState::new();
+        assert_eq!(show_type_for_expr(&state, "println(\"x\")"), "()");
+    }
+
+    // ─── show_ast ───────────────────────────────────────────────
 
     #[test]
     fn test_show_ast_valid() {
@@ -846,5 +1408,33 @@ mod tests {
     fn test_show_ast_invalid() {
         let result = show_ast("this is not valid kodo");
         assert!(result.is_err());
+    }
+
+    // ─── build_preamble ─────────────────────────────────────────
+
+    #[test]
+    fn test_build_preamble_empty_state() {
+        let state = ReplState::new();
+        let preamble = state.build_preamble();
+
+        assert!(preamble.contains("module repl"));
+        assert!(preamble.contains("meta { purpose: \"repl\" }"));
+        // No definitions or type defs.
+        assert!(!preamble.contains("fn "));
+        assert!(!preamble.contains("struct "));
+    }
+
+    #[test]
+    fn test_build_preamble_with_state() {
+        let mut state = ReplState::new();
+        state.type_defs.push("struct Pt { x: Int }".to_string());
+        state
+            .definitions
+            .push("fn id(x: Int) -> Int { return x }".to_string());
+
+        let preamble = state.build_preamble();
+
+        assert!(preamble.contains("struct Pt { x: Int }"));
+        assert!(preamble.contains("fn id(x: Int) -> Int"));
     }
 }
