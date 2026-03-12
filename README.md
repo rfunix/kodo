@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-1002%2B%20passing-brightgreen" alt="Tests: 1002+ passing">
+  <img src="https://img.shields.io/badge/tests-1100%2B%20passing-brightgreen" alt="Tests: 1100+ passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -222,7 +222,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`), `List<T>` (push, get, pop, remove, set, slice), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
 | **Multi-file** | `import module_name` across `.ko` files, qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
-| **Developer tools** | LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
+| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline; LSP server with diagnostics, hover, goto-definition, and completion; JSON error output; `kodoc explain` for any error code |
 | **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes |
 
 ---
@@ -267,11 +267,21 @@ cargo run -p kodoc -- build hello.ko -o hello
 ./hello
 ```
 
+Or try the interactive REPL:
+
+```bash
+cargo run -p kodoc -- repl
+# kōdo> println("Hello from the REPL!")
+# kōdo> let x: Int = 2 + 3
+# kōdo> fn double(n: Int) -> Int { return n * 2 }
+# kōdo> double(x)
+```
+
 ---
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 79 compilable programs:
+The [`examples/`](examples/) directory contains 89 compilable programs:
 
 ### Core Language
 
@@ -287,6 +297,7 @@ The [`examples/`](examples/) directory contains 79 compilable programs:
 | [`expressions.ko`](examples/expressions.ko) | Arithmetic and boolean expressions |
 | [`for_loop.ko`](examples/for_loop.ko) | For loop iteration |
 | [`optional_sugar.ko`](examples/optional_sugar.ko) | Optional syntactic sugar (`?.`, `??`) |
+| [`break_continue.ko`](examples/break_continue.ko) | Break and continue in loops |
 | [`type_errors.ko`](examples/type_errors.ko) | Demonstrates type error messages |
 | [`type_inference.ko`](examples/type_inference.ko) | Local type inference for `let` bindings |
 
@@ -302,6 +313,8 @@ The [`examples/`](examples/) directory contains 79 compilable programs:
 | [`traits.ko`](examples/traits.ko) | Trait definitions and static dispatch |
 | [`generic_bounds.ko`](examples/generic_bounds.ko) | Generic trait bounds (`<T: Ord>`) |
 | [`sorted_list.ko`](examples/sorted_list.ko) | Bounded generics with sorted collections |
+| [`advanced_traits.ko`](examples/advanced_traits.ko) | Advanced trait patterns |
+| [`associated_types.ko`](examples/associated_types.ko) | Associated types in traits |
 | [`methods.ko`](examples/methods.ko) | Inherent impl blocks — struct methods |
 | [`tuples.ko`](examples/tuples.ko) | Tuple types, literals, indexing, and destructuring |
 
@@ -376,6 +389,16 @@ The [`examples/`](examples/) directory contains 79 compilable programs:
 | [`enum_methods.ko`](examples/enum_methods.ko) | Methods on `Option<T>` and `Result<T,E>` enum types |
 | [`generic_method_dispatch.ko`](examples/generic_method_dispatch.ko) | Generic method dispatch on parameterized types |
 
+### Real-World Examples
+
+| File | What it demonstrates |
+|------|---------------------|
+| [`todo_app.ko`](examples/todo_app.ko) | Agent-built task manager with `@authored_by`, `@confidence`, forced `@reviewed_by`, contracts |
+| [`config_validator.ko`](examples/config_validator.ko) | Config validation with refinement types (`Port`, `MaxConns`), `@security_sensitive`, module `invariant` |
+| [`health_checker.ko`](examples/health_checker.ko) | HTTP health checker with `http_get`, `fold` aggregation, `--json-errors` for agent consumption |
+| [`url_shortener.ko`](examples/url_shortener.ko) | URL shortener with `@security_sensitive`, contracts, `Map<Int,Int>` lookup |
+| [`word_counter.ko`](examples/word_counter.ko) | Word counter demonstrating `ref` borrowing (E0240 prevention), `for-in` over `.split()` |
+
 ### Concurrency & Multi-File
 
 > **Note:** `spawn` with captured variables, `actor` with state/message passing, `parallel` blocks, `channels`, and `async`/`await` with thread pool runtime are fully working.
@@ -392,6 +415,9 @@ The [`examples/`](examples/) directory contains 79 compilable programs:
 | [`channels.ko`](examples/channels.ko) | Inter-thread communication with channels |
 | [`channel_string.ko`](examples/channel_string.ko) | Generic typed channels |
 | [`parallel_demo.ko`](examples/parallel_demo.ko) | Structured concurrency with `parallel {}` and async runtime |
+| [`qualified_imports.ko`](examples/qualified_imports.ko) | Qualified imports (`math.add(1, 2)`) |
+| [`selective_imports.ko`](examples/selective_imports.ko) | Selective imports (`import { add } from math`) |
+| [`send_sync_demo.ko`](examples/send_sync_demo.ko) | `Send`/`Sync` bounds for thread safety |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
 
 ---
@@ -450,16 +476,21 @@ Source (.ko)
 - [Getting Started](docs/guide/getting-started.md) — install, build, run
 - [Language Basics](docs/guide/language-basics.md) — modules, functions, types, variables, control flow
 - [Data Types and Pattern Matching](docs/guide/data-types.md) — structs, enums, and `match`
+- [Pattern Matching](docs/guide/pattern-matching.md) — exhaustive match on enums
 - [Generics](docs/guide/generics.md) — generic types and functions
+- [Traits](docs/guide/traits.md) — trait definitions and static dispatch
+- [Inherent Methods](docs/guide/methods.md) — struct methods without traits
 - [Error Handling](docs/guide/error-handling.md) — `Option<T>` and `Result<T, E>`
 - [Contracts](docs/guide/contracts.md) — `requires` and `ensures`
 - [Ownership](docs/guide/ownership.md) — linear ownership with `own`/`ref`
+- [String Interpolation](docs/guide/string-interpolation.md) — f-strings with `{expression}` embedding
 - [Agent Traceability](docs/guide/agent-traceability.md) — confidence propagation and trust policies
 - [Closures](docs/guide/closures.md) — closures, lambda lifting, and higher-order functions
 - [Modules and Imports](docs/guide/modules-and-imports.md) — multi-file programs and standard library
 - [HTTP & JSON](docs/guide/http.md) — HTTP client and JSON parsing
 - [Actors](docs/guide/actors.md) — actor model with state and message passing
 - [Concurrency & Spawn](docs/guide/concurrency.md) — spawn with captured variables
+- [Real-World Examples](docs/guide/real-world-examples.md) — complete programs showcasing agent features
 - [Intent System](docs/intent_system.md) — intent-driven programming
 - [CLI Reference](docs/guide/cli-reference.md) — all `kodoc` commands and flags
 - [Language Design](docs/DESIGN.md) — full specification

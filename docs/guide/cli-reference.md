@@ -173,6 +173,40 @@ kodoc fix my_program.ko --dry-run
 kodoc fix my_program.ko
 ```
 
+### `kodoc repl`
+
+Start an interactive Read-Eval-Print Loop. Each input is compiled and executed through the full pipeline (parse, type-check, desugar, MIR, codegen, link, run).
+
+```bash
+kodoc repl
+```
+
+Definitions (functions, structs, enums, types) persist across inputs — define a function on one line, call it on the next. Multi-line input is detected automatically when braces are unbalanced.
+
+**REPL commands:**
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `:help` | `:h` | Show available commands |
+| `:quit` | `:q`, `:exit` | Exit the REPL |
+| `:reset` | `:clear` | Clear all accumulated definitions |
+| `:type <expr>` | `:t <expr>` | Show the type of an expression without executing it |
+| `:ast <expr>` | | Show the AST of an expression |
+| `:mir <expr>` | | Show the MIR of an expression |
+
+**Examples:**
+
+```bash
+kodoc repl
+kōdo> println("Hello from the REPL!")
+kōdo> let x: Int = 2 + 3
+kōdo> fn double(n: Int) -> Int { return n * 2 }
+kōdo> double(x)
+kōdo> :type 42
+kōdo> :reset
+kōdo> :quit
+```
+
 ### `kodoc lsp`
 
 Start the Kōdo Language Server Protocol server on stdin/stdout. Connect it to any LSP-compatible editor (VS Code, Neovim, etc.) or AI agent.
@@ -196,6 +230,7 @@ cargo run -p kodoc -- lex hello.ko
 cargo run -p kodoc -- parse hello.ko
 cargo run -p kodoc -- intent-explain intent_demo.ko
 cargo run -p kodoc -- fmt hello.ko
+cargo run -p kodoc -- repl
 cargo run -p kodoc -- lsp
 ```
 
