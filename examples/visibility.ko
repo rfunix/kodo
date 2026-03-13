@@ -1,0 +1,37 @@
+// Visibility — demonstrates pub/private function and struct declarations.
+//
+// Functions and structs are private by default. Use `pub` to make them
+// accessible from other modules.
+//
+// Compile and run:
+//   kodoc build examples/visibility.ko -o visibility
+//   ./visibility
+
+module visibility {
+    meta {
+        purpose: "Demonstrate pub/private visibility",
+        version: "0.1.0",
+        author: "Kodo Team"
+    }
+
+    // Public struct — accessible from other modules.
+    pub struct Point {
+        x: Int,
+        y: Int
+    }
+
+    // Public function — part of the module's API.
+    pub fn make_point(x: Int, y: Int) -> Point {
+        return Point { x: x, y: y }
+    }
+
+    // Private helper — only used within this module.
+    fn format_point(p: Point) -> String {
+        return "point"
+    }
+
+    fn main() {
+        let p: Point = make_point(3, 4)
+        println(format_point(p))
+    }
+}

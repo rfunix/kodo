@@ -30,6 +30,7 @@ The core thesis: if we remove ambiguity, make intent explicit, embed contracts i
 ### 3. Self-Describing Modules
 - Every module has a mandatory `meta` block: purpose, version, author (human or agent), dependencies with intent.
 - Type signatures are always explicit — no type inference across module boundaries.
+- **Visibility**: declarations are private by default. Use `pub` to make functions, structs, and enums accessible from other modules. Selective imports: `import module { name1, name2 }`.
 - Every public symbol must have a `doc` annotation (enforced by compiler).
 - Module dependency graph is statically resolved — no dynamic imports, no circular dependencies.
 

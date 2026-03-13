@@ -34,13 +34,14 @@ declaration     = function_decl
 
 (* ===== Imports ===== *)
 
-import_decl     = "import" module_path ;
-module_path     = IDENT ( "." IDENT )* ;
+import_decl     = "import" module_path import_names? ;
+module_path     = IDENT ( "::" IDENT )* ;
+import_names    = "{" IDENT ( "," IDENT )* ","? "}" ;
 
 (* ===== Types ===== *)
 
-type_decl       = "type" IDENT generic_params? "{" field_list "}" ;
-enum_decl       = "enum" IDENT generic_params? "{" variant_list "}" ;
+type_decl       = "pub"? "type" IDENT generic_params? "{" field_list "}" ;
+enum_decl       = "pub"? "enum" IDENT generic_params? "{" variant_list "}" ;
 
 generic_params  = "<" generic_param ("," generic_param)* ">" ;
 generic_param   = IDENT ( ":" IDENT ( "+" IDENT )* )? ;
@@ -76,11 +77,11 @@ impl_member     = type_binding
                 | function_decl ;
 type_binding    = "type" IDENT "=" type_expr ;
 
-struct_decl     = "struct" IDENT "{" field_list "}" ;
+struct_decl     = "pub"? "struct" IDENT "{" field_list "}" ;
 
 (* ===== Functions ===== *)
 
-function_decl   = annotation* "async"? "fn" IDENT "(" param_list? ")" return_type? contract* block ;
+function_decl   = annotation* "pub"? "async"? "fn" IDENT "(" param_list? ")" return_type? contract* block ;
 
 param_list      = param ("," param)* ;
 param           = IDENT ":" type_expr ;

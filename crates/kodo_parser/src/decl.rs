@@ -8,7 +8,7 @@
 use kodo_ast::{
     ActorDecl, Annotation, AnnotationArg, AssociatedType, EnumDecl, EnumVariant, FieldDef,
     Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, InvariantDecl,
-    Ownership, Param, Span, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
+    Ownership, Param, Span, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr, Visibility,
 };
 use kodo_lexer::TokenKind;
 
@@ -142,6 +142,7 @@ impl Parser {
             id: self.next_id(),
             span: start.merge(end),
             name,
+            visibility: Visibility::Private,
             is_async,
             generic_params,
             annotations: vec![],
@@ -244,6 +245,7 @@ impl Parser {
             id: self.next_id(),
             span: start.merge(end),
             name,
+            visibility: Visibility::Private,
             generic_params,
             fields,
         })
@@ -542,6 +544,7 @@ impl Parser {
             id: self.next_id(),
             span: start.merge(end),
             name,
+            visibility: Visibility::Private,
             is_async: false,
             generic_params,
             annotations: vec![],
@@ -711,7 +714,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use crate::parse;
-    use kodo_ast::TypeExpr;
+    use kodo_ast::{TypeExpr, Visibility};
 
     #[test]
     fn decl_struct_with_generic_params() {
@@ -762,6 +765,55 @@ mod tests {
         assert_eq!(
             module.impl_blocks[0].methods[0].params[0].ty,
             TypeExpr::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn decl_pub_function() {
+        let source = r#"module test {
+            pub fn greet(name: String) -> String {
+                return name
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(module.functions[0].name, "greet");
+        assert_eq!(module.functions[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn decl_private_function_by_default() {
+        let source = r#"module test {
+            fn helper() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(module.functions[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn decl_pub_struct() {
+        let source = r#"module test {
+            pub struct Point { x: Int, y: Int }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.type_decls.len(), 1);
+        assert_eq!(module.type_decls[0].name, "Point");
+        assert_eq!(module.type_decls[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn decl_import_with_names() {
+        let source = r#"module test {
+            import math { sin, cos }
+            fn main() -> Int { return 0 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].path, vec!["math"]);
+        assert_eq!(
+            module.imports[0].names,
+            Some(vec!["sin".to_string(), "cos".to_string()])
         );
     }
 }

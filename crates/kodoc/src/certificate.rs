@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use kodo_ast::AnnotationArg;
+use kodo_contracts::ContractMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -55,6 +56,9 @@ pub struct CompilationCertificate {
     /// Per-function confidence scores.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confidence: Vec<FunctionConfidence>,
+    /// Per-function contract verification status.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub function_contracts: Vec<FunctionContractInfo>,
 }
 
 /// Statistics about contracts in the compiled module.
@@ -110,6 +114,18 @@ pub struct FunctionConfidence {
     pub effective: f64,
     /// Direct callees of this function.
     pub callees: Vec<String>,
+    /// Contract verification status for this function.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contracts: Option<String>,
+}
+
+/// Per-function contract status information.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FunctionContractInfo {
+    /// Function name.
+    pub name: String,
+    /// Contract verification status for this function.
+    pub contracts: String,
 }
 
 /// Raw confidence data: (function_name, declared, effective, callees).
@@ -117,8 +133,8 @@ pub type ConfidenceData = (String, f64, f64, Vec<String>);
 
 impl CompilationCertificate {
     /// Creates a new compilation certificate from the module, source, and
-    /// optional binary bytes, parent certificate, confidence data, and
-    /// contract verification results.
+    /// optional binary bytes, parent certificate, confidence data,
+    /// contract verification results, and contract mode.
     pub fn from_module(
         module: &kodo_ast::Module,
         source: &str,
@@ -126,6 +142,7 @@ impl CompilationCertificate {
         parent: Option<&CompilationCertificate>,
         confidence_data: Option<&[ConfidenceData]>,
         verification: Option<(usize, usize, usize)>,
+        contract_mode: Option<ContractMode>,
     ) -> Self {
         let meta = module.meta.as_ref();
 
@@ -260,11 +277,33 @@ impl CompilationCertificate {
             diff_from_parent,
             confidence: confidence_data.map_or_else(Vec::new, |data| {
                 data.iter()
-                    .map(|(name, declared, effective, callees)| FunctionConfidence {
-                        name: name.clone(),
-                        declared: *declared,
-                        effective: *effective,
-                        callees: callees.clone(),
+                    .map(|(name, declared, effective, callees)| {
+                        let contracts = contract_mode.and_then(|mode| {
+                            module.functions.iter().find(|f| f.name == *name).map(|f| {
+                                kodo_contracts::contract_status(f, mode)
+                                    .as_str()
+                                    .to_string()
+                            })
+                        });
+                        FunctionConfidence {
+                            name: name.clone(),
+                            declared: *declared,
+                            effective: *effective,
+                            callees: callees.clone(),
+                            contracts,
+                        }
+                    })
+                    .collect()
+            }),
+            function_contracts: contract_mode.map_or_else(Vec::new, |mode| {
+                module
+                    .functions
+                    .iter()
+                    .map(|f| FunctionContractInfo {
+                        name: f.name.clone(),
+                        contracts: kodo_contracts::contract_status(f, mode)
+                            .as_str()
+                            .to_string(),
                     })
                     .collect()
             }),
@@ -375,6 +414,7 @@ mod tests {
                     id: NodeId(2),
                     span: Span::new(0, 100),
                     name: name.to_string(),
+                    visibility: kodo_ast::Visibility::Private,
                     generic_params: vec![],
                     annotations: vec![],
                     params: vec![],
@@ -403,6 +443,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(
             !cert.binary_hash.is_empty(),
@@ -426,6 +467,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(
             cert.certificate_hash.starts_with("sha256:"),
@@ -438,7 +480,8 @@ mod tests {
     fn first_certificate_has_no_parent() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let cert = CompilationCertificate::from_module(&module, source, None, None, None, None);
+        let cert =
+            CompilationCertificate::from_module(&module, source, None, None, None, None, None);
         assert!(
             cert.parent_certificate.is_none(),
             "first certificate should have no parent"
@@ -449,10 +492,18 @@ mod tests {
     fn chained_certificate_references_parent() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let first = CompilationCertificate::from_module(&module, source, None, None, None, None);
+        let first =
+            CompilationCertificate::from_module(&module, source, None, None, None, None, None);
         let first_hash = first.certificate_hash.clone();
-        let second =
-            CompilationCertificate::from_module(&module, source, None, Some(&first), None, None);
+        let second = CompilationCertificate::from_module(
+            &module,
+            source,
+            None,
+            Some(&first),
+            None,
+            None,
+            None,
+        );
         assert_eq!(
             second.parent_certificate,
             Some(first_hash),
@@ -464,8 +515,15 @@ mod tests {
     fn diff_detects_added_function() {
         let parent_module = make_test_module(&["foo"]);
         let source_v1 = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let parent =
-            CompilationCertificate::from_module(&parent_module, source_v1, None, None, None, None);
+        let parent = CompilationCertificate::from_module(
+            &parent_module,
+            source_v1,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
 
         let new_module = make_test_module(&["foo", "bar"]);
         let source_v2 = "module test { meta { purpose: \"testing\" } fn foo() {} fn bar() {} }";
@@ -474,6 +532,7 @@ mod tests {
             source_v2,
             None,
             Some(&parent),
+            None,
             None,
             None,
         );
@@ -504,6 +563,7 @@ mod tests {
             None,
             Some(&confidence_data),
             None,
+            None,
         );
         assert_eq!(cert.confidence.len(), 2, "should have 2 confidence entries");
         assert_eq!(cert.confidence[0].name, "add");
@@ -516,8 +576,15 @@ mod tests {
     fn certificate_includes_contract_verification_stats() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let cert =
-            CompilationCertificate::from_module(&module, source, None, None, None, Some((3, 2, 0)));
+        let cert = CompilationCertificate::from_module(
+            &module,
+            source,
+            None,
+            None,
+            None,
+            Some((3, 2, 0)),
+            None,
+        );
         assert_eq!(cert.contracts.static_verified, 3);
         assert_eq!(cert.contracts.runtime_checks_needed, 2);
         assert_eq!(cert.contracts.failures, 0);
@@ -528,7 +595,8 @@ mod tests {
     fn certificate_contract_stats_runtime_mode_default() {
         let module = make_test_module(&["foo"]);
         let source = "module test { meta { purpose: \"testing\" } fn foo() {} }";
-        let cert = CompilationCertificate::from_module(&module, source, None, None, None, None);
+        let cert =
+            CompilationCertificate::from_module(&module, source, None, None, None, None, None);
         assert_eq!(cert.contracts.static_verified, 0);
         assert_eq!(cert.contracts.mode, "runtime");
     }
@@ -545,6 +613,7 @@ mod tests {
             None,
             Some(&confidence_data),
             Some((1, 0, 0)),
+            None,
         );
         let json = cert.to_json().unwrap_or_default();
         assert!(
@@ -562,6 +631,234 @@ mod tests {
         assert!(
             json.contains("\"static_verified\""),
             "JSON should contain static_verified"
+        );
+    }
+    fn make_test_module_with_contracts(func_name: &str) -> Module {
+        Module {
+            id: NodeId(0),
+            span: Span::new(0, 100),
+            name: "test".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(1),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "testing".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![Function {
+                id: NodeId(2),
+                span: Span::new(0, 100),
+                name: func_name.to_string(),
+                visibility: kodo_ast::Visibility::Private,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![],
+                return_type: TypeExpr::Unit,
+                requires: vec![kodo_ast::Expr::BoolLit(true, Span::new(0, 4))],
+                ensures: vec![],
+                is_async: false,
+                body: Block {
+                    span: Span::new(0, 100),
+                    stmts: vec![],
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn certificate_includes_function_contracts_with_mode() {
+        let module = make_test_module_with_contracts("guarded");
+        let cert = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Static),
+        );
+        assert_eq!(cert.function_contracts.len(), 1);
+        assert_eq!(cert.function_contracts[0].name, "guarded");
+        assert_eq!(cert.function_contracts[0].contracts, "static_verified");
+    }
+
+    #[test]
+    fn certificate_function_contracts_runtime_mode() {
+        let module = make_test_module_with_contracts("guarded");
+        let cert = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Runtime),
+        );
+        assert_eq!(cert.function_contracts[0].contracts, "runtime_only");
+    }
+
+    #[test]
+    fn certificate_function_contracts_no_contracts_on_function() {
+        let module = make_test_module(&["plain"]);
+        let cert = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Static),
+        );
+        assert_eq!(cert.function_contracts[0].contracts, "no_contracts");
+    }
+
+    #[test]
+    fn certificate_no_function_contracts_without_mode() {
+        let module = make_test_module(&["foo"]);
+        let cert =
+            CompilationCertificate::from_module(&module, "src", None, None, None, None, None);
+        assert!(cert.function_contracts.is_empty());
+    }
+
+    #[test]
+    fn certificate_contract_status_in_json() {
+        let module = make_test_module_with_contracts("guarded");
+        let cert = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Static),
+        );
+        let json = cert.to_json().unwrap_or_default();
+        assert!(json.contains("function_contracts"));
+        assert!(json.contains("static_verified"));
+    }
+
+    #[test]
+    fn certificate_json_contains_per_function_contract_status() {
+        // Build a module with one contracted function and one plain function.
+        let module = Module {
+            id: NodeId(0),
+            span: Span::new(0, 200),
+            name: "mixed".to_string(),
+            imports: vec![],
+            meta: Some(Meta {
+                id: NodeId(1),
+                span: Span::new(0, 50),
+                entries: vec![MetaEntry {
+                    key: "purpose".to_string(),
+                    value: "test mixed contracts".to_string(),
+                    span: Span::new(10, 40),
+                }],
+            }),
+            type_aliases: vec![],
+            type_decls: vec![],
+            enum_decls: vec![],
+            trait_decls: vec![],
+            impl_blocks: vec![],
+            actor_decls: vec![],
+            intent_decls: vec![],
+            invariants: vec![],
+            functions: vec![
+                Function {
+                    id: NodeId(2),
+                    span: Span::new(0, 100),
+                    name: "guarded".to_string(),
+                    visibility: kodo_ast::Visibility::Private,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![],
+                    return_type: TypeExpr::Unit,
+                    requires: vec![kodo_ast::Expr::BoolLit(true, Span::new(0, 4))],
+                    ensures: vec![],
+                    is_async: false,
+                    body: Block {
+                        span: Span::new(0, 100),
+                        stmts: vec![],
+                    },
+                },
+                Function {
+                    id: NodeId(3),
+                    span: Span::new(100, 200),
+                    name: "plain".to_string(),
+                    visibility: kodo_ast::Visibility::Private,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![],
+                    return_type: TypeExpr::Unit,
+                    requires: vec![],
+                    ensures: vec![],
+                    is_async: false,
+                    body: Block {
+                        span: Span::new(100, 200),
+                        stmts: vec![],
+                    },
+                },
+            ],
+        };
+
+        let cert = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Static),
+        );
+
+        // Verify the struct data.
+        assert_eq!(cert.function_contracts.len(), 2);
+        assert_eq!(cert.function_contracts[0].name, "guarded");
+        assert_eq!(cert.function_contracts[0].contracts, "static_verified");
+        assert_eq!(cert.function_contracts[1].name, "plain");
+        assert_eq!(cert.function_contracts[1].contracts, "no_contracts");
+
+        // Verify both statuses appear in the JSON output.
+        let json = cert.to_json().unwrap_or_default();
+        assert!(
+            json.contains("\"static_verified\""),
+            "JSON should contain static_verified status"
+        );
+        assert!(
+            json.contains("\"no_contracts\""),
+            "JSON should contain no_contracts status"
+        );
+        assert!(
+            json.contains("\"function_contracts\""),
+            "JSON should contain the function_contracts array"
+        );
+
+        // Verify runtime_only status in a separate certificate.
+        let cert_rt = CompilationCertificate::from_module(
+            &module,
+            "src",
+            None,
+            None,
+            None,
+            None,
+            Some(ContractMode::Runtime),
+        );
+        assert_eq!(cert_rt.function_contracts[0].contracts, "runtime_only");
+        assert_eq!(cert_rt.function_contracts[1].contracts, "no_contracts");
+        let json_rt = cert_rt.to_json().unwrap_or_default();
+        assert!(
+            json_rt.contains("\"runtime_only\""),
+            "JSON should contain runtime_only status"
         );
     }
 }

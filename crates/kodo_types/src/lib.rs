@@ -40,11 +40,14 @@ mod errors;
 mod expr;
 mod generics;
 mod ownership;
+/// Multi-step repair plans for AI agent error resolution.
+pub mod repair;
 mod stmt;
 mod types;
 
 pub use checker::TypeChecker;
 pub use errors::{Result, TypeError};
+pub use repair::{RepairPlan, RepairStep};
 pub use types::{resolve_type, resolve_type_with_enums, TypeEnv};
 
 /// Represents a type in the Kōdo type system.

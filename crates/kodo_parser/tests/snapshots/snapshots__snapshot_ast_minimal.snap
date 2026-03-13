@@ -67,6 +67,7 @@ Module {
                 end: 146,
             },
             name: "noop",
+            visibility: Private,
             is_async: false,
             generic_params: [],
             annotations: [],

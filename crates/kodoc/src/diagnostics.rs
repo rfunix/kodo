@@ -104,6 +104,13 @@ struct JsonFixPatch {
     replacement: String,
 }
 
+/// A single step in a multi-step repair plan in JSON output.
+#[derive(Serialize)]
+struct JsonRepairStep {
+    description: String,
+    patches: Vec<JsonFixPatch>,
+}
+
 /// A single diagnostic entry in JSON output.
 #[derive(Serialize)]
 struct JsonDiagnostic {
@@ -115,6 +122,8 @@ struct JsonDiagnostic {
     fixability: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     fix_patch: Option<JsonFixPatch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repair_plan: Option<Vec<JsonRepairStep>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     see_also: Option<String>,
 }
@@ -193,6 +202,24 @@ fn diagnostic_to_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic)
         end_offset: p.end_offset,
         replacement: p.replacement,
     });
+    let repair_plan = diagnostic.repair_plan().map(|steps| {
+        steps
+            .into_iter()
+            .map(|(desc, patches)| JsonRepairStep {
+                description: desc,
+                patches: patches
+                    .into_iter()
+                    .map(|p| JsonFixPatch {
+                        description: p.description,
+                        file: p.file,
+                        start_offset: p.start_offset,
+                        end_offset: p.end_offset,
+                        replacement: p.replacement,
+                    })
+                    .collect(),
+            })
+            .collect()
+    });
     JsonDiagnostic {
         code: diagnostic.code(),
         severity: match diagnostic.severity() {
@@ -207,6 +234,7 @@ fn diagnostic_to_json(source: &str, filename: &str, diagnostic: &dyn Diagnostic)
         suggestion: diagnostic.suggestion(),
         fixability: diagnostic.fixability(),
         fix_patch,
+        repair_plan,
         see_also: diagnostic.see_also(),
     }
 }

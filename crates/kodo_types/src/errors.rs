@@ -603,6 +603,67 @@ impl kodo_ast::Diagnostic for TypeError {
     fn fix_patch(&self) -> Option<kodo_ast::FixPatch> {
         fix_patch_for_error(self)
     }
+
+    fn repair_plan(&self) -> Option<Vec<(String, Vec<kodo_ast::FixPatch>)>> {
+        repair_plan_for_error(self)
+    }
+}
+
+/// Returns a multi-step repair plan for complex type errors.
+///
+/// Some errors require more than a single patch to fix. This function produces
+/// a sequence of named steps, each containing one or more [`FixPatch`] entries
+/// that agents should apply in order.
+///
+/// Currently handles:
+/// - `Mismatch` where `expected` contains `Result` — suggests wrapping in `Result::Ok()`
+/// - `Undefined` — suggests adding a `let` binding for the undefined variable
+fn repair_plan_for_error(err: &TypeError) -> Option<Vec<(String, Vec<kodo_ast::FixPatch>)>> {
+    match err {
+        TypeError::Mismatch {
+            expected,
+            found,
+            span,
+        } if expected.contains("Result") && !found.contains("Result") => {
+            let step1 = (
+                "wrap value in Result::Ok()".to_string(),
+                vec![kodo_ast::FixPatch {
+                    description: format!(
+                        "wrap the expression in Result::Ok() to produce `{expected}`"
+                    ),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.end as usize,
+                    replacement: format!("Result::Ok({found})"),
+                }],
+            );
+            let step2 = (
+                "verify return type matches".to_string(),
+                vec![kodo_ast::FixPatch {
+                    description: format!("ensure the function return type is `{expected}`"),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: String::new(),
+                }],
+            );
+            Some(vec![step1, step2])
+        }
+        TypeError::Undefined { name, span, .. } => {
+            let step1 = (
+                format!("add a let binding for `{name}`"),
+                vec![kodo_ast::FixPatch {
+                    description: format!("declare `{name}` before use"),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: format!("let {name}: TODO = TODO\n    "),
+                }],
+            );
+            Some(vec![step1])
+        }
+        _ => None,
+    }
 }
 
 /// Returns a machine-applicable fix patch for the given type error.

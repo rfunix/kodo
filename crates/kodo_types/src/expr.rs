@@ -8,6 +8,30 @@ use crate::types::{expr_span, find_similar_in, GenericFunctionDef, OwnershipStat
 use crate::{Type, TypeError};
 use kodo_ast::{BinOp, Block, Expr, Pattern, Span, Stmt, UnaryOp};
 
+/// Converts a primitive type name string to a [`Type`].
+///
+/// Used when parsing monomorphized generic names like `Result__Int_String`.
+fn type_name_to_type(name: &str) -> Type {
+    match name {
+        "Int" => Type::Int,
+        "Int8" => Type::Int8,
+        "Int16" => Type::Int16,
+        "Int32" => Type::Int32,
+        "Int64" => Type::Int64,
+        "Uint" => Type::Uint,
+        "Uint8" => Type::Uint8,
+        "Uint16" => Type::Uint16,
+        "Uint32" => Type::Uint32,
+        "Uint64" => Type::Uint64,
+        "Float32" => Type::Float32,
+        "Float64" => Type::Float64,
+        "Bool" => Type::Bool,
+        "String" => Type::String,
+        "Byte" => Type::Byte,
+        _ => Type::Struct(name.to_string()),
+    }
+}
+
 impl TypeChecker {
     /// Infers the type of an expression.
     ///
@@ -209,6 +233,9 @@ impl TypeChecker {
     }
 
     /// Checks the try operator `?`.
+    ///
+    /// Unwraps `Result<T, E>`: on `Ok(t)` evaluates to `t`, on `Err(e)` early-returns.
+    /// Handles both generic (`Result<T, E>`) and monomorphized (`Result__Int_String`) forms.
     fn check_try(&mut self, operand: &Expr, span: Span) -> crate::Result<Type> {
         let operand_ty = self.infer_expr(operand)?;
         let returns_result = matches!(&self.current_return_type, Type::Enum(name) if name.starts_with("Result"))
@@ -216,9 +243,21 @@ impl TypeChecker {
         if !returns_result && self.current_return_type != Type::Unknown {
             return Err(TypeError::TryInNonResultFn { span });
         }
-        let _is_result = matches!(&operand_ty, Type::Enum(name) if name.starts_with("Result"))
-            || matches!(&operand_ty, Type::Generic(name, _) if name == "Result");
-        Ok(Type::Unknown)
+        // Extract T from Result<T, E>
+        match &operand_ty {
+            Type::Generic(name, args) if name == "Result" && args.len() == 2 => Ok(args[0].clone()),
+            Type::Enum(name) if name.starts_with("Result__") => {
+                // Monomorphized: "Result__Int_String" -> parse first type component
+                let suffix = &name["Result__".len()..];
+                let ok_type_name = suffix.split('_').next().unwrap_or("Unknown");
+                Ok(type_name_to_type(ok_type_name))
+            }
+            _ => Err(TypeError::Mismatch {
+                expected: "Result<T, E>".to_string(),
+                found: format!("{operand_ty}"),
+                span,
+            }),
+        }
     }
 
     /// Checks the optional chain operator `?.`.

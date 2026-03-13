@@ -3,7 +3,7 @@
 use super::*;
 use kodo_ast::{
     Annotation, AnnotationArg, BinOp, Block, Expr, Function, Meta, MetaEntry, Module, NodeId,
-    Param, Span, Stmt, TypeExpr, UnaryOp,
+    Param, Span, Stmt, TypeExpr, UnaryOp, Visibility,
 };
 
 #[test]
@@ -108,6 +108,7 @@ fn make_function(
         id: NodeId(1),
         span: Span::new(0, 100),
         name: name.to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],
@@ -817,6 +818,7 @@ fn make_function_with_annotations(name: &str, annotations: Vec<Annotation>) -> F
         id: NodeId(1),
         span: Span::new(0, 100),
         name: name.to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations,
@@ -1310,6 +1312,7 @@ fn generic_struct_monomorphizes_correctly() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Wrapper".to_string(),
+        visibility: Visibility::Private,
         generic_params: vec![gp("T")],
         fields: vec![kodo_ast::FieldDef {
             name: "value".to_string(),
@@ -1348,6 +1351,7 @@ fn wrong_type_arg_count_for_generic_struct() {
         id: NodeId(10),
         span: Span::new(0, 50),
         name: "Wrapper".to_string(),
+        visibility: Visibility::Private,
         generic_params: vec![gp("T")],
         fields: vec![kodo_ast::FieldDef {
             name: "value".to_string(),
@@ -1555,6 +1559,7 @@ fn check_trait_and_impl_basic() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![
                 kodo_ast::FieldDef {
@@ -1599,6 +1604,7 @@ fn check_trait_and_impl_basic() {
                 id: NodeId(4),
                 span: Span::new(130, 175),
                 name: "sum".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1646,6 +1652,7 @@ fn check_trait_and_impl_basic() {
             id: NodeId(5),
             span: Span::new(180, 200),
             name: "main".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1733,6 +1740,7 @@ fn check_missing_trait_method_error() {
             id: NodeId(1),
             span: Span::new(50, 65),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -1801,6 +1809,7 @@ fn check_inherent_impl_registers_methods() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![
                 kodo_ast::FieldDef {
@@ -1827,6 +1836,7 @@ fn check_inherent_impl_registers_methods() {
                 id: NodeId(3),
                 span: Span::new(85, 155),
                 name: "sum".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1874,6 +1884,7 @@ fn check_inherent_impl_registers_methods() {
             id: NodeId(4),
             span: Span::new(160, 200),
             name: "main".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1927,6 +1938,7 @@ fn check_inherent_impl_no_trait_required() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -1946,6 +1958,7 @@ fn check_inherent_impl_no_trait_required() {
                 id: NodeId(3),
                 span: Span::new(85, 135),
                 name: "get_x".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1978,6 +1991,7 @@ fn check_inherent_impl_no_trait_required() {
             id: NodeId(4),
             span: Span::new(140, 180),
             name: "main".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -2029,6 +2043,7 @@ fn check_inherent_and_trait_impl_same_type() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -2068,6 +2083,7 @@ fn check_inherent_and_trait_impl_same_type() {
                     id: NodeId(4),
                     span: Span::new(125, 165),
                     name: "get_x".to_string(),
+                    visibility: Visibility::Private,
                     is_async: false,
                     generic_params: vec![],
                     annotations: vec![],
@@ -2107,6 +2123,7 @@ fn check_inherent_and_trait_impl_same_type() {
                     id: NodeId(6),
                     span: Span::new(175, 225),
                     name: "sum".to_string(),
+                    visibility: Visibility::Private,
                     is_async: false,
                     generic_params: vec![],
                     annotations: vec![],
@@ -2143,6 +2160,7 @@ fn check_inherent_and_trait_impl_same_type() {
             id: NodeId(7),
             span: Span::new(230, 270),
             name: "main".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -2183,6 +2201,7 @@ fn await_outside_async_is_error() {
         id: NodeId(0),
         span: Span::new(0, 10),
         name: "sync_fn".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],
@@ -2214,6 +2233,7 @@ fn await_inside_async_is_ok() {
         id: NodeId(0),
         span: Span::new(0, 10),
         name: "async_fn".to_string(),
+        visibility: Visibility::Private,
         is_async: true,
         generic_params: vec![],
         annotations: vec![],
@@ -2411,6 +2431,7 @@ fn confidence_propagation_simple() {
         id: NodeId(1),
         span: Span::new(0, 100),
         name: "b_func".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![
@@ -2447,6 +2468,7 @@ fn confidence_propagation_simple() {
         id: NodeId(2),
         span: Span::new(0, 50),
         name: "a_func".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![Annotation {
@@ -2490,6 +2512,7 @@ fn confidence_threshold_violation() {
         id: NodeId(1),
         span: Span::new(0, 100),
         name: "weak_fn".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![
@@ -2526,6 +2549,7 @@ fn confidence_threshold_violation() {
         id: NodeId(3),
         span: Span::new(0, 50),
         name: "main".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],
@@ -3770,6 +3794,7 @@ fn missing_associated_type_error() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "MyList".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "len".to_string(),
@@ -3811,6 +3836,7 @@ fn missing_associated_type_error() {
                 id: NodeId(4),
                 span: Span::new(130, 175),
                 name: "get".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -3873,6 +3899,7 @@ fn unexpected_associated_type_error() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "MyList".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "len".to_string(),
@@ -3913,6 +3940,7 @@ fn unexpected_associated_type_error() {
                 id: NodeId(4),
                 span: Span::new(130, 175),
                 name: "get".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -3975,6 +4003,7 @@ fn default_method_not_required_in_impl() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Point".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -4034,6 +4063,7 @@ fn default_method_not_required_in_impl() {
                 id: NodeId(4),
                 span: Span::new(140, 175),
                 name: "required_method".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -4095,6 +4125,7 @@ fn associated_type_provided_passes() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "MyList".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "len".to_string(),
@@ -4139,6 +4170,7 @@ fn associated_type_provided_passes() {
                 id: NodeId(4),
                 span: Span::new(130, 175),
                 name: "get".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -4221,6 +4253,7 @@ fn default_method_collecting_not_required() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Foo".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -4301,6 +4334,7 @@ fn missing_associated_type_collecting() {
             id: NodeId(1),
             span: Span::new(50, 80),
             name: "Foo".to_string(),
+            visibility: Visibility::Private,
             generic_params: vec![],
             fields: vec![kodo_ast::FieldDef {
                 name: "x".to_string(),
@@ -4380,6 +4414,7 @@ fn make_module_with_body(stmts: Vec<Stmt>) -> Module {
             id: NodeId(2),
             span: Span::new(0, 100),
             name: "test_fn".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -5165,6 +5200,7 @@ fn for_in_type_checks_list() {
             id: NodeId(1),
             span,
             name: "test_fn".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -5261,6 +5297,7 @@ fn for_in_rejects_non_list() {
             id: NodeId(1),
             span,
             name: "bad_fn".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -6064,6 +6101,7 @@ fn spawn_capture_ref_borrow_is_non_send() {
         id: NodeId(1),
         span,
         name: "test_fn".to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],
@@ -6193,5 +6231,86 @@ fn parallel_with_spawn_blocks_is_ok() {
     assert!(
         result.is_ok(),
         "parallel with spawn blocks should pass: {result:?}"
+    );
+}
+
+#[test]
+fn repair_plan_mismatch_result_wrapping() {
+    use kodo_ast::Diagnostic;
+    let err = TypeError::Mismatch {
+        expected: "Result<Int, String>".to_string(),
+        found: "Int".to_string(),
+        span: Span::new(10, 20),
+    };
+    let plan = err.repair_plan();
+    assert!(
+        plan.is_some(),
+        "should produce a repair plan for Result mismatch"
+    );
+    let steps = plan.unwrap();
+    assert_eq!(steps.len(), 2, "should have 2 steps");
+    assert!(steps[0].0.contains("Result::Ok"));
+    assert!(!steps[0].1.is_empty());
+    assert!(steps[0].1[0].replacement.contains("Result::Ok(Int)"));
+    assert!(steps[1].0.contains("verify"));
+}
+
+#[test]
+fn repair_plan_mismatch_non_result_returns_none() {
+    use kodo_ast::Diagnostic;
+    let err = TypeError::Mismatch {
+        expected: "Int".to_string(),
+        found: "String".to_string(),
+        span: Span::new(10, 20),
+    };
+    let plan = err.repair_plan();
+    assert!(
+        plan.is_none(),
+        "non-Result mismatch should not produce a repair plan"
+    );
+}
+
+#[test]
+fn repair_plan_mismatch_result_to_result_returns_none() {
+    use kodo_ast::Diagnostic;
+    let err = TypeError::Mismatch {
+        expected: "Result<Int, String>".to_string(),
+        found: "Result<String, String>".to_string(),
+        span: Span::new(10, 20),
+    };
+    let plan = err.repair_plan();
+    assert!(
+        plan.is_none(),
+        "Result-to-Result mismatch should not produce a repair plan"
+    );
+}
+
+#[test]
+fn repair_plan_undefined_variable() {
+    use kodo_ast::Diagnostic;
+    let err = TypeError::Undefined {
+        name: "foo".to_string(),
+        span: Span::new(5, 8),
+        similar: None,
+    };
+    let plan = err.repair_plan();
+    assert!(
+        plan.is_some(),
+        "should produce a repair plan for undefined variable"
+    );
+    let steps = plan.unwrap();
+    assert_eq!(steps.len(), 1, "should have 1 step");
+    assert!(steps[0].0.contains("foo"));
+    assert!(steps[0].1[0].replacement.contains("let foo"));
+}
+
+#[test]
+fn repair_plan_other_errors_return_none() {
+    use kodo_ast::Diagnostic;
+    let err = TypeError::MissingMeta;
+    let plan = err.repair_plan();
+    assert!(
+        plan.is_none(),
+        "MissingMeta should not produce a repair plan"
     );
 }

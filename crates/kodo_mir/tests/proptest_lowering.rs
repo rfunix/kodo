@@ -1,7 +1,9 @@
 //! Property-based tests for MIR lowering — verifies that lowering
 //! never panics on valid AST inputs and produces structurally valid MIR.
 
-use kodo_ast::{BinOp, Block, Expr, Function, NodeId, Ownership, Param, Span, Stmt, TypeExpr};
+use kodo_ast::{
+    BinOp, Block, Expr, Function, NodeId, Ownership, Param, Span, Stmt, TypeExpr, Visibility,
+};
 use kodo_mir::lowering::lower_function;
 use proptest::prelude::*;
 
@@ -14,6 +16,7 @@ fn make_fn(name: &str, params: Vec<Param>, body: Block, ret: TypeExpr) -> Functi
         id: NodeId(0),
         span: span(),
         name: name.to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],

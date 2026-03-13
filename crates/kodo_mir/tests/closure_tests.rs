@@ -2,6 +2,7 @@
 
 use kodo_ast::{
     BinOp, Block, ClosureParam, Expr, Function, Module, NodeId, Param, Span, Stmt, TypeExpr,
+    Visibility,
 };
 use kodo_mir::lowering::{lower_function, lower_module};
 use kodo_mir::Instruction;
@@ -16,6 +17,7 @@ fn make_fn(name: &str, params: Vec<Param>, body: Block, ret: TypeExpr) -> Functi
         id: NodeId(0),
         span: span(),
         name: name.to_string(),
+        visibility: Visibility::Private,
         is_async: false,
         generic_params: vec![],
         annotations: vec![],

@@ -14,6 +14,7 @@ members = [
     "crates/kodo_desugar",
     "crates/kodo_lsp",
     "crates/kodoc",
+    "crates/kodo_mcp",
     "tools/ko",
 ]
 
@@ -39,6 +40,7 @@ kodo_std = { path = "crates/kodo_std" }
 kodo_desugar = { path = "crates/kodo_desugar" }
 kodo_lsp = { path = "crates/kodo_lsp" }
 kodo_runtime = { path = "crates/kodo_runtime" }
+kodo_mcp = { path = "crates/kodo_mcp" }
 
 # Lexing
 logos = "0.16.1"

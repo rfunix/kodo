@@ -67,6 +67,7 @@ Module {
                 end: 165,
             },
             name: "main",
+            visibility: Private,
             is_async: false,
             generic_params: [],
             annotations: [],

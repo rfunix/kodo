@@ -153,6 +153,9 @@ pub enum TokenKind {
     /// The `type` keyword (for type aliases and refinement types).
     #[token("type")]
     Type,
+    /// The `pub` keyword — marks a declaration as publicly visible.
+    #[token("pub")]
+    Pub,
     /// The `break` keyword — exits the innermost loop.
     #[token("break")]
     Break,
@@ -881,7 +884,7 @@ mod tests {
                                 "while", "for", "true", "false", "struct", "enum",
                                 "match", "import", "from", "trait", "impl", "self",
                                 "own", "ref", "is", "async", "await", "spawn", "actor",
-                                "parallel", "break", "continue"];
+                                "parallel", "break", "continue", "pub"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
                     let tokens = tokenize(&name).unwrap();
@@ -896,7 +899,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..30usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..31usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -914,6 +917,7 @@ mod tests {
                     ("is", TokenKind::Is), ("async", TokenKind::Async),
                     ("parallel", TokenKind::Parallel),
                     ("break", TokenKind::Break), ("continue", TokenKind::Continue),
+                    ("pub", TokenKind::Pub),
                 ];
                 let (src, expected) = &keywords[idx % keywords.len()];
                 let tokens = tokenize(src).unwrap();

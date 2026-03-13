@@ -576,6 +576,22 @@ All errors can be emitted as JSON with `--json-errors`:
     "length": 12
   },
   "suggestion": "convert the String to Int using `Int.parse(value)`",
+  "fix_patch": {
+    "description": "wrap value in Int.parse()",
+    "start_offset": 120,
+    "end_offset": 132,
+    "replacement": "Int.parse(value)"
+  },
+  "repair_plan": [
+    {
+      "description": "wrap value in Result::Ok()",
+      "patches": [{ "start_offset": 120, "end_offset": 132, "replacement": "Result::Ok(value)" }]
+    }
+  ],
   "spec_reference": "§3.1 Type System"
 }
 ```
+
+The `fix_patch` field contains a single machine-applicable patch. For complex errors requiring
+multiple steps, `repair_plan` provides a sequence of named steps that agents should apply in order.
+Both fields are optional and omitted when not applicable.

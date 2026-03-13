@@ -51,6 +51,7 @@ Module {
                 end: 131,
             },
             name: "add",
+            visibility: Private,
             is_async: false,
             generic_params: [],
             annotations: [],

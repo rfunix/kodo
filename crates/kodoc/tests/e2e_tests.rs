@@ -1675,6 +1675,8 @@ e2e_example_test!(run: e2e_todo_app, "todo_app.ko", contains: ["Todo List", "Wri
 e2e_example_test!(run: e2e_tuples, "tuples.ko", contains: ["42", "99", "1", "2", "3", "10", "20"]);
 e2e_example_test!(run: e2e_advanced_traits, "advanced_traits.ko", contains: ["212", "100"]);
 e2e_example_test!(run: e2e_collections_demo, "collections_demo.ko", contains: ["3", "2", "1", "2", "100"]);
+e2e_example_test!(run: e2e_visibility, "visibility.ko", contains: ["point"]);
+e2e_example_test!(run: e2e_try_operator, "try_operator.ko", contains: ["5"]);
 
 // --- Examples that intentionally fail to compile ---
 

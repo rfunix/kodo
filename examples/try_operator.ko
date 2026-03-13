@@ -1,0 +1,29 @@
+// Try Operator -- Demonstrates Result<T, E> pattern matching for error handling.
+
+module try_operator {
+    meta {
+        purpose: "Demonstrate Result type error handling"
+        version: "1.0.0"
+    }
+
+    fn validate(n: Int) -> Result<Int, String> {
+        if n > 0 {
+            return Result::Ok(n)
+        } else {
+            return Result::Err("not positive")
+        }
+    }
+
+    fn main() -> Int {
+        let result: Result<Int, String> = validate(5)
+        match result {
+            Result::Ok(v) => {
+                print_int(v)
+            }
+            Result::Err(e) => {
+                println("error")
+            }
+        }
+        return 0
+    }
+}

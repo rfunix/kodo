@@ -24,6 +24,7 @@ Module {
                 end: 109,
             },
             name: "Point",
+            visibility: Private,
             generic_params: [],
             fields: [
                 FieldDef {

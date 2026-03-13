@@ -737,10 +737,56 @@ pub fn verify_refinement(
     verify_contracts(&[contract], mode)
 }
 
+/// Verification status for function contracts.
+///
+/// Tracks whether contracts were verified statically (via Z3),
+/// checked at runtime only, or not verified at all. This status
+/// is included in compilation certificates to enable policy-based
+/// deployment decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractStatus {
+    /// Contracts were statically verified by the SMT solver.
+    StaticVerified,
+    /// Contracts have runtime checks but were not statically proven.
+    RuntimeOnly,
+    /// No contracts are present on this function.
+    NoContracts,
+}
+
+impl ContractStatus {
+    /// Returns the string representation used in certificate JSON output.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StaticVerified => "static_verified",
+            Self::RuntimeOnly => "runtime_only",
+            Self::NoContracts => "no_contracts",
+        }
+    }
+}
+
+/// Determines the contract verification status for a function.
+///
+/// Inspects whether the function has any `requires` or `ensures` clauses,
+/// and cross-references with the active [`ContractMode`] to determine
+/// whether those contracts were statically verified or only checked at
+/// runtime.
+#[must_use]
+pub fn contract_status(function: &Function, mode: ContractMode) -> ContractStatus {
+    if function.requires.is_empty() && function.ensures.is_empty() {
+        return ContractStatus::NoContracts;
+    }
+    match mode {
+        ContractMode::Static | ContractMode::Both => ContractStatus::StaticVerified,
+        ContractMode::Runtime | ContractMode::Recoverable => ContractStatus::RuntimeOnly,
+        ContractMode::None => ContractStatus::NoContracts,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kodo_ast::{BinOp, Block, NodeId, Param, Span, TypeExpr, UnaryOp};
+    use kodo_ast::{BinOp, Block, NodeId, Param, Span, TypeExpr, UnaryOp, Visibility};
 
     /// Helper: creates a simple boolean literal expression.
     fn bool_expr(val: bool) -> Expr {
@@ -774,6 +820,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test_fn".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             generic_params: vec![],
             annotations: vec![],
             params: vec![Param {
@@ -1587,5 +1634,74 @@ mod tests {
         let result = result.unwrap_or_else(|_| panic!("already checked"));
         assert_eq!(result.static_verified, 0);
         assert_eq!(result.runtime_checks_needed, 0);
+    }
+    #[test]
+    fn contract_status_no_contracts_returns_no_contracts() {
+        let func = make_function(vec![], vec![]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Runtime),
+            ContractStatus::NoContracts
+        );
+    }
+
+    #[test]
+    fn contract_status_with_requires_runtime_returns_runtime_only() {
+        let func = make_function(vec![bool_expr(true)], vec![]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Runtime),
+            ContractStatus::RuntimeOnly
+        );
+    }
+
+    #[test]
+    fn contract_status_with_ensures_runtime_returns_runtime_only() {
+        let func = make_function(vec![], vec![bool_expr(true)]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Runtime),
+            ContractStatus::RuntimeOnly
+        );
+    }
+
+    #[test]
+    fn contract_status_static_mode_returns_static_verified() {
+        let func = make_function(vec![bool_expr(true)], vec![]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Static),
+            ContractStatus::StaticVerified
+        );
+    }
+
+    #[test]
+    fn contract_status_both_mode_returns_static_verified() {
+        let func = make_function(vec![bool_expr(true)], vec![bool_expr(true)]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Both),
+            ContractStatus::StaticVerified
+        );
+    }
+
+    #[test]
+    fn contract_status_none_mode_returns_no_contracts() {
+        let func = make_function(vec![bool_expr(true)], vec![]);
+        assert_eq!(
+            contract_status(&func, ContractMode::None),
+            ContractStatus::NoContracts
+        );
+    }
+
+    #[test]
+    fn contract_status_recoverable_mode_returns_runtime_only() {
+        let func = make_function(vec![bool_expr(true)], vec![bool_expr(true)]);
+        assert_eq!(
+            contract_status(&func, ContractMode::Recoverable),
+            ContractStatus::RuntimeOnly
+        );
+    }
+
+    #[test]
+    fn contract_status_as_str_values() {
+        assert_eq!(ContractStatus::StaticVerified.as_str(), "static_verified");
+        assert_eq!(ContractStatus::RuntimeOnly.as_str(), "runtime_only");
+        assert_eq!(ContractStatus::NoContracts.as_str(), "no_contracts");
     }
 }

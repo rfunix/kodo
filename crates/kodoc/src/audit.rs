@@ -636,6 +636,7 @@ mod tests {
                 id: NodeId(2),
                 span: Span::new(0, 100),
                 name: "bare".to_string(),
+                visibility: kodo_ast::Visibility::Private,
                 generic_params: vec![],
                 annotations: vec![],
                 params: vec![Param {
@@ -676,6 +677,7 @@ mod tests {
                 id: NodeId(2),
                 span: Span::new(0, 100),
                 name: "add".to_string(),
+                visibility: kodo_ast::Visibility::Private,
                 generic_params: vec![],
                 annotations: vec![Annotation {
                     name: "reviewed_by".to_string(),
@@ -731,6 +733,7 @@ mod tests {
                 id: NodeId(2),
                 span: Span::new(0, 100),
                 name: "add".to_string(),
+                visibility: kodo_ast::Visibility::Private,
                 generic_params: vec![],
                 annotations: vec![],
                 params: vec![

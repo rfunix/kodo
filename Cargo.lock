@@ -1285,6 +1285,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "kodo_mcp"
+version = "0.1.0"
+dependencies = [
+ "kodo_ast",
+ "kodo_codegen",
+ "kodo_contracts",
+ "kodo_desugar",
+ "kodo_lexer",
+ "kodo_mir",
+ "kodo_parser",
+ "kodo_resolver",
+ "kodo_std",
+ "kodo_types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kodo_mir"
 version = "0.1.0"
 dependencies = [

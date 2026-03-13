@@ -818,7 +818,7 @@ mod tests {
     use super::*;
     use kodo_ast::{
         ActorDecl, BinOp, Block, Expr, FieldDef, FieldInit, Function, Meta, MetaEntry, Module,
-        NodeId, Ownership, Param, Span, Stmt, TypeDecl, TypeExpr,
+        NodeId, Ownership, Param, Span, Stmt, TypeDecl, TypeExpr, Visibility,
     };
 
     /// Helper to create a dummy span.
@@ -832,6 +832,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: name.to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1298,6 +1299,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "positive".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1335,6 +1337,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "zero".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1378,6 +1381,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1462,6 +1466,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1522,6 +1527,7 @@ mod tests {
                 id: NodeId(0),
                 span: span(),
                 name: "checked".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -1560,6 +1566,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "multi".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -1957,6 +1964,7 @@ mod tests {
             type_decls: vec![TypeDecl {
                 id: NodeId(1),
                 name: "Point".to_string(),
+                visibility: Visibility::Private,
                 span: span(),
                 generic_params: vec![],
                 fields: vec![
@@ -2453,6 +2461,7 @@ mod tests {
                 id: NodeId(3),
                 span: Span::new(0, 80),
                 name: "main".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -2529,6 +2538,7 @@ mod tests {
                 id: NodeId(3),
                 span: Span::new(0, 80),
                 name: "main".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -2651,6 +2661,7 @@ mod tests {
                 id: NodeId(3),
                 span: Span::new(0, 80),
                 name: "main".to_string(),
+                visibility: Visibility::Private,
                 is_async: false,
                 generic_params: vec![],
                 annotations: vec![],
@@ -3428,6 +3439,7 @@ mod tests {
             type_decls: vec![TypeDecl {
                 id: NodeId(0),
                 name: "Point".to_string(),
+                visibility: Visibility::Private,
                 span: span(),
                 generic_params: vec![],
                 fields: vec![
@@ -3503,6 +3515,7 @@ mod tests {
             type_decls: vec![TypeDecl {
                 id: NodeId(0),
                 name: "Pair".to_string(),
+                visibility: Visibility::Private,
                 span: span(),
                 generic_params: vec![],
                 fields: vec![
@@ -3820,6 +3833,7 @@ mod tests {
             id: NodeId(0),
             span: span(),
             name: "positive".to_string(),
+            visibility: Visibility::Private,
             is_async: false,
             generic_params: vec![],
             annotations: vec![],
@@ -3878,6 +3892,7 @@ mod tests {
             type_decls: vec![TypeDecl {
                 id: NodeId(0),
                 name: "Vec2".to_string(),
+                visibility: Visibility::Private,
                 span: span(),
                 generic_params: vec![],
                 fields: vec![

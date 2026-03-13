@@ -451,6 +451,7 @@ fn run_build(
                             let func = kodo_ast::Function {
                                 id: kodo_ast::NodeId(0),
                                 name: format!("{}_{name}", impl_block.type_name),
+                                visibility: kodo_ast::Visibility::Private,
                                 params,
                                 return_type: trait_method.return_type.clone(),
                                 body,
@@ -647,6 +648,7 @@ fn run_build(
                 parent_cert.as_ref(),
                 None,
                 None,
+                Some(contract_mode),
             );
             match cert.to_json() {
                 Ok(json) => {
@@ -850,6 +852,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
             kodo_ast::Function {
                 id: kodo_ast::NodeId(0),
                 name: name.to_string(),
+                visibility: kodo_ast::Visibility::Private,
                 params: vec![kodo_ast::Param {
                     name: "self".to_string(),
                     ty: kodo_ast::TypeExpr::Named(enum_name.to_string()),
@@ -897,6 +900,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
     let make_unwrap_or = |name: &str, enum_name: &str, success_variant: &str| kodo_ast::Function {
         id: kodo_ast::NodeId(0),
         name: name.to_string(),
+        visibility: kodo_ast::Visibility::Private,
         params: vec![
             kodo_ast::Param {
                 name: "self".to_string(),
@@ -1134,6 +1138,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_map".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![
                 list_param.clone(),
                 kodo_ast::Param {
@@ -1213,6 +1218,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_filter".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![
                 list_param.clone(),
                 kodo_ast::Param {
@@ -1280,6 +1286,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_fold".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![
                 list_param.clone(),
                 kodo_ast::Param {
@@ -1321,6 +1328,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_count".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![list_param.clone()],
             return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
             body: kodo_ast::Block {
@@ -1395,6 +1403,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_any".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![
                 list_param.clone(),
                 kodo_ast::Param {
@@ -1474,6 +1483,7 @@ fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_all".to_string(),
+            visibility: kodo_ast::Visibility::Private,
             params: vec![
                 list_param,
                 kodo_ast::Param {
@@ -2568,6 +2578,7 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str, emit_c
             parent_cert.as_ref(),
             None,
             verification,
+            Some(contract_mode),
         );
         match cert.to_json() {
             Ok(json) => {

@@ -12,7 +12,7 @@
 
 use kodo_ast::{
     ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl, Meta,
-    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl, TypeExpr,
+    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl, TypeExpr, Visibility,
 };
 use kodo_lexer::TokenKind;
 
@@ -90,8 +90,20 @@ impl Parser {
             || self.check(&TokenKind::Invariant)
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
+            || self.check(&TokenKind::Pub)
         {
-            if self.check(&TokenKind::Type) {
+            if self.check(&TokenKind::Pub) {
+                self.advance();
+                if self.check(&TokenKind::Struct) {
+                    let mut decl = self.parse_struct_decl()?;
+                    decl.visibility = Visibility::Public;
+                    type_decls.push(decl);
+                } else {
+                    let mut func = self.parse_annotated_function()?;
+                    func.visibility = Visibility::Public;
+                    functions.push(func);
+                }
+            } else if self.check(&TokenKind::Type) {
                 type_aliases.push(self.parse_type_alias()?);
             } else if self.check(&TokenKind::Struct) {
                 type_decls.push(self.parse_struct_decl()?);
@@ -156,6 +168,7 @@ impl Parser {
                 | TokenKind::At
                 | TokenKind::Async
                 | TokenKind::Type
+                | TokenKind::Pub
         )
     }
 
@@ -366,9 +379,21 @@ impl Parser {
             || self.check(&TokenKind::Invariant)
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
+            || self.check(&TokenKind::Pub)
         {
             let result: std::result::Result<(), ParseError> = (|| {
-                if self.check(&TokenKind::Type) {
+                if self.check(&TokenKind::Pub) {
+                    self.advance();
+                    if self.check(&TokenKind::Struct) {
+                        let mut decl = self.parse_struct_decl()?;
+                        decl.visibility = Visibility::Public;
+                        decls.type_decls.push(decl);
+                    } else {
+                        let mut func = self.parse_annotated_function_with_recovery(errors)?;
+                        func.visibility = Visibility::Public;
+                        decls.functions.push(func);
+                    }
+                } else if self.check(&TokenKind::Type) {
                     decls.type_aliases.push(self.parse_type_alias()?);
                 } else if self.check(&TokenKind::Struct) {
                     decls.type_decls.push(self.parse_struct_decl()?);
@@ -480,6 +505,7 @@ impl Parser {
             id: self.next_id(),
             span: start.merge(end),
             name,
+            visibility: Visibility::Private,
             is_async,
             generic_params,
             annotations: vec![],
@@ -510,12 +536,24 @@ impl Parser {
             self.advance();
             path.push(self.parse_ident()?);
         }
+        // Optional selective import: `import path { name1, name2 }`
+        let names = if self.check(&TokenKind::LBrace) {
+            self.advance();
+            let mut names = vec![self.parse_ident()?];
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                if self.check(&TokenKind::RBrace) {
+                    break;
+                }
+                names.push(self.parse_ident()?);
+            }
+            self.expect(&TokenKind::RBrace)?;
+            Some(names)
+        } else {
+            None
+        };
         let span = start.merge(self.prev_span());
-        Ok(ImportDecl {
-            path,
-            names: None,
-            span,
-        })
+        Ok(ImportDecl { path, names, span })
     }
 
     /// Parses a selective import: `from path::to::module import Name1, Name2`

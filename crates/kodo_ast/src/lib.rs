@@ -362,6 +362,8 @@ pub struct TypeDecl {
     pub span: Span,
     /// The struct name.
     pub name: String,
+    /// Visibility (public or private).
+    pub visibility: Visibility,
     /// Generic type parameters (empty for non-generic structs).
     pub generic_params: Vec<GenericParam>,
     /// Fields of the struct.
@@ -507,6 +509,14 @@ pub struct ClosureParam {
     pub span: Span,
 }
 
+/// Visibility of a declaration (function, struct, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    /// The declaration is accessible from other modules.
+    Public,
+    /// The declaration is only accessible within the defining module (default).
+    Private,
+}
 /// Ownership qualifier for a parameter.
 ///
 /// Based on **\[ATAPL\]** Ch. 1 — substructural type systems.
@@ -564,6 +574,8 @@ pub struct Function {
     pub span: Span,
     /// Function name.
     pub name: String,
+    /// Visibility (public or private).
+    pub visibility: Visibility,
     /// Whether this is an async function.
     pub is_async: bool,
     /// Generic type parameters (empty for non-generic functions).
@@ -1010,6 +1022,13 @@ pub trait Diagnostic: std::fmt::Display {
     ///
     /// When present, agents can apply this patch automatically to fix the error.
     fn fix_patch(&self) -> Option<FixPatch> {
+        None
+    }
+    /// Returns a multi-step repair plan for complex errors.
+    ///
+    /// When a single fix patch is insufficient, a repair plan provides
+    /// a sequence of dependent steps that agents can apply in order.
+    fn repair_plan(&self) -> Option<Vec<(String, Vec<FixPatch>)>> {
         None
     }
     /// Returns the fixability classification for this diagnostic.
