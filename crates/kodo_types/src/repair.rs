@@ -1,6 +1,6 @@
 //! Multi-step repair plans for AI agent error resolution.
 //!
-//! When a single [`FixPatch`] is not enough to fix an error, a [`RepairPlan`]
+//! When a single [`kodo_ast::FixPatch`] is not enough to fix an error, a [`RepairPlan`]
 //! provides a sequence of dependent repair steps that agents can apply
 //! in order.
 

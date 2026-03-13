@@ -820,7 +820,7 @@ mod tests {
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test_fn".to_string(),
-            visibility: kodo_ast::Visibility::Private,
+            visibility: Visibility::Private,
             generic_params: vec![],
             annotations: vec![],
             params: vec![Param {
