@@ -441,6 +441,20 @@ error[E0253]: tuple index 3 is out of bounds for tuple of length 2
    |                  ^ tuple has 2 elements, valid indices are 0..1
 ```
 
+### E0270: Private Access
+
+A private function or type from another module was accessed. Only `pub` items can be used across module boundaries.
+
+```rust
+error[E0270]: `secret` is private to module `utils` and cannot be accessed from here
+  --> src/main.ko:8:15
+   |
+ 8 |     let x = secret()
+   |             ^^^^^^ `secret` is private to module `utils`
+   |
+   = help: add `pub` to the declaration: `pub fn secret(...)`
+```
+
 ### E0280: Spawn Captures Non-Send Type
 A `spawn` block captures a variable with a borrowed reference (`ref`), which cannot be safely sent to another thread. Only owned values can cross thread boundaries.
 

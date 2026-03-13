@@ -448,6 +448,16 @@ pub enum TypeError {
         /// Source location.
         span: Span,
     },
+    /// A private symbol was accessed from outside its defining module.
+    #[error("cannot access private `{name}` from module `{defining_module}` at {span:?}")]
+    PrivateAccess {
+        /// The private symbol name.
+        name: String,
+        /// The module where the symbol is defined.
+        defining_module: String,
+        /// Source location.
+        span: Span,
+    },
     /// A module invariant condition is not of type `Bool`.
     #[error("invariant condition must be `Bool`, found `{found}` at {span:?}")]
     InvariantNotBool {
@@ -508,6 +518,7 @@ impl TypeError {
             | Self::BreakOutsideLoop { span, .. }
             | Self::ContinueOutsideLoop { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
+            | Self::PrivateAccess { span, .. }
             | Self::InvariantNotBool { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
@@ -563,6 +574,7 @@ impl TypeError {
             Self::BreakOutsideLoop { .. } => "E0243",
             Self::ContinueOutsideLoop { .. } => "E0244",
             Self::TupleIndexOutOfBounds { .. } => "E0253",
+            Self::PrivateAccess { .. } => "E0270",
             Self::InvariantNotBool { .. } => "E0310",
         }
     }
@@ -806,6 +818,7 @@ fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
 }
 
 /// Fix patches for type mismatches, ownership, and type annotation errors.
+#[allow(clippy::too_many_lines)]
 fn fix_patch_types_and_ownership(err: &TypeError) -> Option<kodo_ast::FixPatch> {
     match err {
         TypeError::Mismatch { expected, span, .. } => Some(kodo_ast::FixPatch {
@@ -856,6 +869,53 @@ fn fix_patch_types_and_ownership(err: &TypeError) -> Option<kodo_ast::FixPatch> 
             start_offset: span.start as usize,
             end_offset: span.end as usize,
             replacement: format!("{name}<TODO>"),
+        }),
+        TypeError::WrongTypeArgCount {
+            name,
+            expected,
+            span,
+            ..
+        } => {
+            let args = vec!["TODO"; *expected].join(", ");
+            Some(kodo_ast::FixPatch {
+                description: format!("provide {expected} type argument(s) for `{name}`"),
+                file: String::new(),
+                start_offset: span.start as usize,
+                end_offset: span.end as usize,
+                replacement: format!("{name}<{args}>"),
+            })
+        }
+        TypeError::MissingAssociatedType {
+            assoc_type, span, ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("add associated type `{assoc_type}`"),
+            file: String::new(),
+            start_offset: span.end as usize,
+            end_offset: span.end as usize,
+            replacement: format!("\n    type {assoc_type} = TODO\n"),
+        }),
+        TypeError::UnexpectedAssociatedType {
+            assoc_type, span, ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("remove unexpected associated type `{assoc_type}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::MoveWhileBorrowed { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("use `ref` instead of moving `{name}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::InvariantNotBool { span, .. } => Some(kodo_ast::FixPatch {
+            description: "wrap invariant in a boolean comparison".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: "TODO == true".to_string(),
         }),
         _ => None,
     }
@@ -1074,6 +1134,13 @@ fn suggestion_for_trait_method_error(err: &TypeError) -> Option<String> {
         }
         TypeError::SpawnCaptureMutableRef { name, .. } => Some(format!(
             "spawn blocks cannot capture mutable references like `{name}`"
+        )),
+        TypeError::PrivateAccess {
+            name,
+            defining_module,
+            ..
+        } => Some(format!(
+            "`{name}` is private in module `{defining_module}` — add `pub` to make it public"
         )),
         TypeError::SpawnCaptureNonSend { .. } => Some(
             "use owned values (own) instead of references when sending data to spawned tasks"

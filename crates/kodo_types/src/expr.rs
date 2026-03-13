@@ -1025,7 +1025,15 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> crate::Result<Type> {
-        let callee_name = if let Expr::Ident(name, _) = callee {
+        let callee_name = if let Expr::Ident(name, ident_span) = callee {
+            // Check visibility: reject calls to private symbols from imported modules.
+            if let Some(defining_module) = self.private_symbols.get(name) {
+                return Err(TypeError::PrivateAccess {
+                    name: name.clone(),
+                    defining_module: defining_module.clone(),
+                    span: *ident_span,
+                });
+            }
             if let Some(ref caller) = self.current_function_name.clone() {
                 self.call_graph
                     .entry(caller.clone())

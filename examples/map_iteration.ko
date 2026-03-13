@@ -1,0 +1,44 @@
+// Map Iteration -- Demonstrates iterating over Map keys and values.
+//
+// Maps support .keys() and .values() iterators which can be used
+// with manual while loops or for-in when using the iterator protocol.
+
+module map_iteration {
+    meta {
+        purpose: "Demonstrate Map key/value iteration"
+        version: "1.0.0"
+    }
+
+    fn main() -> Int {
+        let m: Map<Int, Int> = map_new()
+        map_insert(m, 10, 100)
+        map_insert(m, 20, 200)
+        map_insert(m, 30, 300)
+
+        // Iterate over keys using the iterator protocol
+        let iter: Int = m.keys()
+        let mut sum: Int = 0
+        while map_keys_advance(iter) == 1 {
+            let key: Int = map_keys_value(iter)
+            sum = sum + key
+        }
+        map_keys_free(iter)
+
+        // sum should be 10 + 20 + 30 = 60
+        print_int(sum)
+
+        // Iterate over values
+        let viter: Int = m.values()
+        let mut vsum: Int = 0
+        while map_values_advance(viter) == 1 {
+            let val: Int = map_values_value(viter)
+            vsum = vsum + val
+        }
+        map_values_free(viter)
+
+        // vsum should be 100 + 200 + 300 = 600
+        print_int(vsum)
+
+        return 0
+    }
+}

@@ -1,0 +1,49 @@
+// List Operations -- Demonstrates the List API.
+
+module list_operations {
+    meta {
+        purpose: "Demonstrate List operations: push, get, set, length, reverse, contains, is_empty"
+        version: "1.0.0"
+    }
+
+    fn main() -> Int {
+        let items: List<Int> = list_new()
+
+        // is_empty on new list
+        let empty: Bool = list_is_empty(items)
+        if empty {
+            println("empty")
+        }
+
+        // push elements
+        list_push(items, 10)
+        list_push(items, 20)
+        list_push(items, 30)
+
+        // length
+        let len: Int = list_length(items)
+        print_int(len)
+
+        // get element at index
+        let first: Int = list_get(items, 0)
+        print_int(first)
+
+        // set element at index
+        list_set(items, 1, 99)
+        let updated: Int = list_get(items, 1)
+        print_int(updated)
+
+        // reverse
+        list_reverse(items)
+        let rev_first: Int = list_get(items, 0)
+        print_int(rev_first)
+
+        // contains
+        let has_99: Bool = list_contains(items, 99)
+        if has_99 {
+            println("found 99")
+        }
+
+        return 0
+    }
+}

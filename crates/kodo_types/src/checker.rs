@@ -121,6 +121,11 @@ pub struct TypeChecker {
     pub(crate) trait_impl_set: std::collections::HashMap<String, std::collections::HashSet<String>>,
     /// Depth of nested loops. `break` and `continue` are only valid when > 0.
     pub(crate) loop_depth: u32,
+    /// Tracks visibility of symbols from imported modules.
+    ///
+    /// When a module is imported and its symbols are registered, private symbols
+    /// are recorded here so that cross-module access can be rejected.
+    pub(crate) private_symbols: std::collections::HashMap<String, String>,
 }
 
 impl TypeChecker {
@@ -162,6 +167,7 @@ impl TypeChecker {
             reference_spans: std::collections::HashMap::new(),
             trait_impl_set: std::collections::HashMap::new(),
             loop_depth: 0,
+            private_symbols: std::collections::HashMap::new(),
         };
         checker.register_builtins();
         checker
@@ -170,6 +176,26 @@ impl TypeChecker {
     /// Registers a module name as imported, enabling qualified calls like `mod.func()`.
     pub fn register_imported_module(&mut self, name: String) {
         self.imported_module_names.insert(name);
+    }
+
+    /// Marks private symbols from an imported module so cross-module access is rejected.
+    ///
+    /// Call this after `check_module` for each imported module but before
+    /// checking the main user module. Private functions and types from the
+    /// imported module will raise `TypeError::PrivateAccess` when referenced.
+    pub fn register_module_visibility(&mut self, module: &Module) {
+        for func in &module.functions {
+            if func.visibility == kodo_ast::Visibility::Private {
+                self.private_symbols
+                    .insert(func.name.clone(), module.name.clone());
+            }
+        }
+        for type_decl in &module.type_decls {
+            if type_decl.visibility == kodo_ast::Visibility::Private {
+                self.private_symbols
+                    .insert(type_decl.name.clone(), module.name.clone());
+            }
+        }
     }
 
     /// Returns the definition spans index built during type checking.

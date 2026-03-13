@@ -1677,6 +1677,10 @@ e2e_example_test!(run: e2e_advanced_traits, "advanced_traits.ko", contains: ["21
 e2e_example_test!(run: e2e_collections_demo, "collections_demo.ko", contains: ["3", "2", "1", "2", "100"]);
 e2e_example_test!(run: e2e_visibility, "visibility.ko", contains: ["point"]);
 e2e_example_test!(run: e2e_try_operator, "try_operator.ko", contains: ["5"]);
+e2e_example_test!(run: e2e_try_operator_sugar, "try_operator_sugar.ko", contains: ["20", "got expected error"]);
+e2e_example_test!(run: e2e_map_iteration, "map_iteration.ko", contains: ["60", "600"]);
+e2e_example_test!(run: e2e_list_operations, "list_operations.ko", contains: ["empty", "3", "10", "99", "found 99"]);
+e2e_example_test!(run: e2e_map_operations, "map_operations.ko", contains: ["empty", "3", "200", "has key 1", "key 2 removed"]);
 
 // --- Examples that intentionally fail to compile ---
 

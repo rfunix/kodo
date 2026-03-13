@@ -214,7 +214,10 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// Checks a `for .. in` loop: verifies iterable is `List<T>`, binds loop variable to `T`.
+    /// Checks a `for .. in` loop: verifies iterable is `List<T>` or `Map<K,V>`.
+    ///
+    /// For `List<T>`, the loop variable is bound to `T`.
+    /// For `Map<K,V>`, the loop variable is bound to `K` (iterates over keys).
     fn check_for_in_stmt(
         &mut self,
         _span: kodo_ast::Span,
@@ -227,9 +230,13 @@ impl TypeChecker {
             Type::Generic(name_str, args) if name_str == "List" && args.len() == 1 => {
                 args[0].clone()
             }
+            Type::Generic(name_str, args) if name_str == "Map" && args.len() == 2 => {
+                // Iterating over Map yields keys (K).
+                args[0].clone()
+            }
             _ => {
                 return Err(TypeError::Mismatch {
-                    expected: "List<T>".to_string(),
+                    expected: "List<T> or Map<K, V>".to_string(),
                     found: format!("{iter_ty}"),
                     span: expr_span(iterable),
                 });

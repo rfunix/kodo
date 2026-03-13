@@ -349,6 +349,179 @@ pub fn handle_explain(id: &serde_json::Value, args: &serde_json::Value) -> JsonR
     }
 }
 
+/// Handles `kodo.build` — compile source code through the full pipeline.
+///
+/// Runs: parse → type-check → contracts → desugar → MIR → codegen.
+/// Returns structured output with status and any errors encountered.
+#[must_use]
+pub fn handle_build(id: &serde_json::Value, args: &serde_json::Value) -> JsonRpcResponse {
+    let Some(source) = args.get("source").and_then(|v| v.as_str()) else {
+        return missing_param_error(id, "source");
+    };
+
+    let (module, mut checker) = match compile_source(id, source) {
+        Ok(pair) => pair,
+        Err(resp) => return *resp,
+    };
+
+    let type_errors = checker.check_module_collecting(&module);
+    if !type_errors.is_empty() {
+        return build_type_error_response(id, &type_errors);
+    }
+
+    // Contract verification
+    let contract_mode = kodo_contracts::ContractMode::Runtime;
+    let mut contract_errors: Vec<String> = Vec::new();
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        if let Err(e) = kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            contract_errors.push(e.to_string());
+        }
+    }
+
+    if !contract_errors.is_empty() {
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: id.clone(),
+            result: Some(serde_json::json!({
+                "status": "failed",
+                "phase": "contracts",
+                "errors": contract_errors.iter().map(|e| {
+                    serde_json::json!({"message": e})
+                }).collect::<Vec<_>>(),
+            })),
+            error: None,
+        };
+    }
+
+    // Desugar pass
+    let mut module = module;
+    kodo_desugar::desugar_module(&mut module);
+
+    // MIR lowering — validates the full pipeline through to MIR.
+    // Full native codegen requires linking with the runtime, which is not
+    // available in the MCP context (source-only). MIR success proves the
+    // program is well-formed through all compiler phases.
+    match kodo_mir::lowering::lower_module(&module) {
+        Ok(mir_fns) => {
+            let count = mir_fns.len();
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: id.clone(),
+                result: Some(serde_json::json!({
+                    "status": "ok",
+                    "module": module.name,
+                    "phase": "mir",
+                    "message": "compilation successful (through MIR)",
+                    "function_count": count,
+                })),
+                error: None,
+            }
+        }
+        Err(mir_err) => {
+            let err_msg = mir_err.to_string();
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: id.clone(),
+                result: Some(serde_json::json!({
+                    "status": "failed",
+                    "phase": "mir",
+                    "errors": [{"message": err_msg}],
+                })),
+                error: None,
+            }
+        }
+    }
+}
+
+/// Handles `kodo.fix` — collect auto-fix patches and repair plans for errors.
+///
+/// Returns structured JSON with patches and repair plans that agents can apply
+/// to fix the source code automatically.
+#[must_use]
+pub fn handle_fix(id: &serde_json::Value, args: &serde_json::Value) -> JsonRpcResponse {
+    let Some(source) = args.get("source").and_then(|v| v.as_str()) else {
+        return missing_param_error(id, "source");
+    };
+
+    let (module, mut checker) = match compile_source(id, source) {
+        Ok(pair) => pair,
+        Err(resp) => return *resp,
+    };
+
+    let type_errors = checker.check_module_collecting(&module);
+
+    if type_errors.is_empty() {
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: id.clone(),
+            result: Some(serde_json::json!({
+                "status": "ok",
+                "message": "no errors to fix",
+                "patches": [],
+                "repair_plans": [],
+            })),
+            error: None,
+        };
+    }
+
+    let mut patches: Vec<serde_json::Value> = Vec::new();
+    let mut repair_plans: Vec<serde_json::Value> = Vec::new();
+
+    for e in &type_errors {
+        if let Some(patch) = e.fix_patch() {
+            patches.push(serde_json::json!({
+                "error_code": e.code(),
+                "description": patch.description,
+                "start_offset": patch.start_offset,
+                "end_offset": patch.end_offset,
+                "replacement": patch.replacement,
+            }));
+        }
+        if let Some(steps) = e.repair_plan() {
+            let json_steps: Vec<serde_json::Value> = steps
+                .iter()
+                .enumerate()
+                .map(|(step_id, (description, step_patches))| {
+                    let jp: Vec<serde_json::Value> = step_patches
+                        .iter()
+                        .map(|p| {
+                            serde_json::json!({
+                                "description": p.description,
+                                "start_offset": p.start_offset,
+                                "end_offset": p.end_offset,
+                                "replacement": p.replacement,
+                            })
+                        })
+                        .collect();
+                    serde_json::json!({
+                        "id": step_id,
+                        "description": description,
+                        "patches": jp,
+                    })
+                })
+                .collect();
+            repair_plans.push(serde_json::json!({
+                "error_code": e.code(),
+                "message": e.message(),
+                "steps": json_steps,
+            }));
+        }
+    }
+
+    JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id: id.clone(),
+        result: Some(serde_json::json!({
+            "status": "errors_found",
+            "error_count": type_errors.len(),
+            "patches": patches,
+            "repair_plans": repair_plans,
+        })),
+        error: None,
+    }
+}
+
 /// Handles `kodo.confidence_report` — return confidence scores for all functions.
 #[must_use]
 pub fn handle_confidence_report(

@@ -6,7 +6,8 @@
 //! ## Available Tools
 //!
 //! - `kodo.check` — Type-check a source file, returning structured errors + repair plans
-//! - `kodo.build` — Compile a source file to a binary
+//! - `kodo.build` — Compile a source file through the full pipeline (parse → MIR)
+//! - `kodo.fix` — Collect auto-fix patches and repair plans for errors
 //! - `kodo.explain` — Explain an error code
 //! - `kodo.describe` — Return module metadata (functions, types, contracts)
 //! - `kodo.confidence_report` — Return confidence scores for all functions
@@ -114,6 +115,32 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "kodo.build".to_string(),
+            description:
+                "Compile Kōdo source through the full pipeline (parse → type-check → contracts → desugar → MIR)"
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Kōdo source code to compile" }
+                },
+                "required": ["source"]
+            }),
+        },
+        ToolDefinition {
+            name: "kodo.fix".to_string(),
+            description:
+                "Collect auto-fix patches and repair plans for Kōdo source errors"
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Kōdo source code to fix" }
+                },
+                "required": ["source"]
+            }),
+        },
+        ToolDefinition {
             name: "kodo.confidence_report".to_string(),
             description: "Generate a confidence report for all functions in a Kōdo module"
                 .to_string(),
@@ -166,6 +193,8 @@ pub fn handle_request(request: &JsonRpcRequest) -> JsonRpcResponse {
 
             match tool_name {
                 Some("kodo.check") => tools::handle_check(&request.id, &arguments),
+                Some("kodo.build") => tools::handle_build(&request.id, &arguments),
+                Some("kodo.fix") => tools::handle_fix(&request.id, &arguments),
                 Some("kodo.describe") => tools::handle_describe(&request.id, &arguments),
                 Some("kodo.explain") => tools::handle_explain(&request.id, &arguments),
                 Some("kodo.confidence_report") => {
@@ -213,11 +242,13 @@ mod tests {
     #[test]
     fn tool_definitions_are_valid() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 6);
         assert_eq!(tools[0].name, "kodo.check");
         assert_eq!(tools[1].name, "kodo.describe");
         assert_eq!(tools[2].name, "kodo.explain");
-        assert_eq!(tools[3].name, "kodo.confidence_report");
+        assert_eq!(tools[3].name, "kodo.build");
+        assert_eq!(tools[4].name, "kodo.fix");
+        assert_eq!(tools[5].name, "kodo.confidence_report");
     }
 
     #[test]
@@ -348,5 +379,113 @@ mod tests {
         let resp = handle_request(&req);
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
+    }
+
+    #[test]
+    fn handle_kodo_build_valid_source() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(10),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.build",
+                "arguments": {
+                    "source": "module test {\n    meta { purpose: \"test\" }\n    fn add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n}\n"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(
+            resp.error.is_none(),
+            "build should succeed for valid source: {:?}",
+            resp.error
+        );
+        let result = resp.result.as_ref().unwrap();
+        let status = result.get("status").and_then(|s| s.as_str());
+        assert_eq!(status, Some("ok"), "build should succeed: {result}");
+        let msg = result.get("message").and_then(|s| s.as_str()).unwrap_or("");
+        assert!(
+            msg.contains("successful"),
+            "build message should indicate success: {msg}"
+        );
+    }
+
+    #[test]
+    fn handle_kodo_build_invalid_source() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(11),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.build",
+                "arguments": {
+                    "source": "this is not valid kodo"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(
+            resp.error.is_none(),
+            "build should return result (not JSON-RPC error) even for invalid source"
+        );
+        let result = resp.result.as_ref().unwrap();
+        let status = result.get("status").and_then(|s| s.as_str());
+        assert_eq!(
+            status,
+            Some("failed"),
+            "build should fail for invalid source: {result}"
+        );
+    }
+
+    #[test]
+    fn handle_kodo_fix_with_errors() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(12),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.fix",
+                "arguments": {
+                    "source": "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        let x: Int = \"hello\"\n        return x\n    }\n}\n"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(
+            resp.error.is_none(),
+            "fix should not return JSON-RPC error: {:?}",
+            resp.error
+        );
+        let result = resp.result.as_ref().unwrap();
+        let status = result.get("status").and_then(|s| s.as_str());
+        assert_eq!(
+            status,
+            Some("errors_found"),
+            "fix should report errors: {result}"
+        );
+    }
+
+    #[test]
+    fn handle_kodo_fix_no_errors() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(13),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.fix",
+                "arguments": {
+                    "source": "module test {\n    meta { purpose: \"test\" }\n    fn add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n}\n"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(resp.error.is_none(), "fix should succeed: {:?}", resp.error);
+        let result = resp.result.as_ref().unwrap();
+        let status = result.get("status").and_then(|s| s.as_str());
+        assert_eq!(
+            status,
+            Some("ok"),
+            "fix should indicate no errors: {result}"
+        );
     }
 }

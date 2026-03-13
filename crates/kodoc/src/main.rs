@@ -76,6 +76,10 @@ enum Command {
         /// Emit a compilation certificate (`<file>.cert.json`) after a successful check.
         #[arg(long, default_value_t = false)]
         emit_cert: bool,
+
+        /// Emit repair plans as JSON for each error (for AI agent consumption).
+        #[arg(long, default_value_t = false)]
+        repair_plan: bool,
     },
     /// Tokenize a source file and print the token stream.
     Lex {
@@ -211,7 +215,8 @@ fn main() {
             json_errors,
             contracts,
             emit_cert,
-        } => run_check(&file, json_errors, &contracts, emit_cert),
+            repair_plan,
+        } => run_check(&file, json_errors, &contracts, emit_cert, repair_plan),
         Command::Lex { file } => run_lex(&file),
         Command::Parse { file } => run_parse(&file),
         Command::Explain { code, json } => run_explain(&code, json),
@@ -353,6 +358,8 @@ fn run_build(
         }
         // Register the module name for qualified access (e.g., math.add()).
         checker.register_imported_module(imported.name.clone());
+        // Track visibility of imported module symbols for enforcement.
+        checker.register_module_visibility(imported);
         // For selective imports, the names are already in scope via check_module.
         // The import declaration's `names` field is informational at this stage.
         let _ = &module.imports.get(idx);
@@ -2409,7 +2416,13 @@ fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
     0
 }
 
-fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str, emit_cert: bool) -> i32 {
+fn run_check(
+    file: &PathBuf,
+    json_errors: bool,
+    contracts_mode_str: &str,
+    emit_cert: bool,
+    repair_plan: bool,
+) -> i32 {
     tracing::info!("checking {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -2480,12 +2493,15 @@ fn run_check(file: &PathBuf, json_errors: bool, contracts_mode_str: &str, emit_c
             return 1;
         }
         checker.register_imported_module(imported.name.clone());
+        checker.register_module_visibility(imported);
     }
 
     // Type check — collect all errors for multi-error reporting.
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
-        if json_errors {
+        if repair_plan {
+            emit_repair_plans(&type_errors);
+        } else if json_errors {
             diagnostics::render_type_errors_json(&source, &filename, &type_errors);
         } else {
             for e in &type_errors {
@@ -3247,6 +3263,72 @@ fn run_fix(file: &PathBuf, dry_run: bool) -> i32 {
 
 /// Applies or displays fix patches.
 ///
+/// Emits repair plans as JSON for all type errors that have them.
+///
+/// Each error produces a JSON object with the error code, message,
+/// and a list of repair steps with machine-applicable patches.
+fn emit_repair_plans(type_errors: &[kodo_types::TypeError]) {
+    use kodo_ast::Diagnostic;
+
+    let plans: Vec<serde_json::Value> = type_errors
+        .iter()
+        .map(|e| {
+            let mut entry = serde_json::json!({
+                "code": e.code(),
+                "message": e.message(),
+            });
+            if let Some(span) = e.span() {
+                entry["span"] = serde_json::json!({
+                    "start": span.start,
+                    "end": span.end,
+                });
+            }
+            if let Some(steps) = e.repair_plan() {
+                let json_steps: Vec<serde_json::Value> = steps
+                    .iter()
+                    .enumerate()
+                    .map(|(id, (description, patches))| {
+                        let json_patches: Vec<serde_json::Value> = patches
+                            .iter()
+                            .map(|p| {
+                                serde_json::json!({
+                                    "description": p.description,
+                                    "start_offset": p.start_offset,
+                                    "end_offset": p.end_offset,
+                                    "replacement": p.replacement,
+                                })
+                            })
+                            .collect();
+                        serde_json::json!({
+                            "id": id,
+                            "description": description,
+                            "patches": json_patches,
+                        })
+                    })
+                    .collect();
+                entry["repair_plan"] = serde_json::json!(json_steps);
+            }
+            if let Some(patch) = e.fix_patch() {
+                entry["fix_patch"] = serde_json::json!({
+                    "description": patch.description,
+                    "start_offset": patch.start_offset,
+                    "end_offset": patch.end_offset,
+                    "replacement": patch.replacement,
+                });
+            }
+            entry
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "repair_plans": plans,
+        }))
+        .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+    );
+}
+
 /// In dry-run mode, prints the patches as JSON without modifying any file.
 /// Otherwise, applies the patches in reverse offset order (to preserve byte
 /// offsets) and writes the result back to `file`.

@@ -1,0 +1,52 @@
+// Map Operations -- Demonstrates the full Map API.
+
+module map_operations {
+    meta {
+        purpose: "Demonstrate Map operations: insert, get, remove, contains_key, is_empty, length"
+        version: "1.0.0"
+    }
+
+    fn main() -> Int {
+        let m: Map<Int, Int> = map_new()
+
+        // is_empty on new map
+        let empty: Bool = map_is_empty(m)
+        if empty {
+            println("empty")
+        }
+
+        // insert key-value pairs
+        map_insert(m, 1, 100)
+        map_insert(m, 2, 200)
+        map_insert(m, 3, 300)
+
+        // length
+        let len: Int = map_length(m)
+        print_int(len)
+
+        // get value by key
+        let val: Int = map_get(m, 2)
+        print_int(val)
+
+        // contains_key
+        let has_key: Bool = map_contains_key(m, 1)
+        if has_key {
+            println("has key 1")
+        }
+
+        // remove a key
+        map_remove(m, 2)
+        let new_len: Int = map_length(m)
+        print_int(new_len)
+
+        // verify removed key
+        let has_removed: Bool = map_contains_key(m, 2)
+        if has_removed {
+            println("still has key 2")
+        } else {
+            println("key 2 removed")
+        }
+
+        return 0
+    }
+}

@@ -1,0 +1,54 @@
+// Try Operator Sugar -- Demonstrates the `?` operator for concise error propagation.
+//
+// The `?` operator desugars to a match on Result:
+//   let val: Int = expr?
+// becomes:
+//   let val: Int = match expr {
+//       Result::Ok(__try_val) => __try_val,
+//       Result::Err(__try_err) => { return Result::Err(__try_err) }
+//   }
+
+module try_operator_sugar {
+    meta {
+        purpose: "Demonstrate the ? operator for Result error propagation"
+        version: "1.0.0"
+    }
+
+    fn validate(n: Int) -> Result<Int, String> {
+        if n > 0 {
+            return Result::Ok(n * 2)
+        } else {
+            return Result::Err("not positive")
+        }
+    }
+
+    fn process(n: Int) -> Result<Int, String> {
+        let doubled: Int = validate(n)?
+        let result: Result<Int, String> = Result::Ok(doubled + 10)
+        return result
+    }
+
+    fn main() -> Int {
+        let ok_result: Result<Int, String> = process(5)
+        match ok_result {
+            Result::Ok(v) => {
+                print_int(v)
+            }
+            Result::Err(e) => {
+                println("unexpected error")
+            }
+        }
+
+        let err_result: Result<Int, String> = process(0)
+        match err_result {
+            Result::Ok(v) => {
+                println("unexpected success")
+            }
+            Result::Err(e) => {
+                println("got expected error")
+            }
+        }
+
+        return 0
+    }
+}
