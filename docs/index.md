@@ -25,7 +25,8 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Modules and Imports](guide/modules-and-imports.md) — multi-file programs and the standard library
 - [Ownership](guide/ownership.md) — linear ownership with `own`, `ref`, and `mut`
 - [Agent Traceability](guide/agent-traceability.md) — annotations, trust policies, and confidence propagation
-- [HTTP & JSON](guide/http.md) — HTTP client and JSON parsing
+- [HTTP, JSON & Networking](guide/http.md) — HTTP client and server, JSON parsing and building
+- [CLI Tools, File I/O & Math](guide/cli-tools.md) — `args()`, `readln`, `exit`, file operations, extended math
 - [Actors](guide/actors.md) — actor model with state and message passing
 - [Iterators](guide/iterators.md) — for-in loops, iterator protocol, collection traversal
 - [Functional Combinators](guide/functional.md) — map, filter, fold, count, any, all, reduce, pipelines
@@ -83,7 +84,11 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`file_io_demo.ko`](../examples/file_io_demo.ko) | File I/O operations |
 | [`contracts_smt_demo.ko`](../examples/contracts_smt_demo.ko) | SMT-verified contracts |
 | [`smt_verified.ko`](../examples/smt_verified.ko) | SMT contract verification |
-| [`http_client.ko`](../examples/http_client.ko) | HTTP GET and JSON parsing |
+| [`http_client.ko`](../examples/http_client.ko) | HTTP GET with `Result<String, String>` |
+| [`http_api.ko`](../examples/http_api.ko) | HTTP server with JSON responses |
+| [`cli_args.ko`](../examples/cli_args.ko) | Reading command-line arguments with `args()` |
+| [`json_builder.ko`](../examples/json_builder.ko) | JSON construction with `json_new_object`, `json_set_*`, `json_stringify` |
+| [`math_demo.ko`](../examples/math_demo.ko) | Extended math: `rand_int` |
 | [`async_tasks.ko`](../examples/async_tasks.ko) | Spawn with captured variables |
 | [`actors.ko`](../examples/actors.ko) | Actor state and message passing |
 | [`actor_demo.ko`](../examples/actor_demo.ko) | Actor demonstration |
@@ -112,4 +117,4 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`url_shortener.ko`](../examples/url_shortener.ko) | Real-world: URL shortener with Map and validation |
 | [`word_counter.ko`](../examples/word_counter.ko) | Real-world: Word counter with string ops and fold |
 | [`config_validator.ko`](../examples/config_validator.ko) | Real-world: Config validator with contracts and enums |
-| [`health_checker.ko`](../examples/health_checker.ko) | Real-world: HTTP health checker with endpoint monitoring |
+| [`health_checker.ko`](../examples/health_checker.ko) | Real-world: Health checker with file checks and fold aggregation |

@@ -41,6 +41,67 @@ pub extern "C" fn kodo_clamp(val: i64, lo: i64, hi: i64) -> i64 {
     }
 }
 
+/// Returns the square root of a float.
+#[no_mangle]
+pub extern "C" fn kodo_sqrt(x: f64) -> f64 {
+    x.sqrt()
+}
+
+/// Returns base raised to the power of exp.
+#[no_mangle]
+pub extern "C" fn kodo_pow(base: f64, exp: f64) -> f64 {
+    base.powf(exp)
+}
+
+/// Returns the sine of x (radians).
+#[no_mangle]
+pub extern "C" fn kodo_sin(x: f64) -> f64 {
+    x.sin()
+}
+
+/// Returns the cosine of x (radians).
+#[no_mangle]
+pub extern "C" fn kodo_cos(x: f64) -> f64 {
+    x.cos()
+}
+
+/// Returns the natural logarithm of x.
+#[no_mangle]
+pub extern "C" fn kodo_log(x: f64) -> f64 {
+    x.ln()
+}
+
+/// Returns the largest integer less than or equal to x.
+#[no_mangle]
+pub extern "C" fn kodo_floor(x: f64) -> f64 {
+    x.floor()
+}
+
+/// Returns the smallest integer greater than or equal to x.
+#[no_mangle]
+pub extern "C" fn kodo_ceil(x: f64) -> f64 {
+    x.ceil()
+}
+
+/// Rounds x to the nearest integer.
+#[no_mangle]
+pub extern "C" fn kodo_round(x: f64) -> f64 {
+    x.round()
+}
+
+/// Returns a random integer in the range `[min, max]` (inclusive).
+#[no_mangle]
+pub extern "C" fn kodo_rand_int(min_val: i64, max_val: i64) -> i64 {
+    if min_val >= max_val {
+        return min_val;
+    }
+    #[allow(clippy::cast_sign_loss)]
+    let range = (max_val - min_val) as u64 + 1;
+    #[allow(clippy::cast_possible_wrap)]
+    let offset = (fastrand::u64(0..range)) as i64;
+    min_val + offset
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

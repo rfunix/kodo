@@ -16,6 +16,7 @@
 //! - [`scheduler`] — Cooperative scheduler, channels, async runtime
 //! - [`memory`] — Reference-counted allocator
 //! - [`http`] — HTTP client builtins
+//! - [`server`] — HTTP server builtins (`tiny_http`)
 //! - `helpers` — Internal helper functions
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
@@ -28,6 +29,7 @@ pub mod io_ops;
 pub mod math_ops;
 pub mod memory;
 pub mod scheduler;
+pub mod server;
 pub mod string_ops;
 
 // Re-export all public #[no_mangle] functions so they remain visible

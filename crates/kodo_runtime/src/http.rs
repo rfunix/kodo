@@ -8,7 +8,7 @@ use crate::helpers::write_string_out_mut;
 /// Performs an HTTP GET request to the given URL.
 ///
 /// On success, writes the response body to `out_ptr`/`out_len` and returns 0.
-/// On error, writes the error message to `out_ptr`/`out_len` and returns -1.
+/// On error, writes the error message to `out_ptr`/`out_len` and returns 1.
 /// The caller must free the output string with `kodo_string_free`.
 ///
 /// # Safety
@@ -24,14 +24,14 @@ pub unsafe extern "C" fn kodo_http_get(
     out_len: *mut usize,
 ) -> i64 {
     if url_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
-        return -1;
+        return 1;
     }
     // SAFETY: caller guarantees url_ptr/url_len form a valid UTF-8 slice.
     let url_bytes = unsafe { std::slice::from_raw_parts(url_ptr, url_len) };
     let Ok(url) = std::str::from_utf8(url_bytes) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
         unsafe { write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len) };
-        return -1;
+        return 1;
     };
     match ureq::get(url).call() {
         Ok(response) => match response.into_body().read_to_string() {
@@ -44,14 +44,14 @@ pub unsafe extern "C" fn kodo_http_get(
                 let msg = format!("failed to read response body: {e}");
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
                 unsafe { write_string_out_mut(msg, out_ptr, out_len) };
-                -1
+                1
             }
         },
         Err(e) => {
             let msg = format!("HTTP GET failed: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
             unsafe { write_string_out_mut(msg, out_ptr, out_len) };
-            -1
+            1
         }
     }
 }
@@ -59,7 +59,7 @@ pub unsafe extern "C" fn kodo_http_get(
 /// Performs an HTTP POST request to the given URL with the provided body.
 ///
 /// On success, writes the response body to `out_ptr`/`out_len` and returns 0.
-/// On error, writes the error message to `out_ptr`/`out_len` and returns -1.
+/// On error, writes the error message to `out_ptr`/`out_len` and returns 1.
 /// The caller must free the output string with `kodo_string_free`.
 ///
 /// # Safety
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn kodo_http_post(
     out_len: *mut usize,
 ) -> i64 {
     if url_ptr.is_null() || body_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
-        return -1;
+        return 1;
     }
     // SAFETY: caller guarantees valid UTF-8 slices.
     let url_bytes = unsafe { std::slice::from_raw_parts(url_ptr, url_len) };
@@ -86,12 +86,12 @@ pub unsafe extern "C" fn kodo_http_post(
     let Ok(url) = std::str::from_utf8(url_bytes) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
         unsafe { write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len) };
-        return -1;
+        return 1;
     };
     let Ok(content) = std::str::from_utf8(post_body) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
         unsafe { write_string_out_mut("invalid body: not UTF-8".to_string(), out_ptr, out_len) };
-        return -1;
+        return 1;
     };
     match ureq::post(url)
         .header("Content-Type", "application/json")
@@ -107,14 +107,14 @@ pub unsafe extern "C" fn kodo_http_post(
                 let msg = format!("failed to read response body: {e}");
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
                 unsafe { write_string_out_mut(msg, out_ptr, out_len) };
-                -1
+                1
             }
         },
         Err(e) => {
             let msg = format!("HTTP POST failed: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
             unsafe { write_string_out_mut(msg, out_ptr, out_len) };
-            -1
+            1
         }
     }
 }
@@ -130,7 +130,7 @@ mod tests {
         let mut out_ptr: *mut u8 = std::ptr::null_mut();
         let mut out_len: usize = 0;
         let status = unsafe { kodo_http_get(url.as_ptr(), url.len(), &mut out_ptr, &mut out_len) };
-        assert_eq!(status, -1);
+        assert_eq!(status, 1);
         assert!(!out_ptr.is_null());
         unsafe { kodo_string_free(out_ptr, out_len) };
     }
@@ -140,7 +140,7 @@ mod tests {
         let mut out_ptr: *mut u8 = std::ptr::null_mut();
         let mut out_len: usize = 0;
         let status = unsafe { kodo_http_get(std::ptr::null(), 0, &mut out_ptr, &mut out_len) };
-        assert_eq!(status, -1);
+        assert_eq!(status, 1);
     }
 
     #[test]
@@ -157,6 +157,6 @@ mod tests {
                 &mut out_len,
             )
         };
-        assert_eq!(status, -1);
+        assert_eq!(status, 1);
     }
 }

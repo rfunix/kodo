@@ -219,7 +219,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
 | **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
 | **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`; functional combinators (`map`, `filter`, `fold`, `count`, `any`, `all`); functional pipelines |
-| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`, `lines`, `parse_int`), `List<T>` (push, get, pop, remove, set, slice, sort, join), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O, HTTP client (`http_get`, `http_post`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`) |
+| **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`, `lines`, `parse_int`), `List<T>` (push, get, pop, remove, set, slice, sort, join), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O (`file_read`, `file_write`, `file_append`, `file_delete`, `file_exists`, `dir_list`, `dir_exists`), HTTP client (`http_get`, `http_post` returning `Result<String, String>`), HTTP server (`http_server_new`, `http_server_recv`, `http_request_method/path/body`, `http_respond`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`, `json_new_object`, `json_set_string/int/bool`, `json_stringify`), CLI (`args`, `readln`, `exit`), Math (`sqrt`, `pow`, `sin`, `cos`, `log`, `floor`, `ceil`, `round`, `rand_int`) |
 | **Visibility** | `pub fn`, `pub struct` — declarations are private by default, `pub` makes them accessible from other modules |
 | **Multi-file** | `import module_name` across `.ko` files, selective imports (`import math { add, Point }`), qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
@@ -307,7 +307,7 @@ kodoc repl
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 92 compilable programs:
+The [`examples/`](examples/) directory contains 96 compilable programs:
 
 ### Core Language
 
@@ -400,8 +400,12 @@ The [`examples/`](examples/) directory contains 92 compilable programs:
 | [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
 | [`for_in.ko`](examples/for_in.ko) | For-in loops over `List<T>` collections |
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |
-| [`http_client.ko`](examples/http_client.ko) | HTTP GET and JSON parsing |
+| [`http_client.ko`](examples/http_client.ko) | HTTP GET with `Result<String, String>` |
 | [`time_env.ko`](examples/time_env.ko) | Time functions and environment variables |
+| [`cli_args.ko`](examples/cli_args.ko) | Reading command-line arguments with `args()` |
+| [`json_builder.ko`](examples/json_builder.ko) | JSON construction: `json_new_object`, `json_set_*`, `json_stringify` |
+| [`math_demo.ko`](examples/math_demo.ko) | Extended math: `rand_int` |
+| [`http_api.ko`](examples/http_api.ko) | HTTP server with JSON responses via `tiny_http` |
 
 ### Iterators, Functional Combinators & Methods
 
@@ -423,7 +427,7 @@ The [`examples/`](examples/) directory contains 92 compilable programs:
 |------|---------------------|
 | [`todo_app.ko`](examples/todo_app.ko) | Agent-built task manager with `@authored_by`, `@confidence`, forced `@reviewed_by`, contracts |
 | [`config_validator.ko`](examples/config_validator.ko) | Config validation with refinement types (`Port`, `MaxConns`), `@security_sensitive`, module `invariant` |
-| [`health_checker.ko`](examples/health_checker.ko) | HTTP health checker with `http_get`, `fold` aggregation, `--json-errors` for agent consumption |
+| [`health_checker.ko`](examples/health_checker.ko) | Health checker with `file_exists`, `fold` aggregation, `--json-errors` for agent consumption |
 | [`url_shortener.ko`](examples/url_shortener.ko) | URL shortener with `@security_sensitive`, contracts, `Map<Int,Int>` lookup |
 | [`word_counter.ko`](examples/word_counter.ko) | Word counter demonstrating `ref` borrowing (E0240 prevention), `for-in` over `.split()` |
 

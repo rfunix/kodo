@@ -1,0 +1,20 @@
+// Demonstrates JSON object construction using builder builtins.
+//
+// Run with: kodoc build examples/json_builder.ko -o json_builder && ./json_builder
+
+module json_builder {
+    meta {
+        purpose: "demonstrates JSON builder builtins"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let obj: Int = json_new_object()
+        json_set_string(obj, "name", "kodo")
+        json_set_int(obj, "version", 1)
+        json_set_bool(obj, "stable", false)
+        let output: String = json_stringify(obj)
+        println(output)
+        return 0
+    }
+}

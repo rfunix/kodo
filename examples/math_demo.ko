@@ -1,0 +1,17 @@
+// Demonstrates extended math builtins.
+//
+// Run with: kodoc build examples/math_demo.ko -o math_demo && ./math_demo
+
+module math_demo {
+    meta {
+        purpose: "demonstrates math builtins"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let r: Int = rand_int(1, 100)
+        println("random number generated")
+        print_int(r)
+        return 0
+    }
+}

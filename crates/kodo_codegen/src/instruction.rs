@@ -68,6 +68,19 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "env_set"
             | "channel_send_string"
             | "channel_recv_string"
+            | "readln"
+            | "json_stringify"
+            | "json_set_string"
+            | "json_set_int"
+            | "json_set_bool"
+            | "file_append"
+            | "file_delete"
+            | "dir_list"
+            | "dir_exists"
+            | "http_request_method"
+            | "http_request_path"
+            | "http_request_body"
+            | "http_respond"
     )
 }
 
@@ -84,13 +97,16 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "Int_to_string"
             | "Float64_to_string"
             | "Bool_to_string"
-            | "http_get"
-            | "http_post"
             | "json_get_string"
+            | "json_stringify"
             | "time_format"
             | "env_get"
             | "channel_recv_string"
             | "list_join"
+            | "readln"
+            | "http_request_method"
+            | "http_request_path"
+            | "http_request_body"
     )
 }
 
@@ -98,7 +114,7 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
 pub(crate) fn is_list_allocating_builtin(callee: &str) -> bool {
     matches!(
         callee,
-        "list_new" | "String_split" | "String_lines" | "list_slice"
+        "list_new" | "String_split" | "String_lines" | "list_slice" | "args" | "dir_list"
     )
 }
 
@@ -1177,9 +1193,22 @@ fn emit_string_builtin_call(
         );
     }
 
-    // file_read and file_write return Result<String, String> via out-parameters.
-    if callee == "file_read" || callee == "file_write" {
+    // file_read, file_write, http_get, http_post, and file_append return
+    // Result<String, String> or Result<Unit, String> via out-parameters.
+    if callee == "file_read"
+        || callee == "file_write"
+        || callee == "http_get"
+        || callee == "http_post"
+        || callee == "file_append"
+    {
         return emit_file_io_call(callee, &arg_vals, dest, builder, module, builtins, var_map);
+    }
+
+    // Widen I8 args (Bool) to I64 to match runtime function signatures.
+    for val in &mut arg_vals {
+        if builder.func.dfg.value_type(*val) == types::I8 {
+            *val = builder.ins().uextend(types::I64, *val);
+        }
     }
 
     let builtin = builtins

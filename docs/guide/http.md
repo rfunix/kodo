@@ -1,128 +1,204 @@
-# HTTP & JSON
+# HTTP, JSON & Networking
 
-Kodo provides built-in functions for making HTTP requests and parsing JSON responses. These builtins enable AI agents to interact with web services and process structured data without external dependencies.
+Kodo provides built-in functions for making HTTP requests, running HTTP servers, and working with JSON. These builtins enable AI agents to build real web services and CLI tools without external dependencies.
 
-## HTTP Requests
+## HTTP Client
 
-### `http_get(url)`
+### `http_get(url) -> Result<String, String>`
 
-Performs an HTTP GET request and returns the response body as a String. The return value is an Int status code: 0 on success, -1 on error.
+Performs an HTTP GET request. Returns `Result::Ok(body)` on success or `Result::Err(message)` on failure.
 
 ```rust
-fn main() {
-    let status: Int = http_get("http://httpbin.org/get")
-    if status == 0 {
-        println("request succeeded")
-    }
-}
+let result: Result<String, String> = http_get("http://httpbin.org/get")
 ```
 
-### `http_post(url, body)`
+### `http_post(url, body) -> Result<String, String>`
 
-Performs an HTTP POST request with a string body. Like `http_get`, it returns 0 on success and -1 on error.
+Performs an HTTP POST request with a string body.
 
 ```rust
-fn main() {
-    let payload: String = "{\"name\": \"kodo\"}"
-    let status: Int = http_post("http://httpbin.org/post", payload)
-    print_int(status)
-}
+let result: Result<String, String> = http_post("http://httpbin.org/post", "hello")
 ```
 
 ### Plain HTTP Only
 
 In v1, HTTP builtins use plain HTTP (no TLS). If you need to reach an HTTPS endpoint, route through a local proxy or use a service that exposes an HTTP interface.
 
+## HTTP Server
+
+Kodo includes a synchronous HTTP server powered by `tiny_http`. Servers and requests are managed via opaque `Int` handles.
+
+### `http_server_new(port) -> Int`
+
+Creates a new HTTP server listening on the given port. Returns a handle, or 0 on failure.
+
+```rust
+let server: Int = http_server_new(8080)
+if server == 0 {
+    println("failed to create server")
+}
+```
+
+### `http_server_recv(server) -> Int`
+
+Blocks until a request is received. Returns a request handle, or 0 on error.
+
+```rust
+let req: Int = http_server_recv(server)
+```
+
+### `http_request_method(req) -> String`
+
+Returns the HTTP method (`"GET"`, `"POST"`, etc.).
+
+### `http_request_path(req) -> String`
+
+Returns the URL path (e.g., `"/api/data"`).
+
+### `http_request_body(req) -> String`
+
+Returns the request body as a string.
+
+### `http_respond(req, status, body)`
+
+Sends an HTTP response with a status code and body. After calling this, the request handle is consumed and must not be reused.
+
+```rust
+http_respond(req, 200, "OK")
+```
+
+### `http_server_free(server)`
+
+Frees an HTTP server handle when done.
+
+### Complete Server Example
+
+```rust
+module http_api {
+    meta {
+        purpose: "HTTP server with JSON responses"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let server: Int = http_server_new(8080)
+        if server == 0 {
+            println("failed to create server")
+            return 1
+        }
+        println("server listening on port 8080")
+
+        let req: Int = http_server_recv(server)
+        let method: String = http_request_method(req)
+        let path: String = http_request_path(req)
+        println(f"received {method} {path}")
+
+        let body: Int = json_new_object()
+        json_set_string(body, "status", "ok")
+        let response: String = json_stringify(body)
+        http_respond(req, 200, response)
+
+        http_server_free(server)
+        return 0
+    }
+}
+```
+
 ## JSON Parsing
 
 Kodo represents parsed JSON as an opaque handle (an `Int`). You obtain a handle by parsing a JSON string, extract values from it by key, and free it when done.
 
-### `json_parse(str)`
+### `json_parse(str) -> Int`
 
 Parses a JSON string and returns a handle. Returns 0 if parsing fails.
 
 ```rust
-let handle: Int = json_parse("{\"count\": 42, \"name\": \"kodo\"}")
-if handle == 0 {
-    println("parse error")
-}
+let handle: Int = json_parse("{\"count\": 42}")
 ```
 
-### `json_get_int(handle, key)`
+### `json_get_int(handle, key) -> Int`
 
-Extracts an integer value from the parsed JSON object by key. Returns 0 if the key does not exist or the value is not an integer.
+Extracts an integer value by key. Returns 0 if the key does not exist.
 
-```rust
-let count: Int = json_get_int(handle, "count")
-print_int(count)  // 42
-```
+### `json_get_string(handle, key) -> String`
 
-### `json_get_string(handle, key)`
-
-Extracts a string value from the parsed JSON object by key. Returns the string value on success.
-
-```rust
-let name: String = json_get_string(handle, "name")
-println(name)  // kodo
-```
+Extracts a string value by key.
 
 ### `json_free(handle)`
 
-Frees the memory associated with a parsed JSON handle. Every handle returned by `json_parse` must be freed when no longer needed. Using a handle after freeing it is undefined behavior.
+Frees the memory associated with a parsed JSON handle. Passing 0 is safe.
+
+## JSON Builder
+
+Build JSON objects programmatically without string manipulation.
+
+### `json_new_object() -> Int`
+
+Creates a new empty JSON object and returns a handle.
 
 ```rust
-json_free(handle)
+let obj: Int = json_new_object()
 ```
 
-Passing 0 (a null handle) to `json_free` is safe and does nothing.
+### `json_set_string(handle, key, value)`
 
-## Complete Example
+Sets a string field on the JSON object.
 
-Here is a program that fetches data from an HTTP endpoint and parses the JSON response:
+### `json_set_int(handle, key, value)`
+
+Sets an integer field.
+
+### `json_set_bool(handle, key, value)`
+
+Sets a boolean field.
+
+### `json_stringify(handle) -> String`
+
+Serializes a JSON object to a string.
 
 ```rust
-module http_client {
-    meta {
-        purpose: "HTTP client and JSON parsing demonstration",
-        version: "0.1.0"
-    }
-
-    fn main() {
-        // Perform HTTP GET request
-        let status: Int = http_get("http://httpbin.org/get")
-
-        // Parse a JSON string into an opaque handle
-        let handle: Int = json_parse("{\"count\": 7, \"lang\": \"kodo\"}")
-
-        // Extract fields by key
-        let count: Int = json_get_int(handle, "count")
-        print_int(count)
-
-        // Always free the handle when done
-        json_free(handle)
-
-        println("done")
-    }
-}
-```
-
-Compile and run:
-
-```bash
-cargo run -p kodoc -- build http_client.ko -o http_client
-./http_client
+let obj: Int = json_new_object()
+json_set_string(obj, "name", "kodo")
+json_set_int(obj, "version", 1)
+json_set_bool(obj, "stable", false)
+let output: String = json_stringify(obj)
+println(output)  // {"name":"kodo","stable":false,"version":1}
 ```
 
 ## Summary of Builtins
 
+### HTTP Client
+
 | Builtin | Parameters | Returns | Description |
 |---------|-----------|---------|-------------|
-| `http_get` | `url: String` | `Int` (0 = success) | GET request |
-| `http_post` | `url: String, body: String` | `Int` (0 = success) | POST request |
-| `json_parse` | `str: String` | `Int` (handle, 0 = error) | Parse JSON string |
-| `json_get_int` | `handle: Int, key: String` | `Int` | Extract integer field |
-| `json_get_string` | `handle: Int, key: String` | `String` | Extract string field |
-| `json_free` | `handle: Int` | `()` | Free parsed JSON |
+| `http_get` | `url: String` | `Result<String, String>` | GET request |
+| `http_post` | `url: String, body: String` | `Result<String, String>` | POST request |
+
+### HTTP Server
+
+| Builtin | Parameters | Returns | Description |
+|---------|-----------|---------|-------------|
+| `http_server_new` | `port: Int` | `Int` (handle) | Create server |
+| `http_server_recv` | `server: Int` | `Int` (request handle) | Block for request |
+| `http_request_method` | `req: Int` | `String` | Get HTTP method |
+| `http_request_path` | `req: Int` | `String` | Get URL path |
+| `http_request_body` | `req: Int` | `String` | Get request body |
+| `http_respond` | `req: Int, status: Int, body: String` | `()` | Send response |
+| `http_server_free` | `server: Int` | `()` | Free server |
+
+### JSON
+
+| Builtin | Parameters | Returns | Description |
+|---------|-----------|---------|-------------|
+| `json_parse` | `str: String` | `Int` (handle) | Parse JSON |
+| `json_get_int` | `handle: Int, key: String` | `Int` | Extract integer |
+| `json_get_string` | `handle: Int, key: String` | `String` | Extract string |
+| `json_free` | `handle: Int` | `()` | Free JSON handle |
+| `json_new_object` | — | `Int` (handle) | Create empty object |
+| `json_set_string` | `handle: Int, key: String, value: String` | `()` | Set string field |
+| `json_set_int` | `handle: Int, key: String, value: Int` | `()` | Set integer field |
+| `json_set_bool` | `handle: Int, key: String, value: Bool` | `()` | Set boolean field |
+| `json_stringify` | `handle: Int` | `String` | Serialize to string |
 
 ## Next Steps
 

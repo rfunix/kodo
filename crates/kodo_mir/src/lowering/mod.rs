@@ -545,6 +545,70 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     fn_return_types
         .entry("List_all".to_string())
         .or_insert(Type::Bool);
+
+    register_sprint5_return_types(fn_return_types);
+}
+
+/// Registers return types for Sprint 5 builtins (CLI, JSON, HTTP server, math).
+fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
+    // CLI builtins.
+    fn_return_types
+        .entry("readln".to_string())
+        .or_insert(Type::String);
+    let list_string = Type::Generic("List".to_string(), vec![Type::String]);
+    fn_return_types
+        .entry("args".to_string())
+        .or_insert(list_string.clone());
+    fn_return_types
+        .entry("dir_list".to_string())
+        .or_insert(list_string);
+
+    // JSON builtins.
+    for name in &["json_new_object", "json_parse"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+    fn_return_types
+        .entry("json_stringify".to_string())
+        .or_insert(Type::String);
+    for name in &["json_get_string", "json_get"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::String);
+    }
+
+    // HTTP server builtins.
+    for name in &["http_server_new", "http_server_recv"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+    for name in &[
+        "http_request_method",
+        "http_request_path",
+        "http_request_body",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::String);
+    }
+
+    // Math + collections builtins.
+    fn_return_types
+        .entry("rand_int".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("list_pop".to_string())
+        .or_insert(Type::Int);
+
+    // File extended builtins returning Bool.
+    fn_return_types
+        .entry("dir_exists".to_string())
+        .or_insert(Type::Bool);
+    fn_return_types
+        .entry("file_exists".to_string())
+        .or_insert(Type::Bool);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],

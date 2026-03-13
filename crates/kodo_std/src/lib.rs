@@ -126,6 +126,8 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
     fns.extend(file_io_builtins());
     fns.extend(collection_builtins());
     fns.extend(network_builtins());
+    fns.extend(http_server_builtins());
+    fns.extend(json_builder_builtins());
     fns.extend(time_builtins());
     fns.extend(env_builtins());
     fns.extend(concurrency_builtins());
@@ -135,7 +137,6 @@ pub fn builtin_functions() -> Vec<BuiltinFunction> {
 /// I/O builtin functions.
 fn io_builtins() -> Vec<BuiltinFunction> {
     vec![
-        // I/O
         BuiltinFunction {
             name: "kodo::io::println".to_string(),
             description: "Prints a line to standard output".to_string(),
@@ -150,6 +151,16 @@ fn io_builtins() -> Vec<BuiltinFunction> {
             name: "kodo::io::readln".to_string(),
             description: "Reads a line from standard input".to_string(),
             param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::io::args".to_string(),
+            description: "Returns command-line arguments as a list".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::io::exit".to_string(),
+            description: "Exits the process with the given exit code".to_string(),
+            param_count: 1,
         },
     ]
 }
@@ -181,6 +192,46 @@ fn math_builtins() -> Vec<BuiltinFunction> {
             name: "kodo::math::clamp".to_string(),
             description: "Clamps a value between a minimum and maximum".to_string(),
             param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::math::pow".to_string(),
+            description: "Returns base raised to the power of exp".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::math::sin".to_string(),
+            description: "Returns the sine of x (radians)".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::cos".to_string(),
+            description: "Returns the cosine of x (radians)".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::log".to_string(),
+            description: "Returns the natural logarithm of x".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::floor".to_string(),
+            description: "Returns the largest integer less than or equal to x".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::ceil".to_string(),
+            description: "Returns the smallest integer greater than or equal to x".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::round".to_string(),
+            description: "Rounds x to the nearest integer".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::math::rand_int".to_string(),
+            description: "Returns a random integer in the range [min, max]".to_string(),
+            param_count: 2,
         },
     ]
 }
@@ -302,6 +353,26 @@ fn file_io_builtins() -> Vec<BuiltinFunction> {
             description: "Writes content to a file, returning Result<Unit, String>".to_string(),
             param_count: 2,
         },
+        BuiltinFunction {
+            name: "kodo::io::file_append".to_string(),
+            description: "Appends content to a file, returning Result<Unit, String>".to_string(),
+            param_count: 2,
+        },
+        BuiltinFunction {
+            name: "kodo::io::file_delete".to_string(),
+            description: "Deletes a file at the given path".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::io::dir_list".to_string(),
+            description: "Lists files in a directory as List<String>".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::io::dir_exists".to_string(),
+            description: "Checks if a directory exists at the given path".to_string(),
+            param_count: 1,
+        },
     ]
 }
 
@@ -402,14 +473,14 @@ fn network_builtins() -> Vec<BuiltinFunction> {
     vec![
         BuiltinFunction {
             name: "kodo::http::get".to_string(),
-            description: "Performs an HTTP GET request and returns the response body".to_string(),
+            description: "Performs an HTTP GET request, returning Result<String, String>"
+                .to_string(),
             param_count: 1,
         },
         BuiltinFunction {
             name: "kodo::http::post".to_string(),
-            description:
-                "Performs an HTTP POST request with the given body and returns the response"
-                    .to_string(),
+            description: "Performs an HTTP POST request, returning Result<String, String>"
+                .to_string(),
             param_count: 2,
         },
         // JSON parsing
@@ -452,6 +523,73 @@ fn network_builtins() -> Vec<BuiltinFunction> {
             name: "kodo::json::get_array".to_string(),
             description: "Gets an array from a JSON object as a list of handles".to_string(),
             param_count: 2,
+        },
+    ]
+}
+
+/// HTTP server builtin functions.
+fn http_server_builtins() -> Vec<BuiltinFunction> {
+    vec![
+        BuiltinFunction {
+            name: "kodo::http::server_new".to_string(),
+            description: "Creates a new HTTP server on the given port".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::server_recv".to_string(),
+            description: "Blocks until a request is received, returns request handle".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::request_method".to_string(),
+            description: "Gets the HTTP method of a request".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::request_path".to_string(),
+            description: "Gets the URL path of a request".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::request_body".to_string(),
+            description: "Gets the body of a request".to_string(),
+            param_count: 1,
+        },
+        BuiltinFunction {
+            name: "kodo::http::respond".to_string(),
+            description: "Sends an HTTP response to a request".to_string(),
+            param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::http::server_free".to_string(),
+            description: "Frees an HTTP server handle".to_string(),
+            param_count: 1,
+        },
+    ]
+}
+
+/// JSON builder builtin functions.
+fn json_builder_builtins() -> Vec<BuiltinFunction> {
+    vec![
+        BuiltinFunction {
+            name: "kodo::json::new_object".to_string(),
+            description: "Creates a new empty JSON object".to_string(),
+            param_count: 0,
+        },
+        BuiltinFunction {
+            name: "kodo::json::set_string".to_string(),
+            description: "Sets a string field on a JSON object".to_string(),
+            param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::json::set_int".to_string(),
+            description: "Sets an integer field on a JSON object".to_string(),
+            param_count: 3,
+        },
+        BuiltinFunction {
+            name: "kodo::json::set_bool".to_string(),
+            description: "Sets a boolean field on a JSON object".to_string(),
+            param_count: 3,
         },
     ]
 }
@@ -566,7 +704,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 68);
+        assert_eq!(builtins.len(), 93);
     }
 
     #[test]

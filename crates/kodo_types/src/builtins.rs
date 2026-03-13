@@ -92,6 +92,11 @@ impl TypeChecker {
         self.register_time_functions();
         self.register_env_functions();
         self.register_channel_functions();
+        self.register_cli_functions();
+        self.register_file_extended_functions();
+        self.register_json_builder_functions();
+        self.register_math_extended_functions();
+        self.register_http_server_functions();
     }
 
     /// Registers builtin methods for the `String` type.
@@ -913,11 +918,17 @@ impl TypeChecker {
     fn register_http_functions(&mut self) {
         self.env.insert(
             "http_get".to_string(),
-            Type::Function(vec![Type::String], Box::new(Type::Int)),
+            Type::Function(
+                vec![Type::String],
+                Box::new(Type::Enum("Result__String_String".to_string())),
+            ),
         );
         self.env.insert(
             "http_post".to_string(),
-            Type::Function(vec![Type::String, Type::String], Box::new(Type::Int)),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Enum("Result__String_String".to_string())),
+            ),
         );
     }
 
@@ -1066,6 +1077,182 @@ impl TypeChecker {
         // channel_free(ch: Int) -> ()  (works on all channel types via opaque handle)
         self.env.insert(
             "channel_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers CLI builtins: args, readln, exit.
+    fn register_cli_functions(&mut self) {
+        // args() -> List<String>
+        self.env.insert(
+            "args".to_string(),
+            Type::Function(
+                vec![],
+                Box::new(Type::Generic("List".to_string(), vec![Type::String])),
+            ),
+        );
+        // readln() -> String
+        self.env.insert(
+            "readln".to_string(),
+            Type::Function(vec![], Box::new(Type::String)),
+        );
+        // exit(Int) -> Unit
+        self.env.insert(
+            "exit".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers extended file I/O builtins: append, delete, `dir_list`, `dir_exists`.
+    fn register_file_extended_functions(&mut self) {
+        // file_append(String, String) -> Result<Unit, String>
+        self.env.insert(
+            "file_append".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Enum("Result__Unit_String".to_string())),
+            ),
+        );
+        // file_delete(String) -> Bool
+        self.env.insert(
+            "file_delete".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Bool)),
+        );
+        // dir_list(String) -> List<String>
+        self.env.insert(
+            "dir_list".to_string(),
+            Type::Function(
+                vec![Type::String],
+                Box::new(Type::Generic("List".to_string(), vec![Type::String])),
+            ),
+        );
+        // dir_exists(String) -> Bool
+        self.env.insert(
+            "dir_exists".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Bool)),
+        );
+    }
+
+    /// Registers JSON builder builtins: `new_object`, `set_string`, `set_int`, `set_bool`.
+    fn register_json_builder_functions(&mut self) {
+        // json_new_object() -> Int
+        self.env.insert(
+            "json_new_object".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        // json_set_string(Int, String, String) -> Unit
+        self.env.insert(
+            "json_set_string".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Unit),
+            ),
+        );
+        // json_set_int(Int, String, Int) -> Unit
+        self.env.insert(
+            "json_set_int".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Unit),
+            ),
+        );
+        // json_set_bool(Int, String, Bool) -> Unit
+        self.env.insert(
+            "json_set_bool".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::String, Type::Bool],
+                Box::new(Type::Unit),
+            ),
+        );
+    }
+
+    /// Registers extended math builtins: `sqrt`, `pow`, trig, `floor`, `ceil`, `round`, `rand_int`.
+    fn register_math_extended_functions(&mut self) {
+        // sqrt(Float64) -> Float64
+        self.env.insert(
+            "sqrt".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // pow(Float64, Float64) -> Float64
+        self.env.insert(
+            "pow".to_string(),
+            Type::Function(vec![Type::Float64, Type::Float64], Box::new(Type::Float64)),
+        );
+        // sin(Float64) -> Float64
+        self.env.insert(
+            "sin".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // cos(Float64) -> Float64
+        self.env.insert(
+            "cos".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // log(Float64) -> Float64
+        self.env.insert(
+            "log".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // floor(Float64) -> Float64
+        self.env.insert(
+            "floor".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // ceil(Float64) -> Float64
+        self.env.insert(
+            "ceil".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // round(Float64) -> Float64
+        self.env.insert(
+            "round".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Float64)),
+        );
+        // rand_int(Int, Int) -> Int
+        self.env.insert(
+            "rand_int".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers HTTP server builtins.
+    fn register_http_server_functions(&mut self) {
+        // http_server_new(Int) -> Int
+        self.env.insert(
+            "http_server_new".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // http_server_recv(Int) -> Int
+        self.env.insert(
+            "http_server_recv".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // http_request_method(Int) -> String
+        self.env.insert(
+            "http_request_method".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // http_request_path(Int) -> String
+        self.env.insert(
+            "http_request_path".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // http_request_body(Int) -> String
+        self.env.insert(
+            "http_request_body".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // http_respond(Int, Int, String) -> Unit
+        self.env.insert(
+            "http_respond".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Unit),
+            ),
+        );
+        // http_server_free(Int) -> Unit
+        self.env.insert(
+            "http_server_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
     }

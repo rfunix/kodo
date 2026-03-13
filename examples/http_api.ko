@@ -1,0 +1,42 @@
+// Demonstrates HTTP server using tiny_http builtins.
+//
+// Run with: kodoc build examples/http_api.ko -o http_api && ./http_api
+// Then: curl http://localhost:8080/health
+
+module http_api {
+    meta {
+        purpose: "demonstrates HTTP server with JSON responses"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let server: Int = http_server_new(8080)
+        if server == 0 {
+            println("failed to create server")
+            return 1
+        }
+        println("server listening on port 8080")
+
+        // Handle one request then exit
+        let req: Int = http_server_recv(server)
+        if req == 0 {
+            println("failed to receive request")
+            http_server_free(server)
+            return 1
+        }
+
+        let method: String = http_request_method(req)
+        let path: String = http_request_path(req)
+        println(f"received {method} {path}")
+
+        let body: Int = json_new_object()
+        json_set_string(body, "status", "ok")
+        json_set_string(body, "path", path)
+        let response: String = json_stringify(body)
+        http_respond(req, 200, response)
+
+        http_server_free(server)
+        println("server stopped")
+        return 0
+    }
+}

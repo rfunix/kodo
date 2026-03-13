@@ -349,38 +349,33 @@ pub unsafe extern "C" fn kodo_json_get_int(handle: i64, key_ptr: *const u8, key_
 
 /// Serializes a JSON handle back to a JSON string.
 ///
-/// Returns the string via out parameters.
+/// Returns the string via out-parameters, following the standard
+/// `write_string_out_mut` pattern used by all string-returning builtins.
 ///
 /// # Safety
 ///
-/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `handle` must be a valid handle returned by `kodo_json_parse` or
+/// `kodo_json_new_object`.
 /// `out_ptr` and `out_len` must be valid writable pointers.
 #[no_mangle]
-pub unsafe extern "C" fn kodo_json_stringify(handle: i64, out_ptr: *mut i64, out_len: *mut i64) {
-    if handle == 0 {
-        let empty = String::new();
-        let leaked = empty.into_bytes().leak();
-        // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe {
-            *out_ptr = leaked.as_ptr() as i64;
-            *out_len = 0;
-        }
+pub unsafe extern "C" fn kodo_json_stringify(
+    handle: i64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) {
+    if out_ptr.is_null() || out_len.is_null() {
         return;
     }
-    // SAFETY: handle was returned by kodo_json_parse.
+    if handle == 0 {
+        // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe { write_string_out_mut(String::new(), out_ptr, out_len) };
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
     let value = unsafe { &*(handle as *const serde_json::Value) };
     let s = serde_json::to_string(value).unwrap_or_default();
-    let bytes = s.into_bytes();
-    let len = bytes.len();
-    let leaked = bytes.leak();
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe {
-        #[allow(clippy::cast_possible_wrap)]
-        {
-            *out_ptr = leaked.as_ptr() as i64;
-            *out_len = len as i64;
-        }
-    }
+    unsafe { write_string_out_mut(s, out_ptr, out_len) };
 }
 
 /// Gets a boolean value from a JSON object by key.
@@ -494,6 +489,299 @@ pub unsafe extern "C" fn kodo_json_free(handle: i64) {
     // SAFETY: caller guarantees handle was returned by kodo_json_parse
     // (i.e. Box::into_raw on a Box<serde_json::Value>).
     let _ = unsafe { Box::from_raw(handle as *mut serde_json::Value) };
+}
+
+// ---------------------------------------------------------------------------
+// CLI builtins
+// ---------------------------------------------------------------------------
+
+/// Returns command-line arguments as a `List<String>` handle.
+///
+/// Each argument is pushed as a (ptr, len) pair packed into an i64 handle.
+/// The first element is the binary name.
+#[no_mangle]
+pub extern "C" fn kodo_args() -> i64 {
+    let list = crate::collections::kodo_list_new();
+    for arg in std::env::args() {
+        let bytes = arg.into_bytes().into_boxed_slice();
+        let len = bytes.len();
+        // SAFETY: intentionally leaks so caller manages via the list handle.
+        let ptr = Box::into_raw(bytes) as *const u8 as i64;
+        #[allow(clippy::cast_possible_wrap)]
+        let len_i64 = len as i64;
+        // Store as heap-allocated [i64; 2] pair (ptr, len) — same format as
+        // `kodo_string_split`, so `list_join` and other List<String> ops work.
+        let pair = Box::new([ptr, len_i64]);
+        // SAFETY: intentionally leaks so caller manages via the list handle.
+        let pair_ptr = Box::into_raw(pair) as i64;
+        // SAFETY: list was just created and is valid.
+        unsafe {
+            crate::collections::kodo_list_push(list, pair_ptr);
+        }
+    }
+    list
+}
+
+/// Reads a line from standard input.
+///
+/// Writes the line (with trailing newline stripped) to `out_ptr`/`out_len`.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_readln(out_ptr: *mut *mut u8, out_len: *mut usize) {
+    if out_ptr.is_null() || out_len.is_null() {
+        return;
+    }
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    // Strip trailing newline.
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+    }
+    // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe { write_string_out_mut(line, out_ptr, out_len) };
+}
+
+/// Exits the process with the given exit code.
+#[no_mangle]
+pub extern "C" fn kodo_exit(code: i64) {
+    #[allow(clippy::cast_possible_truncation)]
+    std::process::exit(code as i32);
+}
+
+// ---------------------------------------------------------------------------
+// Extended file I/O builtins
+// ---------------------------------------------------------------------------
+
+/// Appends content to a file.
+///
+/// Returns 0 on success, 1 on error. On error, `out_ptr`/`out_len` contain the message.
+///
+/// # Safety
+///
+/// All pointers must be valid and point to valid UTF-8.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_file_append(
+    path_ptr: *const u8,
+    path_len: usize,
+    content_ptr: *const u8,
+    content_len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) -> i64 {
+    use std::io::Write;
+    // SAFETY: caller guarantees valid UTF-8 bytes.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let content_bytes = unsafe { std::slice::from_raw_parts(content_ptr, content_len) };
+    let path_str = match std::str::from_utf8(path_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("invalid path: {e}");
+            // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+            unsafe { write_string_out(msg, out_ptr, out_len) };
+            return 1;
+        }
+    };
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path_str)
+    {
+        Ok(mut f) => match f.write_all(content_bytes) {
+            Ok(()) => 0,
+            Err(e) => {
+                let msg = format!("{e}");
+                // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+                unsafe { write_string_out(msg, out_ptr, out_len) };
+                1
+            }
+        },
+        Err(e) => {
+            let msg = format!("{e}");
+            // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
+            unsafe { write_string_out(msg, out_ptr, out_len) };
+            1
+        }
+    }
+}
+
+/// Deletes a file at the given path.
+///
+/// Returns 0 on success, 1 on error.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_file_delete(path_ptr: *const u8, path_len: usize) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes at path_ptr..path_ptr+path_len.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let Ok(path_str) = std::str::from_utf8(path_bytes) else {
+        return 1;
+    };
+    match std::fs::remove_file(path_str) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+/// Lists files in a directory, returning a `List<String>` handle.
+///
+/// Returns 0 if the path is invalid or not a directory.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_dir_list(path_ptr: *const u8, path_len: usize) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes at path_ptr..path_ptr+path_len.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let Ok(path_str) = std::str::from_utf8(path_bytes) else {
+        return 0;
+    };
+    let Ok(entries) = std::fs::read_dir(path_str) else {
+        return 0;
+    };
+    let list = crate::collections::kodo_list_new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let bytes = name.into_bytes().into_boxed_slice();
+        let len = bytes.len();
+        // SAFETY: intentionally leaks so caller manages via the list handle.
+        let ptr = Box::into_raw(bytes) as *const u8 as i64;
+        #[allow(clippy::cast_possible_wrap)]
+        let len_i64 = len as i64;
+        // Store as heap-allocated [i64; 2] pair — same format as string_split.
+        let pair = Box::new([ptr, len_i64]);
+        // SAFETY: intentionally leaks so caller manages via the list handle.
+        let pair_ptr = Box::into_raw(pair) as i64;
+        // SAFETY: list was just created and is valid.
+        unsafe {
+            crate::collections::kodo_list_push(list, pair_ptr);
+        }
+    }
+    list
+}
+
+/// Checks if a directory exists at the given path.
+///
+/// Returns 1 if it exists and is a directory, 0 otherwise.
+///
+/// # Safety
+///
+/// `path_ptr` must point to `path_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_dir_exists(path_ptr: *const u8, path_len: usize) -> i64 {
+    // SAFETY: caller guarantees valid UTF-8 bytes at path_ptr..path_ptr+path_len.
+    let path_bytes = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+    let Ok(path_str) = std::str::from_utf8(path_bytes) else {
+        return 0;
+    };
+    let path = std::path::Path::new(path_str);
+    i64::from(path.is_dir())
+}
+
+// ---------------------------------------------------------------------------
+// JSON builder builtins
+// ---------------------------------------------------------------------------
+
+/// Creates a new empty JSON object and returns an opaque handle.
+#[no_mangle]
+pub extern "C" fn kodo_json_new_object() -> i64 {
+    let obj = serde_json::Value::Object(serde_json::Map::new());
+    let boxed = Box::new(obj);
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    // Freed by `kodo_json_free`.
+    Box::into_raw(boxed) as i64
+}
+
+/// Sets a string field on a JSON object.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle from `kodo_json_parse` or `kodo_json_new_object`.
+/// `key_ptr`/`key_len` and `val_ptr`/`val_len` must point to valid UTF-8.
+#[no_mangle]
+#[allow(clippy::similar_names)]
+pub unsafe extern "C" fn kodo_json_set_string(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+    val_ptr: *const u8,
+    val_len: usize,
+) {
+    if handle == 0 || key_ptr.is_null() || val_ptr.is_null() {
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
+    let value = unsafe { &mut *(handle as *mut serde_json::Value) };
+    // SAFETY: caller guarantees valid UTF-8 slices.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    let val =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(val_ptr, val_len)) };
+    if let serde_json::Value::Object(map) = value {
+        map.insert(key.to_string(), serde_json::Value::String(val.to_string()));
+    }
+}
+
+/// Sets an integer field on a JSON object.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle. `key_ptr`/`key_len` must point to valid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_set_int(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+    int_value: i64,
+) {
+    if handle == 0 || key_ptr.is_null() {
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
+    let value = unsafe { &mut *(handle as *mut serde_json::Value) };
+    // SAFETY: caller guarantees valid UTF-8 slice.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    if let serde_json::Value::Object(map) = value {
+        map.insert(
+            key.to_string(),
+            serde_json::Value::Number(serde_json::Number::from(int_value)),
+        );
+    }
+}
+
+/// Sets a boolean field on a JSON object.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle. `key_ptr`/`key_len` must point to valid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_set_bool(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+    bool_value: i64,
+) {
+    if handle == 0 || key_ptr.is_null() {
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
+    let value = unsafe { &mut *(handle as *mut serde_json::Value) };
+    // SAFETY: caller guarantees valid UTF-8 slice.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    if let serde_json::Value::Object(map) = value {
+        map.insert(key.to_string(), serde_json::Value::Bool(bool_value != 0));
+    }
 }
 
 #[cfg(test)]

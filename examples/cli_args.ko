@@ -1,0 +1,16 @@
+// Demonstrates CLI argument reading.
+//
+// Run with: kodoc build examples/cli_args.ko -o cli_args && ./cli_args foo bar
+
+module cli_args {
+    meta {
+        purpose: "demonstrates reading command-line arguments"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let arg_list: List<String> = args()
+        println("arguments received")
+        return 0
+    }
+}

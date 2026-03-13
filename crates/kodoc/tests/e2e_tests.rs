@@ -1686,6 +1686,13 @@ e2e_example_test!(run: e2e_map_operations, "map_operations.ko", contains: ["empt
 
 e2e_example_test!(fail: e2e_type_errors, "type_errors.ko");
 
+// --- Sprint 5: CLI, JSON, math, HTTP examples ---
+
+e2e_example_test!(run: e2e_cli_args, "cli_args.ko", contains: ["arguments received"]);
+e2e_example_test!(run: e2e_json_builder, "json_builder.ko", contains: ["name", "kodo", "version"]);
+e2e_example_test!(run: e2e_math_demo, "math_demo.ko", contains: ["random number generated"]);
+
 // --- Examples that depend on external services (compile-only) ---
 
 e2e_example_test!(compile: e2e_http_client, "http_client.ko");
+e2e_example_test!(compile: e2e_http_api, "http_api.ko");

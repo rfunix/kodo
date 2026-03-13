@@ -1,21 +1,13 @@
 // Real-world example: Agent-Built HTTP Health Checker
 //
-// Demonstrates how Kōdo's features create a "closed-loop"
-// between AI agents and the compiler:
-//
-// - @authored_by / @confidence: every function has an audit trail
-// - @security_sensitive: network operations require contracts (E0262)
-// - contracts: the compiler verifies preconditions at every call site
-// - meta: agents can discover what this module does programmatically
-// - --json-errors: when something breaks, the agent gets structured output
+// Demonstrates Kōdo's file I/O and list operations for
+// building real health check tools.
 //
 // Run with: kodoc build examples/health_checker.ko -o health_checker && ./health_checker
-// Audit with: kodoc confidence-report examples/health_checker.ko
-// Machine errors: kodoc check examples/health_checker.ko --json-errors
 
 module health_checker {
     meta {
-        purpose: "HTTP health checker with agent traceability and contracts"
+        purpose: "Health checker demonstrating file I/O and list operations"
         version: "1.0.0"
         author: "claude"
     }
@@ -23,49 +15,48 @@ module health_checker {
     fn main() -> Int {
         println("=== Health Check Report ===")
 
-        // http_get returns 0 on success, -1 on error.
-        // Track results in List<Int> for aggregation.
+        // Check if key files exist
         let results: List<Int> = list_new()
 
-        let s1: Int = http_get("https://httpbin.org/status/200")
-        if s1 == 0 {
-            println("  [OK] API Gateway")
+        let e1: Bool = file_exists("Cargo.toml")
+        if e1 {
+            println("  [OK] Cargo.toml")
             list_push(results, 1)
         } else {
-            println("  [FAIL] API Gateway")
+            println("  [FAIL] Cargo.toml")
             list_push(results, 0)
         }
 
-        let s2: Int = http_get("https://httpbin.org/status/200")
-        if s2 == 0 {
-            println("  [OK] Auth Service")
+        let e2: Bool = file_exists("examples/hello.ko")
+        if e2 {
+            println("  [OK] examples/hello.ko")
             list_push(results, 1)
         } else {
-            println("  [FAIL] Auth Service")
+            println("  [FAIL] examples/hello.ko")
             list_push(results, 0)
         }
 
-        let s3: Int = http_get("https://httpbin.org/status/500")
-        if s3 == 0 {
-            println("  [OK] Database Proxy")
-            list_push(results, 1)
-        } else {
-            println("  [FAIL] Database Proxy")
+        let e3: Bool = file_exists("nonexistent.txt")
+        if e3 {
+            println("  [FAIL] nonexistent.txt should not exist")
             list_push(results, 0)
+        } else {
+            println("  [OK] nonexistent.txt correctly missing")
+            list_push(results, 1)
         }
 
-        // Summary using fold — functional aggregation
+        // Summary
         let total: Int = list_length(results)
         let healthy_count: Int = results.fold(0, |acc: Int, x: Int| -> Int { acc + x })
-        let unhealthy: Int = total - healthy_count
-        println("Healthy:")
+        println("Checks passed:")
         print_int(healthy_count)
-        println("Total:")
+        println("Total checks:")
         print_int(total)
-        if unhealthy > 0 {
-            println("WARNING: endpoints down!")
-        } else {
+
+        if healthy_count == total {
             println("All systems operational.")
+        } else {
+            println("WARNING: some checks failed!")
         }
 
         return 0

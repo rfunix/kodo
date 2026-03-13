@@ -1,7 +1,7 @@
 // Demonstrates HTTP client and JSON parsing builtins.
 //
 // These builtins enable AI agents to interact with web services
-// and process structured data from process JSON responses.
+// and process structured data from JSON responses.
 //
 // Run with: kodoc check examples/http_client.ko
 
@@ -12,9 +12,9 @@ module http_client {
     }
 
     fn main() {
-        // Perform HTTP GET request
-        // Returns 0 on success, -1 on error
-        let status: Int = http_get("http://httpbin.org/get")
+        // http_get now returns Result<String, String>
+        // For type-check demonstration only (network calls may fail in CI)
+        let result: Result<String, String> = http_get("http://httpbin.org/get")
 
         // Parse a JSON string into an opaque handle
         // The handle is an Int (0 means parse error)

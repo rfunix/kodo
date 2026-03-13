@@ -70,6 +70,11 @@ pub(crate) fn declare_builtins(
     declare_rc_builtins(module, call_conv, &mut builtins)?;
     declare_async_builtins(module, call_conv, &mut builtins)?;
     declare_iterator_builtins(module, call_conv, &mut builtins)?;
+    declare_cli_builtins(module, call_conv, &mut builtins)?;
+    declare_file_extended_builtins(module, call_conv, &mut builtins)?;
+    declare_json_builder_builtins(module, call_conv, &mut builtins)?;
+    declare_math_extended_builtins(module, call_conv, &mut builtins)?;
+    declare_http_server_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -481,13 +486,7 @@ fn declare_list_builtins(
         [types::I64, types::I64],
         types::I64
     );
-    decl_void!(
-        "kodo_list_pop",
-        "list_pop",
-        types::I64,
-        types::I64,
-        types::I64
-    );
+    decl_ret!("kodo_list_pop_simple", "list_pop", [types::I64], types::I64);
     decl_ret!(
         "kodo_list_remove",
         "list_remove",
@@ -647,7 +646,7 @@ fn declare_network_builtins(
         types::I64
     );
     decl_void!("kodo_json_free", "json_free", types::I64);
-    // json_stringify: (handle, out_ptr, out_len) -> void
+    // json_stringify: (handle, out_ptr, out_len) -> void (string-returning via out-params)
     decl_void!(
         "kodo_json_stringify",
         "json_stringify",
@@ -1049,5 +1048,242 @@ fn declare_iterator_builtins(
     );
     decl_void!("kodo_map_values_free", "map_values_free", types::I64);
 
+    Ok(())
+}
+
+/// Declares CLI builtins (args, readln, exit).
+fn declare_cli_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // args() -> i64 (list handle)
+    decl_ret!("kodo_args", "args", [], types::I64);
+    // readln(out_ptr, out_len) -> void (string-returning)
+    decl_void!("kodo_readln", "readln", types::I64, types::I64);
+    // exit(code) -> void
+    decl_void!("kodo_exit", "exit", types::I64);
+    Ok(())
+}
+
+/// Declares extended file I/O builtins (append, delete, `dir_list`, `dir_exists`).
+fn declare_file_extended_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // file_append: (path_ptr, path_len, content_ptr, content_len, out_ptr, out_len) -> i64
+    decl_ret!(
+        "kodo_file_append",
+        "file_append",
+        [
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64
+        ],
+        types::I64
+    );
+    // file_delete: (path_ptr, path_len) -> i64
+    decl_ret!(
+        "kodo_file_delete",
+        "file_delete",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // dir_list: (path_ptr, path_len) -> i64 (list handle)
+    decl_ret!(
+        "kodo_dir_list",
+        "dir_list",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // dir_exists: (path_ptr, path_len) -> i64
+    decl_ret!(
+        "kodo_dir_exists",
+        "dir_exists",
+        [types::I64, types::I64],
+        types::I64
+    );
+    Ok(())
+}
+
+/// Declares JSON builder builtins (`new_object`, `set_string`, `set_int`, `set_bool`).
+fn declare_json_builder_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // json_new_object() -> i64
+    decl_ret!("kodo_json_new_object", "json_new_object", [], types::I64);
+    // json_set_string(handle, key_ptr, key_len, val_ptr, val_len) -> void
+    decl_void!(
+        "kodo_json_set_string",
+        "json_set_string",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // json_set_int(handle, key_ptr, key_len, value) -> void
+    decl_void!(
+        "kodo_json_set_int",
+        "json_set_int",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // json_set_bool(handle, key_ptr, key_len, value) -> void
+    decl_void!(
+        "kodo_json_set_bool",
+        "json_set_bool",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    Ok(())
+}
+
+/// Declares extended math builtins (`sqrt`, `pow`, trig, `floor`, `ceil`, `round`, `rand_int`).
+fn declare_math_extended_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    decl_ret!("kodo_sqrt", "sqrt", [types::F64], types::F64);
+    decl_ret!("kodo_pow", "pow", [types::F64, types::F64], types::F64);
+    decl_ret!("kodo_sin", "sin", [types::F64], types::F64);
+    decl_ret!("kodo_cos", "cos", [types::F64], types::F64);
+    decl_ret!("kodo_log", "log", [types::F64], types::F64);
+    decl_ret!("kodo_floor", "floor", [types::F64], types::F64);
+    decl_ret!("kodo_ceil", "ceil", [types::F64], types::F64);
+    decl_ret!("kodo_round", "round", [types::F64], types::F64);
+    decl_ret!(
+        "kodo_rand_int",
+        "rand_int",
+        [types::I64, types::I64],
+        types::I64
+    );
+    Ok(())
+}
+
+/// Declares HTTP server builtins (`server_new`, recv, request methods, respond, free).
+fn declare_http_server_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    decl_ret!(
+        "kodo_http_server_new",
+        "http_server_new",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_http_server_recv",
+        "http_server_recv",
+        [types::I64],
+        types::I64
+    );
+    // http_request_method: (req, out_ptr, out_len) -> void (string-returning)
+    decl_void!(
+        "kodo_http_request_method",
+        "http_request_method",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // http_request_path: (req, out_ptr, out_len) -> void (string-returning)
+    decl_void!(
+        "kodo_http_request_path",
+        "http_request_path",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // http_request_body: (req, out_ptr, out_len) -> void (string-returning)
+    decl_void!(
+        "kodo_http_request_body",
+        "http_request_body",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // http_respond: (req, status, body_ptr, body_len) -> void
+    decl_void!(
+        "kodo_http_respond",
+        "http_respond",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!("kodo_http_server_free", "http_server_free", types::I64);
     Ok(())
 }

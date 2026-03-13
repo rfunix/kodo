@@ -184,6 +184,27 @@ pub unsafe extern "C" fn kodo_list_pop(list_ptr: i64, out_value: *mut i64, out_i
     }
 }
 
+/// Simplified pop that returns the last element directly.
+///
+/// Returns the last element, or 0 if the list is empty. This wrapper matches
+/// the type checker's signature: `list_pop(List<Int>) -> Int`.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_pop_simple(list_ptr: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len > 0 {
+        list.len -= 1;
+        // SAFETY: list.len was > 0, data is valid up to old len.
+        unsafe { *list.data.add(list.len) }
+    } else {
+        0
+    }
+}
+
 /// Removes the element at the given index, shifting subsequent elements left.
 ///
 /// Returns 1 if the index was valid, 0 otherwise.
