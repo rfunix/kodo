@@ -380,6 +380,13 @@ fn declare_conversion_builtins(
         [types::F64],
         types::I64
     );
+    decl_void!(
+        "kodo_bool_to_string",
+        "Bool_to_string",
+        types::I64,
+        types::I64,
+        types::I64
+    );
     Ok(())
 }
 
@@ -739,18 +746,18 @@ fn declare_time_builtins(
         }};
     }
 
-    decl_ret!("kodo_time_now", "kodo_time_now", [], types::I64);
-    decl_ret!("kodo_time_now_ms", "kodo_time_now_ms", [], types::I64);
+    decl_ret!("kodo_time_now", "time_now", [], types::I64);
+    decl_ret!("kodo_time_now_ms", "time_now_ms", [], types::I64);
     decl_void!(
         "kodo_time_format",
-        "kodo_time_format",
+        "time_format",
         types::I64,
         types::I64,
         types::I64
     );
     decl_ret!(
         "kodo_time_elapsed_ms",
-        "kodo_time_elapsed_ms",
+        "time_elapsed_ms",
         [types::I64],
         types::I64
     );
@@ -773,7 +780,7 @@ fn declare_env_builtins(
 
     decl_void!(
         "kodo_env_get",
-        "kodo_env_get",
+        "env_get",
         types::I64,
         types::I64,
         types::I64,
@@ -781,7 +788,7 @@ fn declare_env_builtins(
     );
     decl_void!(
         "kodo_env_set",
-        "kodo_env_set",
+        "env_set",
         types::I64,
         types::I64,
         types::I64,
@@ -945,7 +952,7 @@ fn declare_async_builtins(
     decl_ret!(
         "kodo_spawn_async",
         "kodo_spawn_async",
-        [types::I64],
+        [types::I64, types::I64, types::I64],
         types::I64
     );
     decl_ret!("kodo_await", "kodo_await", [types::I64], types::I64);

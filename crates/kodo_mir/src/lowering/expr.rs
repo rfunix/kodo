@@ -4,7 +4,7 @@
 //! each AST [`Expr`] variant into the corresponding [`Value`], emitting
 //! instructions and creating basic blocks as side effects when needed.
 
-use kodo_ast::{Expr, UnaryOp};
+use kodo_ast::{BinOp, Expr, StringPart, UnaryOp};
 use kodo_types::Type;
 
 use super::{MirBuilder, ACTOR_FIELD_SIZE};
@@ -88,9 +88,12 @@ impl MirBuilder {
                 for elem in elems {
                     values.push(self.lower_expr(elem)?);
                 }
+                // Infer element types from the lowered values.
+                let elem_types: Vec<Type> =
+                    values.iter().map(|v| self.infer_value_type(v)).collect();
                 // Store as an enum variant with discriminant 0 to reuse the
                 // existing composite value infrastructure.
-                let local_id = self.alloc_local(Type::Unknown, false);
+                let local_id = self.alloc_local(Type::Tuple(elem_types), false);
                 self.emit(Instruction::Assign(
                     local_id,
                     Value::EnumVariant {
@@ -104,7 +107,12 @@ impl MirBuilder {
             }
             Expr::TupleIndex { tuple, index, .. } => {
                 let tuple_val = self.lower_expr(tuple)?;
-                let local_id = self.alloc_local(Type::Unknown, false);
+                // Infer element type from the tuple's type.
+                let elem_ty = match self.infer_value_type(&tuple_val) {
+                    Type::Tuple(ref elems) => elems.get(*index).cloned().unwrap_or(Type::Unknown),
+                    _ => Type::Unknown,
+                };
+                let local_id = self.alloc_local(elem_ty, false);
                 #[allow(clippy::cast_possible_truncation)]
                 let field_idx = *index as u32;
                 self.emit(Instruction::Assign(
@@ -119,10 +127,70 @@ impl MirBuilder {
             // `Await` in v1: no real suspension — lower the inner expression.
             Expr::Await { operand, .. } => self.lower_expr(operand),
 
-            // StringInterp should be desugared before MIR lowering.
-            // If it appears here, it is a compiler bug — return an empty string.
-            Expr::StringInterp { .. } => Ok(Value::StringConst(String::new())),
+            // StringInterp is lowered here (not in desugar) because we need
+            // type information to insert conversions for non-String expressions.
+            Expr::StringInterp { parts, .. } => self.lower_string_interp(parts),
         }
+    }
+
+    /// Lowers a string interpolation expression by converting each part to a
+    /// String value (inserting `Int_to_string` / `Float64_to_string` /
+    /// `Bool_to_string` calls as needed) and chaining them with `BinOp::Add`.
+    fn lower_string_interp(&mut self, parts: &[StringPart]) -> Result<Value> {
+        let mut string_values: Vec<Value> = Vec::with_capacity(parts.len());
+        for part in parts {
+            match part {
+                StringPart::Literal(s) => {
+                    string_values.push(Value::StringConst(s.clone()));
+                }
+                StringPart::Expr(expr) => {
+                    let val = self.lower_expr(expr)?;
+                    let ty = self.infer_value_type(&val);
+                    let string_val = match ty {
+                        Type::String => val,
+                        Type::Float64 => {
+                            let dest = self.alloc_local(Type::String, false);
+                            self.emit(Instruction::Call {
+                                dest,
+                                callee: "Float64_to_string".to_string(),
+                                args: vec![val],
+                            });
+                            Value::Local(dest)
+                        }
+                        Type::Bool => {
+                            let dest = self.alloc_local(Type::String, false);
+                            self.emit(Instruction::Call {
+                                dest,
+                                callee: "Bool_to_string".to_string(),
+                                args: vec![val],
+                            });
+                            Value::Local(dest)
+                        }
+                        // Int and all other types: convert via Int_to_string.
+                        _ => {
+                            let dest = self.alloc_local(Type::String, false);
+                            self.emit(Instruction::Call {
+                                dest,
+                                callee: "Int_to_string".to_string(),
+                                args: vec![val],
+                            });
+                            Value::Local(dest)
+                        }
+                    };
+                    string_values.push(string_val);
+                }
+            }
+        }
+
+        // Build a left-associative chain of BinOp::Add.
+        if string_values.is_empty() {
+            return Ok(Value::StringConst(String::new()));
+        }
+        let mut result = string_values.remove(0);
+        for val in string_values {
+            result = Value::BinOp(BinOp::Add, Box::new(result), Box::new(val));
+        }
+        Ok(result)
     }
 
     /// Lowers an identifier reference to either a local or a function pointer.

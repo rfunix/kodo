@@ -511,11 +511,15 @@ fn ensure_thread_pool() -> &'static PoolSender {
 
 /// Spawns an async task on the thread pool and returns a future handle.
 ///
-/// `fn_ptr` is a function pointer with signature `extern "C" fn() -> i64`.
+/// `fn_ptr` is a function pointer. When `env_size` is 0 the function has
+/// signature `extern "C" fn() -> i64` (no captures). When `env_size > 0`
+/// the function has signature `extern "C" fn(i64) -> i64` and receives a
+/// pointer to a heap-copied environment buffer.
+///
 /// The returned handle is an opaque integer that can be passed to
 /// [`kodo_await`] to retrieve the result.
 #[no_mangle]
-pub extern "C" fn kodo_spawn_async(fn_ptr: i64) -> i64 {
+pub extern "C" fn kodo_spawn_async(fn_ptr: i64, env_ptr: i64, env_size: i64) -> i64 {
     let handle = FUTURE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let entry = std::sync::Arc::new(FutureEntry {
@@ -534,22 +538,52 @@ pub extern "C" fn kodo_spawn_async(fn_ptr: i64) -> i64 {
         table[idx] = Some(std::sync::Arc::clone(&entry));
     }
 
-    // SAFETY: `fn_ptr` is a valid function pointer produced by Cranelift
-    // codegen with the `extern "C" fn() -> i64` signature.
-    let func: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = env_size as usize;
 
-    let pool_tx = ensure_thread_pool();
-    if let Ok(tx) = pool_tx.lock() {
-        let _ = tx.send(Box::new(move || {
-            let result = func();
-            if let Ok(mut guard) = entry.result.lock() {
-                *guard = Some(result);
-            }
-            entry
-                .completed
-                .store(true, std::sync::atomic::Ordering::Release);
-            entry.condvar.notify_all();
-        }));
+    if size == 0 {
+        // No captures: call as fn() -> i64.
+        // SAFETY: `fn_ptr` is a valid function pointer produced by Cranelift
+        // codegen with the `extern "C" fn() -> i64` signature.
+        let func: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+
+        let pool_tx = ensure_thread_pool();
+        if let Ok(tx) = pool_tx.lock() {
+            let _ = tx.send(Box::new(move || {
+                let result = func();
+                if let Ok(mut guard) = entry.result.lock() {
+                    *guard = Some(result);
+                }
+                entry
+                    .completed
+                    .store(true, std::sync::atomic::Ordering::Release);
+                entry.condvar.notify_all();
+            }));
+        }
+    } else {
+        // With captures: copy env and call as fn(i64) -> i64.
+        let mut env = vec![0u8; size];
+        // SAFETY: The caller guarantees `env_ptr` points to `env_size`
+        // readable bytes (the captures packed on the caller's stack).
+        unsafe {
+            std::ptr::copy_nonoverlapping(env_ptr as *const u8, env.as_mut_ptr(), size);
+        }
+        let func: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+
+        let pool_tx = ensure_thread_pool();
+        if let Ok(tx) = pool_tx.lock() {
+            let _ = tx.send(Box::new(move || {
+                let env_heap_ptr = env.as_ptr() as i64;
+                let result = func(env_heap_ptr);
+                if let Ok(mut guard) = entry.result.lock() {
+                    *guard = Some(result);
+                }
+                entry
+                    .completed
+                    .store(true, std::sync::atomic::Ordering::Release);
+                entry.condvar.notify_all();
+            }));
+        }
     }
 
     handle
@@ -670,7 +704,7 @@ mod tests {
         extern "C" fn compute() -> i64 {
             42
         }
-        let handle = kodo_spawn_async(compute as *const () as i64);
+        let handle = kodo_spawn_async(compute as *const () as i64, 0, 0);
         let result = kodo_await(handle);
         assert_eq!(result, 42);
     }

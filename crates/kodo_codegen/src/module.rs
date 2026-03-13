@@ -51,7 +51,7 @@ pub(crate) fn is_unit(ty: &Type) -> bool {
 pub(crate) fn is_composite(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Struct(_) | Type::Enum(_) | Type::String | Type::DynTrait(_)
+        Type::Struct(_) | Type::Enum(_) | Type::String | Type::DynTrait(_) | Type::Tuple(_)
     )
 }
 

@@ -80,6 +80,7 @@ impl TypeChecker {
         self.register_string_methods();
         self.register_int_methods();
         self.register_float_methods();
+        self.register_bool_methods();
         self.register_option_methods();
         self.register_result_methods();
         self.register_list_functions();
@@ -310,6 +311,19 @@ impl TypeChecker {
         self.env.insert(
             "Float64_to_int".to_string(),
             Type::Function(vec![Type::Float64], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers builtin methods for the `Bool` type.
+    fn register_bool_methods(&mut self) {
+        // Bool.to_string() -> String
+        self.method_lookup.insert(
+            ("Bool".to_string(), "to_string".to_string()),
+            ("Bool_to_string".to_string(), vec![Type::Bool], Type::String),
+        );
+        self.env.insert(
+            "Bool_to_string".to_string(),
+            Type::Function(vec![Type::Bool], Box::new(Type::String)),
         );
     }
 

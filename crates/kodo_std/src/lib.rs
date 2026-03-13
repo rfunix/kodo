@@ -274,6 +274,13 @@ fn numeric_conversion_builtins() -> Vec<BuiltinFunction> {
             description: "Converts a float to an integer (truncates toward zero)".to_string(),
             param_count: 1,
         },
+        // Bool methods
+        BuiltinFunction {
+            name: "kodo::bool::to_string".to_string(),
+            description: "Converts a boolean to its string representation (\"true\" or \"false\")"
+                .to_string(),
+            param_count: 1,
+        },
     ]
 }
 
@@ -559,7 +566,7 @@ mod tests {
     #[test]
     fn builtin_functions_count() {
         let builtins = builtin_functions();
-        assert_eq!(builtins.len(), 67);
+        assert_eq!(builtins.len(), 68);
     }
 
     #[test]

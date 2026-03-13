@@ -1,0 +1,36 @@
+module collections_demo {
+    meta { purpose: "Demonstrate collection operations" }
+
+    fn main() -> Int {
+        // List operations
+        let items = list_new()
+        list_push(items, 3)
+        list_push(items, 1)
+        list_push(items, 2)
+
+        let len = list_length(items)
+        print_int(len)
+
+        list_reverse(items)
+
+        // After reverse: [2, 1, 3]
+        let first = list_get(items, 0)
+        print_int(first)
+
+        let second = list_get(items, 1)
+        print_int(second)
+
+        // Map operations
+        let m = map_new()
+        map_insert(m, 10, 100)
+        map_insert(m, 20, 200)
+        let sz = map_length(m)
+        print_int(sz)
+
+        // Map get
+        let val = map_get(m, 10)
+        print_int(val)
+
+        return 0
+    }
+}

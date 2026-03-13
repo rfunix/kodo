@@ -437,12 +437,23 @@ fn run_build(
                     let overridden = impl_block.methods.iter().any(|m| m.name == *name);
                     if !overridden {
                         if let Some(ref body) = trait_method.body {
+                            let mut params = trait_method.params.clone();
+                            // Fix self param type to concrete type.
+                            for param in &mut params {
+                                if param.name == "self" {
+                                    param.ty =
+                                        kodo_ast::TypeExpr::Named(impl_block.type_name.clone());
+                                }
+                            }
+                            // Rewrite method calls on self in the body.
+                            let mut body = body.clone();
+                            rewrite_self_method_calls_in_block(&mut body, &impl_block.type_name);
                             let func = kodo_ast::Function {
                                 id: kodo_ast::NodeId(0),
                                 name: format!("{}_{name}", impl_block.type_name),
-                                params: trait_method.params.clone(),
+                                params,
                                 return_type: trait_method.return_type.clone(),
-                                body: body.clone(),
+                                body,
                                 span: trait_method.span,
                                 is_async: false,
                                 annotations: Vec::new(),
@@ -1812,6 +1823,109 @@ fn rewrite_method_calls_in_expr(
         | kodo_ast::Expr::StringLit(_, _)
         | kodo_ast::Expr::BoolLit(_, _)
         | kodo_ast::Expr::Ident(_, _)) => e,
+    }
+}
+
+/// Rewrites `self.method(args)` calls in a block to `TypeName_method(self, args)`.
+///
+/// Used for default trait method bodies, where the span-based method resolution
+/// from the type checker is not available.
+fn rewrite_self_method_calls_in_block(block: &mut kodo_ast::Block, type_name: &str) {
+    for stmt in &mut block.stmts {
+        match stmt {
+            kodo_ast::Stmt::Let { value, .. } | kodo_ast::Stmt::Assign { value, .. } => {
+                *value = rewrite_self_method_calls_in_expr(
+                    std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    type_name,
+                );
+            }
+            kodo_ast::Stmt::Expr(expr) => {
+                *expr = rewrite_self_method_calls_in_expr(
+                    std::mem::replace(expr, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    type_name,
+                );
+            }
+            kodo_ast::Stmt::Return { value: Some(v), .. } => {
+                *v = rewrite_self_method_calls_in_expr(
+                    std::mem::replace(v, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
+                    type_name,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Rewrites `self.method(args)` calls to `TypeName_method(self, args)` in expressions.
+fn rewrite_self_method_calls_in_expr(expr: kodo_ast::Expr, type_name: &str) -> kodo_ast::Expr {
+    match expr {
+        kodo_ast::Expr::Call { callee, args, span } => {
+            if let kodo_ast::Expr::FieldAccess {
+                object,
+                field,
+                span: _fa_span,
+            } = *callee
+            {
+                let object = rewrite_self_method_calls_in_expr(*object, type_name);
+                let args: Vec<_> = args
+                    .into_iter()
+                    .map(|a| rewrite_self_method_calls_in_expr(a, type_name))
+                    .collect();
+                // If the receiver is `self`, rewrite to a flat call.
+                if matches!(&object, kodo_ast::Expr::Ident(name, _) if name == "self") {
+                    let mangled = format!("{type_name}_{field}");
+                    let mut new_args = vec![object];
+                    new_args.extend(args);
+                    return kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident(mangled, span)),
+                        args: new_args,
+                        span,
+                    };
+                }
+                kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::FieldAccess {
+                        object: Box::new(object),
+                        field,
+                        span: _fa_span,
+                    }),
+                    args,
+                    span,
+                }
+            } else {
+                let callee = rewrite_self_method_calls_in_expr(*callee, type_name);
+                let args: Vec<_> = args
+                    .into_iter()
+                    .map(|a| rewrite_self_method_calls_in_expr(a, type_name))
+                    .collect();
+                kodo_ast::Expr::Call {
+                    callee: Box::new(callee),
+                    args,
+                    span,
+                }
+            }
+        }
+        kodo_ast::Expr::BinaryOp {
+            left,
+            op,
+            right,
+            span,
+        } => kodo_ast::Expr::BinaryOp {
+            left: Box::new(rewrite_self_method_calls_in_expr(*left, type_name)),
+            op,
+            right: Box::new(rewrite_self_method_calls_in_expr(*right, type_name)),
+            span,
+        },
+        kodo_ast::Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => kodo_ast::Expr::FieldAccess {
+            object: Box::new(rewrite_self_method_calls_in_expr(*object, type_name)),
+            field,
+            span,
+        },
+        // Leaf expressions — no sub-expressions to rewrite.
+        other => other,
     }
 }
 

@@ -1506,3 +1506,180 @@ fn test_stdlib_resolve_module() {
     let source = kodo_std::resolve_stdlib_module(&path);
     assert!(source.is_none(), "non-std path should not resolve");
 }
+
+// ---------------------------------------------------------------------------
+// Macro-generated E2E tests for all examples
+// ---------------------------------------------------------------------------
+
+/// Compiles and runs an example, asserting exit code 0 and that stdout
+/// contains each expected substring.
+macro_rules! e2e_example_test {
+    // Compile + run + check output contains strings
+    (run: $name:ident, $file:expr, contains: [$($expected:expr),+ $(,)?]) => {
+        #[test]
+        fn $name() {
+            let root = workspace_root();
+            let binary = compile_ko(
+                &root.join(concat!("examples/", $file)),
+                concat!("e2e_ex_", stringify!($name)),
+            );
+            let (exit_code, stdout, _stderr) = run_binary(&binary);
+            assert_eq!(exit_code, 0, concat!(stringify!($name), " should exit 0, got: {}"), exit_code);
+            $(
+                assert!(
+                    stdout.contains($expected),
+                    concat!(stringify!($name), " output should contain '", $expected, "', got: {}"),
+                    stdout
+                );
+            )+
+        }
+    };
+    // Compile + run, exit 0 only (no output check)
+    (run: $name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let root = workspace_root();
+            let binary = compile_ko(
+                &root.join(concat!("examples/", $file)),
+                concat!("e2e_ex_", stringify!($name)),
+            );
+            let (exit_code, _stdout, _stderr) = run_binary(&binary);
+            assert_eq!(exit_code, 0, concat!(stringify!($name), " should exit 0, got: {}"), exit_code);
+        }
+    };
+    // Compile only (no run)
+    (compile: $name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let root = workspace_root();
+            let _binary = compile_ko(
+                &root.join(concat!("examples/", $file)),
+                concat!("e2e_ex_", stringify!($name)),
+            );
+        }
+    };
+    // Expect compilation failure
+    (fail: $name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let root = workspace_root();
+            let kodoc = get_kodoc_path();
+            let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+            std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+            let output_path = output_dir.join(concat!("e2e_ex_", stringify!($name)));
+            let result = std::process::Command::new(&kodoc)
+                .arg("build")
+                .arg(root.join(concat!("examples/", $file)))
+                .arg("-o")
+                .arg(&output_path)
+                .output()
+                .expect("failed to run kodoc");
+            assert!(
+                !result.status.success(),
+                concat!(stringify!($name), " should fail to compile")
+            );
+        }
+    };
+}
+
+// --- Examples that compile + run + produce known output ---
+
+e2e_example_test!(run: e2e_actor_demo, "actor_demo.ko", contains: ["10"]);
+e2e_example_test!(run: e2e_actors, "actors.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_agent_traceability, "agent_traceability.ko", contains: ["7"]);
+e2e_example_test!(run: e2e_associated_types, "associated_types.ko", contains: ["5"]);
+e2e_example_test!(run: e2e_async_demo, "async_demo.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_async_real, "async_real.ko", contains: ["1"]);
+e2e_example_test!(run: e2e_async_tasks, "async_tasks.ko", contains: ["all tasks queued"]);
+e2e_example_test!(run: e2e_borrow_rules, "borrow_rules.ko", contains: ["hello borrow rules"]);
+e2e_example_test!(run: e2e_break_continue, "break_continue.ko", contains: ["42", "25"]);
+e2e_example_test!(run: e2e_channel_string, "channel_string.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_channels, "channels.ko", contains: ["42", "channel demo complete"]);
+e2e_example_test!(run: e2e_closures, "closures.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_closures_functional, "closures_functional.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_concurrency_demo, "concurrency_demo.ko", contains: ["scheduling tasks"]);
+e2e_example_test!(run: e2e_confidence_demo, "confidence_demo.ko", contains: ["weighted_sum"]);
+e2e_example_test!(run: e2e_config_validator, "config_validator.ko", contains: ["Config Validator"]);
+e2e_example_test!(run: e2e_contracts, "contracts.ko");
+e2e_example_test!(run: e2e_contracts_demo, "contracts_demo.ko", contains: ["10 / 2"]);
+e2e_example_test!(run: e2e_contracts_smt_demo, "contracts_smt_demo.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_contracts_verified, "contracts_verified.ko", contains: ["5"]);
+e2e_example_test!(run: e2e_copy_semantics, "copy_semantics.ko", contains: ["126"]);
+e2e_example_test!(run: e2e_enum_methods, "enum_methods.ko");
+e2e_example_test!(run: e2e_enum_params, "enum_params.ko", contains: ["25"]);
+e2e_example_test!(run: e2e_enums, "enums.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_expressions, "expressions.ko");
+e2e_example_test!(run: e2e_fibonacci, "fibonacci.ko", contains: ["55"]);
+e2e_example_test!(run: e2e_file_io_demo, "file_io_demo.ko");
+e2e_example_test!(run: e2e_float_math, "float_math.ko", contains: ["5.14"]);
+e2e_example_test!(run: e2e_flow_typing, "flow_typing.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_for_in, "for_in.ko", contains: ["15"]);
+e2e_example_test!(run: e2e_for_loop, "for_loop.ko", contains: ["55"]);
+e2e_example_test!(run: e2e_functional_pipeline, "functional_pipeline.ko", contains: ["60"]);
+e2e_example_test!(run: e2e_generic_bounds, "generic_bounds.ko");
+e2e_example_test!(run: e2e_generic_fn, "generic_fn.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_generic_method_dispatch, "generic_method_dispatch.ko");
+e2e_example_test!(run: e2e_generics, "generics.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_health_checker, "health_checker.ko", contains: ["Health Check Report"]);
+e2e_example_test!(run: e2e_hello, "hello.ko", contains: ["Hello, World!"]);
+e2e_example_test!(run: e2e_intent_cache, "intent_cache.ko", contains: ["intent cache loaded"]);
+e2e_example_test!(run: e2e_intent_composed, "intent_composed.ko");
+e2e_example_test!(run: e2e_intent_database, "intent_database.ko", contains: ["intent database loaded"]);
+e2e_example_test!(run: e2e_intent_demo, "intent_demo.ko", contains: ["Hello from intent-driven"]);
+e2e_example_test!(run: e2e_intent_http, "intent_http.ko", contains: ["HTTP server starting"]);
+e2e_example_test!(run: e2e_intent_json_api, "intent_json_api.ko", contains: ["intent json_api loaded"]);
+e2e_example_test!(run: e2e_intent_math, "intent_math.ko", contains: ["30"]);
+e2e_example_test!(run: e2e_intent_queue, "intent_queue.ko", contains: ["intent queue loaded"]);
+e2e_example_test!(run: e2e_iterator_basic, "iterator_basic.ko", contains: ["60"]);
+e2e_example_test!(run: e2e_iterator_fold, "iterator_fold.ko", contains: ["15"]);
+e2e_example_test!(run: e2e_iterator_list, "iterator_list.ko", contains: ["22"]);
+e2e_example_test!(run: e2e_iterator_map, "iterator_map.ko", contains: ["6"]);
+e2e_example_test!(run: e2e_iterator_map_filter, "iterator_map_filter.ko", contains: ["30"]);
+e2e_example_test!(run: e2e_list_demo, "list_demo.ko", contains: ["3", "10", "list contains 20"]);
+e2e_example_test!(run: e2e_map_demo, "map_demo.ko", contains: ["3", "200", "map contains key 1"]);
+e2e_example_test!(run: e2e_memory_management, "memory_management.ko", contains: ["Hello World"]);
+e2e_example_test!(run: e2e_methods, "methods.ko", contains: ["10"]);
+e2e_example_test!(run: e2e_module_invariant, "module_invariant.ko", contains: ["10"]);
+e2e_example_test!(run: e2e_move_semantics, "move_semantics.ko", contains: ["200"]);
+e2e_example_test!(run: e2e_option_demo, "option_demo.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_optional_sugar, "optional_sugar.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_parallel_blocks, "parallel_blocks.ko", contains: ["starting parallel block", "all parallel tasks finished"]);
+e2e_example_test!(run: e2e_parallel_demo, "parallel_demo.ko");
+e2e_example_test!(run: e2e_qualified_imports, "qualified_imports.ko", contains: ["5"]);
+e2e_example_test!(run: e2e_refinement_smt, "refinement_smt.ko", contains: ["8080"]);
+e2e_example_test!(run: e2e_refinement_types, "refinement_types.ko", contains: ["Refinement types demo"]);
+e2e_example_test!(run: e2e_result_demo, "result_demo.ko", contains: ["100"]);
+e2e_example_test!(run: e2e_selective_imports, "selective_imports.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_send_sync_demo, "send_sync_demo.ko", contains: ["100"]);
+e2e_example_test!(run: e2e_smt_verified, "smt_verified.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_sorted_list, "sorted_list.ko");
+e2e_example_test!(run: e2e_stdlib_demo, "stdlib_demo.ko", contains: ["42"]);
+e2e_example_test!(run: e2e_string_concat_operator, "string_concat_operator.ko", contains: ["Hello World!"]);
+e2e_example_test!(run: e2e_string_demo, "string_demo.ko", contains: ["String operations demo complete"]);
+e2e_example_test!(run: e2e_struct_params, "struct_params.ko", contains: ["10"]);
+e2e_example_test!(run: e2e_struct_predicates, "struct_predicates.ko", contains: ["Struct predicate contracts work!"]);
+e2e_example_test!(run: e2e_structs, "structs.ko", contains: ["10", "20"]);
+e2e_example_test!(run: e2e_time_env, "time_env.ko", contains: ["hello from kodo", "done"]);
+e2e_example_test!(run: e2e_traits, "traits.ko", contains: ["30"]);
+e2e_example_test!(run: e2e_type_inference, "type_inference.ko", contains: ["Type inference demo"]);
+e2e_example_test!(run: e2e_url_shortener, "url_shortener.ko", contains: ["URL Shortener", "Registered code 1"]);
+e2e_example_test!(run: e2e_while_loop, "while_loop.ko", contains: ["5"]);
+e2e_example_test!(run: e2e_word_counter, "word_counter.ko", contains: ["Word Counter", "43"]);
+
+// --- Previously segfaulting examples, now fixed ---
+
+e2e_example_test!(run: e2e_iterator_string, "iterator_string.ko", contains: ["5", "198"]);
+e2e_example_test!(run: e2e_ownership, "ownership.ko", contains: ["Hello from Kodo!", "84"]);
+e2e_example_test!(run: e2e_string_interpolation, "string_interpolation.ko", contains: ["Hello, World!"]);
+e2e_example_test!(run: e2e_todo_app, "todo_app.ko", contains: ["Todo List", "Write unit tests", "2"]);
+e2e_example_test!(run: e2e_tuples, "tuples.ko", contains: ["42", "99", "1", "2", "3", "10", "20"]);
+e2e_example_test!(run: e2e_advanced_traits, "advanced_traits.ko", contains: ["212", "100"]);
+e2e_example_test!(run: e2e_collections_demo, "collections_demo.ko", contains: ["3", "2", "1", "2", "100"]);
+
+// --- Examples that intentionally fail to compile ---
+
+e2e_example_test!(fail: e2e_type_errors, "type_errors.ko");
+
+// --- Examples that depend on external services (compile-only) ---
+
+e2e_example_test!(compile: e2e_http_client, "http_client.ko");

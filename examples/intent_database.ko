@@ -9,4 +9,9 @@ module intent_database {
         tables: ["users", "posts"],
         queries: [find_user, list_posts]
     }
+
+    fn main() -> Int {
+        println("intent database loaded")
+        return 0
+    }
 }

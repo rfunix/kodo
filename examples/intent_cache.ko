@@ -8,4 +8,9 @@ module intent_cache {
         strategy: "lru",
         max_size: 1000
     }
+
+    fn main() -> Int {
+        println("intent cache loaded")
+        return 0
+    }
 }

@@ -8,4 +8,9 @@ module intent_json_api {
         routes: ["/users", "/posts"],
         models: ["User", "Post"]
     }
+
+    fn main() -> Int {
+        println("intent json_api loaded")
+        return 0
+    }
 }

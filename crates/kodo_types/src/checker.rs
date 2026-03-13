@@ -1097,6 +1097,51 @@ impl TypeChecker {
                     Err(e) => errors.push(e),
                 }
             }
+
+            // Register default methods from the trait that are not overridden.
+            if let Some(ref trait_name) = impl_block.trait_name {
+                if let Some(defaults) = self.trait_default_methods.get(trait_name).cloned() {
+                    for (method_name, trait_method) in &defaults {
+                        let overridden = impl_block.methods.iter().any(|m| m.name == *method_name);
+                        if !overridden && trait_method.body.is_some() {
+                            let mangled = format!("{}_{method_name}", impl_block.type_name);
+                            let concrete_type = Type::Struct(impl_block.type_name.clone());
+                            let param_types: std::result::Result<Vec<_>, _> = trait_method
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    if p.name == "self" {
+                                        Ok(concrete_type.clone())
+                                    } else {
+                                        self.resolve_type_mono(&p.ty, p.span)
+                                    }
+                                })
+                                .collect();
+                            match param_types {
+                                Ok(pt) => {
+                                    match self.resolve_type_mono(
+                                        &trait_method.return_type,
+                                        trait_method.span,
+                                    ) {
+                                        Ok(ret_type) => {
+                                            self.method_lookup.insert(
+                                                (impl_block.type_name.clone(), method_name.clone()),
+                                                (mangled.clone(), pt.clone(), ret_type.clone()),
+                                            );
+                                            self.env.insert(
+                                                mangled,
+                                                Type::Function(pt, Box::new(ret_type)),
+                                            );
+                                        }
+                                        Err(e) => errors.push(e),
+                                    }
+                                }
+                                Err(e) => errors.push(e),
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

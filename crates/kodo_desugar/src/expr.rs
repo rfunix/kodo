@@ -3,7 +3,7 @@
 //! The main entry point is [`desugar_expr`], which dispatches sugar operators
 //! to the appropriate transform and recursively desugars sub-expressions.
 
-use kodo_ast::{BinOp, Expr, MatchArm, StringPart};
+use kodo_ast::{Expr, MatchArm, StringPart};
 
 use crate::operators::{desugar_is, desugar_null_coalesce, desugar_optional_chain, desugar_try};
 use crate::stmt::desugar_block;
@@ -80,10 +80,20 @@ pub(crate) fn desugar_expr(expr: Expr) -> Expr {
             operand: Box::new(desugar_expr(*operand)),
             span,
         },
-        // StringInterp: `f"hello {name}!"` =>
-        // "hello " + to_string(name) + "!"
-        // where to_string is resolved via method call rewriting for non-String types.
-        Expr::StringInterp { parts, span } => desugar_string_interp(parts, span),
+        // StringInterp is passed through to MIR lowering, which has type
+        // information needed to insert appropriate conversions (Int_to_string,
+        // Float64_to_string, Bool_to_string) for non-String interpolated
+        // expressions. Sub-expressions are still desugared recursively.
+        Expr::StringInterp { parts, span } => Expr::StringInterp {
+            parts: parts
+                .into_iter()
+                .map(|p| match p {
+                    StringPart::Literal(_) => p,
+                    StringPart::Expr(e) => StringPart::Expr(Box::new(desugar_expr(*e))),
+                })
+                .collect(),
+            span,
+        },
         Expr::TupleLit(elems, span) => {
             Expr::TupleLit(elems.into_iter().map(desugar_expr).collect(), span)
         }
@@ -166,73 +176,51 @@ fn desugar_compound_expr(expr: Expr) -> Expr {
     }
 }
 
-/// Desugars a string interpolation expression into a chain of string
-/// concatenation using `+`.
-///
-/// `f"hello {name}!"` becomes `"hello " + name + "!"`
-///
-/// Each expression part is concatenated directly. Non-string expressions must
-/// have `.to_string()` called explicitly within the `{...}` braces — this is
-/// consistent with Kodo's "no implicit conversions" principle.
-fn desugar_string_interp(parts: Vec<StringPart>, span: kodo_ast::Span) -> Expr {
-    let mut exprs: Vec<Expr> = Vec::with_capacity(parts.len());
-    for part in parts {
-        match part {
-            StringPart::Literal(s) => {
-                exprs.push(Expr::StringLit(s, span));
-            }
-            StringPart::Expr(expr) => {
-                exprs.push(desugar_expr(*expr));
-            }
-        }
-    }
-
-    // Build a left-associative chain of BinaryOp::Add
-    let mut result = exprs.remove(0);
-    for expr in exprs {
-        result = Expr::BinaryOp {
-            left: Box::new(result),
-            op: BinOp::Add,
-            right: Box::new(expr),
-            span,
-        };
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use kodo_ast::Span;
 
     #[test]
-    fn desugar_string_interp_literal_only() {
-        let span = Span::new(0, 10);
-        let parts = vec![StringPart::Literal("hello".to_string())];
-        let result = desugar_string_interp(parts, span);
-        assert!(
-            matches!(result, Expr::StringLit(ref s, _) if s == "hello"),
-            "single literal part should produce StringLit"
-        );
-    }
-
-    #[test]
-    fn desugar_string_interp_with_expr() {
+    fn desugar_string_interp_passes_through() {
         let span = Span::new(0, 20);
         let parts = vec![
             StringPart::Literal("hello ".to_string()),
             StringPart::Expr(Box::new(Expr::Ident("name".to_string(), span))),
             StringPart::Literal("!".to_string()),
         ];
-        let result = desugar_string_interp(parts, span);
-        assert!(matches!(result, Expr::BinaryOp { op: BinOp::Add, .. }));
+        let expr = Expr::StringInterp { parts, span };
+        let result = desugar_expr(expr);
+        // StringInterp is preserved (handled by MIR lowering for type-aware conversion).
+        assert!(matches!(result, Expr::StringInterp { .. }));
     }
 
     #[test]
-    fn desugar_string_interp_single_expr() {
-        let span = Span::new(0, 10);
-        let parts = vec![StringPart::Expr(Box::new(Expr::IntLit(42, span)))];
-        let result = desugar_string_interp(parts, span);
-        assert!(matches!(result, Expr::IntLit(42, _)));
+    fn desugar_string_interp_desugars_sub_exprs() {
+        let span = Span::new(0, 20);
+        // A NullCoalesce inside StringInterp should be desugared.
+        let nc = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("x".to_string(), span)),
+            right: Box::new(Expr::IntLit(0, span)),
+            span,
+        };
+        let parts = vec![
+            StringPart::Literal("val: ".to_string()),
+            StringPart::Expr(Box::new(nc)),
+        ];
+        let expr = Expr::StringInterp { parts, span };
+        let result = desugar_expr(expr);
+        // The outer StringInterp is preserved, but sub-expression should be desugared.
+        match result {
+            Expr::StringInterp { parts, .. } => {
+                assert_eq!(parts.len(), 2);
+                // The second part should be a desugared Match, not NullCoalesce.
+                match &parts[1] {
+                    StringPart::Expr(e) => assert!(matches!(e.as_ref(), Expr::Match { .. })),
+                    _ => panic!("expected Expr part"),
+                }
+            }
+            _ => panic!("expected StringInterp"),
+        }
     }
 }

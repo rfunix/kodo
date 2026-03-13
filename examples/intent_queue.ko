@@ -8,4 +8,9 @@ module intent_queue {
         backend: "memory",
         topics: ["events", "tasks"]
     }
+
+    fn main() -> Int {
+        println("intent queue loaded")
+        return 0
+    }
 }

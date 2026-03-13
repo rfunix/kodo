@@ -71,11 +71,25 @@ pub(crate) fn infer_value_type(value: &Value, var_map: &VarMap) -> Option<Type> 
 }
 
 /// Expands a MIR [`Value`] known to be a String into a `(ptr, len)` pair of Cranelift values.
+///
+/// Handles `StringConst`, `Local` with a `_String` stack slot, and nested
+/// `BinOp(Add, ...)` of strings (chained concatenation like `a + b + c`).
 pub(crate) fn expand_string_value(
     value: &Value,
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     var_map: &VarMap,
+) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value)> {
+    expand_string_value_with_builtins(value, builder, module, var_map, None)
+}
+
+/// Inner implementation that optionally has access to builtins for nested concat.
+pub(crate) fn expand_string_value_with_builtins(
+    value: &Value,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    var_map: &VarMap,
+    builtins: Option<&std::collections::HashMap<String, crate::builtins::BuiltinInfo>>,
 ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value)> {
     match value {
         Value::StringConst(s) => {
@@ -103,6 +117,69 @@ pub(crate) fn expand_string_value(
             let ptr = builder.use_var(var);
             let len = builder.ins().iconst(types::I64, 0);
             Ok((ptr, len))
+        }
+        Value::BinOp(kodo_ast::BinOp::Add, lhs, rhs) => {
+            // Nested string concatenation: `a + b` where a or b is a String.
+            // Compute the concat into a temp stack slot, then return (ptr, len).
+            if let Some(builtins) = builtins {
+                let (lhs_ptr, lhs_len) = expand_string_value_with_builtins(
+                    lhs,
+                    builder,
+                    module,
+                    var_map,
+                    Some(builtins),
+                )?;
+                let (rhs_ptr, rhs_len) = expand_string_value_with_builtins(
+                    rhs,
+                    builder,
+                    module,
+                    var_map,
+                    Some(builtins),
+                )?;
+
+                let out_slot =
+                    builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                        16,
+                        0,
+                    ));
+                let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+                let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+
+                let concat_info = builtins.get("String_concat").ok_or_else(|| {
+                    CodegenError::Unsupported("String_concat builtin not found".to_string())
+                })?;
+                let func_ref = module.declare_func_in_func(concat_info.func_id, builder.func);
+                builder.ins().call(
+                    func_ref,
+                    &[
+                        lhs_ptr,
+                        lhs_len,
+                        rhs_ptr,
+                        rhs_len,
+                        out_ptr_addr,
+                        out_len_addr,
+                    ],
+                );
+
+                let result_ptr = builder.ins().load(
+                    types::I64,
+                    cranelift_codegen::ir::MemFlags::new(),
+                    out_ptr_addr,
+                    0,
+                );
+                let result_len = builder.ins().load(
+                    types::I64,
+                    cranelift_codegen::ir::MemFlags::new(),
+                    out_len_addr,
+                    0,
+                );
+                Ok((result_ptr, result_len))
+            } else {
+                Err(CodegenError::Unsupported(
+                    "cannot expand nested string concat without builtins context".to_string(),
+                ))
+            }
         }
         _ => Err(CodegenError::Unsupported(
             "cannot expand non-string value as string".to_string(),
@@ -275,6 +352,10 @@ fn resolve_enum_addr(
 }
 
 /// Translates a logical NOT value by XOR-ing with 1.
+///
+/// The inner value may be I8 (Bool) or I64 (comparison result that was
+/// `uextend`-ed). We match the `iconst` type to the actual operand type
+/// so that `bxor` sees two values of the same width.
 #[allow(clippy::too_many_arguments)]
 fn translate_not_value(
     inner: &Value,
@@ -294,7 +375,8 @@ fn translate_not_value(
         var_map,
         struct_layouts,
     )?;
-    let one = builder.ins().iconst(types::I8, 1);
+    let val_ty = builder.func.dfg.value_type(val);
+    let one = builder.ins().iconst(val_ty, 1);
     Ok(builder.ins().bxor(val, one))
 }
 

@@ -425,6 +425,29 @@ pub unsafe extern "C" fn kodo_float64_to_string(
     }
 }
 
+/// Converts a boolean to its string representation ("true" or "false").
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_bool_to_string(
+    value: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let s = if value != 0 { "true" } else { "false" };
+    let boxed = s.to_string().into_boxed_str();
+    let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
 /// Converts a 64-bit float to an integer (truncates toward zero).
 #[no_mangle]
 pub extern "C" fn kodo_float64_to_int(value: f64) -> i64 {
@@ -956,6 +979,24 @@ mod tests {
         unsafe { kodo_int_to_string(42, &mut out_ptr, &mut out_len) };
         let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
         assert_eq!(std::str::from_utf8(result).unwrap(), "42");
+    }
+
+    #[test]
+    fn bool_to_string_true() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_bool_to_string(1, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "true");
+    }
+
+    #[test]
+    fn bool_to_string_false() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_bool_to_string(0, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "false");
     }
 
     #[test]

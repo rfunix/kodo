@@ -272,6 +272,23 @@ fn declare_locals(
                 var_map.vars.insert(local.id, var);
                 var_map.var_types.insert(local.id, types::I64);
             }
+            Type::Tuple(ref elems) => {
+                // Allocate a stack slot for tuple: discriminant (8) + N fields (8 each).
+                #[allow(clippy::cast_possible_truncation)]
+                let total_size = 8 + (elems.len() as u32) * 8;
+                let slot =
+                    builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                        total_size,
+                        0,
+                    ));
+                var_map
+                    .stack_slots
+                    .insert(local.id, (slot, "__Tuple".to_string()));
+                let var = builder.declare_var(types::I64);
+                var_map.vars.insert(local.id, var);
+                var_map.var_types.insert(local.id, types::I64);
+            }
             _ => {
                 let cl_ty = cranelift_type(&local.ty);
                 let var = builder.declare_var(cl_ty);
@@ -353,7 +370,11 @@ fn initialize_non_param_locals(
         }
         let var = var_map.get(local.id)?;
         let ty = cranelift_type(&local.ty);
-        let zero = builder.ins().iconst(ty, 0);
+        let zero = if ty.is_float() {
+            builder.ins().f64const(0.0)
+        } else {
+            builder.ins().iconst(ty, 0)
+        };
         builder.def_var(var, zero);
     }
     Ok(())

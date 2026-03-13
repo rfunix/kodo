@@ -16,9 +16,13 @@ use kodo_types::Type;
 
 use crate::builtins::BuiltinInfo;
 use crate::function::{HeapKind, VarMap};
-use crate::layout::{EnumLayout, StructLayout, STRING_LEN_OFFSET, STRING_PTR_OFFSET};
+use crate::layout::{
+    EnumLayout, StructLayout, STRING_LAYOUT_SIZE, STRING_LEN_OFFSET, STRING_PTR_OFFSET,
+};
 use crate::module::{cranelift_type, is_unit};
-use crate::value::{create_string_data, expand_string_value, infer_value_type, translate_value};
+use crate::value::{
+    create_string_data, expand_string_value_with_builtins, infer_value_type, translate_value,
+};
 use crate::{CodegenError, Result};
 
 /// Returns true if the callee is a builtin that needs special handling
@@ -48,6 +52,7 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "list_join"
             | "Int_to_string"
             | "Float64_to_string"
+            | "Bool_to_string"
             | "file_exists"
             | "file_read"
             | "file_write"
@@ -78,6 +83,7 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "String_replace"
             | "Int_to_string"
             | "Float64_to_string"
+            | "Bool_to_string"
             | "http_get"
             | "http_post"
             | "json_get_string"
@@ -448,8 +454,10 @@ fn translate_string_concat_assign(
     builtins: &HashMap<String, BuiltinInfo>,
     var_map: &mut VarMap,
 ) -> Result<()> {
-    let (lhs_ptr, lhs_len) = expand_string_value(lhs, builder, module, var_map)?;
-    let (rhs_ptr, rhs_len) = expand_string_value(rhs, builder, module, var_map)?;
+    let (lhs_ptr, lhs_len) =
+        expand_string_value_with_builtins(lhs, builder, module, var_map, Some(builtins))?;
+    let (rhs_ptr, rhs_len) =
+        expand_string_value_with_builtins(rhs, builder, module, var_map, Some(builtins))?;
     let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
         cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
         16,
@@ -837,7 +845,7 @@ fn translate_composite_copy(
 }
 
 /// Translates a Call instruction.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn translate_call(
     dest: LocalId,
     callee: &str,
@@ -938,6 +946,30 @@ fn translate_call(
                 arg_vals.push(addr);
                 continue;
             }
+        }
+        // StringConst passed to a user function expecting composite String:
+        // create a temp 16-byte stack slot with (ptr, len) and pass its address.
+        if let Value::StringConst(s) = arg {
+            let data_id = create_string_data(module, s)?;
+            let gv = module.declare_data_in_func(data_id, builder.func);
+            let ptr = builder.ins().symbol_value(types::I64, gv);
+            #[allow(clippy::cast_possible_wrap)]
+            let len = builder.ins().iconst(types::I64, s.len() as i64);
+            let tmp_slot =
+                builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                    STRING_LAYOUT_SIZE,
+                    0,
+                ));
+            let tmp_addr = builder.ins().stack_addr(types::I64, tmp_slot, 0);
+            builder
+                .ins()
+                .store(MemFlags::new(), ptr, tmp_addr, STRING_PTR_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), len, tmp_addr, STRING_LEN_OFFSET);
+            arg_vals.push(tmp_addr);
+            continue;
         }
         arg_vals.push(translate_value(
             arg,
@@ -1168,6 +1200,11 @@ fn emit_string_builtin_call(
 }
 
 /// Expands a single argument for a string builtin call.
+///
+/// `StringConst` values and `Local` values with `_String` stack slots are
+/// expanded to `(ptr, len)` pairs. `BinOp(Add, ...)` with String operands
+/// (from f-string interpolation or chained concat) are computed into a temp
+/// stack slot and then expanded.
 #[allow(clippy::too_many_arguments)]
 fn expand_builtin_arg(
     arg: &Value,
@@ -1187,6 +1224,26 @@ fn expand_builtin_arg(
         let len = builder.ins().iconst(types::I64, s.len() as i64);
         arg_vals.push(ptr);
         arg_vals.push(len);
+    } else if let Value::BinOp(kodo_ast::BinOp::Add, lhs, rhs) = arg {
+        // Check if this is a String concat (e.g. f-string interpolation result).
+        let lhs_ty = infer_value_type(lhs, var_map);
+        let rhs_ty = infer_value_type(rhs, var_map);
+        if lhs_ty == Some(Type::String) || rhs_ty == Some(Type::String) {
+            let (ptr, len) =
+                expand_string_value_with_builtins(arg, builder, module, var_map, Some(builtins))?;
+            arg_vals.push(ptr);
+            arg_vals.push(len);
+        } else {
+            arg_vals.push(translate_value(
+                arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?);
+        }
     } else if let Value::Local(local_id) = arg {
         if let Some((slot, ref slot_name)) = var_map.stack_slots.get(local_id) {
             if slot_name == "_String" {

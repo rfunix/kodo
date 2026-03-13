@@ -48,4 +48,12 @@ module break_continue {
         }
         return total
     }
+
+    fn main() -> Int {
+        let result: Int = search_while(100)
+        print_int(result)
+        let odd_sum: Int = skip_evens(10)
+        print_int(odd_sum)
+        return 0
+    }
 }

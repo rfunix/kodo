@@ -33,7 +33,10 @@ fn main() {
         // Build candidates: with and without target triple.
         let mut candidates = vec![
             // Cross-compile: target/<triple>/<profile>/
-            target_root.join(&target).join(profile).join("libkodo_runtime.a"),
+            target_root
+                .join(&target)
+                .join(profile)
+                .join("libkodo_runtime.a"),
         ];
         // Native compile: target/<profile>/
         candidates.push(target_root.join(profile).join("libkodo_runtime.a"));

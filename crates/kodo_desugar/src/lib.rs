@@ -886,7 +886,8 @@ mod tests {
         desugar_module(&mut module);
         let body = &module.functions[0].body.stmts;
         assert_eq!(body.len(), 1);
-        assert!(matches!(&body[0], Stmt::Expr(Expr::BinaryOp { .. })));
+        // StringInterp is now preserved through desugar (handled in MIR lowering).
+        assert!(matches!(&body[0], Stmt::Expr(Expr::StringInterp { .. })));
     }
 
     // Additional modularization verification tests

@@ -440,6 +440,7 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     for name in &[
         "Int_to_string",
         "Float64_to_string",
+        "Bool_to_string",
         "String_trim",
         "String_to_upper",
         "String_to_lower",
@@ -1901,6 +1902,7 @@ mod tests {
         // String-returning builtins
         assert_eq!(types.get("Int_to_string"), Some(&Type::String));
         assert_eq!(types.get("Float64_to_string"), Some(&Type::String));
+        assert_eq!(types.get("Bool_to_string"), Some(&Type::String));
         assert_eq!(types.get("String_trim"), Some(&Type::String));
         assert_eq!(types.get("String_to_upper"), Some(&Type::String));
         assert_eq!(types.get("String_to_lower"), Some(&Type::String));

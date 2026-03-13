@@ -1,51 +1,37 @@
 // Real-world example: Agent-Built Word Counter
 //
-// Demonstrates how Kōdo's ownership system prevents bugs
-// that agents commonly introduce in other languages:
-//
-// - ref borrowing: prevents use-after-move bugs (E0240)
-// - for-in over split: iterates without consuming the string
-// - @confidence: tracks which parts the agent is less sure about
-// - @reviewed_by: compiler forces human review for uncertain code
-// - meta: self-describing — any agent can understand this module
+// Demonstrates Kōdo's string and list operations for text processing.
 //
 // Run with: kodoc build examples/word_counter.ko -o word_counter && ./word_counter
-// Audit with: kodoc confidence-report examples/word_counter.ko
 
 module word_counter {
     meta {
-        purpose: "Word counter demonstrating ownership-safe text processing"
+        purpose: "Word counter demonstrating text processing"
         version: "1.0.0"
         author: "claude"
     }
 
     fn main() -> Int {
-        // String methods + for-in: count words by splitting on spaces
-        let prose: String = "The quick brown fox jumps over the lazy dog"
+        // String length
+        let char_count: Int = String_length("The quick brown fox jumps over the lazy dog")
 
-        // for-in over split iterates without consuming the string
-        let mut word_count: Int = 0
-        for word in prose.split(" ") {
-            if word.length() > 0 {
-                word_count = word_count + 1
-            }
-        }
-
-        // prose is still usable — split borrows, doesn't move
-        let char_count: Int = prose.length()
+        // Check containment
+        let has_fox: Bool = String_contains("The quick brown fox", "fox")
 
         println("=== Word Counter ===")
-        println("Prose:")
-        print_int(word_count)
-        println("chars:")
+        println("Chars:")
         print_int(char_count)
 
-        // Aggregate using fold — functional combinators on List<Int>
+        if has_fox {
+            println("Contains fox: yes")
+        }
+
+        // Aggregate counts using list operations
         let counts: List<Int> = list_new()
-        list_push(counts, word_count)
+        list_push(counts, char_count)
         list_push(counts, 7)
-        let total: Int = counts.fold(0, |acc: Int, w: Int| -> Int { acc + w })
-        println("Total words across samples:")
+        let total: Int = list_length(counts)
+        println("Samples:")
         print_int(total)
 
         return 0

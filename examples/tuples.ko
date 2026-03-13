@@ -1,23 +1,33 @@
 module tuples {
     meta { purpose: "Demonstrate tuple types, literals, indexing, and destructuring" }
 
-    fn make_pair(a: Int, b: String) -> (Int, String) {
+    fn make_pair(a: Int, b: Int) -> (Int, Int) {
         return (a, b)
     }
 
-    fn main() {
-        let pair = (42, "hello")
+    fn main() -> Int {
+        // Tuple literal and field access
+        let pair = (42, 99)
         let first = pair.0
         let second = pair.1
 
+        // Tuple destructuring
         let triple = (1, 2, 3)
         let (a, b, c) = triple
 
-        let result = make_pair(10, "world")
-        let (x, y) = result
+        // Function returning a tuple
+        let result = make_pair(10, 20)
+        let x = result.0
+        let y = result.1
 
         print_int(first)
+        print_int(second)
         print_int(a)
+        print_int(b)
+        print_int(c)
         print_int(x)
+        print_int(y)
+
+        return 0
     }
 }

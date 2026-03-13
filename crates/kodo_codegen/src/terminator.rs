@@ -19,7 +19,9 @@ use crate::layout::{
     EnumLayout, StructLayout, STRING_LAYOUT_SIZE, STRING_LEN_OFFSET, STRING_PTR_OFFSET,
 };
 use crate::module::{cranelift_type, is_composite, is_unit};
-use crate::value::{create_string_data, translate_value};
+use crate::value::{
+    create_string_data, expand_string_value_with_builtins, infer_value_type, translate_value,
+};
 use crate::{CodegenError, Result};
 
 /// Translates a MIR terminator.
@@ -184,16 +186,7 @@ fn translate_composite_return(
     // sret: copy local struct/enum data to the sret pointer, then return void.
     if let Some(sret_v) = sret_var {
         let sret_ptr = builder.use_var(sret_v);
-        // Get the source address (the local's stack slot).
-        let src_addr = translate_value(
-            value,
-            builder,
-            module,
-            func_ids,
-            builtins,
-            var_map,
-            struct_layouts,
-        )?;
+
         // For StringConst return value, store ptr+len directly into sret.
         if let Value::StringConst(s) = value {
             let data_id = create_string_data(module, s)?;
@@ -207,11 +200,52 @@ fn translate_composite_return(
             builder
                 .ins()
                 .store(MemFlags::new(), len, sret_ptr, STRING_LEN_OFFSET);
+        } else if let Value::BinOp(kodo_ast::BinOp::Add, lhs, rhs) = value {
+            // String concatenation returned directly — materialize into sret.
+            let lhs_ty = infer_value_type(lhs, var_map);
+            let rhs_ty = infer_value_type(rhs, var_map);
+            if lhs_ty == Some(Type::String) || rhs_ty == Some(Type::String) {
+                let (ptr, len) = expand_string_value_with_builtins(
+                    value,
+                    builder,
+                    module,
+                    var_map,
+                    Some(builtins),
+                )?;
+                builder
+                    .ins()
+                    .store(MemFlags::new(), ptr, sret_ptr, STRING_PTR_OFFSET);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), len, sret_ptr, STRING_LEN_OFFSET);
+            } else {
+                let src_addr = translate_value(
+                    value,
+                    builder,
+                    module,
+                    func_ids,
+                    builtins,
+                    var_map,
+                    struct_layouts,
+                )?;
+                builder.ins().store(MemFlags::new(), src_addr, sret_ptr, 0);
+            }
         } else {
+            let src_addr = translate_value(
+                value,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
             let slot_size = match &mir_fn.return_type {
                 Type::String => STRING_LAYOUT_SIZE,
                 Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
                 Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
+                #[allow(clippy::cast_possible_truncation)]
+                Type::Tuple(elems) => 8 + (elems.len() as u32) * 8,
                 _ => 8,
             };
             let num_words = slot_size.div_ceil(8);
