@@ -1,0 +1,22 @@
+module intent_cli {
+    meta {
+        purpose: "Demonstrates CLI tool intent resolver"
+        version: "1.0.0"
+    }
+
+    fn do_greet() -> Int {
+        println("Hello from CLI!")
+        return 0
+    }
+
+    fn do_version() -> Int {
+        println("mytool v1.0.0")
+        return 0
+    }
+
+    intent cli {
+        name: "mytool"
+        version: "1.0.0"
+        commands: [["greet", "do_greet", "Print a greeting"], ["version", "do_version", "Show version"]]
+    }
+}

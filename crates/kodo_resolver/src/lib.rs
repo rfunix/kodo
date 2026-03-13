@@ -39,8 +39,8 @@
 #![warn(clippy::pedantic)]
 
 use kodo_ast::{
-    Block, Expr, Function, IntentConfigValue, IntentDecl, NodeId, Ownership, Param, Span, Stmt,
-    TypeExpr, Visibility,
+    BinOp, Block, Expr, Function, IntentConfigValue, IntentDecl, NodeId, Ownership, Param, Span,
+    Stmt, TypeExpr, Visibility,
 };
 use thiserror::Error;
 
@@ -127,7 +127,7 @@ impl kodo_ast::Diagnostic for ResolverError {
     fn suggestion(&self) -> Option<String> {
         match self {
             Self::NoResolver { .. } => {
-                Some("available intents: console_app, math_module, serve_http, database, json_api, cache, queue".to_string())
+                Some("available intents: console_app, math_module, serve_http, database, json_api, cache, queue, cli, http_server, file_processor, worker".to_string())
             }
             Self::UnknownConfig { intent, .. } => {
                 let valid_keys = valid_config_keys(intent);
@@ -199,6 +199,10 @@ impl Resolver {
         resolver.register(Box::new(JsonApiStrategy));
         resolver.register(Box::new(CacheStrategy));
         resolver.register(Box::new(QueueStrategy));
+        resolver.register(Box::new(CliStrategy));
+        resolver.register(Box::new(HttpServerStrategy));
+        resolver.register(Box::new(FileProcessorStrategy));
+        resolver.register(Box::new(WorkerStrategy));
         resolver
     }
 
@@ -259,9 +263,13 @@ fn valid_config_keys(intent: &str) -> Vec<&'static str> {
         "math_module" => vec!["functions"],
         "serve_http" => vec!["port", "routes"],
         "database" => vec!["driver", "tables", "queries"],
-        "json_api" => vec!["routes", "models"],
+        "json_api" => vec!["routes", "models", "port", "base_path", "endpoints"],
         "cache" => vec!["strategy", "max_size"],
         "queue" => vec!["backend", "topics"],
+        "cli" => vec!["name", "version", "commands"],
+        "http_server" => vec!["port", "routes", "not_found"],
+        "file_processor" => vec!["input", "output", "transform"],
+        "worker" => vec!["task", "max_iterations", "on_error"],
         _ => vec![],
     }
 }
@@ -773,11 +781,21 @@ impl ResolverStrategy for JsonApiStrategy {
     }
 
     fn valid_keys(&self) -> &[&str] {
-        &["routes", "models"]
+        &["routes", "models", "port", "base_path", "endpoints"]
     }
 
     fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
         let span = intent.span;
+
+        // New mode: if "endpoints" is present, generate a real HTTP server.
+        let endpoints = get_nested_list_config(intent, "endpoints");
+        if !endpoints.is_empty() {
+            let port = get_int_config(intent, "port").unwrap_or(8080);
+            let base_path = get_string_config(intent, "base_path").unwrap_or("");
+            return Ok(resolve_json_api_server(span, port, base_path, &endpoints));
+        }
+
+        // Legacy mode: generate stubs from routes/models.
         let routes = get_string_list_config(intent, "routes");
         let models = get_string_list_config(intent, "models");
 
@@ -1269,6 +1287,764 @@ fn generate_queue_consume(topic: &str, span: Span) -> Function {
     }
 }
 
+// ===== Helper: extract FnRef config value =====
+
+/// Extracts a function reference name from an intent config entry.
+fn get_fn_ref_config<'a>(intent: &'a IntentDecl, key: &str) -> Option<&'a str> {
+    for entry in &intent.config {
+        if entry.key == key {
+            if let IntentConfigValue::FnRef(ref s, _) = entry.value {
+                return Some(s.as_str());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts nested lists (list of lists) from an intent config entry.
+///
+/// Each inner list is a `Vec<IntentConfigValue>`. Non-list items are skipped.
+fn get_nested_list_config(intent: &IntentDecl, key: &str) -> Vec<Vec<IntentConfigValue>> {
+    for entry in &intent.config {
+        if entry.key == key {
+            if let IntentConfigValue::List(ref items, _) = entry.value {
+                return items
+                    .iter()
+                    .filter_map(|item| {
+                        if let IntentConfigValue::List(ref inner, _) = item {
+                            Some(inner.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Extracts a string from an `IntentConfigValue`.
+fn config_value_as_str(v: &IntentConfigValue) -> Option<&str> {
+    match v {
+        IntentConfigValue::StringLit(s, _) | IntentConfigValue::FnRef(s, _) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+// ===== Helper: generate common AST patterns =====
+
+/// Builds a `let name: type = expr` statement.
+fn make_let(name: &str, ty: TypeExpr, value: Expr, span: Span) -> Stmt {
+    Stmt::Let {
+        span,
+        mutable: false,
+        name: name.to_string(),
+        ty: Some(ty),
+        value,
+    }
+}
+
+/// Builds a function call expression.
+fn make_call(callee: &str, args: Vec<Expr>, span: Span) -> Expr {
+    Expr::Call {
+        callee: Box::new(Expr::Ident(callee.to_string(), span)),
+        args,
+        span,
+    }
+}
+
+/// Builds `println(msg)` as a statement.
+fn make_println(msg: &str, span: Span) -> Stmt {
+    Stmt::Expr(make_call(
+        "println",
+        vec![Expr::StringLit(msg.to_string(), span)],
+        span,
+    ))
+}
+
+/// Builds a simple function with given body statements and return type.
+fn make_function(name: &str, return_type: TypeExpr, body: Vec<Stmt>, span: Span) -> Function {
+    Function {
+        id: NodeId(0),
+        span,
+        name: name.to_string(),
+        visibility: Visibility::Private,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type,
+        requires: vec![],
+        ensures: vec![],
+        body: Block { span, stmts: body },
+    }
+}
+
+/// Builds an if-else chain from a list of (condition, body) pairs and an else body.
+fn make_if_chain(branches: Vec<(Expr, Vec<Stmt>)>, else_body: &[Stmt], span: Span) -> Expr {
+    let mut result: Option<Expr> = None;
+
+    // Build from the end backwards
+    for (condition, body) in branches.into_iter().rev() {
+        let else_branch = if let Some(inner) = result.take() {
+            Some(Block {
+                span,
+                stmts: vec![Stmt::Expr(inner)],
+            })
+        } else if else_body.is_empty() {
+            None
+        } else {
+            Some(Block {
+                span,
+                stmts: else_body.to_vec(),
+            })
+        };
+
+        result = Some(Expr::If {
+            condition: Box::new(condition),
+            then_branch: Block { span, stmts: body },
+            else_branch,
+            span,
+        });
+    }
+
+    result.unwrap_or(Expr::IntLit(0, span))
+}
+
+// ===== Strategy: cli =====
+
+/// Generates a CLI tool with command dispatch using `args()` and `exit()`.
+///
+/// Config keys:
+/// - `name` (string, optional): Tool name for help text. Default: `"tool"`.
+/// - `version` (string, optional): Version string. Default: `"0.1.0"`.
+/// - `commands` (list of lists): Each sub-list is `[command_name, handler_fn, description]`.
+pub struct CliStrategy;
+
+impl ResolverStrategy for CliStrategy {
+    fn handles(&self) -> &[&str] {
+        &["cli"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["name", "version", "commands"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let name = get_string_config(intent, "name").unwrap_or("tool");
+        let version = get_string_config(intent, "version").unwrap_or("0.1.0");
+        let commands = get_nested_list_config(intent, "commands");
+
+        // Parse commands: each is [name_str, handler_fn_ref, description_str]
+        let mut cmd_entries: Vec<(String, String, String)> = Vec::new();
+        for cmd in &commands {
+            if cmd.len() >= 2 {
+                let cmd_name = config_value_as_str(&cmd[0])
+                    .unwrap_or("unknown")
+                    .to_string();
+                let handler = config_value_as_str(&cmd[1])
+                    .unwrap_or("unknown")
+                    .to_string();
+                let desc = if cmd.len() >= 3 {
+                    config_value_as_str(&cmd[2]).unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+                cmd_entries.push((cmd_name, handler, desc));
+            }
+        }
+
+        let mut generated = Vec::new();
+
+        // Generate cli_help() function
+        let help_func = generate_cli_help(name, version, &cmd_entries, span);
+        generated.push(help_func);
+
+        // Generate kodo_main() with dispatch
+        let main_func = generate_cli_main(&cmd_entries, span);
+        generated.push(main_func);
+
+        let cmd_desc: Vec<String> = cmd_entries
+            .iter()
+            .map(|(n, h, d)| format!("  - `{n}` → `{h}()` — {d}"))
+            .collect();
+
+        let description = format!(
+            "Generated CLI tool `{name}` v{version} with {} commands:\n{}",
+            cmd_entries.len(),
+            cmd_desc.join("\n")
+        );
+
+        Ok(ResolvedIntent {
+            generated_functions: generated,
+            generated_types: vec![],
+            description,
+        })
+    }
+}
+
+/// Generates the `cli_help()` function that prints usage info.
+fn generate_cli_help(
+    name: &str,
+    version: &str,
+    commands: &[(String, String, String)],
+    span: Span,
+) -> Function {
+    let mut stmts = Vec::new();
+    stmts.push(make_println(&format!("{name} v{version}"), span));
+    stmts.push(make_println("", span));
+    stmts.push(make_println("Commands:", span));
+    for (cmd_name, _, desc) in commands {
+        stmts.push(make_println(&format!("  {cmd_name}  {desc}"), span));
+    }
+    stmts.push(make_println("  help  Show this help message", span));
+
+    make_function("cli_help", TypeExpr::Unit, stmts, span)
+}
+
+/// Generates the `kodo_main()` function with arg parsing and command dispatch.
+fn generate_cli_main(commands: &[(String, String, String)], span: Span) -> Function {
+    let mut stmts = Vec::new();
+
+    // let cmd: String = "help"
+    stmts.push(make_let(
+        "cmd",
+        TypeExpr::Named("String".to_string()),
+        Expr::StringLit("help".to_string(), span),
+        span,
+    ));
+
+    // Build if-else chain for each command
+    let mut branches: Vec<(Expr, Vec<Stmt>)> = Vec::new();
+    for (cmd_name, handler, _) in commands {
+        let condition = Expr::BinaryOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Ident("cmd".to_string(), span)),
+            right: Box::new(Expr::StringLit(cmd_name.clone(), span)),
+            span,
+        };
+        let body = vec![Stmt::Expr(make_call(handler, vec![], span))];
+        branches.push((condition, body));
+    }
+
+    // Add "help" command
+    let help_condition = Expr::BinaryOp {
+        op: BinOp::Eq,
+        left: Box::new(Expr::Ident("cmd".to_string(), span)),
+        right: Box::new(Expr::StringLit("help".to_string(), span)),
+        span,
+    };
+    branches.push((
+        help_condition,
+        vec![Stmt::Expr(make_call("cli_help", vec![], span))],
+    ));
+
+    // Else: unknown command
+    let else_body = vec![
+        make_println("Unknown command", span),
+        Stmt::Expr(make_call("cli_help", vec![], span)),
+        Stmt::Expr(make_call("exit", vec![Expr::IntLit(1, span)], span)),
+    ];
+
+    stmts.push(Stmt::Expr(make_if_chain(branches, &else_body, span)));
+    stmts.push(Stmt::Return {
+        span,
+        value: Some(Expr::IntLit(0, span)),
+    });
+
+    make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
+}
+
+// ===== Strategy: http_server =====
+
+/// Generates a real HTTP server with routing using `http_server_*` builtins.
+///
+/// Config keys:
+/// - `port` (integer, optional): Port to listen on. Default: `8080`.
+/// - `routes` (list of lists): Each sub-list is `[method, path, handler_fn]`.
+/// - `not_found` (string, optional): 404 response body. Default: `"Not Found"`.
+pub struct HttpServerStrategy;
+
+impl ResolverStrategy for HttpServerStrategy {
+    fn handles(&self) -> &[&str] {
+        &["http_server"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["port", "routes", "not_found"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let port = get_int_config(intent, "port").unwrap_or(8080);
+        let not_found = get_string_config(intent, "not_found").unwrap_or("Not Found");
+        let routes = get_nested_list_config(intent, "routes");
+
+        // Parse routes: each is [method, path, handler_fn]
+        let mut route_entries: Vec<(String, String, String)> = Vec::new();
+        for route in &routes {
+            if route.len() >= 3 {
+                let method = config_value_as_str(&route[0]).unwrap_or("GET").to_string();
+                let path = config_value_as_str(&route[1]).unwrap_or("/").to_string();
+                let handler = config_value_as_str(&route[2])
+                    .unwrap_or("handler")
+                    .to_string();
+                route_entries.push((method, path, handler));
+            }
+        }
+
+        let main_func = generate_http_server_main(port, not_found, &route_entries, span);
+
+        let route_desc: Vec<String> = route_entries
+            .iter()
+            .map(|(m, p, h)| format!("  - {m} {p} → `{h}()`"))
+            .collect();
+
+        let description = format!(
+            "Generated HTTP server on port {port} with {} routes:\n{}",
+            route_entries.len(),
+            route_desc.join("\n")
+        );
+
+        Ok(ResolvedIntent {
+            generated_functions: vec![main_func],
+            generated_types: vec![],
+            description,
+        })
+    }
+}
+
+/// Builds a single route branch: `if method == M && path == P { resp = handler(); respond(req, 200, resp) }`.
+fn make_route_branch(method: &str, path: &str, handler: &str, span: Span) -> (Expr, Vec<Stmt>) {
+    let method_cmp = Expr::BinaryOp {
+        op: BinOp::Eq,
+        left: Box::new(Expr::Ident("method".to_string(), span)),
+        right: Box::new(Expr::StringLit(method.to_string(), span)),
+        span,
+    };
+    let path_cmp = Expr::BinaryOp {
+        op: BinOp::Eq,
+        left: Box::new(Expr::Ident("path".to_string(), span)),
+        right: Box::new(Expr::StringLit(path.to_string(), span)),
+        span,
+    };
+    let condition = Expr::BinaryOp {
+        op: BinOp::And,
+        left: Box::new(method_cmp),
+        right: Box::new(path_cmp),
+        span,
+    };
+    let body = vec![
+        make_let(
+            "resp",
+            TypeExpr::Named("String".to_string()),
+            make_call(handler, vec![], span),
+            span,
+        ),
+        Stmt::Expr(make_call(
+            "http_respond",
+            vec![
+                Expr::Ident("req".to_string(), span),
+                Expr::IntLit(200, span),
+                Expr::Ident("resp".to_string(), span),
+            ],
+            span,
+        )),
+    ];
+    (condition, body)
+}
+
+/// Generates `kodo_main()` with HTTP server loop and route dispatch.
+fn generate_http_server_main(
+    port: i64,
+    not_found: &str,
+    routes: &[(String, String, String)],
+    span: Span,
+) -> Function {
+    let mut stmts = Vec::new();
+
+    // let server: Int = http_server_new(port)
+    stmts.push(make_let(
+        "server",
+        TypeExpr::Named("Int".to_string()),
+        make_call("http_server_new", vec![Expr::IntLit(port, span)], span),
+        span,
+    ));
+
+    // println("HTTP server listening on port {port}")
+    stmts.push(make_println(
+        &format!("HTTP server listening on port {port}"),
+        span,
+    ));
+
+    // while true { ... }
+    let mut loop_stmts = Vec::new();
+
+    // let req: Int = http_server_recv(server)
+    loop_stmts.push(make_let(
+        "req",
+        TypeExpr::Named("Int".to_string()),
+        make_call(
+            "http_server_recv",
+            vec![Expr::Ident("server".to_string(), span)],
+            span,
+        ),
+        span,
+    ));
+
+    // let method: String = http_request_method(req)
+    loop_stmts.push(make_let(
+        "method",
+        TypeExpr::Named("String".to_string()),
+        make_call(
+            "http_request_method",
+            vec![Expr::Ident("req".to_string(), span)],
+            span,
+        ),
+        span,
+    ));
+
+    // let path: String = http_request_path(req)
+    loop_stmts.push(make_let(
+        "path",
+        TypeExpr::Named("String".to_string()),
+        make_call(
+            "http_request_path",
+            vec![Expr::Ident("req".to_string(), span)],
+            span,
+        ),
+        span,
+    ));
+
+    // Build if-else chain for routes
+    let branches: Vec<(Expr, Vec<Stmt>)> = routes
+        .iter()
+        .map(|(method, path, handler)| make_route_branch(method, path, handler, span))
+        .collect();
+
+    // Else: 404
+    let else_body = vec![Stmt::Expr(make_call(
+        "http_respond",
+        vec![
+            Expr::Ident("req".to_string(), span),
+            Expr::IntLit(404, span),
+            Expr::StringLit(not_found.to_string(), span),
+        ],
+        span,
+    ))];
+
+    if branches.is_empty() {
+        // No routes: respond 404 to everything
+        loop_stmts.extend(else_body);
+    } else {
+        loop_stmts.push(Stmt::Expr(make_if_chain(branches, &else_body, span)));
+    }
+
+    stmts.push(Stmt::While {
+        span,
+        condition: Expr::BoolLit(true, span),
+        body: Block {
+            span,
+            stmts: loop_stmts,
+        },
+    });
+
+    make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
+}
+
+/// Resolves a `json_api` intent with real HTTP server endpoints.
+fn resolve_json_api_server(
+    span: Span,
+    port: i64,
+    base_path: &str,
+    endpoints: &[Vec<IntentConfigValue>],
+) -> ResolvedIntent {
+    let mut route_entries: Vec<(String, String, String)> = Vec::new();
+    for ep in endpoints {
+        if ep.len() >= 3 {
+            let method = config_value_as_str(&ep[0]).unwrap_or("GET").to_string();
+            let raw_path = config_value_as_str(&ep[1]).unwrap_or("/").to_string();
+            let path = format!("{base_path}{raw_path}");
+            let handler = config_value_as_str(&ep[2]).unwrap_or("handler").to_string();
+            route_entries.push((method, path, handler));
+        }
+    }
+
+    let main_func = generate_http_server_main(port, "Not Found", &route_entries, span);
+
+    let route_desc: Vec<String> = route_entries
+        .iter()
+        .map(|(m, p, h)| format!("  - {m} {p} → `{h}()`"))
+        .collect();
+
+    ResolvedIntent {
+        generated_functions: vec![main_func],
+        generated_types: vec![],
+        description: format!(
+            "Generated JSON API server on port {port} with {} endpoints:\n{}",
+            route_entries.len(),
+            route_desc.join("\n")
+        ),
+    }
+}
+
+// ===== Strategy: file_processor =====
+
+/// Generates a file processing pipeline using file I/O builtins.
+///
+/// Config keys:
+/// - `input` (string): Input mode — `"file"`, `"directory"`, or `"stdin"`. Default: `"file"`.
+/// - `output` (string): Output mode — `"stdout"` or `"file"`. Default: `"stdout"`.
+/// - `transform` (fn ref): Function to apply to input content.
+pub struct FileProcessorStrategy;
+
+impl ResolverStrategy for FileProcessorStrategy {
+    fn handles(&self) -> &[&str] {
+        &["file_processor"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["input", "output", "transform"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let input_mode = get_string_config(intent, "input").unwrap_or("file");
+        let output_mode = get_string_config(intent, "output").unwrap_or("stdout");
+        let transform = get_fn_ref_config(intent, "transform")
+            .or_else(|| get_string_config(intent, "transform"))
+            .unwrap_or("transform");
+
+        let main_func = generate_file_processor_main(input_mode, output_mode, transform, span);
+
+        let description = format!(
+            "Generated file processor: input={input_mode}, output={output_mode}, transform=`{transform}()`"
+        );
+
+        Ok(ResolvedIntent {
+            generated_functions: vec![main_func],
+            generated_types: vec![],
+            description,
+        })
+    }
+}
+
+/// Generates `kodo_main()` for file processing.
+fn generate_file_processor_main(
+    input_mode: &str,
+    output_mode: &str,
+    transform: &str,
+    span: Span,
+) -> Function {
+    let mut stmts = Vec::new();
+
+    match input_mode {
+        "stdin" => {
+            // let content: String = readln()
+            stmts.push(make_let(
+                "content",
+                TypeExpr::Named("String".to_string()),
+                make_call("readln", vec![], span),
+                span,
+            ));
+            // let result: String = transform(content)
+            stmts.push(make_let(
+                "result",
+                TypeExpr::Named("String".to_string()),
+                make_call(
+                    transform,
+                    vec![Expr::Ident("content".to_string(), span)],
+                    span,
+                ),
+                span,
+            ));
+            emit_output(&mut stmts, output_mode, span);
+        }
+        "directory" => {
+            // println("Processing directory")
+            stmts.push(make_println("Processing directory", span));
+            // let result: String = transform(".")
+            stmts.push(make_let(
+                "result",
+                TypeExpr::Named("String".to_string()),
+                make_call(
+                    transform,
+                    vec![Expr::StringLit(".".to_string(), span)],
+                    span,
+                ),
+                span,
+            ));
+            emit_output(&mut stmts, output_mode, span);
+        }
+        _ => {
+            // Default: "file" mode
+            // println("Processing file")
+            stmts.push(make_println("Processing file", span));
+            // let result: String = transform("input")
+            stmts.push(make_let(
+                "result",
+                TypeExpr::Named("String".to_string()),
+                make_call(
+                    transform,
+                    vec![Expr::StringLit("input".to_string(), span)],
+                    span,
+                ),
+                span,
+            ));
+            emit_output(&mut stmts, output_mode, span);
+        }
+    }
+
+    stmts.push(Stmt::Return {
+        span,
+        value: Some(Expr::IntLit(0, span)),
+    });
+
+    make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
+}
+
+/// Emits output statements based on the output mode.
+fn emit_output(stmts: &mut Vec<Stmt>, output_mode: &str, span: Span) {
+    match output_mode {
+        "file" => {
+            // file_write("output.txt", result)
+            stmts.push(Stmt::Expr(make_call(
+                "file_write",
+                vec![
+                    Expr::StringLit("output.txt".to_string(), span),
+                    Expr::Ident("result".to_string(), span),
+                ],
+                span,
+            )));
+        }
+        _ => {
+            // println(result)
+            stmts.push(Stmt::Expr(make_call(
+                "println",
+                vec![Expr::Ident("result".to_string(), span)],
+                span,
+            )));
+        }
+    }
+}
+
+// ===== Strategy: worker =====
+
+/// Generates a worker loop that calls a task function repeatedly.
+///
+/// Config keys:
+/// - `task` (fn ref): Function to call each iteration.
+/// - `max_iterations` (integer, optional): Maximum iterations. Default: `10`.
+/// - `on_error` (fn ref, optional): Function to call when task returns non-zero.
+pub struct WorkerStrategy;
+
+impl ResolverStrategy for WorkerStrategy {
+    fn handles(&self) -> &[&str] {
+        &["worker"]
+    }
+
+    fn valid_keys(&self) -> &[&str] {
+        &["task", "max_iterations", "on_error"]
+    }
+
+    fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+        let span = intent.span;
+        let task = get_fn_ref_config(intent, "task")
+            .or_else(|| get_string_config(intent, "task"))
+            .unwrap_or("do_work");
+        let max_iterations = get_int_config(intent, "max_iterations").unwrap_or(10);
+        let on_error =
+            get_fn_ref_config(intent, "on_error").or_else(|| get_string_config(intent, "on_error"));
+
+        let main_func = generate_worker_main(task, max_iterations, on_error, span);
+
+        let error_desc = if let Some(handler) = on_error {
+            format!(", on_error=`{handler}()`")
+        } else {
+            String::new()
+        };
+
+        let description = format!(
+            "Generated worker: task=`{task}()`, max_iterations={max_iterations}{error_desc}"
+        );
+
+        Ok(ResolvedIntent {
+            generated_functions: vec![main_func],
+            generated_types: vec![],
+            description,
+        })
+    }
+}
+
+/// Generates `kodo_main()` with a worker loop.
+fn generate_worker_main(
+    task: &str,
+    max_iterations: i64,
+    on_error: Option<&str>,
+    span: Span,
+) -> Function {
+    let mut stmts = Vec::new();
+
+    stmts.push(make_println(
+        &format!("Worker starting ({max_iterations} iterations)"),
+        span,
+    ));
+
+    // for i in 0..max_iterations { task_call }
+    let mut loop_body = Vec::new();
+
+    if let Some(error_handler) = on_error {
+        // let status: Int = task()
+        loop_body.push(make_let(
+            "status",
+            TypeExpr::Named("Int".to_string()),
+            make_call(task, vec![], span),
+            span,
+        ));
+        // if status != 0 { on_error() }
+        let condition = Expr::BinaryOp {
+            op: BinOp::Ne,
+            left: Box::new(Expr::Ident("status".to_string(), span)),
+            right: Box::new(Expr::IntLit(0, span)),
+            span,
+        };
+        loop_body.push(Stmt::Expr(Expr::If {
+            condition: Box::new(condition),
+            then_branch: Block {
+                span,
+                stmts: vec![Stmt::Expr(make_call(error_handler, vec![], span))],
+            },
+            else_branch: None,
+            span,
+        }));
+    } else {
+        // Simple: just call task()
+        loop_body.push(Stmt::Expr(make_call(task, vec![], span)));
+    }
+
+    stmts.push(Stmt::For {
+        span,
+        name: "i".to_string(),
+        start: Expr::IntLit(0, span),
+        end: Expr::IntLit(max_iterations, span),
+        inclusive: false,
+        body: Block {
+            span,
+            stmts: loop_body,
+        },
+    });
+
+    stmts.push(make_println("Worker completed", span));
+    stmts.push(Stmt::Return {
+        span,
+        value: Some(Expr::IntLit(0, span)),
+    });
+
+    make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
+}
+
 /// Formats generated code as a human-readable Kōdo source string.
 ///
 /// Used by `kodoc intent-explain` to show what an intent resolves to.
@@ -1702,7 +2478,7 @@ mod tests {
     #[test]
     fn json_api_invalid_config() {
         let resolver = Resolver::with_builtins();
-        let intent = make_intent("json_api", vec![string_entry("port", "8080")]);
+        let intent = make_intent("json_api", vec![string_entry("unknown_key", "value")]);
         let result = resolver.resolve(&intent);
         assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
     }
@@ -1830,5 +2606,341 @@ mod tests {
         let intent = make_intent("queue", vec![string_entry("driver", "x")]);
         let result = resolver.resolve(&intent);
         assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== Helper: nested list entry for route/command configs =====
+
+    fn fn_ref_entry(key: &str, name: &str) -> kodo_ast::IntentConfigEntry {
+        kodo_ast::IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::FnRef(name.to_string(), Span::new(0, 5)),
+            span: Span::new(0, 10),
+        }
+    }
+
+    fn nested_list_entry(key: &str, items: Vec<Vec<&str>>) -> kodo_ast::IntentConfigEntry {
+        kodo_ast::IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(
+                items
+                    .into_iter()
+                    .map(|inner| {
+                        IntentConfigValue::List(
+                            inner
+                                .into_iter()
+                                .map(|s| {
+                                    IntentConfigValue::StringLit(s.to_string(), Span::new(0, 5))
+                                })
+                                .collect(),
+                            Span::new(0, 20),
+                        )
+                    })
+                    .collect(),
+                Span::new(0, 30),
+            ),
+            span: Span::new(0, 40),
+        }
+    }
+
+    // ===== CLI resolver tests =====
+
+    #[test]
+    fn cli_basic_no_commands() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cli", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        // cli_help + kodo_main = 2 functions
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert_eq!(resolved.generated_functions[0].name, "cli_help");
+        assert_eq!(resolved.generated_functions[1].name, "kodo_main");
+    }
+
+    #[test]
+    fn cli_with_commands() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "cli",
+            vec![
+                string_entry("name", "mytool"),
+                string_entry("version", "1.0.0"),
+                nested_list_entry(
+                    "commands",
+                    vec![
+                        vec!["run", "do_run", "Run the tool"],
+                        vec!["test", "do_test", "Run tests"],
+                    ],
+                ),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert!(resolved.description.contains("mytool"));
+        assert!(resolved.description.contains("1.0.0"));
+        assert!(resolved.description.contains("2 commands"));
+    }
+
+    #[test]
+    fn cli_default_name_and_version() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cli", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("tool"));
+        assert!(resolved.description.contains("0.1.0"));
+    }
+
+    #[test]
+    fn cli_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cli", vec![string_entry("unknown", "x")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    #[test]
+    fn cli_main_returns_int() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("cli", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        let main_fn = &resolved.generated_functions[1];
+        assert_eq!(main_fn.name, "kodo_main");
+        assert!(matches!(main_fn.return_type, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    // ===== HTTP Server resolver tests =====
+
+    #[test]
+    fn http_server_basic() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("8080"));
+    }
+
+    #[test]
+    fn http_server_custom_port() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![int_entry("port", 3000)]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("3000"));
+    }
+
+    #[test]
+    fn http_server_with_routes() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "http_server",
+            vec![nested_list_entry(
+                "routes",
+                vec![
+                    vec!["GET", "/health", "handle_health"],
+                    vec!["POST", "/data", "handle_data"],
+                ],
+            )],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("2 routes"));
+        assert!(resolved.description.contains("GET /health"));
+        assert!(resolved.description.contains("POST /data"));
+    }
+
+    #[test]
+    fn http_server_custom_not_found() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![string_entry("not_found", "Custom 404")]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn http_server_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![string_entry("host", "localhost")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== File Processor resolver tests =====
+
+    #[test]
+    fn file_processor_basic() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("input=file"));
+        assert!(resolved.description.contains("output=stdout"));
+    }
+
+    #[test]
+    fn file_processor_stdin_mode() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![string_entry("input", "stdin")]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("input=stdin"));
+    }
+
+    #[test]
+    fn file_processor_directory_mode() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![string_entry("input", "directory")]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("input=directory"));
+    }
+
+    #[test]
+    fn file_processor_file_output() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![string_entry("output", "file")]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("output=file"));
+    }
+
+    #[test]
+    fn file_processor_custom_transform() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "file_processor",
+            vec![fn_ref_entry("transform", "my_transform")],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("my_transform"));
+    }
+
+    #[test]
+    fn file_processor_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![string_entry("format", "csv")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== Worker resolver tests =====
+
+    #[test]
+    fn worker_basic() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("do_work"));
+        assert!(resolved.description.contains("10"));
+    }
+
+    #[test]
+    fn worker_custom_task() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![fn_ref_entry("task", "process_item")]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("process_item"));
+    }
+
+    #[test]
+    fn worker_custom_iterations() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![int_entry("max_iterations", 100)]);
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("100"));
+    }
+
+    #[test]
+    fn worker_with_error_handler() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "worker",
+            vec![
+                fn_ref_entry("task", "my_task"),
+                fn_ref_entry("on_error", "handle_err"),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("handle_err"));
+    }
+
+    #[test]
+    fn worker_invalid_config() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![string_entry("schedule", "cron")]);
+        let result = resolver.resolve(&intent);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== JSON API with endpoints (new mode) =====
+
+    #[test]
+    fn json_api_with_endpoints() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "json_api",
+            vec![
+                int_entry("port", 9090),
+                string_entry("base_path", "/api"),
+                nested_list_entry(
+                    "endpoints",
+                    vec![
+                        vec!["GET", "/health", "handle_health"],
+                        vec!["POST", "/users", "handle_users"],
+                    ],
+                ),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("9090"));
+        assert!(resolved.description.contains("2 endpoints"));
+    }
+
+    #[test]
+    fn json_api_endpoints_with_base_path() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "json_api",
+            vec![
+                string_entry("base_path", "/v1"),
+                nested_list_entry("endpoints", vec![vec!["GET", "/status", "get_status"]]),
+            ],
+        );
+        let result = resolver.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
+        assert!(resolved.description.contains("/v1/status"));
     }
 }

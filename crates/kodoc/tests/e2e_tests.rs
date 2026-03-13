@@ -1696,3 +1696,10 @@ e2e_example_test!(run: e2e_math_demo, "math_demo.ko", contains: ["random number 
 
 e2e_example_test!(compile: e2e_http_client, "http_client.ko");
 e2e_example_test!(compile: e2e_http_api, "http_api.ko");
+
+// --- Sprint 5: Intent strategies (cli, http_server, file_processor, worker) ---
+
+e2e_example_test!(run: e2e_intent_cli, "intent_cli.ko", contains: ["mytool v1.0.0", "Commands:"]);
+e2e_example_test!(compile: e2e_intent_http_server, "intent_http_server.ko");
+e2e_example_test!(run: e2e_intent_worker, "intent_worker.ko", contains: ["Worker starting", "Worker completed"]);
+e2e_example_test!(compile: e2e_intent_file_processor, "intent_file_processor.ko");

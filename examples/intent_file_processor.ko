@@ -1,0 +1,16 @@
+module intent_file_processor {
+    meta {
+        purpose: "Demonstrates file processor intent resolver"
+        version: "1.0.0"
+    }
+
+    fn transform(input: String) -> String {
+        return input
+    }
+
+    intent file_processor {
+        input: "stdin"
+        output: "stdout"
+        transform: transform
+    }
+}

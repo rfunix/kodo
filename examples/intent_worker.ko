@@ -1,0 +1,22 @@
+module intent_worker {
+    meta {
+        purpose: "Demonstrates worker loop intent resolver"
+        version: "1.0.0"
+    }
+
+    fn do_work() -> Int {
+        println("Working...")
+        return 0
+    }
+
+    fn handle_error() -> Int {
+        println("Error occurred")
+        return 0
+    }
+
+    intent worker {
+        task: do_work
+        max_iterations: 5
+        on_error: handle_error
+    }
+}

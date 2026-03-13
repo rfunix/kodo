@@ -52,21 +52,24 @@ intent serve_http {
 
 ### Implemented
 
-| Intent | Description |
-|--------|-------------|
-| `console_app` | Console application with greeting message |
-| `math_module` | Mathematical helper functions from declarations |
+| Intent | Description | Config Keys |
+|--------|-------------|-------------|
+| `console_app` | Console application with greeting message | `greeting`, `entry_point` |
+| `math_module` | Mathematical helper functions from declarations | `functions` |
+| `serve_http` | HTTP server with routing (legacy) | `port`, `routes` |
+| `database` | Database connection with table/query stubs | `driver`, `tables`, `queries` |
+| `json_api` | JSON REST API (stubs or real HTTP server) | `routes`, `models`, `port`, `base_path`, `endpoints` |
+| `cache` | In-memory caching with get/set/invalidate | `strategy`, `max_size` |
+| `queue` | Message queue producer/consumer | `backend`, `topics` |
+| `cli` | CLI tool with command dispatch | `name`, `version`, `commands` |
+| `http_server` | Real HTTP server with route dispatch | `port`, `routes`, `not_found` |
+| `file_processor` | File processing pipeline | `input`, `output`, `transform` |
+| `worker` | Worker loop with error handling | `task`, `max_iterations`, `on_error` |
 
 ### Planned
 
 | Intent | Description |
 |--------|-------------|
-| `serve_http` | HTTP server with routing |
-| `database` | Database connection with migrations |
-| `json_api` | JSON REST API endpoint |
-| `file_io` | File system operations |
-| `cache` | In-memory or external caching |
-| `queue` | Message queue consumer/producer |
 | `scheduler` | Periodic task execution |
 
 ## Custom Resolvers

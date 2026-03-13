@@ -307,7 +307,7 @@ kodoc repl
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 96 compilable programs:
+The [`examples/`](examples/) directory contains 104 compilable programs:
 
 ### Core Language
 
@@ -390,6 +390,10 @@ The [`examples/`](examples/) directory contains 96 compilable programs:
 | [`intent_json_api.ko`](examples/intent_json_api.ko) | JSON API intent resolver |
 | [`intent_cache.ko`](examples/intent_cache.ko) | Cache intent resolver |
 | [`intent_queue.ko`](examples/intent_queue.ko) | Queue intent resolver |
+| [`intent_cli.ko`](examples/intent_cli.ko) | CLI tool intent resolver |
+| [`intent_http_server.ko`](examples/intent_http_server.ko) | HTTP server intent resolver |
+| [`intent_file_processor.ko`](examples/intent_file_processor.ko) | File processor intent resolver |
+| [`intent_worker.ko`](examples/intent_worker.ko) | Worker loop intent resolver |
 
 ### Collections & I/O
 

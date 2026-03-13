@@ -1,0 +1,19 @@
+module intent_http_server {
+    meta {
+        purpose: "Demonstrates HTTP server intent resolver"
+        version: "1.0.0"
+    }
+
+    fn handle_health() -> String {
+        return "OK"
+    }
+
+    fn handle_echo() -> String {
+        return "echo"
+    }
+
+    intent http_server {
+        port: 9090
+        routes: [["GET", "/health", "handle_health"], ["POST", "/echo", "handle_echo"]]
+    }
+}

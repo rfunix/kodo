@@ -73,6 +73,10 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`float_math.ko`](../examples/float_math.ko) | Float64 arithmetic operations |
 | [`string_concat_operator.ko`](../examples/string_concat_operator.ko) | String concatenation with `+` operator |
 | [`intent_http.ko`](../examples/intent_http.ko) | HTTP intent resolver |
+| [`intent_cli.ko`](../examples/intent_cli.ko) | CLI tool intent resolver |
+| [`intent_http_server.ko`](../examples/intent_http_server.ko) | HTTP server intent resolver |
+| [`intent_file_processor.ko`](../examples/intent_file_processor.ko) | File processor intent resolver |
+| [`intent_worker.ko`](../examples/intent_worker.ko) | Worker loop intent resolver |
 | [`stdlib_demo.ko`](../examples/stdlib_demo.ko) | Standard library math functions |
 | [`async_real.ko`](../examples/async_real.ko) | Cooperative `spawn` with deferred execution |
 | [`ownership.ko`](../examples/ownership.ko) | Linear ownership with `own` and `ref` |
