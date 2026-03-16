@@ -133,4 +133,63 @@ mod tests {
         assert_eq!(kodo_clamp(-5, 1, 10), 1);
         assert_eq!(kodo_clamp(15, 1, 10), 10);
     }
+
+    #[test]
+    fn sqrt_works() {
+        assert!((kodo_sqrt(4.0) - 2.0).abs() < f64::EPSILON);
+        assert!((kodo_sqrt(9.0) - 3.0).abs() < f64::EPSILON);
+        assert!(kodo_sqrt(0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn pow_works() {
+        assert!((kodo_pow(2.0, 3.0) - 8.0).abs() < f64::EPSILON);
+        assert!((kodo_pow(10.0, 0.0) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn sin_cos_works() {
+        assert!(kodo_sin(0.0).abs() < f64::EPSILON);
+        assert!((kodo_cos(0.0) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn log_works() {
+        assert!((kodo_log(1.0)).abs() < f64::EPSILON);
+        assert!((kodo_log(std::f64::consts::E) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn floor_ceil_round_works() {
+        assert!((kodo_floor(2.7) - 2.0).abs() < f64::EPSILON);
+        assert!((kodo_ceil(2.3) - 3.0).abs() < f64::EPSILON);
+        assert!((kodo_round(2.5) - 3.0).abs() < f64::EPSILON);
+        assert!((kodo_round(2.4) - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rand_int_in_range() {
+        for _ in 0..100 {
+            let val = kodo_rand_int(5, 10);
+            assert!(val >= 5 && val <= 10, "rand_int out of range: {val}");
+        }
+    }
+
+    #[test]
+    fn rand_int_min_equals_max() {
+        assert_eq!(kodo_rand_int(7, 7), 7);
+    }
+
+    #[test]
+    fn rand_int_min_greater_than_max() {
+        // When min >= max, function returns min.
+        assert_eq!(kodo_rand_int(10, 5), 10);
+    }
+
+    #[test]
+    fn abs_i64_min() {
+        // i64::MIN.wrapping_abs() == i64::MIN (overflow wraps).
+        // This documents the edge-case behavior.
+        assert_eq!(kodo_abs(i64::MIN), i64::MIN);
+    }
 }

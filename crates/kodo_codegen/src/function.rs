@@ -379,3 +379,111 @@ fn initialize_non_param_locals(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cranelift_codegen::ir::types;
+
+    // ---------------------------------------------------------------
+    // VarMap::new tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn var_map_new_is_empty() {
+        let vm = VarMap::new();
+        assert!(vm.vars.is_empty());
+        assert!(vm.var_types.is_empty());
+        assert!(vm.stack_slots.is_empty());
+        assert!(vm.heap_locals.is_empty());
+    }
+
+    // ---------------------------------------------------------------
+    // VarMap::get tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn var_map_get_undefined_returns_error() {
+        let vm = VarMap::new();
+        let result = vm.get(LocalId(42));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn var_map_get_defined_returns_variable() {
+        let mut vm = VarMap::new();
+        let var = Variable::from_u32(0);
+        vm.vars.insert(LocalId(0), var);
+        let result = vm.get(LocalId(0));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), var);
+    }
+
+    #[test]
+    fn var_map_get_wrong_id_returns_error() {
+        let mut vm = VarMap::new();
+        vm.vars.insert(LocalId(0), Variable::from_u32(0));
+        assert!(vm.get(LocalId(1)).is_err());
+    }
+
+    // ---------------------------------------------------------------
+    // VarMap insertion and lookup
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn var_map_insert_and_retrieve_multiple() {
+        let mut vm = VarMap::new();
+        for i in 0..5 {
+            vm.vars.insert(LocalId(i), Variable::from_u32(i));
+            vm.var_types.insert(LocalId(i), types::I64);
+        }
+        assert_eq!(vm.vars.len(), 5);
+        assert_eq!(vm.var_types.len(), 5);
+        for i in 0..5 {
+            assert!(vm.get(LocalId(i)).is_ok());
+        }
+    }
+
+    #[test]
+    fn var_map_var_types_stores_correct_types() {
+        let mut vm = VarMap::new();
+        vm.var_types.insert(LocalId(0), types::I64);
+        vm.var_types.insert(LocalId(1), types::I8);
+        vm.var_types.insert(LocalId(2), types::F64);
+        assert_eq!(vm.var_types[&LocalId(0)], types::I64);
+        assert_eq!(vm.var_types[&LocalId(1)], types::I8);
+        assert_eq!(vm.var_types[&LocalId(2)], types::F64);
+    }
+
+    // ---------------------------------------------------------------
+    // HeapKind tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn heap_kind_equality() {
+        assert_eq!(HeapKind::String, HeapKind::String);
+        assert_eq!(HeapKind::List, HeapKind::List);
+        assert_eq!(HeapKind::Map, HeapKind::Map);
+        assert_ne!(HeapKind::String, HeapKind::List);
+        assert_ne!(HeapKind::List, HeapKind::Map);
+    }
+
+    #[test]
+    fn heap_kind_clone() {
+        let kind = HeapKind::String;
+        let cloned = kind;
+        assert_eq!(kind, cloned);
+    }
+
+    #[test]
+    fn var_map_heap_locals_tracking() {
+        let mut vm = VarMap::new();
+        vm.heap_locals.insert(LocalId(0), HeapKind::String);
+        vm.heap_locals.insert(LocalId(1), HeapKind::List);
+        vm.heap_locals.insert(LocalId(2), HeapKind::Map);
+        assert_eq!(vm.heap_locals.len(), 3);
+        assert_eq!(vm.heap_locals[&LocalId(0)], HeapKind::String);
+        assert_eq!(vm.heap_locals[&LocalId(1)], HeapKind::List);
+        assert_eq!(vm.heap_locals[&LocalId(2)], HeapKind::Map);
+    }
+}

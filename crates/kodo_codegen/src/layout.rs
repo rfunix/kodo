@@ -91,3 +91,207 @@ pub(crate) fn compute_enum_layout(variants: &[(String, Vec<kodo_types::Type>)]) 
         _max_payload_fields: mpf,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_types::Type;
+
+    // ---------------------------------------------------------------
+    // Layout constants
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn string_layout_constants_are_consistent() {
+        assert_eq!(STRING_LAYOUT_SIZE, 16);
+        assert_eq!(STRING_PTR_OFFSET, 0);
+        assert_eq!(STRING_LEN_OFFSET, 8);
+    }
+
+    #[test]
+    fn dyn_trait_layout_constants_are_consistent() {
+        assert_eq!(DYN_TRAIT_LAYOUT_SIZE, 16);
+        assert_eq!(DYN_TRAIT_DATA_OFFSET, 0);
+        assert_eq!(DYN_TRAIT_VTABLE_OFFSET, 8);
+    }
+
+    // ---------------------------------------------------------------
+    // compute_struct_layout tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn struct_layout_empty() {
+        let layout = compute_struct_layout(&[]);
+        assert_eq!(layout.total_size, 0);
+        assert!(layout.field_offsets.is_empty());
+    }
+
+    #[test]
+    fn struct_layout_single_int_field() {
+        let fields = vec![("x".to_string(), Type::Int)];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.total_size, 8);
+        assert_eq!(layout.field_offsets.len(), 1);
+        assert_eq!(layout.field_offsets[0].0, "x");
+        assert_eq!(layout.field_offsets[0].1, 0); // offset
+        assert_eq!(layout.field_offsets[0].2, types::I64);
+    }
+
+    #[test]
+    fn struct_layout_two_int_fields() {
+        let fields = vec![("x".to_string(), Type::Int), ("y".to_string(), Type::Int)];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.total_size, 16);
+        assert_eq!(layout.field_offsets[0].1, 0);
+        assert_eq!(layout.field_offsets[1].1, 8);
+    }
+
+    #[test]
+    fn struct_layout_mixed_types() {
+        let fields = vec![
+            ("flag".to_string(), Type::Bool),
+            ("value".to_string(), Type::Int),
+        ];
+        let layout = compute_struct_layout(&fields);
+        // Bool = 1 byte at offset 0, then Int needs 8-byte alignment so offset 8.
+        assert_eq!(layout.field_offsets[0].1, 0); // Bool at 0
+        assert_eq!(layout.field_offsets[1].1, 8); // Int at 8 (aligned)
+        assert_eq!(layout.total_size, 16); // 8 + 8, aligned to 8
+    }
+
+    #[test]
+    fn struct_layout_string_field() {
+        let fields = vec![("name".to_string(), Type::String)];
+        let layout = compute_struct_layout(&fields);
+        // String is 16 bytes (ptr + len).
+        assert_eq!(layout.total_size, 16);
+        assert_eq!(layout.field_offsets[0].1, 0);
+    }
+
+    #[test]
+    fn struct_layout_int_then_bool() {
+        let fields = vec![
+            ("x".to_string(), Type::Int),
+            ("flag".to_string(), Type::Bool),
+        ];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.field_offsets[0].1, 0); // Int at 0
+        assert_eq!(layout.field_offsets[1].1, 8); // Bool at 8
+                                                  // Total: 8 + 1 = 9, rounded up to 8-byte alignment = 16.
+        assert_eq!(layout.total_size, 16);
+    }
+
+    #[test]
+    fn struct_layout_all_bools() {
+        let fields = vec![
+            ("a".to_string(), Type::Bool),
+            ("b".to_string(), Type::Bool),
+            ("c".to_string(), Type::Bool),
+        ];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.field_offsets[0].1, 0);
+        assert_eq!(layout.field_offsets[1].1, 1);
+        assert_eq!(layout.field_offsets[2].1, 2);
+        // Total: 3 bytes, aligned to 1 = 3.
+        assert_eq!(layout.total_size, 3);
+    }
+
+    #[test]
+    fn struct_layout_float32_field() {
+        let fields = vec![("val".to_string(), Type::Float32)];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.total_size, 4);
+        assert_eq!(layout.field_offsets[0].2, types::F32);
+    }
+
+    #[test]
+    fn struct_layout_int16_fields() {
+        let fields = vec![
+            ("a".to_string(), Type::Int16),
+            ("b".to_string(), Type::Int16),
+        ];
+        let layout = compute_struct_layout(&fields);
+        assert_eq!(layout.field_offsets[0].1, 0);
+        assert_eq!(layout.field_offsets[1].1, 2);
+        assert_eq!(layout.total_size, 4);
+    }
+
+    #[test]
+    fn struct_layout_preserves_field_names() {
+        let fields = vec![
+            ("alpha".to_string(), Type::Int),
+            ("beta".to_string(), Type::Bool),
+            ("gamma".to_string(), Type::Float64),
+        ];
+        let layout = compute_struct_layout(&fields);
+        let names: Vec<&str> = layout
+            .field_offsets
+            .iter()
+            .map(|(n, _, _)| n.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha", "beta", "gamma"]);
+    }
+
+    // ---------------------------------------------------------------
+    // compute_enum_layout tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn enum_layout_no_variants() {
+        let layout = compute_enum_layout(&[]);
+        // 8 bytes discriminant + 0 payload fields.
+        assert_eq!(layout.total_size, 8);
+        assert_eq!(layout._max_payload_fields, 0);
+    }
+
+    #[test]
+    fn enum_layout_unit_variants_only() {
+        let variants = vec![
+            ("Red".to_string(), vec![]),
+            ("Green".to_string(), vec![]),
+            ("Blue".to_string(), vec![]),
+        ];
+        let layout = compute_enum_layout(&variants);
+        assert_eq!(layout.total_size, 8); // discriminant only
+        assert_eq!(layout._max_payload_fields, 0);
+    }
+
+    #[test]
+    fn enum_layout_single_field_variant() {
+        let variants = vec![
+            ("None".to_string(), vec![]),
+            ("Some".to_string(), vec![Type::Int]),
+        ];
+        let layout = compute_enum_layout(&variants);
+        // 8 (disc) + 1 * 8 = 16
+        assert_eq!(layout.total_size, 16);
+        assert_eq!(layout._max_payload_fields, 1);
+    }
+
+    #[test]
+    fn enum_layout_multiple_fields() {
+        let variants = vec![
+            ("A".to_string(), vec![Type::Int, Type::Bool, Type::String]),
+            ("B".to_string(), vec![Type::Float64]),
+        ];
+        let layout = compute_enum_layout(&variants);
+        // Max payload = 3 fields, so 8 + 3*8 = 32.
+        assert_eq!(layout.total_size, 32);
+        assert_eq!(layout._max_payload_fields, 3);
+    }
+
+    #[test]
+    fn enum_layout_uses_max_across_variants() {
+        let variants = vec![
+            ("A".to_string(), vec![Type::Int]),
+            ("B".to_string(), vec![Type::Int, Type::Int]),
+            (
+                "C".to_string(),
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+            ),
+        ];
+        let layout = compute_enum_layout(&variants);
+        assert_eq!(layout._max_payload_fields, 4);
+        assert_eq!(layout.total_size, 8 + 4 * 8);
+    }
+}

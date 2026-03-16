@@ -1812,4 +1812,63 @@ mod tests {
         assert_ne!(HeapKind::List, HeapKind::Map);
         assert_eq!(HeapKind::String, HeapKind::String);
     }
+
+    // ---------------------------------------------------------------
+    // CodegenOptions tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn codegen_options_default_optimize_is_false() {
+        let opts = CodegenOptions::default();
+        assert!(!opts.optimize);
+    }
+
+    #[test]
+    fn codegen_options_default_debug_info_is_true() {
+        let opts = CodegenOptions::default();
+        assert!(opts.debug_info);
+    }
+
+    #[test]
+    fn codegen_options_default_recoverable_contracts_is_false() {
+        let opts = CodegenOptions::default();
+        assert!(!opts.recoverable_contracts);
+    }
+
+    #[test]
+    fn codegen_options_custom_values() {
+        let opts = CodegenOptions {
+            optimize: true,
+            debug_info: false,
+            recoverable_contracts: true,
+        };
+        assert!(opts.optimize);
+        assert!(!opts.debug_info);
+        assert!(opts.recoverable_contracts);
+    }
+
+    // ---------------------------------------------------------------
+    // CodegenError tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn codegen_error_cranelift_display() {
+        let err = CodegenError::Cranelift("test error".to_string());
+        let msg = format!("{err}");
+        assert!(msg.contains("test error"));
+    }
+
+    #[test]
+    fn codegen_error_unsupported_target_display() {
+        let err = CodegenError::UnsupportedTarget("arm64".to_string());
+        let msg = format!("{err}");
+        assert!(msg.contains("arm64"));
+    }
+
+    #[test]
+    fn codegen_error_module_error_display() {
+        let err = CodegenError::ModuleError("link failed".to_string());
+        let msg = format!("{err}");
+        assert!(msg.contains("link failed"));
+    }
 }

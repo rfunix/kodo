@@ -1,0 +1,939 @@
+//! Smaller command implementations.
+//!
+//! Contains `lex`, `parse`, `explain`, `fmt`, `intent-explain`, `lsp`,
+//! `confidence-report`, `audit`, `describe`, and `mir` commands.
+
+use std::path::PathBuf;
+
+use super::common::{
+    compile_imported_module, inject_stdlib_method_functions, parse_contract_mode,
+    resolve_import_path,
+};
+use crate::{audit, diagnostics, explanations, formatter};
+
+/// Tokenizes a source file and prints the token stream.
+pub(crate) fn run_lex(file: &PathBuf) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    match kodo_lexer::tokenize(&source) {
+        Ok(tokens) => {
+            for token in &tokens {
+                println!(
+                    "{:?} @ {}..{}",
+                    token.kind, token.span.start, token.span.end
+                );
+            }
+            println!("\n{} token(s)", tokens.len());
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+/// Parses a source file and prints the AST.
+pub(crate) fn run_parse(file: &PathBuf) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let output = kodo_parser::parse_with_recovery(&source);
+
+    // Report all errors that were collected during recovery.
+    for e in &output.errors {
+        let filename = file.display().to_string();
+        diagnostics::render_parse_error(&source, &filename, e);
+    }
+
+    if output.errors.is_empty() {
+        println!("{:#?}", output.module);
+        0
+    } else {
+        eprintln!("{} parse error(s) found", output.errors.len());
+        1
+    }
+}
+
+/// Explains an error code in detail with examples.
+pub(crate) fn run_explain(code: &str, json: bool) -> i32 {
+    match explanations::get_explanation(code) {
+        Some(entry) => {
+            if json {
+                let json_output = serde_json::json!({
+                    "code": entry.code,
+                    "title": entry.title,
+                    "explanation": entry.explanation,
+                    "bad_example": entry.bad_example,
+                    "good_example": entry.good_example
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_output).unwrap_or_else(|e| format!(
+                        "{{\"error\": \"json serialization failed: {e}\"}}"
+                    ))
+                );
+            } else {
+                println!("Error {}: {}\n", entry.code, entry.title);
+                println!("{}\n", entry.explanation);
+                println!("Example of incorrect code:\n");
+                println!("```kodo");
+                println!("{}", entry.bad_example);
+                println!("```\n");
+                println!("Corrected code:\n");
+                println!("```kodo");
+                println!("{}", entry.good_example);
+                println!("```");
+            }
+            0
+        }
+        None => {
+            if json {
+                let json_output = serde_json::json!({
+                    "error": format!("unknown error code `{code}`"),
+                    "hint": "error codes range from E0001 to E0699"
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_output).unwrap_or_else(|e| format!(
+                        "{{\"error\": \"json serialization failed: {e}\"}}"
+                    ))
+                );
+            } else {
+                eprintln!("error: unknown error code `{code}`");
+                eprintln!("hint: error codes range from E0001 to E0699");
+            }
+            1
+        }
+    }
+}
+
+/// Formats a Kodo source file.
+pub(crate) fn run_fmt(file: &PathBuf, check: bool) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    let formatted = formatter::format_module(&module);
+
+    if check {
+        if formatted == source {
+            0
+        } else {
+            eprintln!("Would reformat {}", file.display());
+            1
+        }
+    } else if formatted == source {
+        0
+    } else {
+        if let Err(e) = std::fs::write(file, &formatted) {
+            eprintln!("error: could not write file `{}`: {e}", file.display());
+            return 1;
+        }
+        println!("Formatted {}", file.display());
+        0
+    }
+}
+
+/// Shows the code generated by intent resolution.
+pub(crate) fn run_intent_explain(file: &PathBuf, json: bool) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    if module.intent_decls.is_empty() {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "module": module.name,
+                    "intents": [],
+                    "count": 0
+                })
+            );
+        } else {
+            println!("No intents found in module `{}`", module.name);
+        }
+        return 0;
+    }
+
+    let resolver = kodo_resolver::Resolver::with_builtins();
+
+    if json {
+        let mut intent_results = Vec::new();
+        for intent in &module.intent_decls {
+            match resolver.resolve(intent) {
+                Ok(resolved) => {
+                    let functions: Vec<serde_json::Value> = resolved
+                        .generated_functions
+                        .iter()
+                        .map(|f| {
+                            serde_json::json!({
+                                "name": f.name,
+                                "params": f.params.iter().map(|p| {
+                                    serde_json::json!({
+                                        "name": p.name,
+                                        "type": format!("{:?}", p.ty),
+                                    })
+                                }).collect::<Vec<_>>(),
+                                "return_type": format!("{:?}", f.return_type),
+                            })
+                        })
+                        .collect();
+                    intent_results.push(serde_json::json!({
+                        "name": intent.name,
+                        "description": resolved.description,
+                        "generated_functions": functions,
+                        "generated_types": resolved.generated_types,
+                        "generated_code": kodo_resolver::format_resolved_intent(&resolved),
+                    }));
+                }
+                Err(e) => {
+                    intent_results.push(serde_json::json!({
+                        "name": intent.name,
+                        "error": e.to_string(),
+                    }));
+                }
+            }
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "module": module.name,
+                "intents": intent_results,
+                "count": intent_results.len(),
+            }))
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+        );
+    } else {
+        for intent in &module.intent_decls {
+            println!("Intent: `{}`", intent.name);
+            println!("{}", "-".repeat(40));
+            match resolver.resolve(intent) {
+                Ok(resolved) => {
+                    println!("{}", kodo_resolver::format_resolved_intent(&resolved));
+                }
+                Err(e) => {
+                    eprintln!("  Error: {e}");
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Starts the Kodo LSP server.
+pub(crate) fn run_lsp() -> i32 {
+    let rt = tokio::runtime::Runtime::new();
+    match rt {
+        Ok(rt) => {
+            rt.block_on(async {
+                if let Err(e) = kodo_lsp::run_server().await {
+                    eprintln!("LSP server error: {e}");
+                }
+            });
+            0
+        }
+        Err(e) => {
+            eprintln!("Failed to start async runtime: {e}");
+            1
+        }
+    }
+}
+
+/// Generates a confidence report for a source file.
+///
+/// Parses the file, type-checks it (with the stdlib prelude), and then
+/// asks the type checker to compute per-function confidence scores.
+/// Reports both the declared `@confidence` value and the propagated
+/// minimum across all direct callees.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run_confidence_report(file: &PathBuf, json: bool, threshold: f64) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    let report = checker.confidence_report(&module);
+
+    // Build a set of functions missing @authored_by.
+    let missing_authored_by: Vec<String> = module
+        .functions
+        .iter()
+        .filter(|f| !f.annotations.iter().any(|a| a.name == "authored_by"))
+        .map(|f| f.name.clone())
+        .collect();
+
+    // Compute per-module average confidence (single module in a file).
+    let module_avg = if report.is_empty() {
+        1.0
+    } else {
+        report
+            .iter()
+            .map(|(_, _, computed, _)| *computed)
+            .sum::<f64>()
+            / report.len() as f64
+    };
+
+    // Overall project confidence: min of all function confidences.
+    let overall = report
+        .iter()
+        .map(|(_, _, computed, _)| *computed)
+        .fold(1.0_f64, f64::min);
+
+    // Functions below the configurable threshold.
+    let below_threshold: Vec<(&str, f64)> = report
+        .iter()
+        .filter(|(_, _, computed, _)| *computed < threshold)
+        .map(|(name, _, computed, _)| (name.as_str(), *computed))
+        .collect();
+
+    if json {
+        let functions: Vec<serde_json::Value> = report
+            .iter()
+            .map(|(name, declared, computed, callees)| {
+                let has_authored_by = !missing_authored_by.contains(name);
+                serde_json::json!({
+                    "name": name,
+                    "declared_confidence": declared,
+                    "computed_confidence": computed,
+                    "callees": callees,
+                    "has_authored_by": has_authored_by,
+                })
+            })
+            .collect();
+        let below_threshold_json: Vec<serde_json::Value> = below_threshold
+            .iter()
+            .map(|(name, computed)| {
+                serde_json::json!({
+                    "name": name,
+                    "computed_confidence": computed,
+                })
+            })
+            .collect();
+        let output = serde_json::json!({
+            "module": module.name,
+            "module_average_confidence": module_avg,
+            "overall_confidence": overall,
+            "threshold": threshold,
+            "functions": functions,
+            "missing_authored_by": missing_authored_by,
+            "below_threshold": below_threshold_json,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}"))
+        );
+    } else {
+        println!("Confidence Report for module `{}`", module.name);
+        println!("{}", "=".repeat(60));
+        println!("Overall confidence: {overall:.2}");
+        println!("Module average:     {module_avg:.2}");
+        println!("Threshold:          {threshold:.2}");
+        println!();
+        println!(
+            "{:<30} {:>10} {:>10}  Flags",
+            "Function", "Declared", "Computed"
+        );
+        println!("{}", "-".repeat(70));
+        for (name, declared, computed, _) in &report {
+            let mut flags = Vec::new();
+            if missing_authored_by.contains(name) {
+                flags.push("no @authored_by");
+            }
+            if *computed < threshold {
+                flags.push("below threshold");
+            }
+            let flag_str = if flags.is_empty() {
+                String::new()
+            } else {
+                flags.join(", ")
+            };
+            println!("{name:<30} {declared:>10.2} {computed:>10.2}  {flag_str}");
+        }
+
+        // Summary of flagged functions.
+        if !missing_authored_by.is_empty() {
+            println!();
+            println!("Functions missing @authored_by:");
+            for name in &missing_authored_by {
+                println!("  - {name}");
+            }
+        }
+        if !below_threshold.is_empty() {
+            println!();
+            println!("Functions below threshold ({threshold:.2}):");
+            for (name, computed) in &below_threshold {
+                println!("  - {name} ({computed:.2})");
+            }
+        }
+    }
+
+    0
+}
+
+/// Generates a consolidated audit report combining confidence, contracts, and annotations.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run_audit(
+    file: &PathBuf,
+    json: bool,
+    contracts_mode_str: &str,
+    policy: Option<&str>,
+) -> i32 {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse error: {e}");
+            return 1;
+        }
+    };
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    if let Err(e) = checker.check_module(&module) {
+        eprintln!("type error: {e}");
+        return 1;
+    }
+
+    // Confidence report.
+    let confidence_data = checker.confidence_report(&module);
+
+    // Contract verification.
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    let mut total_static = 0_usize;
+    let mut total_runtime = 0_usize;
+    let mut total_failures = 0_usize;
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            Ok(result) => {
+                total_static += result.static_verified;
+                total_runtime += result.runtime_checks_needed;
+                total_failures += result.failures.len();
+            }
+            Err(e) => {
+                eprintln!("contract error: {e}");
+                return 1;
+            }
+        }
+    }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            match kodo_contracts::verify_contracts(&contracts, contract_mode) {
+                Ok(result) => {
+                    total_static += result.static_verified;
+                    total_runtime += result.runtime_checks_needed;
+                    total_failures += result.failures.len();
+                }
+                Err(e) => {
+                    eprintln!("contract error: {e}");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    let report = audit::build_audit_report(
+        &module,
+        &confidence_data,
+        total_static,
+        total_runtime,
+        total_failures,
+    );
+
+    // Validate policy if specified.
+    let policy_result = policy.map(|p| match audit::parse_policy(p) {
+        Ok(criteria) => audit::validate_policy(&report, &criteria),
+        Err(e) => {
+            eprintln!("policy parse error: {e}");
+            // Return a failed result so we exit with code 1.
+            audit::PolicyResult {
+                passed: false,
+                violations: vec![audit::PolicyViolation {
+                    criterion: "parse".to_string(),
+                    function: String::new(),
+                    expected: "valid policy string".to_string(),
+                    actual: e,
+                }],
+            }
+        }
+    });
+
+    if json {
+        // When policy is present, wrap both report and policy result.
+        if let Some(ref pr) = policy_result {
+            let combined = serde_json::json!({
+                "report": report,
+                "policy": pr,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&combined).unwrap_or_else(|e| format!(
+                    "{{\"error\": \"json serialization failed: {e}\"}}"
+                ))
+            );
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_else(|e| format!(
+                    "{{\"error\": \"json serialization failed: {e}\"}}"
+                ))
+            );
+        }
+    } else {
+        println!("Audit Report for module `{}`", report.module);
+        println!("{}", "=".repeat(60));
+        println!("Functions:       {}", report.summary.total_functions);
+        println!("Min confidence:  {:.2}", report.summary.min_confidence);
+        println!(
+            "Contracts:       {} total ({} static, {} runtime, {} failed)",
+            report.summary.contracts_total,
+            report.summary.contracts_static_verified,
+            report.summary.contracts_runtime,
+            report.summary.contracts_failed,
+        );
+        println!(
+            "Deployable:      {}",
+            if report.summary.deployable {
+                "yes"
+            } else {
+                "no"
+            }
+        );
+        println!();
+        println!(
+            "{:<30} {:>10} {:>10} {:>8} {:>8}",
+            "Function", "Declared", "Effective", "Req", "Ens"
+        );
+        println!("{}", "-".repeat(76));
+        for f in &report.functions {
+            println!(
+                "{:<30} {:>10.2} {:>10.2} {:>8} {:>8}",
+                f.name,
+                f.confidence_declared,
+                f.confidence_effective,
+                f.requires_count,
+                f.ensures_count,
+            );
+        }
+
+        // Print policy results if present.
+        if let Some(ref pr) = policy_result {
+            println!();
+            println!("{}", "=".repeat(60));
+            if pr.passed {
+                println!("Policy: PASSED");
+            } else {
+                println!("Policy: FAILED");
+                println!();
+                for v in &pr.violations {
+                    if v.function.is_empty() {
+                        println!(
+                            "  [{}] expected: {}, actual: {}",
+                            v.criterion, v.expected, v.actual
+                        );
+                    } else {
+                        println!(
+                            "  [{}] function `{}`: expected: {}, actual: {}",
+                            v.criterion, v.function, v.expected, v.actual
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Exit 1 if policy was specified and failed.
+    if let Some(ref pr) = policy_result {
+        if !pr.passed {
+            return 1;
+        }
+    }
+
+    0
+}
+
+/// Reads and displays module metadata from a compiled Kodo binary.
+pub(crate) fn run_describe(binary: &PathBuf, json_output: bool) -> i32 {
+    let data = match std::fs::read(binary) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: could not read binary `{}`: {e}", binary.display());
+            return 1;
+        }
+    };
+
+    let file = match object::File::parse(&*data) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: could not parse binary `{}`: {e}", binary.display());
+            return 1;
+        }
+    };
+
+    let meta_bytes = find_kodo_meta(&file, &data);
+
+    match meta_bytes {
+        Some(json_str) => {
+            if json_output {
+                println!("{json_str}");
+            } else {
+                print_metadata_human(&json_str);
+            }
+            0
+        }
+        None => {
+            eprintln!("error: no Kodo metadata found in `{}`", binary.display());
+            eprintln!("hint: was this binary compiled with kodoc?");
+            1
+        }
+    }
+}
+
+/// Finds the `kodo_meta` content in the binary by looking for the exported data symbols.
+fn find_kodo_meta(file: &object::File, _data: &[u8]) -> Option<String> {
+    use object::{Object, ObjectSection, ObjectSymbol};
+
+    // Try to find kodo_meta and kodo_meta_len symbols
+    let mut meta_addr = None;
+    let mut meta_len_addr = None;
+
+    for symbol in file.symbols() {
+        let name = symbol.name().unwrap_or("");
+        // On macOS, symbols have a leading underscore
+        let clean_name = name.strip_prefix('_').unwrap_or(name);
+        match clean_name {
+            "kodo_meta" => meta_addr = Some((symbol.address(), symbol.size())),
+            "kodo_meta_len" => meta_len_addr = Some((symbol.address(), symbol.size())),
+            _ => {}
+        }
+    }
+
+    let (meta_address, meta_symbol_size) = meta_addr?;
+    let (len_address, _) = meta_len_addr?;
+
+    // Find the section containing the metadata length
+    for section in file.sections() {
+        let section_addr = section.address();
+        let section_data = section.data().ok()?;
+
+        // Check if kodo_meta_len is in this section
+        if len_address >= section_addr && len_address < section_addr + section_data.len() as u64 {
+            let len_offset = (len_address - section_addr) as usize;
+            if len_offset + 8 <= section_data.len() {
+                let len_bytes: [u8; 8] =
+                    section_data[len_offset..len_offset + 8].try_into().ok()?;
+                let meta_len = u64::from_le_bytes(len_bytes) as usize;
+
+                // Now find kodo_meta data in same section
+                if meta_address >= section_addr
+                    && meta_address < section_addr + section_data.len() as u64
+                {
+                    let meta_offset = (meta_address - section_addr) as usize;
+                    if meta_offset + meta_len <= section_data.len() {
+                        let meta_str =
+                            std::str::from_utf8(&section_data[meta_offset..meta_offset + meta_len])
+                                .ok()?;
+                        return Some(meta_str.to_string());
+                    }
+                }
+
+                // Meta might be in a different section
+                for other_section in file.sections() {
+                    let other_addr = other_section.address();
+                    let other_data = other_section.data().ok()?;
+                    if meta_address >= other_addr
+                        && meta_address < other_addr + other_data.len() as u64
+                    {
+                        let meta_offset = (meta_address - other_addr) as usize;
+                        if meta_offset + meta_len <= other_data.len() {
+                            let meta_str = std::str::from_utf8(
+                                &other_data[meta_offset..meta_offset + meta_len],
+                            )
+                            .ok()?;
+                            return Some(meta_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: try using symbol size directly
+    if meta_symbol_size > 0 {
+        for section in file.sections() {
+            let section_addr = section.address();
+            let section_data = section.data().ok()?;
+            if meta_address >= section_addr
+                && meta_address < section_addr + section_data.len() as u64
+            {
+                let meta_offset = (meta_address - section_addr) as usize;
+                let meta_len = meta_symbol_size as usize;
+                if meta_offset + meta_len <= section_data.len() {
+                    let meta_str =
+                        std::str::from_utf8(&section_data[meta_offset..meta_offset + meta_len])
+                            .ok()?;
+                    return Some(meta_str.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Prints metadata in a human-readable format.
+fn print_metadata_human(json_str: &str) {
+    match serde_json::from_str::<serde_json::Value>(json_str) {
+        Ok(value) => {
+            println!("Kodo Module Metadata");
+            println!("{}", "=".repeat(40));
+            if let Some(obj) = value.as_object() {
+                for (key, val) in obj {
+                    match val {
+                        serde_json::Value::String(s) => println!("  {key}: {s}"),
+                        serde_json::Value::Array(arr) => {
+                            println!("  {key}:");
+                            for item in arr {
+                                if let serde_json::Value::String(s) = item {
+                                    println!("    - {s}");
+                                } else {
+                                    println!("    - {item}");
+                                }
+                            }
+                        }
+                        other => println!("  {key}: {other}"),
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            // If not valid JSON, just print raw
+            println!("{json_str}");
+        }
+    }
+}
+
+/// Lowers a source file to MIR and prints it without generating code.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
+    tracing::info!("lowering to MIR: {}", file.display());
+
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read file `{}`: {e}", file.display());
+            return 1;
+        }
+    };
+
+    let filename = file.display().to_string();
+
+    let module = match kodo_parser::parse(&source) {
+        Ok(m) => m,
+        Err(e) => {
+            diagnostics::render_parse_error(&source, &filename, &e);
+            return 1;
+        }
+    };
+
+    // Resolve and compile imported modules.
+    let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
+    let mut import_visited: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for import in &module.imports {
+        if let Some(stdlib_source) = kodo_std::resolve_stdlib_module(&import.path) {
+            match kodo_parser::parse(stdlib_source) {
+                Ok(m) => imported_modules.push(m),
+                Err(e) => {
+                    eprintln!("stdlib parse error: {e}");
+                    return 1;
+                }
+            }
+            continue;
+        }
+        let import_path = resolve_import_path(base_dir, &import.path);
+        if !import_visited.insert(import_path.clone()) {
+            continue;
+        }
+        let mut dummy_objects = Vec::new();
+        match compile_imported_module(&import_path, &mut dummy_objects) {
+            Ok(imported_module) => imported_modules.push(imported_module),
+            Err(msg) => {
+                eprintln!("{msg}");
+                return 1;
+            }
+        }
+    }
+
+    // Load stdlib prelude for type checking.
+    let mut checker = kodo_types::TypeChecker::new();
+    for (_name, prelude_source) in kodo_std::prelude_sources() {
+        if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+
+    // Type-check imported modules, then the user module.
+    for imported in &imported_modules {
+        if let Err(e) = checker.check_module(imported) {
+            eprintln!("type error in imported module `{}`: {e}", imported.name);
+            return 1;
+        }
+        checker.register_imported_module(imported.name.clone());
+    }
+
+    let type_errors = checker.check_module_collecting(&module);
+    if !type_errors.is_empty() {
+        for e in &type_errors {
+            diagnostics::render_type_error(&source, &filename, e);
+        }
+        return 1;
+    }
+
+    // Contract verification.
+    let contract_mode = parse_contract_mode(contracts_mode_str);
+    for func in &module.functions {
+        let contracts = kodo_contracts::extract_contracts(func);
+        if let Err(e) = kodo_contracts::verify_contracts(&contracts, contract_mode) {
+            eprintln!("contract error: {e}");
+            return 1;
+        }
+    }
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let contracts = kodo_contracts::extract_contracts(method);
+            if let Err(e) = kodo_contracts::verify_contracts(&contracts, contract_mode) {
+                eprintln!("contract error: {e}");
+                return 1;
+            }
+        }
+    }
+
+    // Desugar pass.
+    let mut module = module;
+    kodo_desugar::desugar_module(&mut module);
+
+    // Lift impl block methods to top-level functions with mangled names.
+    for impl_block in &module.impl_blocks {
+        for method in &impl_block.methods {
+            let mut func = method.clone();
+            func.name = format!("{}_{}", impl_block.type_name, method.name);
+            for param in &mut func.params {
+                if param.name == "self" {
+                    param.ty = kodo_ast::TypeExpr::Named(impl_block.type_name.clone());
+                }
+            }
+            module.functions.push(func);
+        }
+    }
+
+    // Inject synthetic stdlib method implementations for MIR lowering.
+    inject_stdlib_method_functions(&mut module);
+
+    // MIR lowering.
+    let mir_functions = match kodo_mir::lowering::lower_module_with_type_info(
+        &module,
+        checker.struct_registry(),
+        checker.enum_registry(),
+        checker.enum_names(),
+        checker.type_alias_registry(),
+    ) {
+        Ok(fns) => fns,
+        Err(e) => {
+            eprintln!("MIR lowering error: {e}");
+            return 1;
+        }
+    };
+
+    // Run MIR optimization passes.
+    let mut mir_functions = mir_functions;
+    kodo_mir::optimize::optimize_all(&mut mir_functions);
+
+    // Print MIR to stdout.
+    println!("--- MIR ({} functions) ---", mir_functions.len());
+    for func in &mir_functions {
+        println!("{func:#?}");
+        println!();
+    }
+    println!("--- end MIR ---");
+
+    0
+}

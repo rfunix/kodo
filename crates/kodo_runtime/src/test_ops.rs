@@ -345,3 +345,306 @@ pub extern "C" fn kodo_test_summary(total: i64, passed: i64, failed: i64) {
         "test result: {status}. {passed} passed; {failed} failed; {total} total"
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: reset the global TEST_FAILED flag before each test that
+    /// inspects it, to avoid cross-test contamination.
+    ///
+    /// # Safety
+    ///
+    /// Must only be called from single-threaded test code.
+    unsafe fn reset_test_failed() {
+        unsafe {
+            TEST_FAILED = false;
+        }
+    }
+
+    // -- kodo_assert --
+
+    #[test]
+    fn assert_passes_on_nonzero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert(1);
+            assert!(!TEST_FAILED, "assert(1) should not set failure flag");
+        }
+    }
+
+    #[test]
+    fn assert_fails_on_zero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert(0);
+            assert!(TEST_FAILED, "assert(0) should set failure flag");
+        }
+    }
+
+    // -- kodo_assert_true --
+
+    #[test]
+    fn assert_true_passes_on_nonzero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_true(1);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_true_fails_on_zero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_true(0);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_false --
+
+    #[test]
+    fn assert_false_passes_on_zero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_false(0);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_false_fails_on_nonzero() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_false(1);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_eq_int --
+
+    #[test]
+    fn assert_eq_int_passes_on_equal() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_int(42, 42);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_int_fails_on_different() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_int(42, 99);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_int_negative_values() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_int(-10, -10);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_eq_bool --
+
+    #[test]
+    fn assert_eq_bool_passes_both_true() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_bool(1, 1);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_bool_passes_both_false() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_bool(0, 0);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_bool_fails_true_vs_false() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_bool(1, 0);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_bool_nonzero_is_true() {
+        unsafe {
+            reset_test_failed();
+            // Any non-zero value is truthy, so 5 == 1 as booleans.
+            kodo_assert_eq_bool(5, 1);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_eq_float --
+
+    #[test]
+    fn assert_eq_float_passes_on_equal() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_float(3.14, 3.14);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_float_fails_on_different() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_float(3.14, 2.71);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_ne_int --
+
+    #[test]
+    fn assert_ne_int_passes_on_different() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_int(1, 2);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_ne_int_fails_on_equal() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_int(5, 5);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_ne_bool --
+
+    #[test]
+    fn assert_ne_bool_passes_on_different() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_bool(1, 0);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_ne_bool_fails_on_same() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_bool(1, 1);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_ne_float --
+
+    #[test]
+    fn assert_ne_float_passes_on_different() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_float(1.0, 2.0);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_ne_float_fails_on_equal() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_float(1.0, 1.0);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_assert_eq_string / kodo_assert_ne_string --
+
+    #[test]
+    fn assert_eq_string_passes_on_equal() {
+        let a = "hello";
+        let b = "hello";
+        // Build 16-byte string slots: [ptr: i64, len: i64].
+        let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
+        let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_eq_string_fails_on_different() {
+        let a = "hello";
+        let b = "world";
+        let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
+        let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        unsafe {
+            reset_test_failed();
+            kodo_assert_eq_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_ne_string_passes_on_different() {
+        let a = "foo";
+        let b = "bar";
+        let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
+        let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn assert_ne_string_fails_on_equal() {
+        let a = "same";
+        let b = "same";
+        let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
+        let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        unsafe {
+            reset_test_failed();
+            kodo_assert_ne_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
+            assert!(TEST_FAILED);
+        }
+    }
+
+    // -- kodo_test_end --
+    // Note: kodo_test_end and kodo_test_summary print to stdout using
+    // the "test result:" format, which confuses the Rust test runner's
+    // output parser. We test the underlying flag logic instead.
+
+    #[test]
+    fn test_failed_flag_starts_false() {
+        unsafe {
+            reset_test_failed();
+            assert!(!TEST_FAILED);
+        }
+    }
+
+    #[test]
+    fn test_failed_flag_set_by_assertion() {
+        unsafe {
+            reset_test_failed();
+            kodo_assert(0); // triggers failure
+            assert!(TEST_FAILED);
+            reset_test_failed(); // clean up
+        }
+    }
+}

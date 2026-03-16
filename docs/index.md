@@ -31,6 +31,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Iterators](guide/iterators.md) — for-in loops, iterator protocol, collection traversal
 - [Functional Combinators](guide/functional.md) — map, filter, fold, count, any, all, reduce, pipelines
 - [Concurrency & Spawn](guide/concurrency.md) — spawn with captured variables
+- [Testing](guide/testing.md) — built-in test framework with assertions and `kodoc test`
 - [Real-World Examples](guide/real-world-examples.md) — complete programs: todo app, URL shortener, word counter, config validator, health checker
 
 ### Tools

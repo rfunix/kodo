@@ -1704,4 +1704,929 @@ mod tests {
         assert_eq!(ContractStatus::RuntimeOnly.as_str(), "runtime_only");
         assert_eq!(ContractStatus::NoContracts.as_str(), "no_contracts");
     }
+
+    // =========================================================================
+    // Additional test coverage
+    // =========================================================================
+
+    // --- validate_contract_expr: all rejected expression variants ---
+
+    #[test]
+    fn validate_struct_lit_is_invalid() {
+        let expr = Expr::StructLit {
+            name: "Point".to_string(),
+            fields: vec![],
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_enum_variant_is_invalid() {
+        let expr = Expr::EnumVariantExpr {
+            enum_name: "Color".to_string(),
+            variant: "Red".to_string(),
+            args: vec![],
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_match_is_invalid() {
+        let expr = Expr::Match {
+            expr: Box::new(ident_expr("x")),
+            arms: vec![],
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_range_is_invalid() {
+        let expr = Expr::Range {
+            start: Box::new(int_expr(0)),
+            end: Box::new(int_expr(10)),
+            inclusive: false,
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_try_is_invalid() {
+        let expr = Expr::Try {
+            operand: Box::new(ident_expr("x")),
+            span: Span::new(0, 5),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_optional_chain_is_invalid() {
+        let expr = Expr::OptionalChain {
+            object: Box::new(ident_expr("x")),
+            field: "y".to_string(),
+            span: Span::new(0, 5),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_null_coalesce_is_invalid() {
+        let expr = Expr::NullCoalesce {
+            left: Box::new(ident_expr("x")),
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_closure_is_invalid() {
+        let expr = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: Box::new(bool_expr(true)),
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_is_expr_is_invalid() {
+        let expr = Expr::Is {
+            operand: Box::new(ident_expr("x")),
+            type_name: "Int".to_string(),
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_await_is_invalid() {
+        let expr = Expr::Await {
+            operand: Box::new(ident_expr("x")),
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_string_interp_is_invalid() {
+        let expr = Expr::StringInterp {
+            parts: vec![],
+            span: Span::new(0, 10),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_tuple_lit_is_invalid() {
+        let expr = Expr::TupleLit(vec![int_expr(1), int_expr(2)], Span::new(0, 10));
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_tuple_index_is_invalid() {
+        let expr = Expr::TupleIndex {
+            tuple: Box::new(ident_expr("t")),
+            index: 0,
+            span: Span::new(0, 5),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_float_literal_is_valid() {
+        let expr = Expr::FloatLit(3.14, Span::new(0, 4));
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    #[test]
+    fn validate_nested_valid_binary_ops() {
+        // (x > 0) && (y > 0) || (z > 0)
+        let left = Expr::BinaryOp {
+            left: Box::new(gt_expr(ident_expr("x"), int_expr(0))),
+            op: BinOp::And,
+            right: Box::new(gt_expr(ident_expr("y"), int_expr(0))),
+            span: Span::new(0, 20),
+        };
+        let expr = Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinOp::Or,
+            right: Box::new(gt_expr(ident_expr("z"), int_expr(0))),
+            span: Span::new(0, 30),
+        };
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    #[test]
+    fn validate_nested_field_access_is_valid() {
+        // self.point.x
+        let inner = Expr::FieldAccess {
+            object: Box::new(ident_expr("self")),
+            field: "point".to_string(),
+            span: Span::new(0, 10),
+        };
+        let expr = Expr::FieldAccess {
+            object: Box::new(inner),
+            field: "x".to_string(),
+            span: Span::new(0, 12),
+        };
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    #[test]
+    fn validate_binary_with_invalid_left_fails() {
+        let call = Expr::Call {
+            callee: Box::new(ident_expr("foo")),
+            args: vec![],
+            span: Span::new(0, 5),
+        };
+        let expr = Expr::BinaryOp {
+            left: Box::new(call),
+            op: BinOp::Gt,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        assert!(validate_contract_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn validate_binary_with_invalid_right_fails() {
+        let call = Expr::Call {
+            callee: Box::new(ident_expr("bar")),
+            args: vec![],
+            span: Span::new(0, 5),
+        };
+        let expr = Expr::BinaryOp {
+            left: Box::new(int_expr(0)),
+            op: BinOp::Lt,
+            right: Box::new(call),
+            span: Span::new(0, 10),
+        };
+        assert!(validate_contract_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn validate_unary_not_with_invalid_operand_fails() {
+        let call = Expr::Call {
+            callee: Box::new(ident_expr("baz")),
+            args: vec![],
+            span: Span::new(0, 5),
+        };
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(call),
+            span: Span::new(0, 6),
+        };
+        assert!(validate_contract_expr(&expr).is_err());
+    }
+
+    // --- verify_contracts: Recoverable mode ---
+
+    #[test]
+    fn verify_contracts_recoverable_mode_counts_as_runtime() {
+        let contracts = vec![
+            Contract {
+                kind: ContractKind::Requires,
+                expr: gt_expr(ident_expr("x"), int_expr(0)),
+                span: Span::new(0, 10),
+            },
+            Contract {
+                kind: ContractKind::Ensures,
+                expr: bool_expr(true),
+                span: Span::new(10, 20),
+            },
+        ];
+        let result = verify_contracts(&contracts, ContractMode::Recoverable);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // Recoverable mode is not Static/Both, so all go to runtime
+        assert_eq!(result.runtime_checks_needed, 2);
+        assert_eq!(result.static_verified, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn verify_contracts_recoverable_mode_still_validates() {
+        // Invalid expressions are still caught in Recoverable mode
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: Expr::StringLit("bad".to_string(), Span::new(0, 5)),
+            span: Span::new(0, 5),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Recoverable);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(result.runtime_checks_needed, 0);
+    }
+
+    // --- verify_contracts: all invalid contracts ---
+
+    #[test]
+    fn verify_contracts_all_invalid_reports_all_failures() {
+        let contracts = vec![
+            Contract {
+                kind: ContractKind::Requires,
+                expr: Expr::StringLit("a".to_string(), Span::new(0, 3)),
+                span: Span::new(0, 3),
+            },
+            Contract {
+                kind: ContractKind::Ensures,
+                expr: Expr::Block(Block {
+                    span: Span::new(5, 10),
+                    stmts: vec![],
+                }),
+                span: Span::new(5, 10),
+            },
+        ];
+        let result = verify_contracts(&contracts, ContractMode::Runtime);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.failures.len(), 2);
+        assert_eq!(result.runtime_checks_needed, 0);
+    }
+
+    // --- extract_contracts: multiple requires and ensures ---
+
+    #[test]
+    fn extract_contracts_multiple_requires_multiple_ensures() {
+        let func = make_function(
+            vec![
+                gt_expr(ident_expr("x"), int_expr(0)),
+                gt_expr(ident_expr("y"), int_expr(0)),
+                gt_expr(ident_expr("z"), int_expr(0)),
+            ],
+            vec![bool_expr(true), bool_expr(false)],
+        );
+        let contracts = extract_contracts(&func);
+        assert_eq!(contracts.len(), 5);
+        assert_eq!(
+            contracts
+                .iter()
+                .filter(|c| c.kind == ContractKind::Requires)
+                .count(),
+            3
+        );
+        assert_eq!(
+            contracts
+                .iter()
+                .filter(|c| c.kind == ContractKind::Ensures)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn extract_contracts_preserves_expr_content() {
+        let req_expr = gt_expr(ident_expr("x"), int_expr(42));
+        let func = make_function(vec![req_expr.clone()], vec![]);
+        let contracts = extract_contracts(&func);
+        assert_eq!(contracts.len(), 1);
+        // Verify the expression span matches
+        assert_eq!(contracts[0].span, expr_span(&req_expr));
+    }
+
+    // --- generate_runtime_check: message format ---
+
+    #[test]
+    fn generate_runtime_check_message_contains_span_offsets() {
+        let contract = Contract {
+            kind: ContractKind::Requires,
+            expr: gt_expr(ident_expr("x"), int_expr(0)),
+            span: Span::new(42, 55),
+        };
+        let check = generate_runtime_check(&contract);
+        assert!(check.message.contains("42..55"));
+        assert!(check.message.contains("precondition"));
+    }
+
+    #[test]
+    fn generate_runtime_check_postcondition_message() {
+        let contract = Contract {
+            kind: ContractKind::Ensures,
+            expr: bool_expr(true),
+            span: Span::new(100, 200),
+        };
+        let check = generate_runtime_check(&contract);
+        assert!(check.message.contains("100..200"));
+        assert!(check.message.contains("postcondition"));
+    }
+
+    // --- expr_span: more variants ---
+
+    #[test]
+    fn expr_span_from_float_lit() {
+        let span = Span::new(10, 20);
+        assert_eq!(expr_span(&Expr::FloatLit(1.5, span)), span);
+    }
+
+    #[test]
+    fn expr_span_from_string_lit() {
+        let span = Span::new(3, 12);
+        assert_eq!(expr_span(&Expr::StringLit("hello".to_string(), span)), span);
+    }
+
+    #[test]
+    fn expr_span_from_binary_op() {
+        let span = Span::new(7, 17);
+        let expr = Expr::BinaryOp {
+            left: Box::new(int_expr(1)),
+            op: BinOp::Add,
+            right: Box::new(int_expr(2)),
+            span,
+        };
+        assert_eq!(expr_span(&expr), span);
+    }
+
+    #[test]
+    fn expr_span_from_unary_op() {
+        let span = Span::new(2, 8);
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(bool_expr(true)),
+            span,
+        };
+        assert_eq!(expr_span(&expr), span);
+    }
+
+    #[test]
+    fn expr_span_from_call() {
+        let span = Span::new(0, 20);
+        let expr = Expr::Call {
+            callee: Box::new(ident_expr("f")),
+            args: vec![],
+            span,
+        };
+        assert_eq!(expr_span(&expr), span);
+    }
+
+    #[test]
+    fn expr_span_from_field_access() {
+        let span = Span::new(4, 14);
+        let expr = Expr::FieldAccess {
+            object: Box::new(ident_expr("obj")),
+            field: "x".to_string(),
+            span,
+        };
+        assert_eq!(expr_span(&expr), span);
+    }
+
+    #[test]
+    fn expr_span_from_block() {
+        let span = Span::new(5, 25);
+        let expr = Expr::Block(Block {
+            span,
+            stmts: vec![],
+        });
+        assert_eq!(expr_span(&expr), span);
+    }
+
+    // --- ContractError display messages ---
+
+    #[test]
+    fn contract_error_precondition_display() {
+        let err = ContractError::PreconditionUnverifiable {
+            message: "cannot prove x > 0".to_string(),
+            span: Span::new(5, 15),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("precondition"));
+        assert!(msg.contains("cannot prove x > 0"));
+    }
+
+    #[test]
+    fn contract_error_postcondition_display() {
+        let err = ContractError::PostconditionUnverifiable {
+            message: "result may be negative".to_string(),
+            span: Span::new(10, 25),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("postcondition"));
+        assert!(msg.contains("result may be negative"));
+    }
+
+    #[test]
+    fn contract_error_invalid_expression_display() {
+        let err = ContractError::InvalidExpression {
+            message: "closures not allowed".to_string(),
+            span: Span::new(0, 10),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("invalid contract expression"));
+        assert!(msg.contains("closures not allowed"));
+    }
+
+    // --- substitute_self: more cases ---
+
+    #[test]
+    fn substitute_self_non_self_ident_unchanged() {
+        let constraint = gt_expr(ident_expr("x"), int_expr(0));
+        let substituted = substitute_self(&constraint, "port");
+        // "x" should remain "x", not become "port"
+        if let Expr::BinaryOp { left, .. } = &substituted {
+            if let Expr::Ident(name, _) = left.as_ref() {
+                assert_eq!(name, "x");
+            } else {
+                panic!("expected Ident");
+            }
+        } else {
+            panic!("expected BinaryOp");
+        }
+    }
+
+    #[test]
+    fn substitute_self_in_nested_binary() {
+        // self > 0 && self < 100 → port > 0 && port < 100
+        let constraint = Expr::BinaryOp {
+            left: Box::new(gt_expr(ident_expr("self"), int_expr(0))),
+            op: BinOp::And,
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(ident_expr("self")),
+                op: BinOp::Lt,
+                right: Box::new(int_expr(100)),
+                span: Span::new(0, 15),
+            }),
+            span: Span::new(0, 30),
+        };
+        let substituted = substitute_self(&constraint, "port");
+        // Check both self occurrences were replaced
+        if let Expr::BinaryOp { left, right, .. } = &substituted {
+            if let Expr::BinaryOp {
+                left: inner_left, ..
+            } = left.as_ref()
+            {
+                if let Expr::Ident(name, _) = inner_left.as_ref() {
+                    assert_eq!(name, "port");
+                } else {
+                    panic!("expected Ident");
+                }
+            }
+            if let Expr::BinaryOp {
+                left: inner_left, ..
+            } = right.as_ref()
+            {
+                if let Expr::Ident(name, _) = inner_left.as_ref() {
+                    assert_eq!(name, "port");
+                } else {
+                    panic!("expected Ident");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn substitute_self_in_unary() {
+        // !self → !port (conceptually, even though self is typically not boolean)
+        let constraint = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(ident_expr("self")),
+            span: Span::new(0, 5),
+        };
+        let substituted = substitute_self(&constraint, "flag");
+        if let Expr::UnaryOp { operand, .. } = &substituted {
+            if let Expr::Ident(name, _) = operand.as_ref() {
+                assert_eq!(name, "flag");
+            } else {
+                panic!("expected Ident");
+            }
+        } else {
+            panic!("expected UnaryOp");
+        }
+    }
+
+    #[test]
+    fn substitute_self_leaves_other_exprs_unchanged() {
+        // Expressions without "self" are returned as-is (cloned)
+        let constraint = int_expr(42);
+        let substituted = substitute_self(&constraint, "x");
+        assert!(matches!(substituted, Expr::IntLit(42, _)));
+    }
+
+    // --- refinement_contract ---
+
+    #[test]
+    fn refinement_contract_creates_requires_with_substitution() {
+        let constraint = gt_expr(ident_expr("self"), int_expr(0));
+        let span = Span::new(0, 10);
+        let contract = refinement_contract(&constraint, "port", span);
+
+        assert_eq!(contract.kind, ContractKind::Requires);
+        assert_eq!(contract.span, span);
+        // The "self" in the expression should have been replaced with "port"
+        if let Expr::BinaryOp { left, .. } = &contract.expr {
+            if let Expr::Ident(name, _) = left.as_ref() {
+                assert_eq!(name, "port");
+            } else {
+                panic!("expected Ident");
+            }
+        } else {
+            panic!("expected BinaryOp");
+        }
+    }
+
+    // --- verify_refinement ---
+
+    #[test]
+    fn verify_refinement_none_mode_skips() {
+        let constraint = gt_expr(ident_expr("self"), int_expr(0));
+        let result = verify_refinement(&constraint, "x", Span::new(0, 10), ContractMode::None);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 0);
+        assert_eq!(result.runtime_checks_needed, 0);
+    }
+
+    #[test]
+    fn verify_refinement_runtime_mode() {
+        let constraint = gt_expr(ident_expr("self"), int_expr(0));
+        let result = verify_refinement(&constraint, "x", Span::new(0, 10), ContractMode::Runtime);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.runtime_checks_needed, 1);
+    }
+
+    // --- verify_contracts_with_refinements: Runtime and Both modes ---
+
+    #[test]
+    fn verify_with_refinements_runtime_mode() {
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: gt_expr(ident_expr("x"), int_expr(0)),
+            span: Span::new(0, 10),
+        }];
+        let refinements = vec![gt_expr(ident_expr("x"), int_expr(5))];
+        let result =
+            verify_contracts_with_refinements(&contracts, &refinements, ContractMode::Runtime);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // Runtime mode does not use SMT, so all contracts are counted as runtime
+        assert_eq!(result.runtime_checks_needed, 1);
+        assert_eq!(result.static_verified, 0);
+    }
+
+    #[test]
+    fn verify_with_refinements_none_mode() {
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: Expr::StringLit("invalid".to_string(), Span::new(0, 9)),
+            span: Span::new(0, 9),
+        }];
+        let result = verify_contracts_with_refinements(&contracts, &[], ContractMode::None);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 0);
+        assert_eq!(result.runtime_checks_needed, 0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn verify_with_refinements_both_mode_falls_back() {
+        // In Both mode with refinements, a refuted contract goes to runtime
+        let ne = Expr::BinaryOp {
+            left: Box::new(ident_expr("x")),
+            op: BinOp::Ne,
+            right: Box::new(int_expr(0)),
+            span: Span::new(0, 10),
+        };
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: ne,
+            span: Span::new(0, 10),
+        }];
+        // Empty refinements → falls through to regular SMT verify
+        let result = verify_contracts_with_refinements(&contracts, &[], ContractMode::Both);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        // x != 0 is refuted by Z3, but in Both mode it falls back to runtime
+        assert_eq!(result.runtime_checks_needed, 1);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn verify_with_refinements_static_mode_invalid_expr() {
+        // Invalid expressions are caught regardless of refinements
+        let contracts = vec![Contract {
+            kind: ContractKind::Requires,
+            expr: Expr::StringLit("bad".to_string(), Span::new(0, 5)),
+            span: Span::new(0, 5),
+        }];
+        let refinements = vec![gt_expr(ident_expr("x"), int_expr(0))];
+        let result =
+            verify_contracts_with_refinements(&contracts, &refinements, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.failures.len(), 1);
+        assert!(matches!(
+            result.failures[0],
+            ContractError::InvalidExpression { .. }
+        ));
+    }
+
+    // --- ContractKind equality ---
+
+    #[test]
+    fn contract_kind_equality() {
+        assert_eq!(ContractKind::Requires, ContractKind::Requires);
+        assert_eq!(ContractKind::Ensures, ContractKind::Ensures);
+        assert_ne!(ContractKind::Requires, ContractKind::Ensures);
+    }
+
+    // --- ContractMode equality ---
+
+    #[test]
+    fn contract_mode_equality() {
+        assert_eq!(ContractMode::Static, ContractMode::Static);
+        assert_eq!(ContractMode::Runtime, ContractMode::Runtime);
+        assert_eq!(ContractMode::Both, ContractMode::Both);
+        assert_eq!(ContractMode::None, ContractMode::None);
+        assert_eq!(ContractMode::Recoverable, ContractMode::Recoverable);
+        assert_ne!(ContractMode::Static, ContractMode::Runtime);
+        assert_ne!(ContractMode::None, ContractMode::Both);
+    }
+
+    // --- ContractSummary equality ---
+
+    #[test]
+    fn contract_summary_equality() {
+        let a = ContractSummary {
+            preconditions: 2,
+            postconditions: 1,
+            all_valid: true,
+        };
+        let b = ContractSummary {
+            preconditions: 2,
+            postconditions: 1,
+            all_valid: true,
+        };
+        let c = ContractSummary {
+            preconditions: 0,
+            postconditions: 0,
+            all_valid: false,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // --- summarize: multiple invalid contracts ---
+
+    #[test]
+    fn summarize_function_with_multiple_invalid_contracts() {
+        let func = make_function(
+            vec![
+                Expr::Call {
+                    callee: Box::new(ident_expr("foo")),
+                    args: vec![],
+                    span: Span::new(0, 5),
+                },
+                gt_expr(ident_expr("x"), int_expr(0)),
+            ],
+            vec![Expr::StringLit("bad".to_string(), Span::new(10, 15))],
+        );
+        let summary = summarize_function_contracts(&func);
+        assert_eq!(summary.preconditions, 2);
+        assert_eq!(summary.postconditions, 1);
+        assert!(!summary.all_valid);
+    }
+
+    // --- verify_contracts: multiple valid and invalid mixed ---
+
+    #[test]
+    fn verify_contracts_runtime_mixed_valid_and_invalid() {
+        let contracts = vec![
+            Contract {
+                kind: ContractKind::Requires,
+                expr: gt_expr(ident_expr("a"), int_expr(0)),
+                span: Span::new(0, 10),
+            },
+            Contract {
+                kind: ContractKind::Ensures,
+                expr: Expr::Closure {
+                    params: vec![],
+                    return_type: None,
+                    body: Box::new(bool_expr(true)),
+                    span: Span::new(10, 20),
+                },
+                span: Span::new(10, 20),
+            },
+            Contract {
+                kind: ContractKind::Requires,
+                expr: bool_expr(true),
+                span: Span::new(20, 25),
+            },
+        ];
+        let result = verify_contracts(&contracts, ContractMode::Runtime);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.runtime_checks_needed, 2);
+        assert_eq!(result.failures.len(), 1);
+    }
+
+    // --- is_allowed_contract_method: edge cases via validate ---
+
+    #[test]
+    fn validate_length_with_args_is_invalid() {
+        // .length(42) is not allowed — length takes no arguments
+        let expr = Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                object: Box::new(ident_expr("s")),
+                field: "length".to_string(),
+                span: Span::new(0, 8),
+            }),
+            args: vec![int_expr(42)],
+            span: Span::new(0, 12),
+        };
+        let result = validate_contract_expr(&expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_length_on_nested_field_is_valid() {
+        // self.items.length() > 0 should be valid
+        let inner_field = Expr::FieldAccess {
+            object: Box::new(ident_expr("self")),
+            field: "items".to_string(),
+            span: Span::new(0, 10),
+        };
+        let length_call = Expr::Call {
+            callee: Box::new(Expr::FieldAccess {
+                object: Box::new(inner_field),
+                field: "length".to_string(),
+                span: Span::new(0, 17),
+            }),
+            args: vec![],
+            span: Span::new(0, 19),
+        };
+        let expr = gt_expr(length_call, int_expr(0));
+        assert!(validate_contract_expr(&expr).is_ok());
+    }
+
+    // --- generate_runtime_check: expression is preserved ---
+
+    #[test]
+    fn generate_runtime_check_preserves_expression_span() {
+        let original_expr = gt_expr(ident_expr("x"), int_expr(5));
+        let original_span = Span::new(77, 88);
+        let contract = Contract {
+            kind: ContractKind::Requires,
+            expr: original_expr,
+            span: original_span,
+        };
+        let check = generate_runtime_check(&contract);
+        assert_eq!(check.span, original_span);
+        assert_eq!(check.kind, ContractKind::Requires);
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_ensures_trivial_true_proved() {
+        // `ensures { true }` in Static mode
+        let contracts = vec![Contract {
+            kind: ContractKind::Ensures,
+            expr: bool_expr(true),
+            span: Span::new(0, 4),
+        }];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 1);
+        assert!(result.failures.is_empty());
+    }
+
+    #[cfg(feature = "smt")]
+    #[test]
+    fn smt_e2e_multiple_ensures_all_proved() {
+        let contracts = vec![
+            Contract {
+                kind: ContractKind::Ensures,
+                expr: bool_expr(true),
+                span: Span::new(0, 4),
+            },
+            Contract {
+                kind: ContractKind::Ensures,
+                expr: Expr::BinaryOp {
+                    left: Box::new(ident_expr("x")),
+                    op: BinOp::Eq,
+                    right: Box::new(ident_expr("x")),
+                    span: Span::new(5, 15),
+                },
+                span: Span::new(5, 15),
+            },
+        ];
+        let result = verify_contracts(&contracts, ContractMode::Static);
+        assert!(result.is_ok());
+        let result = result.unwrap_or_else(|_| panic!("already checked"));
+        assert_eq!(result.static_verified, 2);
+        assert!(result.failures.is_empty());
+    }
 }

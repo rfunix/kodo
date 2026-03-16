@@ -8,6 +8,13 @@
 //!
 //! - **Diagnostics**: Real-time error and warning reporting as you type
 //! - **Hover**: Type information, contracts, and confidence annotations
+//! - **Completion**: Context-aware code completion with contracts and annotations
+//! - **Go to definition**: Navigate to symbol definitions
+//! - **Find references**: Find all usages of a symbol
+//! - **Rename**: Rename symbols across a document
+//! - **Signature help**: Parameter hints inside function calls
+//! - **Code actions**: Quick fixes for missing contracts and type annotations
+//! - **Document symbols**: Outline view of module declarations
 //! - **Custom Extensions**: `/kodo/contractStatus`, `/kodo/confidenceReport`
 //!
 //! ## Usage
@@ -17,6 +24,16 @@
 #![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
+
+mod actions;
+mod completion;
+mod diagnostics;
+mod goto;
+mod hover;
+mod rename;
+mod signature;
+mod symbols;
+mod utils;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -69,219 +86,19 @@ impl KodoLanguageServer {
 
     /// Analyzes a document and publishes diagnostics.
     async fn analyze_document(&self, uri: &Url, text: &str) {
-        let diagnostics = analyze_source(text);
+        let diags = diagnostics::analyze_source(text);
         self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .publish_diagnostics(uri.clone(), diags, None)
             .await;
     }
-}
 
-/// Analyzes Kōdo source code and returns LSP diagnostics.
-///
-/// Runs the parser and type checker pipeline, collecting
-/// any errors as LSP diagnostic entries.
-fn analyze_source(source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    // Parse with error recovery so we report ALL diagnostics at once.
-    let output = kodo_parser::parse_with_recovery(source);
-
-    // Collect all parse errors as diagnostics.
-    for e in &output.errors {
-        let (line, col) = if let Some(span) = e.span() {
-            offset_to_line_col(source, span.start)
-        } else {
-            (0, 0)
-        };
-        diagnostics.push(Diagnostic {
-            range: Range::new(Position::new(line, col), Position::new(line, col + 1)),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(e.code().to_string())),
-            source: Some("kodo".to_string()),
-            message: e.to_string(),
-            ..Default::default()
-        });
-    }
-
-    // Only run type checking if parsing produced no errors (partial ASTs
-    // from recovery would generate misleading type errors).
-    if output.errors.is_empty() {
-        let mut checker = kodo_types::TypeChecker::new();
-        if let Err(error) = checker.check_module(&output.module) {
-            let (line, col, end_line, end_col) = if let Some(span) = error.span() {
-                let (l, c) = offset_to_line_col(source, span.start);
-                let (el, ec) = offset_to_line_col(source, span.end);
-                (l, c, el, ec)
-            } else {
-                (0, 0, 0, 1)
-            };
-            diagnostics.push(Diagnostic {
-                range: Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String(error.code().to_string())),
-                source: Some("kodo".to_string()),
-                message: error.to_string(),
-                ..Default::default()
-            });
-        }
-    }
-
-    diagnostics
-}
-
-/// Converts a byte offset in source to (line, column) for LSP.
-fn offset_to_line_col(source: &str, offset: u32) -> (u32, u32) {
-    let offset = offset as usize;
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
-}
-
-/// Formats an annotation with its arguments for display.
-///
-/// Renders `@confidence(0.85)`, `@authored_by(agent: "claude")`, etc.
-fn format_annotation(ann: &kodo_ast::Annotation) -> String {
-    if ann.args.is_empty() {
-        return format!("@{}", ann.name);
-    }
-    let args: Vec<String> = ann
-        .args
-        .iter()
-        .map(|arg| match arg {
-            kodo_ast::AnnotationArg::Positional(expr) => format_annotation_expr(expr),
-            kodo_ast::AnnotationArg::Named(name, expr) => {
-                format!("{name}: {}", format_annotation_expr(expr))
-            }
-        })
-        .collect();
-    format!("@{}({})", ann.name, args.join(", "))
-}
-
-/// Formats an expression value for annotation display.
-fn format_annotation_expr(expr: &kodo_ast::Expr) -> String {
-    match expr {
-        kodo_ast::Expr::IntLit(n, _) => n.to_string(),
-        kodo_ast::Expr::FloatLit(f, _) => format!("{f}"),
-        kodo_ast::Expr::StringLit(s, _) => format!("\"{s}\""),
-        kodo_ast::Expr::BoolLit(b, _) => b.to_string(),
-        kodo_ast::Expr::Ident(name, _) => name.clone(),
-        _ => "...".to_string(),
-    }
-}
-
-/// Finds the function at a given position in the source and returns
-/// hover information including type, contracts, and annotations.
-fn hover_at_position(source: &str, position: Position) -> Option<String> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-
-    // Parse
-    let module = kodo_parser::parse(source).ok()?;
-
-    // Find function at offset
-    #[allow(clippy::cast_possible_truncation)]
-    let offset_u32 = offset as u32;
-    for func in &module.functions {
-        if func.span.start <= offset_u32 && offset_u32 <= func.span.end {
-            use std::fmt::Write;
-
-            // Check if the cursor is on a parameter or local variable first
-            let word = word_at_offset(source, offset);
-            if !word.is_empty() {
-                // Check parameters
-                for p in &func.params {
-                    if p.name == word {
-                        return Some(format!("**param {}**: {}", p.name, format_type_expr(&p.ty)));
-                    }
-                }
-                // Check let bindings
-                for stmt in &func.body.stmts {
-                    if let kodo_ast::Stmt::Let {
-                        name, ty, value, ..
-                    } = stmt
-                    {
-                        if name == word {
-                            let type_str = if let Some(ty) = ty {
-                                format_type_expr(ty)
-                            } else {
-                                infer_type_hint(value)
-                            };
-                            return Some(format!("**let {name}**: {type_str}"));
-                        }
-                    }
-                }
-            }
-
-            let mut info = format!("**fn {}**", func.name);
-
-            // Add parameter types
-            if !func.params.is_empty() {
-                info.push_str("\n\nParameters:\n");
-                for p in &func.params {
-                    let _ = writeln!(info, "- `{}: {:?}`", p.name, p.ty);
-                }
-            }
-
-            // Add return type
-            let _ = write!(info, "\nReturns: `{:?}`", func.return_type);
-
-            // Add contracts
-            if !func.requires.is_empty() {
-                info.push_str("\n\n**Contracts:**\n");
-                for req in &func.requires {
-                    let _ = writeln!(info, "- `requires {{ {} }}`", format_expr(req));
-                }
-            }
-            if !func.ensures.is_empty() {
-                for ens in &func.ensures {
-                    let _ = writeln!(info, "- `ensures {{ {} }}`", format_expr(ens));
-                }
-            }
-
-            // Add annotations
-            for ann in &func.annotations {
-                let _ = write!(info, "\n{}", format_annotation(ann));
-            }
-
-            return Some(info);
-        }
-    }
-
-    None
-}
-
-/// Converts (line, column) to a byte offset.
-fn line_col_to_offset(source: &str, line: u32, col: u32) -> Option<usize> {
-    let mut current_line = 0u32;
-    let mut current_col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if current_line == line && current_col == col {
-            return Some(i);
-        }
-        if ch == '\n' {
-            if current_line == line {
-                return Some(i);
-            }
-            current_line += 1;
-            current_col = 0;
-        } else {
-            current_col += 1;
-        }
-    }
-    if current_line == line {
-        Some(source.len())
-    } else {
-        None
+    /// Retrieves the source text for a document URI.
+    fn get_source(&self, uri: &Url) -> Result<Option<String>> {
+        let docs = self
+            .documents
+            .lock()
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        Ok(docs.get(&uri.to_string()).cloned())
     }
 }
 
@@ -369,18 +186,10 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            if let Some(span) = definition_at_position(&source, position) {
-                let (line, col) = offset_to_line_col(&source, span.start);
-                let (end_line, end_col) = offset_to_line_col(&source, span.end);
+        if let Some(source) = self.get_source(&uri)? {
+            if let Some(span) = goto::definition_at_position(&source, position) {
+                let (line, col) = utils::offset_to_line_col(&source, span.start);
+                let (end_line, end_col) = utils::offset_to_line_col(&source, span.end);
                 let range = Range::new(Position::new(line, col), Position::new(end_line, end_col));
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location::new(
                     uri, range,
@@ -395,16 +204,8 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            let items = completions_for_source(&source, position);
+        if let Some(source) = self.get_source(&uri)? {
+            let items = completion::completions_for_source(&source, position);
             if !items.is_empty() {
                 return Ok(Some(CompletionResponse::Array(items)));
             }
@@ -417,16 +218,8 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            if let Some(info) = hover_at_position(&source, position) {
+        if let Some(source) = self.get_source(&uri)? {
+            if let Some(info) = hover::hover_at_position(&source, position) {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -444,16 +237,8 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            if let Some(sig) = signature_at_position(&source, position) {
+        if let Some(source) = self.get_source(&uri)? {
+            if let Some(sig) = signature::signature_at_position(&source, position) {
                 return Ok(Some(sig));
             }
         }
@@ -467,18 +252,10 @@ impl LanguageServer for KodoLanguageServer {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            let symbols = document_symbols(&source);
-            if !symbols.is_empty() {
-                return Ok(Some(DocumentSymbolResponse::Flat(symbols)));
+        if let Some(source) = self.get_source(&uri)? {
+            let syms = symbols::document_symbols(&source);
+            if !syms.is_empty() {
+                return Ok(Some(DocumentSymbolResponse::Flat(syms)));
             }
         }
 
@@ -492,16 +269,8 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document.uri;
         let position = params.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            if let Some((range, name)) = prepare_rename_at(&source, position) {
+        if let Some(source) = self.get_source(&uri)? {
+            if let Some((range, name)) = rename::prepare_rename_at(&source, position) {
                 return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
                     range,
                     placeholder: name,
@@ -517,16 +286,8 @@ impl LanguageServer for KodoLanguageServer {
         let position = params.text_document_position.position;
         let new_name = params.new_name;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            let edits = rename_symbol(&source, position, &new_name);
+        if let Some(source) = self.get_source(&uri)? {
+            let edits = rename::rename_symbol(&source, position, &new_name);
             if !edits.is_empty() {
                 let mut changes = HashMap::new();
                 changes.insert(uri, edits);
@@ -554,8 +315,8 @@ impl LanguageServer for KodoLanguageServer {
         let mut all_symbols = Vec::new();
         for (uri_str, source) in docs.iter() {
             if let Ok(uri) = Url::parse(uri_str) {
-                let symbols = workspace_symbols_for_source(source, &uri);
-                all_symbols.extend(symbols);
+                let syms = symbols::workspace_symbols_for_source(source, &uri);
+                all_symbols.extend(syms);
             }
         }
 
@@ -574,18 +335,10 @@ impl LanguageServer for KodoLanguageServer {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            let actions = code_actions_for_source(&source, &uri, &params.range);
-            if !actions.is_empty() {
-                return Ok(Some(actions));
+        if let Some(source) = self.get_source(&uri)? {
+            let acts = actions::code_actions_for_source(&source, &uri, &params.range);
+            if !acts.is_empty() {
+                return Ok(Some(acts));
             }
         }
 
@@ -596,354 +349,14 @@ impl LanguageServer for KodoLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let source = {
-            let docs = self
-                .documents
-                .lock()
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            docs.get(&uri.to_string()).cloned()
-        };
-
-        if let Some(source) = source {
-            if let Some(locations) = references_at_position(&source, &uri, position) {
+        if let Some(source) = self.get_source(&uri)? {
+            if let Some(locations) = goto::references_at_position(&source, &uri, position) {
                 return Ok(Some(locations));
             }
         }
 
         Ok(None)
     }
-}
-
-/// Finds the definition span of the identifier at the given position.
-///
-/// Parses the source, runs the type checker to build the definition index,
-/// then looks up the word at the cursor position.
-fn definition_at_position(source: &str, position: Position) -> Option<kodo_ast::Span> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-    let word = word_at_offset(source, offset);
-    if word.is_empty() {
-        return None;
-    }
-
-    let module = kodo_parser::parse(source).ok()?;
-    let mut checker = kodo_types::TypeChecker::new();
-    let _ = checker.check_module(&module);
-
-    checker.definition_spans().get(word).copied()
-}
-
-/// Finds all reference locations of the identifier at the given position.
-///
-/// Parses the source, runs the type checker to build the reference index,
-/// then looks up the word at the cursor position and converts all usage
-/// spans to LSP locations.
-fn references_at_position(source: &str, uri: &Url, position: Position) -> Option<Vec<Location>> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-    let word = word_at_offset(source, offset);
-    if word.is_empty() {
-        return None;
-    }
-
-    let module = kodo_parser::parse(source).ok()?;
-    let mut checker = kodo_types::TypeChecker::new();
-    let _ = checker.check_module(&module);
-
-    let spans = checker.reference_spans().get(word)?;
-    if spans.is_empty() {
-        return None;
-    }
-
-    let locations: Vec<Location> = spans
-        .iter()
-        .map(|span| {
-            let (line, col) = offset_to_line_col(source, span.start);
-            let (end_line, end_col) = offset_to_line_col(source, span.end);
-            let range = Range::new(Position::new(line, col), Position::new(end_line, end_col));
-            Location::new(uri.clone(), range)
-        })
-        .collect();
-
-    Some(locations)
-}
-
-/// Extracts the word (identifier) at the given byte offset.
-fn word_at_offset(source: &str, offset: usize) -> &str {
-    let bytes = source.as_bytes();
-    if offset >= bytes.len() {
-        return "";
-    }
-    // Check if the offset is within an identifier character.
-    if !is_ident_char(bytes[offset]) {
-        return "";
-    }
-    let mut start = offset;
-    while start > 0 && is_ident_char(bytes[start - 1]) {
-        start -= 1;
-    }
-    let mut end = offset;
-    while end < bytes.len() && is_ident_char(bytes[end]) {
-        end += 1;
-    }
-    &source[start..end]
-}
-
-/// Returns true if the byte is a valid identifier character.
-fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// Adds builtin function completions to the list.
-fn add_builtin_completions(items: &mut Vec<CompletionItem>) {
-    let builtins: &[(&str, &str)] = &[
-        ("println", "println(value) -> Unit"),
-        ("print", "print(value) -> Unit"),
-        ("print_int", "print_int(n: Int) -> Unit"),
-        ("abs", "abs(n: Int) -> Int"),
-        ("min", "min(a: Int, b: Int) -> Int"),
-        ("max", "max(a: Int, b: Int) -> Int"),
-        ("clamp", "clamp(val: Int, lo: Int, hi: Int) -> Int"),
-        ("file_exists", "file_exists(path: String) -> Bool"),
-        ("file_read", "file_read(path: String) -> String"),
-        (
-            "file_write",
-            "file_write(path: String, data: String) -> Unit",
-        ),
-        ("list_new", "list_new() -> List<T>"),
-        ("list_push", "list_push(list, value) -> Unit"),
-        ("list_get", "list_get(list, index: Int) -> T"),
-        ("list_length", "list_length(list) -> Int"),
-        ("list_contains", "list_contains(list, value) -> Bool"),
-        ("list_pop", "list_pop(list) -> T"),
-        ("list_remove", "list_remove(list, index: Int) -> T"),
-        ("list_set", "list_set(list, index: Int, value) -> Unit"),
-        ("list_is_empty", "list_is_empty(list) -> Bool"),
-        ("list_reverse", "list_reverse(list) -> Unit"),
-        ("map_new", "map_new() -> Map<K, V>"),
-        ("map_insert", "map_insert(map, key, value) -> Unit"),
-        ("map_get", "map_get(map, key) -> V"),
-        ("map_contains_key", "map_contains_key(map, key) -> Bool"),
-        ("map_length", "map_length(map) -> Int"),
-        ("map_remove", "map_remove(map, key) -> Bool"),
-        ("map_is_empty", "map_is_empty(map) -> Bool"),
-        ("json_stringify", "json_stringify(json) -> String"),
-        ("json_get_bool", "json_get_bool(json, key: String) -> Bool"),
-        (
-            "json_get_float",
-            "json_get_float(json, key: String) -> Float64",
-        ),
-        (
-            "json_get_array",
-            "json_get_array(json, key: String) -> List<Json>",
-        ),
-    ];
-    for (name, detail) in builtins {
-        items.push(CompletionItem {
-            label: (*name).to_string(),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some((*detail).to_string()),
-            ..Default::default()
-        });
-    }
-}
-
-/// Adds string method completions to the list.
-fn add_string_method_completions(items: &mut Vec<CompletionItem>) {
-    let string_methods = [
-        ("length", "Returns the length of the string", "() -> Int"),
-        (
-            "contains",
-            "Checks if the string contains a substring",
-            "(sub: String) -> Bool",
-        ),
-        (
-            "starts_with",
-            "Checks if the string starts with a prefix",
-            "(prefix: String) -> Bool",
-        ),
-        (
-            "ends_with",
-            "Checks if the string ends with a suffix",
-            "(suffix: String) -> Bool",
-        ),
-        (
-            "trim",
-            "Removes leading and trailing whitespace",
-            "() -> String",
-        ),
-        ("to_upper", "Converts to uppercase", "() -> String"),
-        ("to_lower", "Converts to lowercase", "() -> String"),
-        (
-            "substring",
-            "Extracts a substring",
-            "(start: Int, end: Int) -> String",
-        ),
-        (
-            "to_string",
-            "Converts to string representation",
-            "() -> String",
-        ),
-    ];
-    for (name, doc, signature) in &string_methods {
-        items.push(CompletionItem {
-            label: (*name).to_string(),
-            kind: Some(CompletionItemKind::METHOD),
-            detail: Some(format!("String.{name}{signature}")),
-            documentation: Some(Documentation::String((*doc).to_string())),
-            ..Default::default()
-        });
-    }
-}
-
-/// Extracts the qualified prefix before the cursor (e.g., `"Color"` from `Color::`).
-///
-/// Returns `Some(name)` if the text before the cursor ends with `Name::`,
-/// meaning the user wants completions for variants/members of `Name`.
-fn qualified_prefix_at(source: &str, position: Position) -> Option<String> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-    let before = &source[..offset];
-    let trimmed = before.trim_end();
-
-    // Check for `Name::` pattern
-    if !trimmed.ends_with("::") {
-        return None;
-    }
-    let prefix = &trimmed[..trimmed.len() - 2];
-    // Extract the identifier right before `::`
-    let bytes = prefix.as_bytes();
-    let mut end = bytes.len();
-    while end > 0 && bytes[end - 1] == b' ' {
-        end -= 1;
-    }
-    let mut start = end;
-    while start > 0 && is_ident_char(bytes[start - 1]) {
-        start -= 1;
-    }
-    let name = &prefix[start..end];
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
-    }
-}
-
-/// Returns completion items for the current source at the given cursor position.
-///
-/// Provides context-aware completions:
-/// - After `EnumName::`: enum variant names
-/// - Otherwise: function names, struct/enum names, builtin functions,
-///   string method completions, and struct field completions.
-fn completions_for_source(source: &str, position: Position) -> Vec<CompletionItem> {
-    let mut items = Vec::new();
-
-    // Check for qualified prefix (e.g., `Color::`) before parsing,
-    // since incomplete source like `Color::` may fail to parse.
-    if let Some(prefix) = qualified_prefix_at(source, position) {
-        // Use recovery parser to get the module even with incomplete source
-        let output = kodo_parser::parse_with_recovery(source);
-        for enum_decl in &output.module.enum_decls {
-            if enum_decl.name == prefix {
-                for variant in &enum_decl.variants {
-                    let detail = if variant.fields.is_empty() {
-                        format!("{}::{}", enum_decl.name, variant.name)
-                    } else {
-                        let fields_str: Vec<String> =
-                            variant.fields.iter().map(format_type_expr).collect();
-                        format!(
-                            "{}::{}({})",
-                            enum_decl.name,
-                            variant.name,
-                            fields_str.join(", ")
-                        )
-                    };
-                    items.push(CompletionItem {
-                        label: variant.name.clone(),
-                        kind: Some(CompletionItemKind::ENUM_MEMBER),
-                        detail: Some(detail),
-                        ..Default::default()
-                    });
-                }
-                return items;
-            }
-        }
-        // No matching enum found — return empty
-        return items;
-    }
-
-    let Ok(module) = kodo_parser::parse(source) else {
-        return items;
-    };
-
-    let mut checker = kodo_types::TypeChecker::new();
-    let _ = checker.check_module(&module);
-
-    for func in &module.functions {
-        let params_str: Vec<String> = func
-            .params
-            .iter()
-            .map(|p| format!("{}: {}", p.name, format_type_expr(&p.ty)))
-            .collect();
-        let ret = format_type_expr(&func.return_type);
-        let detail = format!("fn {}({}) -> {}", func.name, params_str.join(", "), ret);
-
-        let mut doc_parts = Vec::new();
-        for req in &func.requires {
-            doc_parts.push(format!("requires {{ {req:?} }}"));
-        }
-        for ens in &func.ensures {
-            doc_parts.push(format!("ensures {{ {ens:?} }}"));
-        }
-        for ann in &func.annotations {
-            doc_parts.push(format_annotation(ann));
-        }
-
-        let documentation = if doc_parts.is_empty() {
-            None
-        } else {
-            Some(Documentation::String(doc_parts.join("\n")))
-        };
-
-        items.push(CompletionItem {
-            label: func.name.clone(),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(detail),
-            documentation,
-            ..Default::default()
-        });
-    }
-
-    for type_decl in &module.type_decls {
-        items.push(CompletionItem {
-            label: type_decl.name.clone(),
-            kind: Some(CompletionItemKind::STRUCT),
-            detail: Some(format!("struct {}", type_decl.name)),
-            ..Default::default()
-        });
-    }
-
-    for enum_decl in &module.enum_decls {
-        items.push(CompletionItem {
-            label: enum_decl.name.clone(),
-            kind: Some(CompletionItemKind::ENUM),
-            detail: Some(format!("enum {}", enum_decl.name)),
-            ..Default::default()
-        });
-    }
-
-    add_builtin_completions(&mut items);
-    add_string_method_completions(&mut items);
-
-    for type_decl in &module.type_decls {
-        for field in &type_decl.fields {
-            items.push(CompletionItem {
-                label: field.name.clone(),
-                kind: Some(CompletionItemKind::FIELD),
-                detail: Some(format!("{}.{}", type_decl.name, field.name)),
-                ..Default::default()
-            });
-        }
-    }
-
-    items
 }
 
 /// Starts the Kōdo LSP server on stdin/stdout.
@@ -960,747 +373,21 @@ pub async fn run_server() -> std::result::Result<(), LspError> {
     Ok(())
 }
 
-/// Returns signature help for the function call at the given position.
-fn signature_at_position(source: &str, position: Position) -> Option<SignatureHelp> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-
-    // Walk backwards from cursor to find the function name before '('
-    let bytes = source.as_bytes();
-    let mut paren_pos = offset;
-    let mut depth = 0i32;
-
-    // Find the matching '(' by walking back
-    while paren_pos > 0 {
-        paren_pos -= 1;
-        match bytes[paren_pos] {
-            b')' => depth += 1,
-            b'(' => {
-                if depth == 0 {
-                    break;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-
-    if paren_pos == 0 && bytes[0] != b'(' {
-        return None;
-    }
-
-    // Extract function name before '('
-    let func_name = {
-        let mut end = paren_pos;
-        while end > 0 && bytes[end - 1] == b' ' {
-            end -= 1;
-        }
-        let mut start = end;
-        while start > 0 && is_ident_char(bytes[start - 1]) {
-            start -= 1;
-        }
-        &source[start..end]
-    };
-
-    if func_name.is_empty() {
-        return None;
-    }
-
-    // Count which parameter we're on (count commas at depth 0)
-    let mut active_param = 0u32;
-    let mut scan = paren_pos + 1;
-    let mut scan_depth = 0i32;
-    while scan < offset {
-        match bytes[scan] {
-            b'(' => scan_depth += 1,
-            b')' => scan_depth -= 1,
-            b',' if scan_depth == 0 => active_param += 1,
-            _ => {}
-        }
-        scan += 1;
-    }
-
-    // Parse and find the function
-    let module = kodo_parser::parse(source).ok()?;
-
-    for func in &module.functions {
-        if func.name == func_name {
-            let params_str: Vec<String> = func
-                .params
-                .iter()
-                .map(|p| format!("{}: {}", p.name, format_type_expr(&p.ty)))
-                .collect();
-            let ret_str = format_type_expr(&func.return_type);
-            let label = format!("fn {}({}) -> {}", func.name, params_str.join(", "), ret_str);
-
-            let param_infos: Vec<ParameterInformation> = func
-                .params
-                .iter()
-                .map(|p| ParameterInformation {
-                    label: ParameterLabel::Simple(format!(
-                        "{}: {}",
-                        p.name,
-                        format_type_expr(&p.ty)
-                    )),
-                    documentation: None,
-                })
-                .collect();
-
-            // Build documentation with contracts
-            let mut doc_parts = Vec::new();
-            for req in &func.requires {
-                doc_parts.push(format!("requires {{ {} }}", format_expr(req)));
-            }
-            for ens in &func.ensures {
-                doc_parts.push(format!("ensures {{ {} }}", format_expr(ens)));
-            }
-            let documentation = if doc_parts.is_empty() {
-                None
-            } else {
-                Some(Documentation::String(doc_parts.join("\n")))
-            };
-
-            return Some(SignatureHelp {
-                signatures: vec![SignatureInformation {
-                    label,
-                    documentation,
-                    parameters: Some(param_infos),
-                    active_parameter: Some(active_param),
-                }],
-                active_signature: Some(0),
-                active_parameter: Some(active_param),
-            });
-        }
-    }
-
-    None
-}
-
-/// Formats a type expression as a string for display.
-fn format_type_expr(ty: &kodo_ast::TypeExpr) -> String {
-    match ty {
-        kodo_ast::TypeExpr::Named(name) => name.clone(),
-        kodo_ast::TypeExpr::Unit => "Unit".to_string(),
-        kodo_ast::TypeExpr::Generic(name, args) => {
-            let args_str: Vec<String> = args.iter().map(format_type_expr).collect();
-            format!("{name}<{}>", args_str.join(", "))
-        }
-        kodo_ast::TypeExpr::Function(params, ret) => {
-            let params_str: Vec<String> = params.iter().map(format_type_expr).collect();
-            format!("({}) -> {}", params_str.join(", "), format_type_expr(ret))
-        }
-        kodo_ast::TypeExpr::Optional(inner) => {
-            format!("{}?", format_type_expr(inner))
-        }
-        kodo_ast::TypeExpr::Tuple(elems) => {
-            let elems_str: Vec<String> = elems.iter().map(format_type_expr).collect();
-            format!("({})", elems_str.join(", "))
-        }
-        kodo_ast::TypeExpr::DynTrait(name) => format!("dyn {name}"),
-    }
-}
-
-/// Formats an expression as a string for display (used in contract display).
-fn format_expr(expr: &kodo_ast::Expr) -> String {
-    match expr {
-        kodo_ast::Expr::Ident(name, _) => name.clone(),
-        kodo_ast::Expr::IntLit(n, _) => n.to_string(),
-        kodo_ast::Expr::FloatLit(f, _) => format!("{f}"),
-        kodo_ast::Expr::BoolLit(b, _) => b.to_string(),
-        kodo_ast::Expr::StringLit(s, _) => format!("\"{s}\""),
-        kodo_ast::Expr::BinaryOp {
-            left, op, right, ..
-        } => {
-            format!("{} {op:?} {}", format_expr(left), format_expr(right))
-        }
-        kodo_ast::Expr::UnaryOp { op, operand, .. } => {
-            format!("{op:?}{}", format_expr(operand))
-        }
-        kodo_ast::Expr::Call { callee, .. } => {
-            if let kodo_ast::Expr::Ident(name, _) = callee.as_ref() {
-                format!("{name}(...)")
-            } else {
-                "call(...)".to_string()
-            }
-        }
-        kodo_ast::Expr::FieldAccess { object, field, .. } => {
-            format!("{}.{field}", format_expr(object))
-        }
-        _ => "...".to_string(),
-    }
-}
-
-/// Finds all occurrences of the given identifier name in the source.
-///
-/// Scans the source for whole-word matches of `name` that appear as
-/// identifiers (bounded by non-identifier characters).
-fn find_all_occurrences(source: &str, name: &str) -> Vec<Range> {
-    let mut results = Vec::new();
-    let bytes = source.as_bytes();
-    let name_bytes = name.as_bytes();
-    let name_len = name_bytes.len();
-
-    if name_len == 0 || bytes.len() < name_len {
-        return results;
-    }
-
-    let mut i = 0;
-    while i + name_len <= bytes.len() {
-        if &bytes[i..i + name_len] == name_bytes {
-            // Check word boundaries
-            let before_ok = i == 0 || !is_ident_char(bytes[i - 1]);
-            let after_ok = i + name_len >= bytes.len() || !is_ident_char(bytes[i + name_len]);
-            if before_ok && after_ok {
-                #[allow(clippy::cast_possible_truncation)]
-                let start_u32 = i as u32;
-                #[allow(clippy::cast_possible_truncation)]
-                let end_u32 = (i + name_len) as u32;
-                let (sl, sc) = offset_to_line_col(source, start_u32);
-                let (el, ec) = offset_to_line_col(source, end_u32);
-                results.push(Range::new(Position::new(sl, sc), Position::new(el, ec)));
-            }
-        }
-        i += 1;
-    }
-    results
-}
-
-/// Prepares a rename at the given position, returning the range and current name.
-///
-/// Returns `None` if the cursor is not on a renamable identifier.
-fn prepare_rename_at(source: &str, position: Position) -> Option<(Range, String)> {
-    let offset = line_col_to_offset(source, position.line, position.character)?;
-    let word = word_at_offset(source, offset);
-    if word.is_empty() {
-        return None;
-    }
-
-    // Verify it's a known symbol by parsing and checking
-    let module = kodo_parser::parse(source).ok()?;
-    let mut checker = kodo_types::TypeChecker::new();
-    let _ = checker.check_module(&module);
-
-    // Check if the word is a function name, struct name, enum name, or parameter/variable
-    let is_known = checker.definition_spans().contains_key(word)
-        || module.functions.iter().any(|f| f.name == word)
-        || module.type_decls.iter().any(|t| t.name == word)
-        || module.enum_decls.iter().any(|e| e.name == word)
-        || module
-            .functions
-            .iter()
-            .any(|f| f.params.iter().any(|p| p.name == word));
-
-    if !is_known {
-        return None;
-    }
-
-    // Find the range of the word at the cursor
-    let bytes = source.as_bytes();
-    let mut start = offset;
-    while start > 0 && is_ident_char(bytes[start - 1]) {
-        start -= 1;
-    }
-    let mut end = offset;
-    while end < bytes.len() && is_ident_char(bytes[end]) {
-        end += 1;
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    let start_u32 = start as u32;
-    #[allow(clippy::cast_possible_truncation)]
-    let end_u32 = end as u32;
-    let (sl, sc) = offset_to_line_col(source, start_u32);
-    let (el, ec) = offset_to_line_col(source, end_u32);
-    let range = Range::new(Position::new(sl, sc), Position::new(el, ec));
-
-    Some((range, word.to_string()))
-}
-
-/// Performs a rename of the symbol at the given position, returning text edits.
-///
-/// Finds all occurrences of the identifier at the cursor and creates
-/// edits to replace them with `new_name`.
-fn rename_symbol(source: &str, position: Position, new_name: &str) -> Vec<TextEdit> {
-    let Some(offset) = line_col_to_offset(source, position.line, position.character) else {
-        return Vec::new();
-    };
-    let word = word_at_offset(source, offset);
-    if word.is_empty() {
-        return Vec::new();
-    }
-
-    let occurrences = find_all_occurrences(source, word);
-    occurrences
-        .into_iter()
-        .map(|range| TextEdit {
-            range,
-            new_text: new_name.to_string(),
-        })
-        .collect()
-}
-
-/// Returns workspace symbols for a single document, using the real document URI.
-fn workspace_symbols_for_source(source: &str, uri: &Url) -> Vec<SymbolInformation> {
-    let Ok(module) = kodo_parser::parse(source) else {
-        return Vec::new();
-    };
-
-    let mut symbols = Vec::new();
-
-    // Functions
-    for func in &module.functions {
-        let (line, col) = offset_to_line_col(source, func.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, func.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: func.name.clone(),
-            kind: SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    // Structs
-    for type_decl in &module.type_decls {
-        let (line, col) = offset_to_line_col(source, type_decl.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, type_decl.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: type_decl.name.clone(),
-            kind: SymbolKind::STRUCT,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    // Enums
-    for enum_decl in &module.enum_decls {
-        let (line, col) = offset_to_line_col(source, enum_decl.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, enum_decl.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: enum_decl.name.clone(),
-            kind: SymbolKind::ENUM,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    symbols
-}
-
-/// Returns code actions available for the given range.
-///
-/// Currently provides two code actions:
-/// - "Add missing contract" for functions without `requires`/`ensures` clauses
-/// - "Add type annotation" for `let` bindings without explicit type annotations
-fn code_actions_for_source(source: &str, uri: &Url, range: &Range) -> CodeActionResponse {
-    let Ok(module) = kodo_parser::parse(source) else {
-        return Vec::new();
-    };
-
-    let mut actions: CodeActionResponse = Vec::new();
-
-    // Code action: "Add missing contract" for functions without contracts
-    for func in &module.functions {
-        let (func_line, _) = offset_to_line_col(source, func.span.start);
-        let (func_end_line, _) = offset_to_line_col(source, func.span.end);
-
-        // Check if the cursor range overlaps a function without contracts
-        if range.start.line <= func_end_line
-            && range.end.line >= func_line
-            && func.requires.is_empty()
-            && func.ensures.is_empty()
-        {
-            // Build the contract text to insert before the function body
-            let params_str: Vec<String> = func
-                .params
-                .iter()
-                .map(|p| format!("{}: {}", p.name, format_type_expr(&p.ty)))
-                .collect();
-            let ret_str = format_type_expr(&func.return_type);
-
-            let contract_text = format!(
-                "\n        requires {{ /* precondition for {}({}) */ true }}\
-                     \n        ensures {{ /* postcondition -> {} */ true }}",
-                func.name,
-                params_str.join(", "),
-                ret_str,
-            );
-
-            // Find the position right before the opening brace of the body
-            let body_start = func.body.span.start;
-            let (insert_line, insert_col) = offset_to_line_col(source, body_start);
-
-            let mut changes = HashMap::new();
-            changes.insert(
-                uri.clone(),
-                vec![TextEdit {
-                    range: Range::new(
-                        Position::new(insert_line, insert_col),
-                        Position::new(insert_line, insert_col),
-                    ),
-                    new_text: contract_text,
-                }],
-            );
-
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Add missing contract for `{}`", func.name),
-                kind: Some(CodeActionKind::QUICKFIX),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }));
-        }
-    }
-
-    // Code actions from FixPatch: type-check errors with machine-applicable patches.
-    add_fix_patch_actions(source, &module, uri, range, &mut actions);
-
-    // Code action: "Add type annotation" for let bindings without explicit type
-    for func in &module.functions {
-        for stmt in &func.body.stmts {
-            if let kodo_ast::Stmt::Let {
-                span,
-                name,
-                ty: None,
-                value,
-                ..
-            } = stmt
-            {
-                let (let_line, _) = offset_to_line_col(source, span.start);
-                let (let_end_line, _) = offset_to_line_col(source, span.end);
-
-                if range.start.line <= let_end_line && range.end.line >= let_line {
-                    // Infer a type hint from the value expression
-                    let inferred = infer_type_hint(value);
-
-                    // Find position right after the variable name to insert `: Type`
-                    // Look for the name in the source around the let statement
-                    #[allow(clippy::cast_possible_truncation)]
-                    let source_len_u32 = source.len() as u32;
-                    let let_source =
-                        &source[span.start as usize..span.end.min(source_len_u32) as usize];
-                    if let Some(name_pos) = let_source.find(name.as_str()) {
-                        #[allow(clippy::cast_possible_truncation)]
-                        let insert_offset = span.start + name_pos as u32 + name.len() as u32;
-                        let (il, ic) = offset_to_line_col(source, insert_offset);
-
-                        let mut changes = HashMap::new();
-                        changes.insert(
-                            uri.clone(),
-                            vec![TextEdit {
-                                range: Range::new(Position::new(il, ic), Position::new(il, ic)),
-                                new_text: format!(": {inferred}"),
-                            }],
-                        );
-
-                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: format!("Add type annotation for `{name}`"),
-                            kind: Some(CodeActionKind::QUICKFIX),
-                            edit: Some(WorkspaceEdit {
-                                changes: Some(changes),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        }));
-                    }
-                }
-            }
-        }
-    }
-
-    actions
-}
-
-/// Adds code actions from type error fix patches.
-///
-/// Runs the type checker on the module and converts any [`kodo_ast::FixPatch`] results
-/// into LSP `CodeAction` entries with `TextEdit` replacements.
-fn add_fix_patch_actions(
-    source: &str,
-    module: &kodo_ast::Module,
-    uri: &Url,
-    range: &Range,
-    actions: &mut CodeActionResponse,
-) {
-    let mut checker = kodo_types::TypeChecker::new();
-    let type_errors = checker.check_module_collecting(module);
-    for err in &type_errors {
-        if let Some(patch) = kodo_ast::Diagnostic::fix_patch(err) {
-            let (start_line, start_col) =
-                offset_to_line_col(source, u32::try_from(patch.start_offset).unwrap_or(0));
-            let (end_line, end_col) =
-                offset_to_line_col(source, u32::try_from(patch.end_offset).unwrap_or(0));
-
-            let patch_range = Range::new(
-                Position::new(start_line, start_col),
-                Position::new(end_line, end_col),
-            );
-
-            // Only include if the action is relevant to the requested range.
-            if range.start.line <= end_line && range.end.line >= start_line {
-                let mut changes = HashMap::new();
-                changes.insert(
-                    uri.clone(),
-                    vec![TextEdit {
-                        range: patch_range,
-                        new_text: patch.replacement.clone(),
-                    }],
-                );
-
-                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title: patch.description.clone(),
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![Diagnostic {
-                        range: patch_range,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: Some(NumberOrString::String(
-                            kodo_ast::Diagnostic::code(err).to_string(),
-                        )),
-                        source: Some("kodo".to_string()),
-                        message: err.to_string(),
-                        ..Default::default()
-                    }]),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }));
-            }
-        }
-    }
-}
-
-/// Infers a type hint string from an expression for the "Add type annotation" code action.
-///
-/// Uses the `TypeChecker` to infer the actual type when possible, falling back
-/// to simple pattern matching on AST literals for cases where the full type
-/// checker cannot be run (e.g., expressions that depend on context).
-fn infer_type_hint(expr: &kodo_ast::Expr) -> String {
-    match expr {
-        kodo_ast::Expr::IntLit(_, _) => "Int".to_string(),
-        kodo_ast::Expr::FloatLit(_, _) => "Float64".to_string(),
-        kodo_ast::Expr::BoolLit(_, _) => "Bool".to_string(),
-        kodo_ast::Expr::StringLit(_, _) => "String".to_string(),
-        kodo_ast::Expr::Call { callee, .. } => infer_type_from_call(callee),
-        kodo_ast::Expr::Ident(_, _) | kodo_ast::Expr::FieldAccess { .. } => {
-            // Try to infer using the TypeChecker on a minimal wrapper module.
-            infer_type_via_checker(expr)
-        }
-        kodo_ast::Expr::BinaryOp { op, .. } => {
-            let result = infer_type_via_checker(expr);
-            if result != "TODO" {
-                return result;
-            }
-            match op {
-                kodo_ast::BinOp::Add
-                | kodo_ast::BinOp::Sub
-                | kodo_ast::BinOp::Mul
-                | kodo_ast::BinOp::Div
-                | kodo_ast::BinOp::Mod => "Int".to_string(),
-                kodo_ast::BinOp::Lt
-                | kodo_ast::BinOp::Gt
-                | kodo_ast::BinOp::Le
-                | kodo_ast::BinOp::Ge
-                | kodo_ast::BinOp::Eq
-                | kodo_ast::BinOp::Ne
-                | kodo_ast::BinOp::And
-                | kodo_ast::BinOp::Or => "Bool".to_string(),
-            }
-        }
-        kodo_ast::Expr::UnaryOp { op, .. } => {
-            let result = infer_type_via_checker(expr);
-            if result != "TODO" {
-                return result;
-            }
-            match op {
-                kodo_ast::UnaryOp::Neg => "Int".to_string(),
-                kodo_ast::UnaryOp::Not => "Bool".to_string(),
-            }
-        }
-        _ => "TODO".to_string(),
-    }
-}
-
-/// Infers a return type from a function call expression by examining the callee name.
-///
-/// For known builtin functions, returns their documented return types.
-fn infer_type_from_call(callee: &kodo_ast::Expr) -> String {
-    if let kodo_ast::Expr::Ident(name, _) = callee {
-        #[allow(clippy::match_same_arms)]
-        match name.as_str() {
-            "list_new" => return "List<Int>".to_string(),
-            "map_new" => return "Map<Int, Int>".to_string(),
-            "channel_new" => return "Channel<Int>".to_string(),
-            "channel_new_bool" => return "Channel<Bool>".to_string(),
-            "channel_new_string" => return "Channel<String>".to_string(),
-            "abs" | "min" | "max" | "clamp" | "list_length" | "map_length" | "json_parse"
-            | "http_get" | "http_post" | "time_now" | "time_now_ms" => return "Int".to_string(),
-            "list_contains" | "map_contains_key" | "file_exists" | "list_is_empty"
-            | "map_is_empty" => return "Bool".to_string(),
-            "file_read" | "env_get" => return "String".to_string(),
-            _ => {}
-        }
-    }
-    "TODO".to_string()
-}
-
-/// Attempts to infer the type of an expression using the full `TypeChecker`.
-///
-/// Wraps the expression in a minimal module and runs type inference.
-/// Returns `"TODO"` if inference fails (e.g., due to missing context).
-fn infer_type_via_checker(expr: &kodo_ast::Expr) -> String {
-    let mut checker = kodo_types::TypeChecker::new();
-    match checker.infer_expr(expr) {
-        Ok(ty) => format_type(&ty),
-        Err(_) => "TODO".to_string(),
-    }
-}
-
-/// Formats a [`kodo_types::Type`] as a human-readable string for type annotations.
-fn format_type(ty: &kodo_types::Type) -> String {
-    match ty {
-        kodo_types::Type::Int => "Int".to_string(),
-        kodo_types::Type::Int8 => "Int8".to_string(),
-        kodo_types::Type::Int16 => "Int16".to_string(),
-        kodo_types::Type::Int32 => "Int32".to_string(),
-        kodo_types::Type::Int64 => "Int64".to_string(),
-        kodo_types::Type::Uint => "Uint".to_string(),
-        kodo_types::Type::Uint8 => "Uint8".to_string(),
-        kodo_types::Type::Uint16 => "Uint16".to_string(),
-        kodo_types::Type::Uint32 => "Uint32".to_string(),
-        kodo_types::Type::Uint64 => "Uint64".to_string(),
-        kodo_types::Type::Float32 => "Float32".to_string(),
-        kodo_types::Type::Float64 => "Float64".to_string(),
-        kodo_types::Type::Bool => "Bool".to_string(),
-        kodo_types::Type::String => "String".to_string(),
-        kodo_types::Type::Byte => "Byte".to_string(),
-        kodo_types::Type::Unit => "Unit".to_string(),
-        kodo_types::Type::Struct(name) | kodo_types::Type::Enum(name) => name.clone(),
-        kodo_types::Type::Generic(name, args) => {
-            let arg_strs: Vec<String> = args.iter().map(format_type).collect();
-            format!("{name}<{}>", arg_strs.join(", "))
-        }
-        kodo_types::Type::Function(params, ret) => {
-            let param_strs: Vec<String> = params.iter().map(format_type).collect();
-            format!("({}) -> {}", param_strs.join(", "), format_type(ret))
-        }
-        kodo_types::Type::Tuple(elems) => {
-            let elem_strs: Vec<String> = elems.iter().map(format_type).collect();
-            format!("({})", elem_strs.join(", "))
-        }
-        kodo_types::Type::DynTrait(name) => format!("dyn {name}"),
-        kodo_types::Type::Unknown => "TODO".to_string(),
-    }
-}
-
-/// Returns document symbols (outline) for the given source.
-fn document_symbols(source: &str) -> Vec<SymbolInformation> {
-    let Ok(module) = kodo_parser::parse(source) else {
-        return Vec::new();
-    };
-
-    let mut symbols = Vec::new();
-    let Ok(uri) = Url::parse("file:///tmp/dummy") else {
-        return Vec::new();
-    };
-
-    // Functions
-    for func in &module.functions {
-        let (line, col) = offset_to_line_col(source, func.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, func.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: func.name.clone(),
-            kind: SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    // Structs
-    for type_decl in &module.type_decls {
-        let (line, col) = offset_to_line_col(source, type_decl.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, type_decl.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: type_decl.name.clone(),
-            kind: SymbolKind::STRUCT,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    // Enums
-    for enum_decl in &module.enum_decls {
-        let (line, col) = offset_to_line_col(source, enum_decl.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, enum_decl.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: enum_decl.name.clone(),
-            kind: SymbolKind::ENUM,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    // Intents
-    for intent in &module.intent_decls {
-        let (line, col) = offset_to_line_col(source, intent.span.start);
-        let (end_line, end_col) = offset_to_line_col(source, intent.span.end);
-        #[allow(deprecated)]
-        symbols.push(SymbolInformation {
-            name: intent.name.clone(),
-            kind: SymbolKind::INTERFACE,
-            tags: None,
-            deprecated: None,
-            location: Location::new(
-                uri.clone(),
-                Range::new(Position::new(line, col), Position::new(end_line, end_col)),
-            ),
-            container_name: Some(module.name.clone()),
-        });
-    }
-
-    symbols
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::code_actions_for_source;
+    use crate::completion::{completions_for_source, qualified_prefix_at};
+    use crate::diagnostics::analyze_source;
+    use crate::goto::{definition_at_position, references_at_position};
+    use crate::hover::hover_at_position;
+    use crate::rename::{prepare_rename_at, rename_symbol};
+    use crate::signature::signature_at_position;
+    use crate::symbols::{document_symbols, workspace_symbols_for_source};
+    use crate::utils::{
+        find_all_occurrences, format_annotation, format_expr, format_type_expr, infer_type_hint,
+        line_col_to_offset, offset_to_line_col, word_at_offset,
+    };
 
     #[test]
     fn analyze_valid_source() {

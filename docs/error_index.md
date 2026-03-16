@@ -13,7 +13,8 @@ Every Kōdo compiler error has a unique code for easy reference and machine cons
 | E0400–E0499 | Resolver | Intent resolution errors |
 | E0500–E0599 | MIR | Mid-level IR errors |
 | E0600–E0699 | Codegen | Code generation errors |
-| E0700–E0799 | Stdlib | Standard library errors |
+| E0700–E0799 | Testing | Test framework errors |
+| E0800–E0899 | Stdlib | Standard library errors |
 | W0001–W0999 | Warnings | Compiler warnings |
 
 ## Lexer Errors (E0001–E0099)
@@ -572,6 +573,72 @@ error[E0600]: indirect call failure: function reference to unknown function `mis
    |
  8 |     let result = f(42)
    |                    ^^ could not resolve function pointer
+```
+
+## Testing Errors (E0700–E0799)
+
+### E0700: Assertion Failed
+A test assertion failed at runtime. This indicates the tested code did not produce the expected result.
+
+```rust
+error[E0700]: assertion failed in test "add returns correct sum"
+  --> src/math.ko:12:9
+   |
+12 |     assert_eq(add(2, 3), 6)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^ left: 5, right: 6
+```
+
+### E0701: Assert Type Mismatch
+The left and right operands of `assert_eq` or `assert_ne` have different types. Both sides must be the same type.
+
+```rust
+error[E0701]: assert_eq type mismatch: left is `Int`, right is `String`
+  --> src/math.ko:10:9
+   |
+10 |     assert_eq(42, "42")
+   |               ^^  ^^^^ right operand is `String`
+   |               |
+   |               left operand is `Int`
+   |
+   = help: convert one side so both operands have the same type
+```
+
+### E0702: Assert Unsupported Type
+The type used in `assert_eq` or `assert_ne` does not support equality comparison. Only `Int`, `String`, `Bool`, and `Float64` are supported.
+
+```rust
+error[E0702]: assert_eq does not support type `List<Int>`
+  --> src/math.ko:10:9
+   |
+10 |     assert_eq(my_list, other_list)
+   |               ^^^^^^^ type `List<Int>` cannot be compared
+   |
+   = help: supported types are: Int, String, Bool, Float64
+```
+
+### E0703: Duplicate Test Name
+Two or more test blocks in the same module have the same name. Test names must be unique within a module.
+
+```rust
+error[E0703]: duplicate test name "basic addition" in module `math`
+  --> src/math.ko:15:5
+   |
+ 8 |     test "basic addition" {
+   |          ---------------- first defined here
+   |
+15 |     test "basic addition" {
+   |          ^^^^^^^^^^^^^^^^ duplicate test name
+```
+
+### E0704: Test Name Must Be String Literal
+The test name must be a string literal, not a variable or expression.
+
+```rust
+error[E0704]: test name must be a string literal
+  --> src/math.ko:10:10
+   |
+10 |     test name {
+   |          ^^^^ expected a string literal, e.g., test "my test" { ... }
 ```
 
 ## JSON Error Format
