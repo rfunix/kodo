@@ -477,6 +477,11 @@ pub fn compile_and_run(source: &str) -> Result<String, String> {
         link_cmd.arg("-Wl,-w");
     }
 
+    // On Linux, libm/libpthread/libdl are not linked automatically.
+    if cfg!(target_os = "linux") {
+        link_cmd.args(["-lm", "-lpthread", "-ldl"]);
+    }
+
     let link_status = link_cmd
         .output()
         .map_err(|e| format!("failed to invoke linker: {e}"))?;

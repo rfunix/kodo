@@ -157,6 +157,12 @@ pub(crate) fn link_executable(
         cmd.arg("-Wl,-w");
     }
 
+    // On Linux, libm/libpthread/libdl are not linked automatically.
+    // The runtime uses math functions (sin, cos, ln, powf) and SQLite.
+    if cfg!(target_os = "linux") {
+        cmd.args(["-lm", "-lpthread", "-ldl"]);
+    }
+
     let status = cmd
         .status()
         .map_err(|e| format!("failed to invoke linker `cc`: {e}"))?;
