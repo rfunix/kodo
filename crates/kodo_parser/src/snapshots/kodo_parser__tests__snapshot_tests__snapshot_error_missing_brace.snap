@@ -1,5 +1,5 @@
 ---
-source: crates/kodo_parser/src/lib.rs
+source: crates/kodo_parser/src/tests.rs
 expression: err.to_string()
 ---
 expected LBrace, found RBrace at Span { start: 23, end: 24 }

@@ -1,0 +1,114 @@
+module test_expressions {
+    meta {
+        purpose: "Tests for expression parsing: precedence, unary, control flow"
+        version: "0.1.0"
+    }
+
+    fn arithmetic() -> Int {
+        let a: Int = 10
+        let b: Int = 3
+        let c: Int = a + b * 2 - a / b
+        return c
+    }
+
+    fn logic(x: Int) -> Bool {
+        let positive: Bool = x > 0
+        let small: Bool = x < 100
+        return positive && small || x == 0
+    }
+
+    fn nesting() -> Int {
+        let x: Int = (1 + 2) * (3 + 4)
+        return -x
+    }
+
+    fn control_flow(n: Int) -> Int {
+        if n > 0 {
+            if n > 100 {
+                return 100
+            } else {
+                return n
+            }
+        } else {
+            return 0
+        }
+    }
+
+    test "arithmetic operator precedence" {
+        assert_eq(arithmetic(), 13)
+    }
+
+    test "nesting and unary negation" {
+        assert_eq(nesting(), -21)
+    }
+
+    test "logic with positive small number" {
+        assert_true(logic(50))
+    }
+
+    test "logic with zero" {
+        assert_true(logic(0))
+    }
+
+    test "logic with negative number" {
+        assert_false(logic(-1))
+    }
+
+    test "logic with large number" {
+        assert_false(logic(100))
+    }
+
+    test "control flow positive in range" {
+        assert_eq(control_flow(50), 50)
+        assert_eq(control_flow(1), 1)
+        assert_eq(control_flow(99), 99)
+    }
+
+    test "control flow clamped at 100" {
+        assert_eq(control_flow(150), 100)
+        assert_eq(control_flow(101), 100)
+    }
+
+    test "control flow negative returns zero" {
+        assert_eq(control_flow(-5), 0)
+        assert_eq(control_flow(-100), 0)
+        assert_eq(control_flow(0), 0)
+    }
+
+    test "basic arithmetic operations" {
+        assert_eq(2 + 3, 5)
+        assert_eq(10 - 4, 6)
+        assert_eq(3 * 7, 21)
+        assert_eq(20 / 4, 5)
+        assert_eq(17 % 5, 2)
+    }
+
+    test "operator precedence mul before add" {
+        assert_eq(2 + 3 * 4, 14)
+        assert_eq(10 - 2 * 3, 4)
+    }
+
+    test "comparison operators" {
+        assert_true(1 < 2)
+        assert_true(2 > 1)
+        assert_true(5 <= 5)
+        assert_true(5 >= 5)
+        assert_true(3 == 3)
+        assert_true(3 != 4)
+    }
+
+    test "boolean operators" {
+        assert(true)
+        assert_true(true && true)
+        assert_false(true && false)
+        assert_true(true || false)
+        assert_false(false || false)
+        assert_false(!true)
+        assert_true(!false)
+    }
+
+    test "unary negation" {
+        assert_eq(-5, 0 - 5)
+        assert_eq(-(-3), 3)
+    }
+}

@@ -200,7 +200,7 @@ impl MirBuilder {
         return_type: Option<&kodo_ast::TypeExpr>,
         body: &Expr,
     ) -> Result<(String, Vec<String>)> {
-        let closure_name = format!("__closure_{}", self.closure_counter);
+        let closure_name = format!("__closure_{}_{}", self.fn_name, self.closure_counter);
         self.closure_counter += 1;
 
         // Collect free variables (captures).

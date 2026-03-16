@@ -1,0 +1,53 @@
+module test_strings {
+    meta {
+        purpose: "Tests for string operations and concatenation"
+        version: "0.1.0"
+    }
+
+    fn greet(name: String) -> String {
+        return "Hello, " + name + "!"
+    }
+
+    fn repeat_str(s: String, n: Int) -> String {
+        let mut result: String = ""
+        let mut i: Int = 0
+        while i < n {
+            result = result + s
+            i = i + 1
+        }
+        return result
+    }
+
+    test "string equality" {
+        let a: String = "hello"
+        let b: String = "hello"
+        assert_eq(a, b)
+    }
+
+    test "string inequality" {
+        assert_ne("hello", "world")
+        assert_ne("abc", "ABC")
+    }
+
+    test "string concatenation" {
+        let result: String = "foo" + "bar"
+        assert_eq(result, "foobar")
+    }
+
+    test "greet function" {
+        assert_eq(greet("World"), "Hello, World!")
+        assert_eq(greet("Kodo"), "Hello, Kodo!")
+    }
+
+    test "repeat string once" {
+        assert_eq(repeat_str("x", 1), "x")
+    }
+
+    test "repeat string three times" {
+        assert_eq(repeat_str("ab", 3), "ababab")
+    }
+
+    test "repeat string zero times" {
+        assert_eq(repeat_str("hi", 0), "")
+    }
+}

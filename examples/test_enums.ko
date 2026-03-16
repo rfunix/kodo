@@ -1,0 +1,96 @@
+module test_enums {
+    meta {
+        purpose: "Tests for enum types and match expressions"
+        version: "0.1.0"
+    }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int)
+    }
+
+    fn shape_area(s: Shape) -> Int {
+        let result: Int = match s {
+            Shape::Circle(r) => r * r * 3,
+            Shape::Rectangle(w, h) => w * h
+        }
+        return result
+    }
+
+    enum Direction {
+        North,
+        South,
+        East,
+        West
+    }
+
+    fn is_vertical(d: Direction) -> Bool {
+        let result: Bool = match d {
+            Direction::North => true,
+            Direction::South => true,
+            Direction::East => false,
+            Direction::West => false
+        }
+        return result
+    }
+
+    fn direction_code(d: Direction) -> Int {
+        let result: Int = match d {
+            Direction::North => 1,
+            Direction::South => 2,
+            Direction::East => 3,
+            Direction::West => 4
+        }
+        return result
+    }
+
+    test "circle area approximation" {
+        let c: Shape = Shape::Circle(5)
+        assert_eq(shape_area(c), 75)
+    }
+
+    test "rectangle area" {
+        let r: Shape = Shape::Rectangle(4, 6)
+        assert_eq(shape_area(r), 24)
+    }
+
+    test "unit circle area" {
+        let c: Shape = Shape::Circle(1)
+        assert_eq(shape_area(c), 3)
+    }
+
+    test "vertical directions" {
+        assert_true(is_vertical(Direction::North))
+        assert_true(is_vertical(Direction::South))
+    }
+
+    test "horizontal directions" {
+        assert_false(is_vertical(Direction::East))
+        assert_false(is_vertical(Direction::West))
+    }
+
+    test "direction codes are unique" {
+        assert_eq(direction_code(Direction::North), 1)
+        assert_eq(direction_code(Direction::South), 2)
+        assert_eq(direction_code(Direction::East), 3)
+        assert_eq(direction_code(Direction::West), 4)
+    }
+
+    test "match extracts correct payload" {
+        let c: Shape = Shape::Circle(42)
+        let r: Int = match c {
+            Shape::Circle(radius) => radius,
+            Shape::Rectangle(w, h) => 0
+        }
+        assert_eq(r, 42)
+    }
+
+    test "match rectangle extracts width" {
+        let r: Shape = Shape::Rectangle(10, 20)
+        let w: Int = match r {
+            Shape::Circle(radius) => 0,
+            Shape::Rectangle(width, height) => width
+        }
+        assert_eq(w, 10)
+    }
+}

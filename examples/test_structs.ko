@@ -1,0 +1,72 @@
+module test_structs {
+    meta {
+        purpose: "Tests for struct creation and field access"
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    struct Rectangle {
+        width: Int,
+        height: Int
+    }
+
+    fn make_point(x: Int, y: Int) -> Point {
+        return Point { x: x, y: y }
+    }
+
+    fn distance_squared(p1: Point, p2: Point) -> Int {
+        let dx: Int = p1.x - p2.x
+        let dy: Int = p1.y - p2.y
+        return dx * dx + dy * dy
+    }
+
+    fn area(r: Rectangle) -> Int {
+        return r.width * r.height
+    }
+
+    fn perimeter(r: Rectangle) -> Int {
+        return 2 * (r.width + r.height)
+    }
+
+    test "struct field access" {
+        let p: Point = Point { x: 10, y: 20 }
+        assert_eq(p.x, 10)
+        assert_eq(p.y, 20)
+    }
+
+    test "make_point factory" {
+        let p: Point = make_point(5, 15)
+        assert_eq(p.x, 5)
+        assert_eq(p.y, 15)
+    }
+
+    test "distance squared between points" {
+        let p1: Point = make_point(0, 0)
+        let p2: Point = make_point(3, 4)
+        assert_eq(distance_squared(p1, p2), 25)
+    }
+
+    test "rectangle area" {
+        let r: Rectangle = Rectangle { width: 5, height: 10 }
+        assert_eq(area(r), 50)
+    }
+
+    test "rectangle perimeter" {
+        let r: Rectangle = Rectangle { width: 3, height: 7 }
+        assert_eq(perimeter(r), 20)
+    }
+
+    test "square area" {
+        let sq: Rectangle = Rectangle { width: 4, height: 4 }
+        assert_eq(area(sq), 16)
+    }
+
+    test "square perimeter" {
+        let sq2: Rectangle = Rectangle { width: 4, height: 4 }
+        assert_eq(perimeter(sq2), 16)
+    }
+}

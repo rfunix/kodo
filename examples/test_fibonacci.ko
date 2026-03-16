@@ -1,0 +1,38 @@
+module test_fibonacci {
+    meta {
+        purpose: "Tests for recursive Fibonacci computation"
+        version: "0.1.0"
+    }
+
+    fn fib(n: Int) -> Int {
+        if n <= 1 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    test "fib base cases" {
+        assert_eq(fib(0), 0)
+        assert_eq(fib(1), 1)
+    }
+
+    test "fib small values" {
+        assert_eq(fib(2), 1)
+        assert_eq(fib(3), 2)
+        assert_eq(fib(4), 3)
+        assert_eq(fib(5), 5)
+    }
+
+    test "fib(10) is 55" {
+        assert_eq(fib(10), 55)
+    }
+
+    test "fib(15) is 610" {
+        assert_eq(fib(15), 610)
+    }
+
+    test "fib grows between consecutive values" {
+        assert_ne(fib(5), fib(4))
+        assert_ne(fib(10), fib(9))
+    }
+}

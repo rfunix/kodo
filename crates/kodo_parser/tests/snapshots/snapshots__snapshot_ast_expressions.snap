@@ -674,4 +674,5 @@ Module {
             },
         },
     ],
+    test_decls: [],
 }

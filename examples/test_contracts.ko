@@ -1,0 +1,75 @@
+module test_contracts {
+    meta {
+        purpose: "Tests for contract-annotated functions"
+        version: "0.1.0"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn clamp(value: Int, min: Int, max: Int) -> Int
+        requires { min <= max }
+    {
+        if value < min {
+            return min
+        }
+        if value > max {
+            return max
+        }
+        return value
+    }
+
+    fn abs(x: Int) -> Int
+        ensures { result >= 0 }
+    {
+        if x < 0 {
+            return -x
+        }
+        return x
+    }
+
+    test "safe_divide basic" {
+        assert_eq(safe_divide(10, 2), 5)
+        assert_eq(safe_divide(20, 4), 5)
+        assert_eq(safe_divide(100, 10), 10)
+        assert_eq(safe_divide(7, 3), 2)
+    }
+
+    test "safe_divide with negative" {
+        assert_eq(safe_divide(-20, 4), -5)
+        assert_eq(safe_divide(20, -4), -5)
+    }
+
+    test "clamp within range" {
+        assert_eq(clamp(5, 0, 10), 5)
+        assert_eq(clamp(0, 0, 10), 0)
+        assert_eq(clamp(10, 0, 10), 10)
+    }
+
+    test "clamp below minimum" {
+        assert_eq(clamp(-10, 0, 10), 0)
+        assert_eq(clamp(-1, 0, 100), 0)
+    }
+
+    test "clamp above maximum" {
+        assert_eq(clamp(20, 0, 10), 10)
+        assert_eq(clamp(999, 0, 100), 100)
+    }
+
+    test "abs positive" {
+        assert_eq(abs(5), 5)
+        assert_eq(abs(100), 100)
+    }
+
+    test "abs negative" {
+        assert_eq(abs(-5), 5)
+        assert_eq(abs(-100), 100)
+    }
+
+    test "abs zero" {
+        assert_eq(abs(0), 0)
+    }
+}

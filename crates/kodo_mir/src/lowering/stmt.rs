@@ -147,6 +147,19 @@ impl MirBuilder {
         let local_id = self.alloc_local(resolved_ty.clone(), mutable);
         self.name_map.insert(name.to_string(), local_id);
         let val = self.lower_expr(value)?;
+        // When the let binding has no type annotation (resolved_ty == Unknown),
+        // infer the type from the lowered value and update the local's type
+        // so that downstream passes (e.g. monomorphize_assert_callee) can
+        // determine the correct type.
+        if resolved_ty == Type::Unknown {
+            let inferred = self.infer_value_type(&val);
+            if inferred != Type::Unknown {
+                self.local_types.insert(local_id, inferred.clone());
+                if let Some(local) = self.locals.iter_mut().find(|l| l.id == local_id) {
+                    local.ty = inferred;
+                }
+            }
+        }
         // Wrap the value in a MakeDynTrait if assigning a concrete value
         // to a dyn Trait variable.
         let final_val = if let Type::DynTrait(ref trait_name) = resolved_ty {

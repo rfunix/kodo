@@ -63,6 +63,7 @@ fn resolve_primitive_types() {
 /// Helper to build a minimal module with one function.
 fn make_module(functions: Vec<Function>) -> Module {
     Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -791,6 +792,7 @@ fn make_module_with_policy(functions: Vec<Function>, policy: Option<&str>) -> Mo
         });
     }
     Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -970,6 +972,7 @@ fn make_module_with_decls(
     functions: Vec<Function>,
 ) -> Module {
     Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -1541,6 +1544,7 @@ fn closure_param_missing_type_annotation() {
 #[test]
 fn check_trait_and_impl_basic() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -1682,6 +1686,7 @@ fn check_trait_and_impl_basic() {
 #[test]
 fn check_unknown_trait_error() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -1722,6 +1727,7 @@ fn check_unknown_trait_error() {
 #[test]
 fn check_missing_trait_method_error() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -1791,6 +1797,7 @@ fn check_missing_trait_method_error() {
 #[test]
 fn check_inherent_impl_registers_methods() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 250),
         name: "test".to_string(),
@@ -1920,6 +1927,7 @@ fn check_inherent_impl_registers_methods() {
 fn check_inherent_impl_no_trait_required() {
     // Inherent impl should not require a trait to be defined.
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -2025,6 +2033,7 @@ fn check_inherent_impl_no_trait_required() {
 #[test]
 fn check_inherent_and_trait_impl_same_type() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 300),
         name: "test".to_string(),
@@ -2570,6 +2579,7 @@ fn confidence_threshold_violation() {
         },
     };
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -3776,6 +3786,7 @@ fn tuple_index_out_of_bounds_error_has_code() {
 #[test]
 fn missing_associated_type_error() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -3881,6 +3892,7 @@ fn missing_associated_type_error() {
 #[test]
 fn unexpected_associated_type_error() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -3985,6 +3997,7 @@ fn unexpected_associated_type_error() {
 #[test]
 fn default_method_not_required_in_impl() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -4107,6 +4120,7 @@ fn default_method_not_required_in_impl() {
 #[test]
 fn associated_type_provided_passes() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -4235,6 +4249,7 @@ fn unexpected_associated_type_error_code() {
 #[test]
 fn default_method_collecting_not_required() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -4316,6 +4331,7 @@ fn default_method_collecting_not_required() {
 #[test]
 fn missing_associated_type_collecting() {
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -4389,6 +4405,7 @@ fn missing_associated_type_collecting() {
 /// Helper to build a minimal module for testing break/continue.
 fn make_module_with_body(stmts: Vec<Stmt>) -> Module {
     Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -5168,6 +5185,7 @@ fn iterator_free_returns_unit() {
 fn for_in_type_checks_list() {
     let span = Span::new(0, 100);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "for_in_test".to_string(),
@@ -5265,6 +5283,7 @@ fn for_in_type_checks_list() {
 fn for_in_rejects_non_list() {
     let span = Span::new(0, 100);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "for_in_err_test".to_string(),
@@ -5336,6 +5355,7 @@ fn for_in_rejects_non_list() {
 fn invariant_bool_condition_passes() {
     let span = Span::new(0, 10);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -5380,6 +5400,7 @@ fn invariant_bool_condition_passes() {
 fn invariant_non_bool_condition_fails() {
     let span = Span::new(0, 10);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -5426,6 +5447,7 @@ fn invariant_non_bool_condition_fails() {
 fn invariant_comparison_expr_passes() {
     let span = Span::new(0, 10);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -5478,6 +5500,7 @@ fn invariant_comparison_expr_passes() {
 fn invariant_collecting_reports_error() {
     let span = Span::new(0, 10);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -5525,6 +5548,7 @@ fn invariant_collecting_reports_error() {
 fn invariant_multiple_conditions() {
     let span = Span::new(0, 10);
     let module = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -6341,6 +6365,7 @@ fn private_function_call_from_another_module_errors() {
         },
     };
     let module_a = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "module_a".to_string(),
@@ -6430,6 +6455,7 @@ fn public_function_call_from_another_module_succeeds() {
         },
     };
     let module_a = Module {
+        test_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "module_a".to_string(),

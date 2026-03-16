@@ -162,6 +162,9 @@ pub enum TokenKind {
     /// The `continue` keyword — skips to the next iteration of the innermost loop.
     #[token("continue")]
     Continue,
+    /// The `test` keyword — declares a test block.
+    #[token("test")]
+    Test,
 
     // --- Literals ---
     /// An integer literal.
@@ -746,6 +749,21 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_test_keyword() {
+        let tokens = tokenize("test").unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Test);
+    }
+
+    #[test]
+    fn tokenize_test_with_string() {
+        let tokens = tokenize(r#"test "my test name""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].kind, TokenKind::Test);
+        assert!(matches!(tokens[1].kind, TokenKind::StringLit(ref s) if s == "my test name"));
+    }
+
+    #[test]
     fn tokenize_fstring_simple() {
         let tokens = tokenize(r#"f"hello {name}!""#).unwrap_or_default();
         assert_eq!(tokens.len(), 1);
@@ -973,7 +991,7 @@ mod tests {
                                 "while", "for", "true", "false", "struct", "enum",
                                 "match", "import", "from", "trait", "impl", "self",
                                 "own", "ref", "is", "async", "await", "spawn", "actor",
-                                "parallel", "break", "continue", "pub"];
+                                "parallel", "break", "continue", "pub", "test"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
                     let tokens = tokenize(&name).unwrap();
@@ -988,7 +1006,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..31usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..32usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -1006,7 +1024,7 @@ mod tests {
                     ("is", TokenKind::Is), ("async", TokenKind::Async),
                     ("parallel", TokenKind::Parallel),
                     ("break", TokenKind::Break), ("continue", TokenKind::Continue),
-                    ("pub", TokenKind::Pub),
+                    ("pub", TokenKind::Pub), ("test", TokenKind::Test),
                 ];
                 let (src, expected) = &keywords[idx % keywords.len()];
                 let tokens = tokenize(src).unwrap();

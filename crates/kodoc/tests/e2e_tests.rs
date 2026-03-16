@@ -1688,6 +1688,10 @@ e2e_example_test!(run: e2e_map_string_string, "map_string_string.ko", contains: 
 e2e_example_test!(run: e2e_map_string_int, "map_string_int.ko", contains: ["Alice: 95", "Bob: 87", "Carol is in the map", "Total students: 3", "Bob updated: 91"]);
 e2e_example_test!(run: e2e_map_int_string, "map_int_string.ko", contains: ["1 = one", "2 = two", "3 = three", "Map size: 3", "1 updated = uno"]);
 
+// --- Missing example: crud_api (compile-only, depends on HTTP + DB) ---
+
+e2e_example_test!(compile: e2e_crud_api, "crud_api.ko");
+
 // --- Examples that intentionally fail to compile ---
 
 e2e_example_test!(fail: e2e_type_errors, "type_errors.ko");
@@ -1790,5 +1794,216 @@ module result_test {
     assert!(
         stdout.contains("err"),
         "file_read(nonexistent).is_err() should be true, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10: WI-2 — Map<Int, String> remove and contains_key
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_map_int_string_remove() {
+    let source = r#"
+module map_sv_remove_test {
+    meta { purpose: "test map_remove on Map<Int, String>" }
+    fn main() {
+        let m: Map<Int, String> = map_new()
+        map_insert(m, 1, "one")
+        map_insert(m, 2, "two")
+        map_insert(m, 3, "three")
+        let len1: Int = map_length(m)
+        println(f"before: {len1}")
+
+        let removed: Bool = map_remove(m, 2)
+        if removed {
+            println("removed ok")
+        }
+
+        let len2: Int = map_length(m)
+        println(f"after: {len2}")
+
+        let not_found: Bool = map_remove(m, 99)
+        if not_found {
+            println("should not happen")
+        } else {
+            println("not found as expected")
+        }
+    }
+}
+"#;
+    let binary = compile_source(source, "e2e_map_sv_remove");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "map remove sv should exit 0");
+    assert!(
+        stdout.contains("before: 3"),
+        "should have 3 items before remove, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("removed ok"),
+        "remove should succeed, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("after: 2"),
+        "should have 2 items after remove, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("not found as expected"),
+        "remove non-existent key should fail, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_map_int_string_contains_key() {
+    let source = r#"
+module map_sv_contains_test {
+    meta { purpose: "test map_contains_key on Map<Int, String>" }
+    fn main() {
+        let m: Map<Int, String> = map_new()
+        map_insert(m, 10, "ten")
+        map_insert(m, 20, "twenty")
+
+        let has10: Bool = map_contains_key(m, 10)
+        let has99: Bool = map_contains_key(m, 99)
+        if has10 {
+            println("has 10")
+        }
+        if has99 {
+            println("has 99")
+        } else {
+            println("no 99")
+        }
+    }
+}
+"#;
+    let binary = compile_source(source, "e2e_map_sv_contains");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "map contains_key sv should exit 0");
+    assert!(
+        stdout.contains("has 10"),
+        "should find key 10, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("no 99"),
+        "should not find key 99, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10: WI-3 — Contract recovery mode E2E
+// ---------------------------------------------------------------------------
+
+/// Compiles a `.ko` source with the given contract mode and returns the binary path.
+fn compile_source_with_contracts(source: &str, test_name: &str, mode: &str) -> std::path::PathBuf {
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+    let source_path = output_dir.join(format!("{test_name}.ko"));
+    std::fs::write(&source_path, source).expect("could not write source file");
+    let output_path = output_dir.join(test_name);
+
+    let kodoc = get_kodoc_path();
+    let result = Command::new(&kodoc)
+        .arg("build")
+        .arg(&source_path)
+        .arg("--contracts")
+        .arg(mode)
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        result.status.success(),
+        "kodoc build --contracts {mode} failed for {test_name}:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    output_path
+}
+
+#[test]
+fn e2e_contract_recoverable_no_violation() {
+    let source = r#"
+module recoverable_ok {
+    meta { purpose: "test recoverable mode with no violation" }
+    fn safe_add(a: Int, b: Int) -> Int
+        requires { a > 0 }
+        requires { b > 0 }
+    {
+        return a + b
+    }
+    fn main() {
+        let result: Int = safe_add(3, 7)
+        print_int(result)
+    }
+}
+"#;
+    let binary = compile_source_with_contracts(source, "e2e_recoverable_ok", "recoverable");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "recoverable mode with valid inputs should exit 0"
+    );
+    assert!(
+        stdout.contains("10"),
+        "should print 10 (3+7), got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_contract_recoverable_violation_no_crash() {
+    let source = r#"
+module recoverable_violation {
+    meta { purpose: "test recoverable mode logs warning instead of aborting" }
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+    fn main() {
+        let result: Int = positive_only(-5)
+        print_int(result)
+        println("still running")
+    }
+}
+"#;
+    let binary = compile_source_with_contracts(source, "e2e_recoverable_violation", "recoverable");
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "recoverable mode should NOT crash on contract violation"
+    );
+    assert!(
+        stdout.contains("still running"),
+        "execution should continue after recoverable violation, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("WARNING") || stderr.contains("contract"),
+        "recoverable violation should emit a warning on stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn e2e_contract_default_violation_aborts() {
+    let source = r#"
+module default_violation {
+    meta { purpose: "test default mode aborts on violation" }
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+    fn main() {
+        let result: Int = positive_only(-5)
+        print_int(result)
+        println("should not reach here")
+    }
+}
+"#;
+    let binary = compile_source_with_contracts(source, "e2e_default_violation", "runtime");
+    let (exit_code, _stdout, _stderr) = run_binary(&binary);
+    assert_ne!(
+        exit_code, 0,
+        "default contract mode should abort on violation"
     );
 }

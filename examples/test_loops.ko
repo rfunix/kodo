@@ -1,0 +1,120 @@
+module test_loops {
+    meta {
+        purpose: "Tests for while loops, for loops, break, and continue"
+        version: "0.1.0"
+    }
+
+    fn sum_range(n: Int) -> Int {
+        let mut total: Int = 0
+        for i in 0..n {
+            total = total + i
+        }
+        return total
+    }
+
+    fn sum_inclusive(n: Int) -> Int {
+        let mut total: Int = 0
+        for i in 0..=n {
+            total = total + i
+        }
+        return total
+    }
+
+    fn factorial(n: Int) -> Int {
+        let mut result: Int = 1
+        let mut i: Int = 2
+        while i <= n {
+            result = result * i
+            i = i + 1
+        }
+        return result
+    }
+
+    fn search_while(limit: Int) -> Int {
+        let mut i: Int = 0
+        while i < limit {
+            if i == 42 {
+                break
+            }
+            i = i + 1
+        }
+        return i
+    }
+
+    fn skip_evens(limit: Int) -> Int {
+        let mut total: Int = 0
+        let mut i: Int = 0
+        while i < limit {
+            i = i + 1
+            if i % 2 == 0 {
+                continue
+            }
+            total = total + i
+        }
+        return total
+    }
+
+    fn count_down(start: Int) -> Int {
+        let mut n: Int = start
+        let mut steps: Int = 0
+        while n > 0 {
+            n = n - 1
+            steps = steps + 1
+        }
+        return steps
+    }
+
+    test "for loop sum 0..10" {
+        assert_eq(sum_range(10), 45)
+    }
+
+    test "for loop sum 0..1" {
+        assert_eq(sum_range(1), 0)
+    }
+
+    test "for loop sum 0..0" {
+        assert_eq(sum_range(0), 0)
+    }
+
+    test "inclusive for loop sum 0..=10" {
+        assert_eq(sum_inclusive(10), 55)
+    }
+
+    test "inclusive for loop sum 0..=0" {
+        assert_eq(sum_inclusive(0), 0)
+    }
+
+    test "factorial small values" {
+        assert_eq(factorial(1), 1)
+        assert_eq(factorial(2), 2)
+        assert_eq(factorial(3), 6)
+        assert_eq(factorial(4), 24)
+        assert_eq(factorial(5), 120)
+    }
+
+    test "factorial of 10" {
+        assert_eq(factorial(10), 3628800)
+    }
+
+    test "break exits loop at 42" {
+        assert_eq(search_while(100), 42)
+    }
+
+    test "break when limit is smaller" {
+        assert_eq(search_while(10), 10)
+    }
+
+    test "continue skips even numbers" {
+        assert_eq(skip_evens(10), 25)
+    }
+
+    test "continue with small limit" {
+        assert_eq(skip_evens(5), 9)
+    }
+
+    test "countdown counts correct steps" {
+        assert_eq(count_down(5), 5)
+        assert_eq(count_down(0), 0)
+        assert_eq(count_down(100), 100)
+    }
+}

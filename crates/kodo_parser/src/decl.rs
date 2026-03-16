@@ -8,7 +8,8 @@
 use kodo_ast::{
     ActorDecl, Annotation, AnnotationArg, AssociatedType, EnumDecl, EnumVariant, FieldDef,
     Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, InvariantDecl,
-    Ownership, Param, Span, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr, Visibility,
+    Ownership, Param, Span, TestDecl, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
+    Visibility,
 };
 use kodo_lexer::TokenKind;
 
@@ -662,6 +663,36 @@ impl Parser {
         }
     }
 
+    /// Parses a test declaration: `test "name" { body }`
+    ///
+    /// Annotations are parsed externally and passed in so that the dispatch
+    /// in `parse_module` can decide between `test` and `fn` after seeing `@`.
+    pub(crate) fn parse_test_decl(&mut self, annotations: Vec<Annotation>) -> Result<TestDecl> {
+        let start = self.expect(&TokenKind::Test)?.span;
+        let name_token = self.advance().ok_or(ParseError::UnexpectedEof {
+            expected: "string literal for test name".to_string(),
+        })?;
+        let name = match &name_token.kind {
+            TokenKind::StringLit(s) => s.clone(),
+            other => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "string literal for test name".to_string(),
+                    found: other.clone(),
+                    span: name_token.span,
+                });
+            }
+        };
+        let body = self.parse_block()?;
+        let end = self.prev_span();
+        Ok(TestDecl {
+            id: self.next_id(),
+            span: start.merge(end),
+            name,
+            annotations,
+            body,
+        })
+    }
+
     /// Parses an actor declaration: `actor Name { fields... fn handler(self) { ... } ... }`
     pub(crate) fn parse_actor_decl(&mut self) -> Result<ActorDecl> {
         let start = self.expect(&TokenKind::Actor)?.span;
@@ -800,6 +831,61 @@ mod tests {
         assert_eq!(module.type_decls.len(), 1);
         assert_eq!(module.type_decls[0].name, "Point");
         assert_eq!(module.type_decls[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn decl_test_basic() {
+        let source = r#"module test_mod {
+            test "addition works" {
+                let x: Int = 2
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.test_decls.len(), 1);
+        assert_eq!(module.test_decls[0].name, "addition works");
+    }
+
+    #[test]
+    fn decl_test_with_annotations() {
+        let source = r#"module test_mod {
+            @confidence(0.95)
+            test "annotated test" {
+                let x: Int = 1
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.test_decls.len(), 1);
+        assert_eq!(module.test_decls[0].name, "annotated test");
+        assert_eq!(module.test_decls[0].annotations.len(), 1);
+        assert_eq!(module.test_decls[0].annotations[0].name, "confidence");
+    }
+
+    #[test]
+    fn decl_test_alongside_functions() {
+        let source = r#"module test_mod {
+            fn add(a: Int, b: Int) -> Int { return a + b }
+            test "add works" {
+                let r: Int = add(1, 2)
+            }
+            fn sub(a: Int, b: Int) -> Int { return a - b }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.functions.len(), 2);
+        assert_eq!(module.test_decls.len(), 1);
+    }
+
+    #[test]
+    fn decl_multiple_tests() {
+        let source = r#"module test_mod {
+            test "first" { let x: Int = 1 }
+            test "second" { let y: Int = 2 }
+            test "third" { let z: Int = 3 }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.test_decls.len(), 3);
+        assert_eq!(module.test_decls[0].name, "first");
+        assert_eq!(module.test_decls[1].name, "second");
+        assert_eq!(module.test_decls[2].name, "third");
     }
 
     #[test]

@@ -140,6 +140,25 @@ pub struct ImportDecl {
     pub span: Span,
 }
 
+/// A test declaration: `test "name" { body }`
+///
+/// Test declarations allow AI agents to write and run tests natively in Kōdo.
+/// Each test has a descriptive string name and a body block containing
+/// assertions and other statements.
+#[derive(Debug, Clone)]
+pub struct TestDecl {
+    /// Unique identifier for this test node.
+    pub id: NodeId,
+    /// Source span of the entire test declaration.
+    pub span: Span,
+    /// Descriptive name of the test (from string literal).
+    pub name: String,
+    /// Annotations (e.g. `@confidence`, `@authored_by`).
+    pub annotations: Vec<Annotation>,
+    /// Test body block.
+    pub body: Block,
+}
+
 /// The top-level compilation unit representing a `.ko` file.
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -171,6 +190,8 @@ pub struct Module {
     pub invariants: Vec<InvariantDecl>,
     /// Functions defined in this module.
     pub functions: Vec<Function>,
+    /// Test declarations.
+    pub test_decls: Vec<TestDecl>,
 }
 
 /// A module invariant declaration: `invariant { condition_expr }`

@@ -12,7 +12,7 @@
 
 use kodo_ast::{
     ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl, Meta,
-    MetaEntry, Module, Span, TraitDecl, TypeAlias, TypeDecl, TypeExpr, Visibility,
+    MetaEntry, Module, Span, TestDecl, TraitDecl, TypeAlias, TypeDecl, TypeExpr, Visibility,
 };
 use kodo_lexer::TokenKind;
 
@@ -40,6 +40,8 @@ struct RecoveredDeclarations {
     invariants: Vec<InvariantDecl>,
     /// Collected function declarations.
     functions: Vec<Function>,
+    /// Collected test declarations.
+    test_decls: Vec<TestDecl>,
 }
 
 impl Parser {
@@ -79,6 +81,7 @@ impl Parser {
         let mut intent_decls = Vec::new();
         let mut invariants = Vec::new();
         let mut functions = Vec::new();
+        let mut test_decls = Vec::new();
         while self.check(&TokenKind::Fn)
             || self.check(&TokenKind::At)
             || self.check(&TokenKind::Struct)
@@ -91,8 +94,11 @@ impl Parser {
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
             || self.check(&TokenKind::Pub)
+            || self.check(&TokenKind::Test)
         {
-            if self.check(&TokenKind::Pub) {
+            if self.check(&TokenKind::Test) {
+                test_decls.push(self.parse_test_decl(vec![])?);
+            } else if self.check(&TokenKind::Pub) {
                 self.advance();
                 if self.check(&TokenKind::Struct) {
                     let mut decl = self.parse_struct_decl()?;
@@ -120,7 +126,15 @@ impl Parser {
             } else if self.check(&TokenKind::Intent) {
                 intent_decls.push(self.parse_intent()?);
             } else {
-                functions.push(self.parse_annotated_function()?);
+                // Parse annotations first, then dispatch to test or function.
+                let annotations = self.parse_annotations()?;
+                if self.check(&TokenKind::Test) {
+                    test_decls.push(self.parse_test_decl(annotations)?);
+                } else {
+                    let mut func = self.parse_function()?;
+                    func.annotations = annotations;
+                    functions.push(func);
+                }
             }
         }
 
@@ -142,6 +156,7 @@ impl Parser {
             intent_decls,
             invariants,
             functions,
+            test_decls,
         })
     }
 
@@ -169,6 +184,7 @@ impl Parser {
                 | TokenKind::Async
                 | TokenKind::Type
                 | TokenKind::Pub
+                | TokenKind::Test
         )
     }
 
@@ -258,6 +274,7 @@ impl Parser {
             intent_decls: vec![],
             invariants: vec![],
             functions: vec![],
+            test_decls: vec![],
         }
     }
 
@@ -319,6 +336,7 @@ impl Parser {
                 intent_decls: module_body.intent_decls,
                 invariants: module_body.invariants,
                 functions: module_body.functions,
+                test_decls: module_body.test_decls,
             },
             errors,
         }
@@ -380,9 +398,12 @@ impl Parser {
             || self.check(&TokenKind::Intent)
             || self.check(&TokenKind::Type)
             || self.check(&TokenKind::Pub)
+            || self.check(&TokenKind::Test)
         {
             let result: std::result::Result<(), ParseError> = (|| {
-                if self.check(&TokenKind::Pub) {
+                if self.check(&TokenKind::Test) {
+                    decls.test_decls.push(self.parse_test_decl(vec![])?);
+                } else if self.check(&TokenKind::Pub) {
                     self.advance();
                     if self.check(&TokenKind::Struct) {
                         let mut decl = self.parse_struct_decl()?;
@@ -410,9 +431,15 @@ impl Parser {
                 } else if self.check(&TokenKind::Intent) {
                     decls.intent_decls.push(self.parse_intent()?);
                 } else {
-                    decls
-                        .functions
-                        .push(self.parse_annotated_function_with_recovery(errors)?);
+                    // Parse annotations first, then dispatch to test or function.
+                    let annotations = self.parse_annotations()?;
+                    if self.check(&TokenKind::Test) {
+                        decls.test_decls.push(self.parse_test_decl(annotations)?);
+                    } else {
+                        let mut func = self.parse_function_with_recovery(errors)?;
+                        func.annotations = annotations;
+                        decls.functions.push(func);
+                    }
                 }
                 Ok(())
             })();
@@ -673,6 +700,7 @@ pub fn parse_with_recovery(source: &str) -> ParseOutput {
                     intent_decls: vec![],
                     invariants: vec![],
                     functions: vec![],
+                    test_decls: vec![],
                 },
                 errors: vec![ParseError::from(e)],
             };

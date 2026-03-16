@@ -1,0 +1,73 @@
+module test_generics {
+    meta {
+        purpose: "Tests for generic functions, max/min, and type inference"
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn max_of(a: Int, b: Int) -> Int {
+        if a > b {
+            return a
+        }
+        return b
+    }
+
+    fn min_of(a: Int, b: Int) -> Int {
+        if a < b {
+            return a
+        }
+        return b
+    }
+
+    test "identity preserves int values" {
+        assert_eq(identity(42), 42)
+        assert_eq(identity(0), 0)
+        assert_eq(identity(-7), -7)
+    }
+
+    test "add with type inference" {
+        let result = add(10, 20)
+        assert_eq(result, 30)
+    }
+
+    test "let binding type inference" {
+        let x = 42
+        assert_eq(x, 42)
+    }
+
+    test "max_of returns larger" {
+        assert_eq(max_of(3, 7), 7)
+        assert_eq(max_of(7, 3), 7)
+        assert_eq(max_of(5, 5), 5)
+    }
+
+    test "min_of returns smaller" {
+        assert_eq(min_of(3, 7), 3)
+        assert_eq(min_of(7, 3), 3)
+        assert_eq(min_of(5, 5), 5)
+    }
+
+    test "max and min difference" {
+        let a: Int = 10
+        let b: Int = 20
+        let diff: Int = max_of(a, b) - min_of(a, b)
+        assert_eq(diff, 10)
+    }
+
+    test "negative values" {
+        assert_eq(max_of(-3, -7), -3)
+        assert_eq(min_of(-3, -7), -7)
+    }
+
+    test "add negative and positive" {
+        assert_eq(add(-10, 10), 0)
+        assert_eq(add(-5, 3), -2)
+    }
+}

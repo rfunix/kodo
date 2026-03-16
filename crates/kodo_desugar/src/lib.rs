@@ -84,6 +84,7 @@ mod tests {
     fn make_test_module(stmts: Vec<Stmt>) -> Module {
         let mut id_gen = NodeIdGen::new();
         Module {
+            test_decls: vec![],
             id: id_gen.next_id(),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -634,6 +635,7 @@ mod tests {
         let span = Span::new(0, 100);
         let mut id_gen = NodeIdGen::new();
         let mut module = Module {
+            test_decls: vec![],
             id: id_gen.next_id(),
             span,
             name: "test".to_string(),
@@ -850,6 +852,7 @@ mod tests {
         let span = Span::new(0, 30);
         let mut id_gen = NodeIdGen::new();
         let mut module = Module {
+            test_decls: vec![],
             id: id_gen.next_id(),
             span,
             name: "test".to_string(),
@@ -993,6 +996,7 @@ mod tests {
         let mut id_gen = NodeIdGen::new();
         let span = Span::new(0, 100);
         let mut module = Module {
+            test_decls: vec![],
             id: id_gen.next_id(),
             span,
             name: "test".to_string(),
@@ -1057,6 +1061,7 @@ mod tests {
         let mut id_gen = NodeIdGen::new();
         let span = Span::new(0, 100);
         let mut module = Module {
+            test_decls: vec![],
             id: id_gen.next_id(),
             span,
             name: "test".to_string(),

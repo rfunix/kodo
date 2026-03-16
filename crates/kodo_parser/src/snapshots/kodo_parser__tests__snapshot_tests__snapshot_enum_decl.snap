@@ -71,4 +71,5 @@ Module {
     intent_decls: [],
     invariants: [],
     functions: [],
+    test_decls: [],
 }

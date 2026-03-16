@@ -18,6 +18,8 @@ impl TypeChecker {
     ///   `trim`, `to_upper`, `to_lower`, `substring`
     /// - Int methods: `to_string`, `to_float64`
     /// - Float64 methods: `to_string`, `to_int`
+    /// - Test assertion builtins: `assert`, `assert_true`, `assert_false`
+    ///   (`assert_eq` and `assert_ne` are handled specially in `check_call`)
     pub(crate) fn register_builtins(&mut self) {
         self.env.insert(
             "println".to_string(),
@@ -98,6 +100,35 @@ impl TypeChecker {
         self.register_math_extended_functions();
         self.register_http_server_functions();
         self.register_db_functions();
+
+        // Test assertion builtins — assert_eq/assert_ne are polymorphic and
+        // handled as special cases in `check_call`.
+        self.env.insert(
+            "assert".to_string(),
+            Type::Function(vec![Type::Bool], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "assert_true".to_string(),
+            Type::Function(vec![Type::Bool], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "assert_false".to_string(),
+            Type::Function(vec![Type::Bool], Box::new(Type::Unit)),
+        );
+
+        // Test harness runtime builtins — used by the synthetic `main` in test mode.
+        self.env.insert(
+            "kodo_test_start".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "kodo_test_end".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "kodo_test_summary".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
     }
 
     /// Registers builtin methods for the `String` type.

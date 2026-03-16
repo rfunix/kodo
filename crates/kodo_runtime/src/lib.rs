@@ -18,6 +18,7 @@
 //! - [`memory`] — Reference-counted allocator
 //! - [`http`] — HTTP client builtins
 //! - [`server`] — HTTP server builtins (`tiny_http`)
+//! - [`test_ops`] — Test framework assertions and lifecycle
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -34,6 +35,7 @@ pub mod memory;
 pub mod scheduler;
 pub mod server;
 pub mod string_ops;
+pub mod test_ops;
 
 // Re-export all public #[no_mangle] functions so they remain visible
 // in the final staticlib. Each module's public extern "C" functions

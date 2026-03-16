@@ -1,0 +1,72 @@
+module test_traits {
+    meta {
+        purpose: "Tests for traits and method dispatch"
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    struct Circle {
+        radius: Int
+    }
+
+    trait HasArea {
+        fn area(self) -> Int
+    }
+
+    trait Describable {
+        fn describe(self) -> Int
+    }
+
+    impl HasArea for Circle {
+        fn area(self) -> Int {
+            return self.radius * self.radius * 3
+        }
+    }
+
+    impl Describable for Point {
+        fn describe(self) -> Int {
+            return self.x + self.y
+        }
+    }
+
+    impl HasArea for Point {
+        fn area(self) -> Int {
+            return self.x * self.y
+        }
+    }
+
+    test "point describe sums coordinates" {
+        let p: Point = Point { x: 10, y: 20 }
+        let d: Int = p.describe()
+        assert_eq(d, 30)
+    }
+
+    test "point describe with zero" {
+        let p: Point = Point { x: 0, y: 0 }
+        assert_eq(p.describe(), 0)
+    }
+
+    test "point describe with negative" {
+        let p: Point = Point { x: -5, y: 15 }
+        assert_eq(p.describe(), 10)
+    }
+
+    test "circle area approximation" {
+        let c: Circle = Circle { radius: 5 }
+        assert_eq(c.area(), 75)
+    }
+
+    test "circle area with unit radius" {
+        let c: Circle = Circle { radius: 1 }
+        assert_eq(c.area(), 3)
+    }
+
+    test "point area as rectangle" {
+        let p: Point = Point { x: 4, y: 5 }
+        assert_eq(p.area(), 20)
+    }
+}

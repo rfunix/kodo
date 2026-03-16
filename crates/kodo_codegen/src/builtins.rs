@@ -76,6 +76,7 @@ pub(crate) fn declare_builtins(
     declare_math_extended_builtins(module, call_conv, &mut builtins)?;
     declare_http_server_builtins(module, call_conv, &mut builtins)?;
     declare_db_builtins(module, call_conv, &mut builtins)?;
+    declare_test_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -1469,5 +1470,99 @@ fn declare_http_server_builtins(
         types::I64
     );
     decl_void!("kodo_http_server_free", "http_server_free", types::I64);
+    Ok(())
+}
+
+/// Declares test framework builtins (assertions and test lifecycle).
+fn declare_test_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // Simple assertion builtins — Bool may be I8 (direct) or I64 (after uextend
+    // from comparison results), so we declare as I64 and truncate in the runtime.
+    decl_void!("kodo_assert", "assert", types::I64);
+    decl_void!("kodo_assert_true", "assert_true", types::I64);
+    decl_void!("kodo_assert_false", "assert_false", types::I64);
+
+    // assert_eq monomorphized variants.
+    decl_void!(
+        "kodo_assert_eq_int",
+        "kodo_assert_eq_int",
+        types::I64,
+        types::I64
+    );
+    // Strings are composite types passed as pointers to 16-byte (ptr+len) slots.
+    decl_void!(
+        "kodo_assert_eq_string",
+        "kodo_assert_eq_string",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_assert_eq_bool",
+        "kodo_assert_eq_bool",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_assert_eq_float",
+        "kodo_assert_eq_float",
+        types::F64,
+        types::F64
+    );
+
+    // assert_ne monomorphized variants.
+    decl_void!(
+        "kodo_assert_ne_int",
+        "kodo_assert_ne_int",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_assert_ne_string",
+        "kodo_assert_ne_string",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_assert_ne_bool",
+        "kodo_assert_ne_bool",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_assert_ne_float",
+        "kodo_assert_ne_float",
+        types::F64,
+        types::F64
+    );
+
+    // Test lifecycle builtins.
+    // kodo_test_start takes a String (composite → pointer to 16-byte slot).
+    decl_void!("kodo_test_start", "kodo_test_start", types::I64);
+    decl_ret!("kodo_test_end", "kodo_test_end", [], types::I64);
+    decl_void!(
+        "kodo_test_summary",
+        "kodo_test_summary",
+        types::I64,
+        types::I64,
+        types::I64
+    );
     Ok(())
 }

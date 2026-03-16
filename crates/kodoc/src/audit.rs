@@ -619,6 +619,7 @@ mod tests {
     fn make_test_module_no_contracts() -> kodo_ast::Module {
         use kodo_ast::{Ownership, *};
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -660,6 +661,7 @@ mod tests {
     fn make_test_module_reviewed() -> kodo_ast::Module {
         use kodo_ast::{Ownership, *};
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -708,6 +710,7 @@ mod tests {
     fn make_test_module() -> kodo_ast::Module {
         use kodo_ast::{Ownership, *};
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),

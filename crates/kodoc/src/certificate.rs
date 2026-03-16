@@ -387,6 +387,7 @@ mod tests {
 
     fn make_test_module(func_names: &[&str]) -> Module {
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -635,6 +636,7 @@ mod tests {
     }
     fn make_test_module_with_contracts(func_name: &str) -> Module {
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -752,6 +754,7 @@ mod tests {
     fn certificate_json_contains_per_function_contract_status() {
         // Build a module with one contracted function and one plain function.
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 200),
             name: "mixed".to_string(),

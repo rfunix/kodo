@@ -125,4 +125,5 @@ Module {
             },
         },
     ],
+    test_decls: [],
 }

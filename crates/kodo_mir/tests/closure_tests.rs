@@ -31,6 +31,7 @@ fn make_fn(name: &str, params: Vec<Param>, body: Block, ret: TypeExpr) -> Functi
 
 fn make_module(functions: Vec<Function>) -> Module {
     Module {
+        test_decls: vec![],
         id: NodeId(0),
         name: "test".to_string(),
         span: span(),

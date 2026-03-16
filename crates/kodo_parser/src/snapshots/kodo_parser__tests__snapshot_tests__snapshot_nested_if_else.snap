@@ -181,4 +181,5 @@ Module {
             },
         },
     ],
+    test_decls: [],
 }

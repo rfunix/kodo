@@ -446,6 +446,8 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
         "String_to_upper",
         "String_to_lower",
         "String_substring",
+        "String_replace",
+        "String_repeat",
         "map_get_sv",
         "map_get_ss",
     ] {
@@ -459,17 +461,34 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
         "String_contains",
         "String_starts_with",
         "String_ends_with",
+        "String_char_at",
+        "String_index_of",
+        "String_eq",
+        "String_parse_int",
         "abs",
         "min",
         "max",
         "clamp",
         "list_length",
         "list_contains",
+        "list_is_empty",
+        "list_slice",
+        "list_set",
+        "list_remove",
         "map_length",
         "map_contains_key",
         "map_contains_key_sk",
+        "map_remove",
         "map_remove_sk",
+        "map_is_empty",
         "map_get_sk",
+        "json_get_int",
+        "json_get_bool",
+        "json_get_array",
+        "json_get_object",
+        "file_delete",
+        "String_lines",
+        "String_split",
     ] {
         fn_return_types
             .entry((*name).to_string())
@@ -553,6 +572,7 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
         .or_insert(Type::Bool);
 
     register_sprint5_return_types(fn_return_types);
+    register_test_return_types(fn_return_types);
 }
 
 /// Registers return types for Sprint 5 builtins (CLI, JSON, HTTP server, math).
@@ -608,6 +628,24 @@ fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
         .entry("list_pop".to_string())
         .or_insert(Type::Int);
 
+    // Float64-returning math builtins.
+    for name in &[
+        "Int_to_float64",
+        "sqrt",
+        "pow",
+        "sin",
+        "cos",
+        "log",
+        "floor",
+        "ceil",
+        "round",
+        "json_get_float",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Float64);
+    }
+
     // File extended builtins returning Bool.
     fn_return_types
         .entry("dir_exists".to_string())
@@ -655,6 +693,41 @@ fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
             .entry((*name).to_string())
             .or_insert(Type::Bool);
     }
+}
+
+/// Registers return types for test framework builtins (assertions and lifecycle).
+fn register_test_return_types(fn_return_types: &mut HashMap<String, Type>) {
+    // All assertion builtins return Unit.
+    for name in &[
+        "assert",
+        "assert_true",
+        "assert_false",
+        "assert_eq",
+        "assert_ne",
+        "kodo_assert_eq_int",
+        "kodo_assert_eq_string",
+        "kodo_assert_eq_bool",
+        "kodo_assert_eq_float",
+        "kodo_assert_ne_int",
+        "kodo_assert_ne_string",
+        "kodo_assert_ne_bool",
+        "kodo_assert_ne_float",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Unit);
+    }
+
+    // Test lifecycle: kodo_test_start returns Unit, kodo_test_end returns Int.
+    fn_return_types
+        .entry("kodo_test_start".to_string())
+        .or_insert(Type::Unit);
+    fn_return_types
+        .entry("kodo_test_end".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("kodo_test_summary".to_string())
+        .or_insert(Type::Unit);
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],
@@ -1131,6 +1204,7 @@ mod tests {
     #[test]
     fn lower_module_multiple_functions() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test_module".to_string(),
@@ -1474,6 +1548,7 @@ mod tests {
     #[test]
     fn validator_generated_for_function_with_requires() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
@@ -1529,6 +1604,7 @@ mod tests {
     #[test]
     fn validator_not_generated_without_requires() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
@@ -1559,6 +1635,7 @@ mod tests {
     #[test]
     fn validator_has_same_params() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
@@ -1620,6 +1697,7 @@ mod tests {
     #[test]
     fn validator_returns_bool() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test_mod".to_string(),
@@ -2050,6 +2128,7 @@ mod tests {
     #[test]
     fn test_field_access_type_resolution() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             name: "test".to_string(),
             span: span(),
@@ -2265,6 +2344,7 @@ mod tests {
     /// Helper to build a module with a Counter actor and a main function.
     fn make_actor_module(main_body: Block) -> Module {
         Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "test".to_string(),
@@ -2540,6 +2620,7 @@ mod tests {
             span: Span::new(0, 10),
         };
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -2617,6 +2698,7 @@ mod tests {
     #[test]
     fn no_refinement_check_for_unconstrained_alias() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -2740,6 +2822,7 @@ mod tests {
             span: Span::new(0, 20),
         };
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -3540,6 +3623,7 @@ mod tests {
     fn lower_struct_literal_module() {
         // Module with struct type and a function that creates it
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "struct_test".to_string(),
@@ -3616,6 +3700,7 @@ mod tests {
     #[test]
     fn lower_struct_field_access_module() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "field_test".to_string(),
@@ -3703,6 +3788,7 @@ mod tests {
     #[test]
     fn lower_enum_variant_and_match_module() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "enum_test".to_string(),
@@ -3772,6 +3858,7 @@ mod tests {
     #[test]
     fn lower_match_with_wildcard() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "match_test".to_string(),
@@ -3860,6 +3947,7 @@ mod tests {
     #[test]
     fn lower_actor_with_handler_module() {
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "actor_test".to_string(),
@@ -3993,6 +4081,7 @@ mod tests {
     fn lower_module_with_struct_type_registers_fields() {
         // Module with struct → function that creates and accesses the struct
         let module = Module {
+            test_decls: vec![],
             id: NodeId(0),
             span: span(),
             name: "reg_test".to_string(),

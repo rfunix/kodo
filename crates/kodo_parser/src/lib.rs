@@ -150,6 +150,12 @@ impl Parser {
                 kind: TokenKind::Ident(name),
                 ..
             }) => Ok(name.clone()),
+            // `test` is a contextual keyword — it can be used as an identifier
+            // in most positions (e.g., module name, variable name).
+            Some(Token {
+                kind: TokenKind::Test,
+                ..
+            }) => Ok("test".to_string()),
             Some(token) => Err(ParseError::UnexpectedToken {
                 expected: "identifier".to_string(),
                 found: token.kind.clone(),

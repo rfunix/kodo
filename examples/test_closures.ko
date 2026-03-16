@@ -1,0 +1,44 @@
+module test_closures {
+    meta {
+        purpose: "Tests for closures and higher-order functions"
+        version: "0.1.0"
+    }
+
+    fn apply(f: (Int) -> Int, x: Int) -> Int {
+        return f(x)
+    }
+
+    test "simple closure" {
+        let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        assert_eq(double(21), 42)
+        assert_eq(double(0), 0)
+        assert_eq(double(5), 10)
+    }
+
+    test "closure with capture" {
+        let offset: Int = 100
+        let add_offset: (Int) -> Int = |x: Int| -> Int { x + offset }
+        assert_eq(add_offset(42), 142)
+        assert_eq(add_offset(0), 100)
+    }
+
+    test "closure with multiple captures" {
+        let a: Int = 10
+        let b: Int = 20
+        let sum_with: (Int) -> Int = |x: Int| -> Int { x + a + b }
+        assert_eq(sum_with(5), 35)
+        assert_eq(sum_with(0), 30)
+    }
+
+    test "apply higher-order function" {
+        let negate: (Int) -> Int = |x: Int| -> Int { 0 - x }
+        assert_eq(apply(negate, 5), -5)
+    }
+
+    test "closure negate" {
+        let neg: (Int) -> Int = |x: Int| -> Int { 0 - x }
+        assert_eq(neg(5), -5)
+        assert_eq(neg(-3), 3)
+        assert_eq(neg(0), 0)
+    }
+}

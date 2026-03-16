@@ -30,7 +30,8 @@ declaration     = function_decl
                 | impl_block
                 | intent_decl
                 | invariant_decl
-                | import_decl ;
+                | import_decl
+                | test_decl ;
 
 (* ===== Imports ===== *)
 
@@ -94,6 +95,10 @@ annotation      = "@" IDENT ( "(" annotation_args ")" )? ;
 annotation_args = annotation_arg ("," annotation_arg)* ;
 annotation_arg  = IDENT ":" expr
                 | expr ;
+
+(* ===== Tests ===== *)
+
+test_decl       = annotation* "test" STRING_LIT block ;
 
 (* ===== Intent System ===== *)
 

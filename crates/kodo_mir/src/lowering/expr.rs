@@ -245,6 +245,10 @@ impl MirBuilder {
             arg_values.push(self.lower_expr(arg)?);
         }
 
+        // Monomorphize assert_eq/assert_ne: dispatch to type-specific runtime
+        // builtins based on the inferred type of the first argument.
+        let callee_name = self.monomorphize_assert_callee(callee_name, &arg_values);
+
         // Monomorphize map builtins: rename callee based on the map arg's type params.
         let callee_name = self.monomorphize_map_callee(callee_name, &arg_values);
 
@@ -309,6 +313,32 @@ impl MirBuilder {
         Ok(Value::Local(dest))
     }
 
+    /// Monomorphizes `assert_eq` and `assert_ne` to type-specific runtime
+    /// builtins (`kodo_assert_eq_int`, `kodo_assert_eq_string`, etc.) based on
+    /// the inferred type of the first argument.
+    ///
+    /// Returns the original callee name unchanged if it is not an assertion
+    /// builtin or if the argument type cannot be determined.
+    fn monomorphize_assert_callee(&self, callee_name: String, arg_values: &[Value]) -> String {
+        let base = match callee_name.as_str() {
+            "assert_eq" => "kodo_assert_eq",
+            "assert_ne" => "kodo_assert_ne",
+            _ => return callee_name,
+        };
+        if arg_values.is_empty() {
+            return callee_name;
+        }
+        let arg_ty = self.infer_value_type(&arg_values[0]);
+        let suffix = match arg_ty {
+            Type::Int => "_int",
+            Type::String => "_string",
+            Type::Bool => "_bool",
+            Type::Float64 => "_float",
+            _ => return callee_name,
+        };
+        format!("{base}{suffix}")
+    }
+
     /// Determines the monomorphized suffix for a map builtin based on the map's
     /// type parameters (`_sk` for String key, `_sv` for String value, `_ss` for both).
     ///
@@ -351,9 +381,13 @@ impl MirBuilder {
         if callee_name == "map_length" || callee_name == "map_is_empty" {
             return callee_name;
         }
-        // contains_key and remove for _ss reuse the _sk variants (same key handling).
+        // contains_key and remove for _ss reuse the _sk variants (same String key handling).
         if suffix == "_ss" && (callee_name == "map_contains_key" || callee_name == "map_remove") {
             return format!("{callee_name}_sk");
+        }
+        // contains_key and remove for _sv use the base variants (Int key, no suffix).
+        if suffix == "_sv" && (callee_name == "map_contains_key" || callee_name == "map_remove") {
+            return callee_name;
         }
         format!("{callee_name}{suffix}")
     }

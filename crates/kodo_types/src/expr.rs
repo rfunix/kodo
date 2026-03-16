@@ -894,6 +894,41 @@ impl TypeChecker {
             }
         }
 
+        // Polymorphic assertion builtins — both args must be the same
+        // supported primitive type. Resolved to monomorphized runtime calls
+        // during MIR lowering.
+        if let Expr::Ident(name, _) = callee {
+            if name == "assert_eq" || name == "assert_ne" {
+                if args.len() != 2 {
+                    return Err(TypeError::ArityMismatch {
+                        expected: 2,
+                        found: args.len(),
+                        span,
+                    });
+                }
+                let left_ty = self.infer_expr(&args[0])?;
+                let right_ty = self.infer_expr(&args[1])?;
+                if left_ty != right_ty {
+                    return Err(TypeError::Mismatch {
+                        expected: format!("{left_ty}"),
+                        found: format!("{right_ty}"),
+                        span: expr_span(&args[1]),
+                    });
+                }
+                if !matches!(
+                    left_ty,
+                    Type::Int | Type::String | Type::Bool | Type::Float64
+                ) {
+                    return Err(TypeError::Mismatch {
+                        expected: "Int, String, Bool, or Float64".to_string(),
+                        found: format!("{left_ty}"),
+                        span,
+                    });
+                }
+                return Ok(Type::Unit);
+            }
+        }
+
         // Check for generic function call.
         if let Expr::Ident(name, ident_span) = callee {
             if let Some(def) = self.generic_functions.get(name).cloned() {

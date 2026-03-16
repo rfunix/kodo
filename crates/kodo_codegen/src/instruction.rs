@@ -1050,6 +1050,30 @@ fn translate_call(
         )?);
     }
 
+    // Widen i8 (Bool) arguments to i64 when the callee signature expects i64.
+    // This handles the mismatch between Bool values (represented as i8 in
+    // Cranelift) and builtin functions declared with i64 parameters.
+    let resolve_func_ref = builtins
+        .get(callee)
+        .map(|b| b.func_id)
+        .or_else(|| func_ids.get(callee).copied());
+    if let Some(fid) = resolve_func_ref {
+        let sig = &module.declarations().get_function_decl(fid).signature;
+        for (i, val) in arg_vals.iter_mut().enumerate() {
+            if let Some(param) = sig.params.get(i) {
+                let actual = builder.func.dfg.value_type(*val);
+                if actual != param.value_type && !actual.is_float() && !param.value_type.is_float()
+                {
+                    if actual.bits() < param.value_type.bits() {
+                        *val = builder.ins().uextend(param.value_type, *val);
+                    } else if actual.bits() > param.value_type.bits() {
+                        *val = builder.ins().ireduce(param.value_type, *val);
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(builtin) = builtins.get(callee) {
         let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
         let call = builder.ins().call(func_ref, &arg_vals);
