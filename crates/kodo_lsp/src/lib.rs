@@ -194,6 +194,34 @@ fn hover_at_position(source: &str, position: Position) -> Option<String> {
     for func in &module.functions {
         if func.span.start <= offset_u32 && offset_u32 <= func.span.end {
             use std::fmt::Write;
+
+            // Check if the cursor is on a parameter or local variable first
+            let word = word_at_offset(source, offset);
+            if !word.is_empty() {
+                // Check parameters
+                for p in &func.params {
+                    if p.name == word {
+                        return Some(format!("**param {}**: {}", p.name, format_type_expr(&p.ty)));
+                    }
+                }
+                // Check let bindings
+                for stmt in &func.body.stmts {
+                    if let kodo_ast::Stmt::Let {
+                        name, ty, value, ..
+                    } = stmt
+                    {
+                        if name == word {
+                            let type_str = if let Some(ty) = ty {
+                                format_type_expr(ty)
+                            } else {
+                                infer_type_hint(value)
+                            };
+                            return Some(format!("**let {name}**: {type_str}"));
+                        }
+                    }
+                }
+            }
+
             let mut info = format!("**fn {}**", func.name);
 
             // Add parameter types
@@ -210,13 +238,13 @@ fn hover_at_position(source: &str, position: Position) -> Option<String> {
             // Add contracts
             if !func.requires.is_empty() {
                 info.push_str("\n\n**Contracts:**\n");
-                for _req in &func.requires {
-                    info.push_str("- `requires { ... }`\n");
+                for req in &func.requires {
+                    let _ = writeln!(info, "- `requires {{ {} }}`", format_expr(req));
                 }
             }
             if !func.ensures.is_empty() {
-                for _ens in &func.ensures {
-                    info.push_str("- `ensures { ... }`\n");
+                for ens in &func.ensures {
+                    let _ = writeln!(info, "- `ensures {{ {} }}`", format_expr(ens));
                 }
             }
 
@@ -1076,12 +1104,26 @@ fn format_expr(expr: &kodo_ast::Expr) -> String {
     match expr {
         kodo_ast::Expr::Ident(name, _) => name.clone(),
         kodo_ast::Expr::IntLit(n, _) => n.to_string(),
+        kodo_ast::Expr::FloatLit(f, _) => format!("{f}"),
         kodo_ast::Expr::BoolLit(b, _) => b.to_string(),
         kodo_ast::Expr::StringLit(s, _) => format!("\"{s}\""),
         kodo_ast::Expr::BinaryOp {
             left, op, right, ..
         } => {
             format!("{} {op:?} {}", format_expr(left), format_expr(right))
+        }
+        kodo_ast::Expr::UnaryOp { op, operand, .. } => {
+            format!("{op:?}{}", format_expr(operand))
+        }
+        kodo_ast::Expr::Call { callee, .. } => {
+            if let kodo_ast::Expr::Ident(name, _) = callee.as_ref() {
+                format!("{name}(...)")
+            } else {
+                "call(...)".to_string()
+            }
+        }
+        kodo_ast::Expr::FieldAccess { object, field, .. } => {
+            format!("{}.{field}", format_expr(object))
         }
         _ => "...".to_string(),
     }
@@ -1459,12 +1501,40 @@ fn infer_type_hint(expr: &kodo_ast::Expr) -> String {
         kodo_ast::Expr::BoolLit(_, _) => "Bool".to_string(),
         kodo_ast::Expr::StringLit(_, _) => "String".to_string(),
         kodo_ast::Expr::Call { callee, .. } => infer_type_from_call(callee),
-        kodo_ast::Expr::Ident(_, _)
-        | kodo_ast::Expr::BinaryOp { .. }
-        | kodo_ast::Expr::UnaryOp { .. }
-        | kodo_ast::Expr::FieldAccess { .. } => {
+        kodo_ast::Expr::Ident(_, _) | kodo_ast::Expr::FieldAccess { .. } => {
             // Try to infer using the TypeChecker on a minimal wrapper module.
             infer_type_via_checker(expr)
+        }
+        kodo_ast::Expr::BinaryOp { op, .. } => {
+            let result = infer_type_via_checker(expr);
+            if result != "TODO" {
+                return result;
+            }
+            match op {
+                kodo_ast::BinOp::Add
+                | kodo_ast::BinOp::Sub
+                | kodo_ast::BinOp::Mul
+                | kodo_ast::BinOp::Div
+                | kodo_ast::BinOp::Mod => "Int".to_string(),
+                kodo_ast::BinOp::Lt
+                | kodo_ast::BinOp::Gt
+                | kodo_ast::BinOp::Le
+                | kodo_ast::BinOp::Ge
+                | kodo_ast::BinOp::Eq
+                | kodo_ast::BinOp::Ne
+                | kodo_ast::BinOp::And
+                | kodo_ast::BinOp::Or => "Bool".to_string(),
+            }
+        }
+        kodo_ast::Expr::UnaryOp { op, .. } => {
+            let result = infer_type_via_checker(expr);
+            if result != "TODO" {
+                return result;
+            }
+            match op {
+                kodo_ast::UnaryOp::Neg => "Int".to_string(),
+                kodo_ast::UnaryOp::Not => "Bool".to_string(),
+            }
         }
         _ => "TODO".to_string(),
     }
@@ -3098,6 +3168,226 @@ mod tests {
         assert!(
             refs.is_none(),
             "should return None for identifier not in reference_spans"
+        );
+    }
+
+    #[test]
+    fn hover_shows_contract_expressions() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+    {
+        return a / b
+    }
+}"#;
+        // Position within the function body (not on a param name)
+        let hover = hover_at_position(source, Position::new(9, 17));
+        assert!(hover.is_some(), "should find hover info");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("b Gt 0"),
+            "hover should contain the real contract expression, got: {info}"
+        );
+        assert!(
+            !info.contains("requires { ... }"),
+            "hover should NOT contain literal '...' placeholder"
+        );
+    }
+
+    #[test]
+    fn hover_shows_ensures_expressions() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn positive(x: Int) -> Int
+        ensures { result > 0 }
+    {
+        return x
+    }
+}"#;
+        // Position within the function body (not on a param)
+        let hover = hover_at_position(source, Position::new(9, 17));
+        assert!(hover.is_some(), "should find hover info");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("result Gt 0"),
+            "hover should contain the real ensures expression, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_shows_variable_info() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let count: Int = 42
+        return count
+    }
+}"#;
+        // Position on "count" in the let binding (line 7, col 12)
+        let hover = hover_at_position(source, Position::new(7, 12));
+        assert!(hover.is_some(), "should find hover info for variable");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("**let count**"),
+            "hover should show let variable info, got: {info}"
+        );
+        assert!(
+            info.contains("Int"),
+            "hover should show variable type, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_shows_parameter_info() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        // Position on "a" in the function body "return a + b" (line 7)
+        let hover = hover_at_position(source, Position::new(7, 15));
+        assert!(hover.is_some(), "should find hover info for parameter");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("**param a**"),
+            "hover should show param info, got: {info}"
+        );
+        assert!(
+            info.contains("Int"),
+            "hover should show param type, got: {info}"
+        );
+    }
+
+    #[test]
+    fn format_expr_handles_unary() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::UnaryOp {
+            op: kodo_ast::UnaryOp::Neg,
+            operand: Box::new(kodo_ast::Expr::IntLit(5, span)),
+            span,
+        };
+        let result = format_expr(&expr);
+        assert_eq!(result, "Neg5", "UnaryOp Neg should format as Neg<operand>");
+
+        let expr_not = kodo_ast::Expr::UnaryOp {
+            op: kodo_ast::UnaryOp::Not,
+            operand: Box::new(kodo_ast::Expr::BoolLit(true, span)),
+            span,
+        };
+        let result_not = format_expr(&expr_not);
+        assert_eq!(
+            result_not, "Nottrue",
+            "UnaryOp Not should format as Not<operand>"
+        );
+    }
+
+    #[test]
+    fn format_expr_handles_call() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::Call {
+            callee: Box::new(kodo_ast::Expr::Ident("my_func".to_string(), span)),
+            args: vec![kodo_ast::Expr::IntLit(1, span)],
+            span,
+        };
+        let result = format_expr(&expr);
+        assert_eq!(
+            result, "my_func(...)",
+            "Call with Ident callee should show function name"
+        );
+    }
+
+    #[test]
+    fn format_expr_handles_field_access() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::FieldAccess {
+            object: Box::new(kodo_ast::Expr::Ident("point".to_string(), span)),
+            field: "x".to_string(),
+            span,
+        };
+        let result = format_expr(&expr);
+        assert_eq!(
+            result, "point.x",
+            "FieldAccess should format as object.field"
+        );
+    }
+
+    #[test]
+    fn infer_type_hint_binary_arithmetic() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::BinaryOp {
+            left: Box::new(kodo_ast::Expr::Ident("x".to_string(), span)),
+            op: kodo_ast::BinOp::Add,
+            right: Box::new(kodo_ast::Expr::Ident("y".to_string(), span)),
+            span,
+        };
+        assert_eq!(
+            infer_type_hint(&expr),
+            "Int",
+            "BinaryOp Add should infer Int"
+        );
+    }
+
+    #[test]
+    fn infer_type_hint_binary_comparison() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::BinaryOp {
+            left: Box::new(kodo_ast::Expr::Ident("x".to_string(), span)),
+            op: kodo_ast::BinOp::Lt,
+            right: Box::new(kodo_ast::Expr::Ident("y".to_string(), span)),
+            span,
+        };
+        assert_eq!(
+            infer_type_hint(&expr),
+            "Bool",
+            "BinaryOp Lt should infer Bool"
+        );
+    }
+
+    #[test]
+    fn infer_type_hint_unary_neg() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::UnaryOp {
+            op: kodo_ast::UnaryOp::Neg,
+            operand: Box::new(kodo_ast::Expr::Ident("x".to_string(), span)),
+            span,
+        };
+        assert_eq!(
+            infer_type_hint(&expr),
+            "Int",
+            "UnaryOp Neg should infer Int"
+        );
+    }
+
+    #[test]
+    fn infer_type_hint_unary_not() {
+        let span = kodo_ast::Span { start: 0, end: 0 };
+        let expr = kodo_ast::Expr::UnaryOp {
+            op: kodo_ast::UnaryOp::Not,
+            operand: Box::new(kodo_ast::Expr::Ident("x".to_string(), span)),
+            span,
+        };
+        assert_eq!(
+            infer_type_hint(&expr),
+            "Bool",
+            "UnaryOp Not should infer Bool"
         );
     }
 }

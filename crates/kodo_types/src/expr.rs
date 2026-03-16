@@ -597,15 +597,33 @@ impl TypeChecker {
     /// The type is determined by the last statement: if it is an `Expr`
     /// statement, its type is the block's type; otherwise the block is `Unit`.
     pub(crate) fn infer_block(&mut self, block: &Block) -> crate::Result<Type> {
+        let scope = self.env.scope_level();
         let mut last_ty = Type::Unit;
         for stmt in &block.stmts {
             match stmt {
                 Stmt::Expr(expr) => {
                     last_ty = self.infer_expr(expr)?;
                 }
-                Stmt::LetPattern { value, .. }
-                | Stmt::Let { value, .. }
-                | Stmt::Assign { value, .. } => {
+                Stmt::Let {
+                    name,
+                    ty,
+                    value,
+                    span,
+                    ..
+                } => {
+                    self.check_let_stmt(*span, name, ty.as_ref(), value)?;
+                    last_ty = Type::Unit;
+                }
+                Stmt::LetPattern {
+                    pattern,
+                    value,
+                    span,
+                    ..
+                } => {
+                    self.check_let_pattern_stmt(*span, pattern, value)?;
+                    last_ty = Type::Unit;
+                }
+                Stmt::Assign { value, .. } => {
                     self.infer_expr(value)?;
                     last_ty = Type::Unit;
                 }
@@ -643,10 +661,10 @@ impl TypeChecker {
                     ..
                 } => {
                     let val_ty = self.infer_expr(value)?;
-                    let scope = self.env.scope_level();
+                    let inner_scope = self.env.scope_level();
                     self.introduce_pattern_bindings(pattern, &val_ty);
                     self.infer_block(body)?;
-                    self.env.truncate(scope);
+                    self.env.truncate(inner_scope);
                     if let Some(else_block) = else_body {
                         self.infer_block(else_block)?;
                     }
@@ -668,6 +686,7 @@ impl TypeChecker {
                 }
             }
         }
+        self.env.truncate(scope);
         Ok(last_ty)
     }
 
@@ -1338,10 +1357,14 @@ impl TypeChecker {
         let cond_ty = self.infer_expr(condition)?;
         TypeEnv::check_eq(&Type::Bool, &cond_ty, expr_span(condition))?;
 
+        self.push_ownership_scope();
         let then_ty = self.infer_block(then_branch)?;
+        self.pop_ownership_scope();
 
         if let Some(else_block) = else_branch {
+            self.push_ownership_scope();
             let else_ty = self.infer_block(else_block)?;
+            self.pop_ownership_scope();
             TypeEnv::check_eq(&then_ty, &else_ty, span)?;
             Ok(then_ty)
         } else {

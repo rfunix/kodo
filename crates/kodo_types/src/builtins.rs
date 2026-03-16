@@ -97,6 +97,7 @@ impl TypeChecker {
         self.register_json_builder_functions();
         self.register_math_extended_functions();
         self.register_http_server_functions();
+        self.register_db_functions();
     }
 
     /// Registers builtin methods for the `String` type.
@@ -163,7 +164,9 @@ impl TypeChecker {
         );
     }
 
-    /// Registers String transform methods: `trim`, `to_upper`, `to_lower`, `substring`, `split`.
+    /// Registers String transform methods: `trim`, `to_upper`, `to_lower`, `substring`, `split`,
+    /// `char_at`, `repeat`.
+    #[allow(clippy::too_many_lines)]
     fn register_string_transform_methods(&mut self) {
         // String.trim() -> String
         self.method_lookup.insert(
@@ -266,6 +269,34 @@ impl TypeChecker {
         self.env.insert(
             "String_parse_int".to_string(),
             Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // String.char_at(index: Int) -> Int
+        self.method_lookup.insert(
+            ("String".to_string(), "char_at".to_string()),
+            (
+                "String_char_at".to_string(),
+                vec![Type::String, Type::Int],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "String_char_at".to_string(),
+            Type::Function(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+
+        // String.repeat(count: Int) -> String
+        self.method_lookup.insert(
+            ("String".to_string(), "repeat".to_string()),
+            (
+                "String_repeat".to_string(),
+                vec![Type::String, Type::Int],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "String_repeat".to_string(),
+            Type::Function(vec![Type::String, Type::Int], Box::new(Type::String)),
         );
     }
 
@@ -941,6 +972,8 @@ impl TypeChecker {
             "json_parse".to_string(),
             Type::Function(vec![Type::String], Box::new(Type::Int)),
         );
+        // json_get_string: returns the string value from a JSON object by key.
+        // The codegen handles this as a string-returning builtin (out-params).
         self.env.insert(
             "json_get_string".to_string(),
             Type::Function(vec![Type::Int, Type::String], Box::new(Type::String)),
@@ -975,6 +1008,11 @@ impl TypeChecker {
                 vec![Type::Int, Type::String],
                 Box::new(Type::Generic("List".to_string(), vec![Type::Int])),
             ),
+        );
+        // json_get_object(handle: Int, key: String) -> Int (JSON handle)
+        self.env.insert(
+            "json_get_object".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );
     }
 
@@ -1164,6 +1202,14 @@ impl TypeChecker {
                 Box::new(Type::Unit),
             ),
         );
+        // json_set_float(Int, String, Float64) -> Unit
+        self.env.insert(
+            "json_set_float".to_string(),
+            Type::Function(
+                vec![Type::Int, Type::String, Type::Float64],
+                Box::new(Type::Unit),
+            ),
+        );
     }
 
     /// Registers extended math builtins: `sqrt`, `pow`, trig, `floor`, `ceil`, `round`, `rand_int`.
@@ -1212,6 +1258,58 @@ impl TypeChecker {
         self.env.insert(
             "rand_int".to_string(),
             Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers `SQLite` database builtins.
+    ///
+    /// Provides functions for opening databases, executing SQL statements,
+    /// querying rows, and reading column values. Handles are opaque `Int` values.
+    fn register_db_functions(&mut self) {
+        // db_open(path: String) -> Int (handle)
+        self.env.insert(
+            "db_open".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+        // db_execute(db: Int, sql: String) -> Int (0=ok, 1=err)
+        self.env.insert(
+            "db_execute".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        // db_query(db: Int, sql: String) -> Int (result handle)
+        self.env.insert(
+            "db_query".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        // db_row_next(result: Int) -> Int (1=has row, 0=done)
+        self.env.insert(
+            "db_row_next".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // db_row_get_string(result: Int, col: Int) -> String
+        self.env.insert(
+            "db_row_get_string".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        // db_row_get_int(result: Int, col: Int) -> Int
+        self.env.insert(
+            "db_row_get_int".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        // db_row_advance(result: Int) -> Int (1=more, 0=done)
+        self.env.insert(
+            "db_row_advance".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // db_result_free(result: Int) -> Unit
+        self.env.insert(
+            "db_result_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+        // db_close(db: Int) -> Unit
+        self.env.insert(
+            "db_close".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
     }
 

@@ -488,4 +488,177 @@ mod tests {
             "fix should indicate no errors: {result}"
         );
     }
+
+    #[test]
+    fn tool_definitions_have_input_schemas() {
+        let tools = tool_definitions();
+        for tool in &tools {
+            let schema = &tool.input_schema;
+            assert!(
+                schema.get("type").is_some(),
+                "tool '{}' should have 'type' in inputSchema",
+                tool.name
+            );
+            assert_eq!(
+                schema.get("type").and_then(|t| t.as_str()),
+                Some("object"),
+                "tool '{}' inputSchema type should be 'object'",
+                tool.name
+            );
+            assert!(
+                schema.get("properties").is_some(),
+                "tool '{}' should have 'properties' in inputSchema",
+                tool.name
+            );
+        }
+    }
+
+    #[test]
+    fn tool_definitions_have_required_source() {
+        let tools = tool_definitions();
+        let source_tools = [
+            "kodo.check",
+            "kodo.describe",
+            "kodo.build",
+            "kodo.fix",
+            "kodo.confidence_report",
+        ];
+        for tool in &tools {
+            if source_tools.contains(&tool.name.as_str()) {
+                let required = tool
+                    .input_schema
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .unwrap_or_else(|| panic!("tool '{}' should have 'required' array", tool.name));
+                let has_source = required.iter().any(|v| v.as_str() == Some("source"));
+                assert!(
+                    has_source,
+                    "tool '{}' should require 'source' parameter",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dispatch_unknown_tool() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(20),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.nonexistent",
+                "arguments": {}
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32601);
+        assert!(err.message.contains("Unknown tool"));
+    }
+
+    #[test]
+    fn dispatch_missing_tool_name() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(21),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "arguments": { "source": "anything" }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("name"));
+    }
+
+    #[test]
+    fn response_always_has_jsonrpc_2_0() {
+        // Test with initialize
+        let init_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(30),
+            method: "initialize".to_string(),
+            params: serde_json::Value::Null,
+        };
+        assert_eq!(handle_request(&init_req).jsonrpc, "2.0");
+
+        // Test with tools/list
+        let list_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(31),
+            method: "tools/list".to_string(),
+            params: serde_json::Value::Null,
+        };
+        assert_eq!(handle_request(&list_req).jsonrpc, "2.0");
+
+        // Test with unknown method
+        let unknown_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(32),
+            method: "bogus".to_string(),
+            params: serde_json::Value::Null,
+        };
+        assert_eq!(handle_request(&unknown_req).jsonrpc, "2.0");
+
+        // Test with tools/call
+        let call_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(33),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.check",
+                "arguments": {
+                    "source": "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        return 0\n    }\n}\n"
+                }
+            }),
+        };
+        assert_eq!(handle_request(&call_req).jsonrpc, "2.0");
+    }
+
+    #[test]
+    fn handle_request_tools_call_explain() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(40),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.explain",
+                "arguments": {
+                    "code": "E0200"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("code").and_then(|c| c.as_str()), Some("E0200"));
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Type Error")
+        );
+    }
+
+    #[test]
+    fn handle_request_build_dispatch() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(41),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({
+                "name": "kodo.build",
+                "arguments": {
+                    "source": "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        return 0\n    }\n}\n"
+                }
+            }),
+        };
+        let resp = handle_request(&req);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("status").and_then(|s| s.as_str()), Some("ok"));
+        assert_eq!(result.get("module").and_then(|m| m.as_str()), Some("test"));
+    }
 }

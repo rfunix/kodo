@@ -6547,3 +6547,250 @@ fn for_in_over_map_yields_key_type() {
         "for-in over Map<Int, String> should yield Int keys, got: {errors:?}"
     );
 }
+
+// --- WI2: Variables inside if blocks should be visible within the block ---
+
+#[test]
+fn let_inside_if_block_visible_in_same_block() {
+    // if true { let x: Int = 1; let y: Int = x }
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Expr(Expr::If {
+            condition: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
+            then_branch: Block {
+                span: Span::new(5, 30),
+                stmts: vec![
+                    Stmt::Let {
+                        span: Span::new(6, 18),
+                        mutable: false,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(1, Span::new(15, 16)),
+                    },
+                    Stmt::Let {
+                        span: Span::new(19, 29),
+                        mutable: false,
+                        name: "y".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::Ident("x".to_string(), Span::new(27, 28)),
+                    },
+                ],
+            },
+            else_branch: None,
+            span: Span::new(0, 30),
+        })],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_ok(),
+        "let x inside if block should be visible for let y = x in same block"
+    );
+}
+
+#[test]
+fn let_inside_if_block_not_visible_outside() {
+    // if true { let x: Int = 1 }; let y: Int = x  — should fail
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![
+            Stmt::Expr(Expr::If {
+                condition: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
+                then_branch: Block {
+                    span: Span::new(5, 20),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(6, 18),
+                        mutable: false,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(1, Span::new(15, 16)),
+                    }],
+                },
+                else_branch: None,
+                span: Span::new(0, 20),
+            }),
+            Stmt::Let {
+                span: Span::new(21, 33),
+                mutable: false,
+                name: "y".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(31, 32)),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_err(),
+        "variable x from if block should NOT be visible after if"
+    );
+}
+
+#[test]
+fn let_inside_if_not_visible_in_else() {
+    // if true { let x: Int = 1 } else { let y: Int = x } — should fail
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Expr(Expr::If {
+            condition: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
+            then_branch: Block {
+                span: Span::new(5, 20),
+                stmts: vec![Stmt::Let {
+                    span: Span::new(6, 18),
+                    mutable: false,
+                    name: "x".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::IntLit(1, Span::new(15, 16)),
+                }],
+            },
+            else_branch: Some(Block {
+                span: Span::new(21, 40),
+                stmts: vec![Stmt::Let {
+                    span: Span::new(22, 34),
+                    mutable: false,
+                    name: "y".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::Ident("x".to_string(), Span::new(32, 33)),
+                }],
+            }),
+            span: Span::new(0, 40),
+        })],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_err(),
+        "variable x from then-branch should NOT be visible in else-branch"
+    );
+}
+
+#[test]
+fn outer_variable_accessible_inside_if() {
+    // let x: Int = 1; if true { let y: Int = x }
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![
+            Stmt::Let {
+                span: Span::new(0, 12),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::IntLit(1, Span::new(10, 11)),
+            },
+            Stmt::Expr(Expr::If {
+                condition: Box::new(Expr::BoolLit(true, Span::new(14, 18))),
+                then_branch: Block {
+                    span: Span::new(19, 34),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(20, 32),
+                        mutable: false,
+                        name: "y".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::Ident("x".to_string(), Span::new(30, 31)),
+                    }],
+                },
+                else_branch: None,
+                span: Span::new(14, 34),
+            }),
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_ok(),
+        "outer variable x should be accessible inside if block"
+    );
+}
+
+#[test]
+fn shadowing_inside_if_does_not_affect_outer() {
+    // let x: Int = 1; if true { let x: Bool = true }; let y: Int = x
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![
+            Stmt::Let {
+                span: Span::new(0, 12),
+                mutable: false,
+                name: "x".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::IntLit(1, Span::new(10, 11)),
+            },
+            Stmt::Expr(Expr::If {
+                condition: Box::new(Expr::BoolLit(true, Span::new(14, 18))),
+                then_branch: Block {
+                    span: Span::new(19, 40),
+                    stmts: vec![Stmt::Let {
+                        span: Span::new(20, 36),
+                        mutable: false,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Bool".to_string())),
+                        value: Expr::BoolLit(true, Span::new(33, 37)),
+                    }],
+                },
+                else_branch: None,
+                span: Span::new(14, 40),
+            }),
+            Stmt::Let {
+                span: Span::new(42, 56),
+                mutable: false,
+                name: "y".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Ident("x".to_string(), Span::new(54, 55)),
+            },
+        ],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_ok(),
+        "shadowing x to Bool inside if should not change outer x: Int"
+    );
+}
+
+#[test]
+fn let_mut_inside_if_with_reassignment() {
+    // if true { let mut x: Int = 1; x = 2 }
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Expr(Expr::If {
+            condition: Box::new(Expr::BoolLit(true, Span::new(0, 4))),
+            then_branch: Block {
+                span: Span::new(5, 35),
+                stmts: vec![
+                    Stmt::Let {
+                        span: Span::new(6, 22),
+                        mutable: true,
+                        name: "x".to_string(),
+                        ty: Some(TypeExpr::Named("Int".to_string())),
+                        value: Expr::IntLit(1, Span::new(20, 21)),
+                    },
+                    Stmt::Assign {
+                        span: Span::new(24, 29),
+                        name: "x".to_string(),
+                        value: Expr::IntLit(2, Span::new(28, 29)),
+                    },
+                ],
+            },
+            else_branch: None,
+            span: Span::new(0, 35),
+        })],
+    );
+    let module = make_module(vec![func]);
+    let mut checker = TypeChecker::new();
+    assert!(
+        checker.check_module(&module).is_ok(),
+        "let mut x inside if with reassignment should work"
+    );
+}

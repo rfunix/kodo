@@ -21,7 +21,8 @@ use crate::layout::{
 };
 use crate::module::{cranelift_type, is_unit};
 use crate::value::{
-    create_string_data, expand_string_value_with_builtins, infer_value_type, translate_value,
+    create_string_data, expand_string_value_with_builtins, infer_value_type, resolve_enum_addr,
+    translate_value,
 };
 use crate::{CodegenError, Result};
 
@@ -89,6 +90,13 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "http_request_path"
             | "http_request_body"
             | "http_respond"
+            | "db_open"
+            | "db_execute"
+            | "db_query"
+            | "db_row_get_string"
+            | "db_row_get_int"
+            | "db_result_free"
+            | "db_close"
     )
 }
 
@@ -115,6 +123,7 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "http_request_method"
             | "http_request_path"
             | "http_request_body"
+            | "db_row_get_string"
     )
 }
 
@@ -914,6 +923,41 @@ fn translate_call(
                 .ins()
                 .load(types::I64, MemFlags::new(), ptr_val, off);
             var_map.def_var_with_cast(dest, val, builder)?;
+            return Ok(());
+        }
+    }
+
+    // Enum discriminant check methods — inline, no FFI needed.
+    // Layout: [discriminant i64 @ offset 0][payload @ offset 8+].
+    // is_ok/is_some = discriminant == 0; is_err/is_none = discriminant != 0.
+    if matches!(
+        callee,
+        "Result_is_ok" | "Result_is_err" | "Option_is_some" | "Option_is_none"
+    ) {
+        if let Some(arg) = args.first() {
+            let addr = resolve_enum_addr(
+                arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            let disc = builder.ins().load(types::I64, MemFlags::new(), addr, 0);
+            let cmp = match callee {
+                "Result_is_ok" | "Option_is_some" => {
+                    builder
+                        .ins()
+                        .icmp_imm(cranelift_codegen::ir::condcodes::IntCC::Equal, disc, 0)
+                }
+                _ => builder.ins().icmp_imm(
+                    cranelift_codegen::ir::condcodes::IntCC::NotEqual,
+                    disc,
+                    0,
+                ),
+            };
+            var_map.def_var_with_cast(dest, cmp, builder)?;
             return Ok(());
         }
     }

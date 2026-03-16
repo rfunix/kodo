@@ -170,17 +170,17 @@ pub enum TokenKind {
     /// A float literal (e.g., `0.95`, `3.14`).
     #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*", priority = 3, callback = |lex| lex.slice().replace('_', "").parse::<f64>().ok())]
     FloatLit(f64),
-    /// A string literal (double-quoted).
-    #[regex(r#""[^"]*""#, |lex| {
+    /// A string literal (double-quoted), with escape sequence support.
+    #[regex(r#""([^"\\]|\\[\s\S])*""#, |lex| {
         let s = lex.slice();
-        Some(s[1..s.len()-1].to_string())
+        Some(unescape_string(&s[1..s.len()-1]))
     })]
     StringLit(String),
     /// An f-string literal for string interpolation: `f"hello {name}!"`.
     ///
     /// The raw content between the quotes is preserved (including `{expr}` markers).
     /// The parser is responsible for splitting this into literal and expression parts.
-    #[regex(r#"f"[^"]*""#, lex_fstring)]
+    #[regex(r#"f"([^"\\]|\\[\s\S])*""#, lex_fstring)]
     FStringLit(String),
 
     // --- Identifiers ---
@@ -310,16 +310,47 @@ pub enum TokenKind {
     LineComment,
 }
 
+/// Processes escape sequences in a string literal.
+///
+/// Converts `\"`, `\\`, `\n`, `\t`, `\r`, and `\0` to their actual
+/// characters. Unknown escapes (e.g., `\q`) are kept as-is.
+fn unescape_string(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            #[allow(clippy::match_same_arms)]
+            match chars.next() {
+                Some('"') => result.push('"'),
+                Some('\\') => result.push('\\'),
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('r') => result.push('\r'),
+                Some('0') => result.push('\0'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                // Trailing backslash at end of string — keep as-is.
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Lexer callback for f-string literals.
 ///
 /// Extracts the content between `f"` and `"`, preserving `{expr}` markers
-/// for the parser to process. Returns `Option<String>` as required by the
-/// logos callback interface.
+/// for the parser to process. Escape sequences are processed.
+/// Returns `Option<String>` as required by the logos callback interface.
 #[allow(clippy::unnecessary_wraps)]
 fn lex_fstring(lex: &mut logos::Lexer<'_, TokenKind>) -> Option<String> {
     let s = lex.slice();
     // Strip leading `f"` and trailing `"`
-    Some(s[2..s.len() - 1].to_string())
+    Some(unescape_string(&s[2..s.len() - 1]))
 }
 
 /// A token with its kind and source span.
@@ -760,6 +791,64 @@ mod tests {
         assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "value: {x + 1}"));
     }
 
+    // --- WI1: String escape sequence tests ---
+
+    #[test]
+    fn tokenize_string_escaped_quote() {
+        let tokens = tokenize(r#""hello \"world\"""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == r#"hello "world""#));
+    }
+
+    #[test]
+    fn tokenize_string_escaped_newline() {
+        let tokens = tokenize(r#""line1\nline2""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == "line1\nline2"));
+    }
+
+    #[test]
+    fn tokenize_string_escaped_tab() {
+        let tokens = tokenize(r#""col1\tcol2""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == "col1\tcol2"));
+    }
+
+    #[test]
+    fn tokenize_string_escaped_backslash() {
+        let tokens = tokenize(r#""back\\slash""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == "back\\slash"));
+    }
+
+    #[test]
+    fn tokenize_string_only_escaped_quote() {
+        let tokens = tokenize(r#""\"""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == "\""));
+    }
+
+    #[test]
+    fn tokenize_fstring_with_escape() {
+        let tokens = tokenize(r#"f"hi \"{name}\"""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::FStringLit(ref s) if s == "hi \"{name}\""));
+    }
+
+    #[test]
+    fn tokenize_string_no_escape_regression() {
+        let tokens = tokenize(r#""hello world""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s == "hello world"));
+    }
+
+    #[test]
+    fn tokenize_string_empty_still_works() {
+        let tokens = tokenize(r#""""#).unwrap_or_default();
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s.is_empty()));
+    }
+
     mod proptest_fuzz {
         use super::*;
         use proptest::prelude::*;
@@ -834,9 +923,9 @@ mod tests {
                 assert!(matches!(tokens[0].kind, TokenKind::StringLit(ref s) if s.is_empty()));
             }
 
-            /// String literals with arbitrary content (no inner quotes) must tokenize.
+            /// String literals with arbitrary content (no inner quotes or backslashes) must tokenize.
             #[test]
-            fn string_literals_with_content(content in "[^\"]{0,100}") {
+            fn string_literals_with_content(content in "[^\"\\\\]{0,100}") {
                 let source = format!("\"{content}\"");
                 let tokens = tokenize(&source).unwrap();
                 assert_eq!(tokens.len(), 1);

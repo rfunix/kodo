@@ -580,3 +580,332 @@ pub fn handle_confidence_report(
         error: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_SOURCE: &str = "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        return 0\n    }\n}\n";
+
+    const TYPE_ERROR_SOURCE: &str = "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        return true\n    }\n}\n";
+
+    const INVALID_SYNTAX: &str = "this is not valid kodo at all!!!";
+
+    // ── handle_check tests ──────────────────────────────────────────
+
+    #[test]
+    fn check_missing_source_param() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_check(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn check_parse_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": INVALID_SYNTAX});
+        let resp = handle_check(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("status").and_then(|s| s.as_str()),
+            Some("failed")
+        );
+        assert_eq!(result.get("phase").and_then(|s| s.as_str()), Some("parse"));
+    }
+
+    #[test]
+    fn check_type_error_returns_failed_types_phase() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": TYPE_ERROR_SOURCE});
+        let resp = handle_check(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        let status = result.get("status").and_then(|s| s.as_str());
+        assert_eq!(status, Some("failed"));
+        let phase = result.get("phase").and_then(|s| s.as_str());
+        assert_eq!(phase, Some("types"));
+    }
+
+    // ── handle_describe tests ───────────────────────────────────────
+
+    #[test]
+    fn describe_missing_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_describe(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn describe_with_types() {
+        let source = "module shapes {\n    meta { purpose: \"geometry\" }\n    struct Point {\n        x: Int\n        y: Int\n    }\n    fn origin() -> Point {\n        return Point { x: 0, y: 0 }\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_describe(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("module").and_then(|m| m.as_str()),
+            Some("shapes")
+        );
+        let types = result.get("types").and_then(|t| t.as_array()).unwrap();
+        assert!(!types.is_empty(), "should have type declarations");
+        let first_type = &types[0];
+        assert_eq!(
+            first_type.get("name").and_then(|n| n.as_str()),
+            Some("Point")
+        );
+        let fields = first_type.get("fields").and_then(|f| f.as_array()).unwrap();
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn describe_empty_module() {
+        let source = "module empty {\n    meta { purpose: \"nothing\" }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_describe(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("module").and_then(|m| m.as_str()), Some("empty"));
+        let functions = result.get("functions").and_then(|f| f.as_array()).unwrap();
+        assert!(
+            functions.is_empty(),
+            "empty module should have no functions"
+        );
+    }
+
+    #[test]
+    fn describe_with_annotations() {
+        let source = "module annotated {\n    meta { purpose: \"test\" }\n    @confidence(0.85)\n    fn compute() -> Int {\n        return 42\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_describe(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        let functions = result.get("functions").and_then(|f| f.as_array()).unwrap();
+        assert_eq!(functions.len(), 1);
+        let func = &functions[0];
+        let annotations = func.get("annotations").and_then(|a| a.as_array()).unwrap();
+        assert!(
+            !annotations.is_empty(),
+            "should have @confidence annotation"
+        );
+        let ann = &annotations[0];
+        assert_eq!(ann.get("name").and_then(|n| n.as_str()), Some("confidence"));
+    }
+
+    // ── handle_explain tests ────────────────────────────────────────
+
+    #[test]
+    fn explain_lexer_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0001"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Lexer Error")
+        );
+    }
+
+    #[test]
+    fn explain_parser_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0100"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Parser Error")
+        );
+    }
+
+    #[test]
+    fn explain_contract_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0300"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Contract Error")
+        );
+    }
+
+    #[test]
+    fn explain_resolver_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0400"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Resolver Error")
+        );
+    }
+
+    #[test]
+    fn explain_mir_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0500"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("MIR Error")
+        );
+    }
+
+    #[test]
+    fn explain_codegen_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E0600"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Codegen Error")
+        );
+    }
+
+    #[test]
+    fn explain_unknown_code() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"code": "E9999"});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("title").and_then(|t| t.as_str()),
+            Some("Unknown Error Code")
+        );
+    }
+
+    #[test]
+    fn explain_missing_code_param() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_explain(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("code"));
+    }
+
+    // ── handle_build tests ──────────────────────────────────────────
+
+    #[test]
+    fn build_missing_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_build(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn build_type_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": TYPE_ERROR_SOURCE});
+        let resp = handle_build(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("status").and_then(|s| s.as_str()),
+            Some("failed")
+        );
+        assert_eq!(result.get("phase").and_then(|s| s.as_str()), Some("types"));
+    }
+
+    // ── handle_fix tests ────────────────────────────────────────────
+
+    #[test]
+    fn fix_missing_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_fix(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn fix_with_type_mismatch() {
+        let source = "module test {\n    meta { purpose: \"test\" }\n    fn main() -> Int {\n        let x: Int = \"hello\"\n        return x\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_fix(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("status").and_then(|s| s.as_str()),
+            Some("errors_found")
+        );
+        let error_count = result.get("error_count").and_then(|c| c.as_u64()).unwrap();
+        assert!(error_count > 0, "should have at least one error");
+    }
+
+    // ── handle_confidence_report tests ──────────────────────────────
+
+    #[test]
+    fn confidence_report_missing_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_confidence_report(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn confidence_report_with_annotations() {
+        let source = "module annotated {\n    meta { purpose: \"test\" }\n    @confidence(0.85)\n    fn compute() -> Int {\n        return 42\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_confidence_report(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("status").and_then(|s| s.as_str()), Some("ok"));
+        let functions = result.get("functions").and_then(|f| f.as_array()).unwrap();
+        assert_eq!(functions.len(), 1);
+        let func = &functions[0];
+        assert_eq!(func.get("name").and_then(|n| n.as_str()), Some("compute"));
+    }
+
+    #[test]
+    fn confidence_report_valid_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": VALID_SOURCE});
+        let resp = handle_confidence_report(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("status").and_then(|s| s.as_str()), Some("ok"));
+        assert!(result.get("functions").is_some());
+        assert!(result.get("overall_confidence").is_some());
+        let overall = result
+            .get("overall_confidence")
+            .and_then(|c| c.as_f64())
+            .unwrap();
+        assert!(overall > 0.0, "overall confidence should be positive");
+        assert!(overall <= 1.0, "overall confidence should be at most 1.0");
+    }
+}

@@ -784,6 +784,69 @@ pub unsafe extern "C" fn kodo_json_set_bool(
     }
 }
 
+/// Sets a float field on a JSON object.
+///
+/// NaN and Infinity values cannot be represented in JSON, so they are
+/// silently ignored (the field is not inserted).
+///
+/// # Safety
+///
+/// `handle` must be a valid handle. `key_ptr`/`key_len` must point to valid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_set_float(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+    float_value: f64,
+) {
+    if handle == 0 || key_ptr.is_null() {
+        return;
+    }
+    // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
+    let value = unsafe { &mut *(handle as *mut serde_json::Value) };
+    // SAFETY: caller guarantees valid UTF-8 slice.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    if let serde_json::Value::Object(map) = value {
+        // serde_json::Number::from_f64 returns None for NaN/Infinity.
+        if let Some(num) = serde_json::Number::from_f64(float_value) {
+            map.insert(key.to_string(), serde_json::Value::Number(num));
+        }
+    }
+}
+
+/// Gets a nested JSON object by key, returning a new handle to a clone of it.
+///
+/// Returns 0 if the key is not found or the value is not an object.
+///
+/// # Safety
+///
+/// `handle` must be a valid handle returned by `kodo_json_parse`.
+/// `key_ptr` must point to `key_len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_json_get_object(
+    handle: i64,
+    key_ptr: *const u8,
+    key_len: usize,
+) -> i64 {
+    if handle == 0 || key_ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: handle was returned by kodo_json_parse.
+    let value = unsafe { &*(handle as *const serde_json::Value) };
+    // SAFETY: key_ptr/key_len describe a valid UTF-8 string.
+    let key =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
+    match value.get(key) {
+        Some(v @ serde_json::Value::Object(_)) => {
+            let cloned = Box::new(v.clone());
+            // SAFETY: intentionally leaks so caller manages via opaque handle.
+            Box::into_raw(cloned) as i64
+        }
+        _ => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,6 +907,59 @@ mod tests {
         let key = "count";
         let value = unsafe { kodo_json_get_int(handle, key.as_ptr(), key.len()) };
         assert_eq!(value, 42);
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn json_set_float_works() {
+        let handle = kodo_json_new_object();
+        let key = "price";
+        unsafe { kodo_json_set_float(handle, key.as_ptr(), key.len(), 3.14) };
+        // Stringify and verify
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe { kodo_json_stringify(handle, &mut p, &mut l) };
+        let s = unsafe { String::from_raw_parts(p, l, l) };
+        assert!(s.contains("3.14"));
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn json_set_float_nan() {
+        let handle = kodo_json_new_object();
+        let key = "bad";
+        unsafe { kodo_json_set_float(handle, key.as_ptr(), key.len(), f64::NAN) };
+        // NaN should not be inserted, so object should be empty.
+        let mut p: *mut u8 = std::ptr::null_mut();
+        let mut l: usize = 0;
+        unsafe { kodo_json_stringify(handle, &mut p, &mut l) };
+        let s = unsafe { String::from_raw_parts(p, l, l) };
+        assert_eq!(s, "{}");
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn json_get_object_works() {
+        let json = r#"{"a": {"b": 1}}"#;
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        assert_ne!(handle, 0);
+        let key_a = "a";
+        let nested = unsafe { kodo_json_get_object(handle, key_a.as_ptr(), key_a.len()) };
+        assert_ne!(nested, 0);
+        let key_b = "b";
+        let val = unsafe { kodo_json_get_int(nested, key_b.as_ptr(), key_b.len()) };
+        assert_eq!(val, 1);
+        unsafe { kodo_json_free(nested) };
+        unsafe { kodo_json_free(handle) };
+    }
+
+    #[test]
+    fn json_get_object_missing_key() {
+        let json = r#"{"a": 1}"#;
+        let handle = unsafe { kodo_json_parse(json.as_ptr(), json.len()) };
+        let key = "missing";
+        let result = unsafe { kodo_json_get_object(handle, key.as_ptr(), key.len()) };
+        assert_eq!(result, 0);
         unsafe { kodo_json_free(handle) };
     }
 

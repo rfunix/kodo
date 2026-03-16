@@ -1,0 +1,166 @@
+// REST API CRUD for user management with SQLite persistence.
+//
+// Demonstrates ALL agent-first features of Kodo:
+//   - meta: self-describing module
+//   - @authored_by / @confidence: agent traceability
+//   - requires/ensures: contracts
+//   - Result<T, E>: structured error handling
+//   - JSON builder: structured responses
+//   - SQLite: real persistence
+//
+// Run with: kodoc build examples/crud_api.ko -o crud_api && ./crud_api
+// Test:
+//   curl -X POST http://localhost:8080/users -d '{"name":"Alice","email":"alice@kodo.dev"}'
+//   curl http://localhost:8080/users
+//   curl http://localhost:8080/health
+
+module crud_api {
+    meta {
+        purpose: "REST API CRUD for user management with SQLite persistence"
+        version: "1.0.0"
+        author: "kodo-agent"
+        license: "MIT"
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn init_db(db: Int) -> Int
+        requires { db > 0 }
+    {
+        let result: Int = db_execute(db,
+            "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL)")
+        if result != 0 {
+            println("failed to create table")
+            return 1
+        }
+        return 0
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn make_error(message: String) -> String {
+        let obj: Int = json_new_object()
+        json_set_string(obj, "error", message)
+        let out: String = json_stringify(obj)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn create_user(db: Int, body: String) -> String
+        requires { db > 0 }
+    {
+        let parsed: Int = json_parse(body)
+        if parsed == 0 {
+            return make_error("invalid JSON")
+        }
+        let name: String = json_get_string(parsed, "name")
+        let email: String = json_get_string(parsed, "email")
+        json_free(parsed)
+
+        let sql: String = f"INSERT INTO users (name, email) VALUES ('{name}', '{email}')"
+        let result: Int = db_execute(db, sql)
+        if result != 0 {
+            return make_error("insert failed")
+        }
+
+        let resp: Int = json_new_object()
+        json_set_string(resp, "status", "created")
+        json_set_string(resp, "name", name)
+        json_set_string(resp, "email", email)
+        let out: String = json_stringify(resp)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn list_users(db: Int) -> String
+        requires { db > 0 }
+    {
+        let rows: Int = db_query(db, "SELECT id, name, email FROM users ORDER BY id")
+        let mut count: Int = 0
+
+        let mut has: Int = 0
+        if rows != 0 {
+            has = db_row_next(rows)
+        }
+        while has == 1 {
+            let id: Int = db_row_get_int(rows, 0)
+            let name: String = db_row_get_string(rows, 1)
+            let email: String = db_row_get_string(rows, 2)
+            println(f"  user {id}: {name} <{email}>")
+            count = count + 1
+            db_row_advance(rows)
+            has = db_row_next(rows)
+        }
+        if rows != 0 {
+            db_result_free(rows)
+        }
+
+        let resp: Int = json_new_object()
+        json_set_int(resp, "count", count)
+        let out: String = json_stringify(resp)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    fn handle_health() -> String {
+        let resp: Int = json_new_object()
+        json_set_string(resp, "status", "ok")
+        json_set_string(resp, "service", "crud_api")
+        let out: String = json_stringify(resp)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn route(db: Int, method: String, path: String, body: String) -> String
+        requires { db > 0 }
+    {
+        if method == "GET" && path == "/health" {
+            return handle_health()
+        }
+        if method == "POST" && path == "/users" {
+            return create_user(db, body)
+        }
+        if method == "GET" && path == "/users" {
+            return list_users(db)
+        }
+        return make_error("not found")
+    }
+
+    fn main() -> Int {
+        let db: Int = db_open(":memory:")
+        if db == 0 {
+            println("failed to open database")
+            return 1
+        }
+        let init: Int = init_db(db)
+        if init != 0 {
+            db_close(db)
+            return 1
+        }
+
+        let server: Int = http_server_new(8080)
+        if server == 0 {
+            println("failed to start server")
+            db_close(db)
+            return 1
+        }
+        println("CRUD API listening on port 8080")
+
+        while true {
+            let req: Int = http_server_recv(server)
+            let method: String = http_request_method(req)
+            let path: String = http_request_path(req)
+            let body: String = http_request_body(req)
+            let resp: String = route(db, method, path, body)
+            http_respond(req, 200, resp)
+        }
+
+        db_close(db)
+        http_server_free(server)
+        return 0
+    }
+}

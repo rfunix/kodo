@@ -225,6 +225,80 @@ pub unsafe extern "C" fn kodo_string_replace(
     }
 }
 
+/// Returns the character (Unicode codepoint as i64) at the given character index.
+///
+/// Index is character-based (iterates UTF-8 codepoints, not bytes).
+/// Returns -1 if `index` is out of bounds or negative.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_char_at(ptr: *const u8, len: usize, index: i64) -> i64 {
+    if index < 0 {
+        return -1;
+    }
+    // SAFETY: Caller guarantees ptr/len form a valid UTF-8 byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let Ok(s) = std::str::from_utf8(bytes) else {
+        return -1;
+    };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let target = index as usize;
+    match s.chars().nth(target) {
+        Some(c) => i64::from(c as u32),
+        None => -1,
+    }
+}
+
+/// Repeats a string `count` times, writing the result via out-parameters.
+///
+/// If `count` is zero or negative, returns an empty string.
+/// The caller is responsible for eventually freeing the allocated memory.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_repeat(
+    ptr: *const u8,
+    len: usize,
+    count: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    if count <= 0 {
+        let empty: Box<[u8]> = Vec::new().into_boxed_slice();
+        let result_len = 0;
+        // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
+        let result_ptr = Box::into_raw(empty) as *const u8;
+        // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe {
+            *out_ptr = result_ptr;
+            *out_len = result_len;
+        }
+        return;
+    }
+    // SAFETY: Caller guarantees ptr/len form a valid byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let n = count as usize;
+    let mut result = Vec::with_capacity(len * n);
+    for _ in 0..n {
+        result.extend_from_slice(bytes);
+    }
+    let boxed = result.into_boxed_slice();
+    let result_len = boxed.len();
+    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
+    let result_ptr = Box::into_raw(boxed) as *const u8;
+    // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        *out_ptr = result_ptr;
+        *out_len = result_len;
+    }
+}
+
 /// Byte-level substring search.
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() {
@@ -1186,6 +1260,53 @@ mod tests {
         let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
         // Empty string yields one empty line.
         assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+    }
+
+    #[test]
+    fn string_char_at_ascii() {
+        let s = "hello";
+        let result = unsafe { kodo_string_char_at(s.as_ptr(), s.len(), 1) };
+        assert_eq!(result, 101); // 'e'
+    }
+
+    #[test]
+    fn string_char_at_unicode() {
+        let s = "a\u{00E9}\u{4E16}"; // "aé世"
+        let result = unsafe { kodo_string_char_at(s.as_ptr(), s.len(), 1) };
+        assert_eq!(result, 0xE9); // 'é'
+    }
+
+    #[test]
+    fn string_char_at_out_of_bounds() {
+        let s = "hello";
+        let result = unsafe { kodo_string_char_at(s.as_ptr(), s.len(), 100) };
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn string_char_at_negative() {
+        let s = "hello";
+        let result = unsafe { kodo_string_char_at(s.as_ptr(), s.len(), -1) };
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn string_repeat_basic() {
+        let s = "ab";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_string_repeat(s.as_ptr(), s.len(), 3, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "ababab");
+    }
+
+    #[test]
+    fn string_repeat_zero() {
+        let s = "ab";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_string_repeat(s.as_ptr(), s.len(), 0, &mut out_ptr, &mut out_len) };
+        assert_eq!(out_len, 0);
     }
 
     #[test]

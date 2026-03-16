@@ -114,7 +114,7 @@ impl TypeChecker {
     }
 
     /// Checks a `let` statement: resolves type annotation, infers initializer, tracks ownership.
-    fn check_let_stmt(
+    pub(crate) fn check_let_stmt(
         &mut self,
         span: kodo_ast::Span,
         name: &str,
@@ -152,7 +152,7 @@ impl TypeChecker {
     }
 
     /// Checks a `let` statement with a destructuring pattern (e.g., `let (a, b) = expr`).
-    fn check_let_pattern_stmt(
+    pub(crate) fn check_let_pattern_stmt(
         &mut self,
         _span: kodo_ast::Span,
         pattern: &kodo_ast::Pattern,

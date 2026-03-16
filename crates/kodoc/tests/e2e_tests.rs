@@ -1709,3 +1709,86 @@ e2e_example_test!(run: e2e_intent_cli, "intent_cli.ko", contains: ["mytool v1.0.
 e2e_example_test!(compile: e2e_intent_http_server, "intent_http_server.ko");
 e2e_example_test!(run: e2e_intent_worker, "intent_worker.ko", contains: ["Worker starting", "Worker completed"]);
 e2e_example_test!(compile: e2e_intent_file_processor, "intent_file_processor.ko");
+
+// --- Sprint 9: Bug fixes ---
+
+#[test]
+fn e2e_string_escape_sequences() {
+    let source = r#"
+module string_escape_test {
+    meta { purpose: "test string escapes" }
+    fn main() {
+        let a: String = "hello \"world\""
+        println(a)
+        let b: String = "line1\nline2"
+        println(b)
+        let c: String = "col1\tcol2"
+        println(c)
+        let d: String = "back\\slash"
+        println(d)
+    }
+}
+"#;
+    let binary = compile_source(source, "e2e_string_escape");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "string escape should exit 0");
+    assert!(
+        stdout.contains("hello \"world\""),
+        "should contain escaped quotes, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("back\\slash"),
+        "should contain escaped backslash, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_let_inside_if_block() {
+    let source = r#"
+module if_scope_test {
+    meta { purpose: "test let inside if block" }
+    fn main() {
+        let flag: Bool = true
+        if flag {
+            let x: Int = 42
+            let y: Int = x
+            println(f"y={y}")
+        }
+    }
+}
+"#;
+    let binary = compile_source(source, "e2e_let_if_block");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "let inside if block should work");
+    assert!(stdout.contains("y=42"), "y should be 42, got: {stdout}");
+}
+
+#[test]
+fn e2e_result_is_ok_no_segfault() {
+    let source = r#"
+module result_test {
+    meta { purpose: "test Result is_ok/is_err without segfault" }
+    fn main() {
+        let result: Result<String, String> = file_read("Cargo.toml")
+        if result.is_ok() {
+            println("ok")
+        }
+        let result2: Result<String, String> = file_read("nonexistent_file_xyz")
+        if result2.is_err() {
+            println("err")
+        }
+    }
+}
+"#;
+    let binary = compile_source(source, "e2e_result_is_ok");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "Result is_ok/is_err should not segfault");
+    assert!(
+        stdout.contains("ok"),
+        "file_read(Cargo.toml).is_ok() should be true, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("err"),
+        "file_read(nonexistent).is_err() should be true, got: {stdout}"
+    );
+}

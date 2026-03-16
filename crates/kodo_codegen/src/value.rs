@@ -321,7 +321,7 @@ pub(crate) fn translate_value(
 }
 
 /// Resolves the base address for an enum value (discriminant or payload extraction).
-fn resolve_enum_addr(
+pub(crate) fn resolve_enum_addr(
     inner: &Value,
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,

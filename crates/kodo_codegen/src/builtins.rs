@@ -75,6 +75,7 @@ pub(crate) fn declare_builtins(
     declare_json_builder_builtins(module, call_conv, &mut builtins)?;
     declare_math_extended_builtins(module, call_conv, &mut builtins)?;
     declare_http_server_builtins(module, call_conv, &mut builtins)?;
+    declare_db_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -262,6 +263,13 @@ fn declare_string_query_builtins(
         [types::I64, types::I64],
         types::I64
     );
+    // string_char_at: (ptr, len, index) -> i64
+    decl_ret!(
+        "kodo_string_char_at",
+        "String_char_at",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
     Ok(())
 }
 
@@ -329,6 +337,16 @@ fn declare_string_transform_builtins(
         types::I64,
         types::I64,
         types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // string_repeat: (ptr, len, count, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_string_repeat",
+        "String_repeat",
         types::I64,
         types::I64,
         types::I64,
@@ -748,6 +766,13 @@ fn declare_network_builtins(
     decl_ret!(
         "kodo_json_get_array",
         "json_get_array",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // json_get_object: (handle, key_ptr, key_len) -> i64
+    decl_ret!(
+        "kodo_json_get_object",
+        "json_get_object",
         [types::I64, types::I64, types::I64],
         types::I64
     );
@@ -1260,6 +1285,15 @@ fn declare_json_builder_builtins(
         types::I64,
         types::I64
     );
+    // json_set_float(handle, key_ptr, key_len, float_value) -> void
+    decl_void!(
+        "kodo_json_set_float",
+        "json_set_float",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::F64
+    );
     Ok(())
 }
 
@@ -1291,6 +1325,80 @@ fn declare_math_extended_builtins(
         [types::I64, types::I64],
         types::I64
     );
+    Ok(())
+}
+
+/// Declares `SQLite` database builtins (open, execute, query, row access, close).
+fn declare_db_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // db_open: (path_ptr, path_len) -> i64
+    decl_ret!(
+        "kodo_db_open",
+        "db_open",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // db_execute: (db, sql_ptr, sql_len) -> i64
+    decl_ret!(
+        "kodo_db_execute",
+        "db_execute",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // db_query: (db, sql_ptr, sql_len) -> i64
+    decl_ret!(
+        "kodo_db_query",
+        "db_query",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // db_row_next: (result) -> i64
+    decl_ret!("kodo_db_row_next", "db_row_next", [types::I64], types::I64);
+    // db_row_get_string: (result, col, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_db_row_get_string",
+        "db_row_get_string",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // db_row_get_int: (result, col) -> i64
+    decl_ret!(
+        "kodo_db_row_get_int",
+        "db_row_get_int",
+        [types::I64, types::I64],
+        types::I64
+    );
+    // db_row_advance: (result) -> i64
+    decl_ret!(
+        "kodo_db_row_advance",
+        "db_row_advance",
+        [types::I64],
+        types::I64
+    );
+    // db_result_free: (result) -> void
+    decl_void!("kodo_db_result_free", "db_result_free", types::I64);
+    // db_close: (db) -> void
+    decl_void!("kodo_db_close", "db_close", types::I64);
     Ok(())
 }
 

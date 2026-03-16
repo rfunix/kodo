@@ -615,6 +615,46 @@ fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
     fn_return_types
         .entry("file_exists".to_string())
         .or_insert(Type::Bool);
+
+    // SQLite database builtins.
+    for name in &[
+        "db_open",
+        "db_execute",
+        "db_query",
+        "db_row_next",
+        "db_row_get_int",
+        "db_row_advance",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+    fn_return_types
+        .entry("db_row_get_string".to_string())
+        .or_insert(Type::String);
+
+    // IO builtins that return Result<T, E> (enum types).
+    fn_return_types
+        .entry("file_read".to_string())
+        .or_insert(Type::Enum("Result__String_String".to_string()));
+    fn_return_types
+        .entry("file_write".to_string())
+        .or_insert(Type::Enum("Result__Unit_String".to_string()));
+    fn_return_types
+        .entry("file_append".to_string())
+        .or_insert(Type::Enum("Result__Unit_String".to_string()));
+
+    // Result/Option discriminant checks return Bool (but they are inlined in codegen).
+    for name in &[
+        "Result_is_ok",
+        "Result_is_err",
+        "Option_is_some",
+        "Option_is_none",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Bool);
+    }
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`],

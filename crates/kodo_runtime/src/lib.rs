@@ -13,6 +13,7 @@
 //! - [`math_ops`] — Numeric builtins (abs, min, max, clamp)
 //! - [`io_ops`] — File I/O, time, environment, JSON
 //! - [`collections`] — List and Map builtins, actor runtime
+//! - [`db`] — `SQLite` database builtins
 //! - [`scheduler`] — Cooperative scheduler, channels, async runtime
 //! - [`memory`] — Reference-counted allocator
 //! - [`http`] — HTTP client builtins
@@ -24,6 +25,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod collections;
+pub mod db;
 mod helpers;
 pub mod http;
 pub mod io_ops;
