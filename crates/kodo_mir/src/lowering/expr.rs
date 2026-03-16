@@ -244,6 +244,10 @@ impl MirBuilder {
         for arg in args {
             arg_values.push(self.lower_expr(arg)?);
         }
+
+        // Monomorphize map builtins: rename callee based on the map arg's type params.
+        let callee_name = self.monomorphize_map_callee(callee_name, &arg_values);
+
         // Resolve generic function calls: if callee_name is not in
         // fn_return_types, try to find a monomorphized version.
         let resolved_callee = if self.fn_return_types.contains_key(&callee_name) {
@@ -303,6 +307,55 @@ impl MirBuilder {
             args: arg_values,
         });
         Ok(Value::Local(dest))
+    }
+
+    /// Determines the monomorphized suffix for a map builtin based on the map's
+    /// type parameters (`_sk` for String key, `_sv` for String value, `_ss` for both).
+    ///
+    /// Returns the original callee name unchanged if the map uses `Int` keys and values
+    /// or if the callee is not a map builtin.
+    fn monomorphize_map_callee(&self, callee_name: String, arg_values: &[Value]) -> String {
+        let is_map_fn = matches!(
+            callee_name.as_str(),
+            "map_insert"
+                | "map_get"
+                | "map_contains_key"
+                | "map_remove"
+                | "map_length"
+                | "map_is_empty"
+                | "map_free"
+        );
+        if !is_map_fn || arg_values.is_empty() {
+            return callee_name;
+        }
+        // Get the type of the first argument (the map handle).
+        let map_local = match &arg_values[0] {
+            Value::Local(id) => *id,
+            _ => return callee_name,
+        };
+        let Some(map_ty) = self.local_types.get(&map_local) else {
+            return callee_name;
+        };
+        let suffix = match map_ty {
+            Type::Generic(name, params) if name == "Map" && params.len() == 2 => {
+                match (&params[0], &params[1]) {
+                    (Type::String, Type::String) => "_ss",
+                    (Type::String, _) => "_sk",
+                    (_, Type::String) => "_sv",
+                    _ => return callee_name,
+                }
+            }
+            _ => return callee_name,
+        };
+        // map_length and map_is_empty are type-agnostic (no suffix needed).
+        if callee_name == "map_length" || callee_name == "map_is_empty" {
+            return callee_name;
+        }
+        // contains_key and remove for _ss reuse the _sk variants (same key handling).
+        if suffix == "_ss" && (callee_name == "map_contains_key" || callee_name == "map_remove") {
+            return format!("{callee_name}_sk");
+        }
+        format!("{callee_name}{suffix}")
     }
 
     /// Lowers an indirect call through a function pointer local.

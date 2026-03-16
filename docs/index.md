@@ -84,6 +84,9 @@ The [`examples/`](../examples/) directory contains compilable programs demonstra
 | [`move_semantics.ko`](../examples/move_semantics.ko) | Move semantics, Copy vs non-Copy types |
 | [`list_demo.ko`](../examples/list_demo.ko) | `List<T>` built-in collection |
 | [`map_demo.ko`](../examples/map_demo.ko) | `Map<K,V>` built-in collection |
+| [`map_string_string.ko`](../examples/map_string_string.ko) | `Map<String, String>` — generic map with String keys and values |
+| [`map_string_int.ko`](../examples/map_string_int.ko) | `Map<String, Int>` — generic map with String keys |
+| [`map_int_string.ko`](../examples/map_int_string.ko) | `Map<Int, String>` — generic map with String values |
 | [`string_demo.ko`](../examples/string_demo.ko) | String methods including `split` |
 | [`file_io_demo.ko`](../examples/file_io_demo.ko) | File I/O operations |
 | [`contracts_smt_demo.ko`](../examples/contracts_smt_demo.ko) | SMT-verified contracts |

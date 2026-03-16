@@ -1,0 +1,32 @@
+module map_int_string {
+    meta {
+        description: "Demonstrates Map<Int, String> operations"
+        purpose: "Example of generic Map with Int keys and String values"
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let names: Map<Int, String> = map_new()
+
+        map_insert(names, 1, "one")
+        map_insert(names, 2, "two")
+        map_insert(names, 3, "three")
+
+        let first: String = map_get(names, 1)
+        println(f"1 = {first}")
+
+        let second: String = map_get(names, 2)
+        println(f"2 = {second}")
+
+        let third: String = map_get(names, 3)
+        println(f"3 = {third}")
+
+        let len: Int = map_length(names)
+        println(f"Map size: {len}")
+
+        // Overwrite
+        map_insert(names, 1, "uno")
+        let updated: String = map_get(names, 1)
+        println(f"1 updated = {updated}")
+    }
+}

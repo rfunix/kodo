@@ -1,0 +1,54 @@
+module map_string_string {
+    meta {
+        description: "Demonstrates Map<String, String> operations"
+        purpose: "Example of generic Map with String keys and values"
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let m: Map<String, String> = map_new()
+
+        // Insert key-value pairs
+        map_insert(m, "name", "Kodo")
+        map_insert(m, "lang", "Rust")
+        map_insert(m, "type", "compiler")
+
+        // Length
+        let len: Int = map_length(m)
+        println(f"Map has {len} entries")
+
+        // Get values
+        let name: String = map_get(m, "name")
+        println(f"name = {name}")
+
+        let lang: String = map_get(m, "lang")
+        println(f"lang = {lang}")
+
+        // Contains key
+        let has_name: Bool = map_contains_key(m, "name")
+        if has_name {
+            println("Has key 'name': true")
+        }
+
+        let has_missing: Bool = map_contains_key(m, "missing")
+        if has_missing {
+            println("ERROR: should not have 'missing'")
+        } else {
+            println("Has key 'missing': false")
+        }
+
+        // Overwrite
+        map_insert(m, "lang", "Kodo")
+        let updated: String = map_get(m, "lang")
+        println(f"updated lang = {updated}")
+
+        // Remove
+        let removed: Bool = m.remove("type")
+        if removed {
+            println("Removed 'type': true")
+        }
+
+        let final_len: Int = map_length(m)
+        println(f"Final length: {final_len}")
+    }
+}

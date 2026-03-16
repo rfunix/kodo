@@ -124,7 +124,9 @@ impl TypeChecker {
         let value_ty = self.infer_expr(value)?;
         if let Some(annotation) = ty {
             let expected = self.resolve_type_mono(annotation, span)?;
-            if !Self::compatible_enum_types(&expected, &value_ty) {
+            if !Self::compatible_enum_types(&expected, &value_ty)
+                && !Self::compatible_map_annotation(&expected, &value_ty)
+            {
                 TypeEnv::check_eq(&expected, &value_ty, span)?;
             }
             self.env.insert(name.to_string(), expected);

@@ -307,7 +307,7 @@ kodoc repl
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 104 compilable programs:
+The [`examples/`](examples/) directory contains 107 compilable programs:
 
 ### Core Language
 
@@ -401,6 +401,9 @@ The [`examples/`](examples/) directory contains 104 compilable programs:
 |------|---------------------|
 | [`list_demo.ko`](examples/list_demo.ko) | `List<T>` — `list_new`, `list_push`, `list_get`, `list_length`, `list_contains` |
 | [`map_demo.ko`](examples/map_demo.ko) | `Map<K,V>` — `map_new`, `map_insert`, `map_get`, `map_contains_key`, `map_length` |
+| [`map_string_string.ko`](examples/map_string_string.ko) | `Map<String, String>` — generic map with String keys and values |
+| [`map_string_int.ko`](examples/map_string_int.ko) | `Map<String, Int>` — generic map with String keys |
+| [`map_int_string.ko`](examples/map_int_string.ko) | `Map<Int, String>` — generic map with String values |
 | [`string_demo.ko`](examples/string_demo.ko) | String methods including `split`, `trim`, `to_upper`, `substring` |
 | [`for_in.ko`](examples/for_in.ko) | For-in loops over `List<T>` collections |
 | [`file_io_demo.ko`](examples/file_io_demo.ko) | File I/O: `file_exists`, `file_read`, `file_write` |

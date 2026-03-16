@@ -1,0 +1,34 @@
+module map_string_int {
+    meta {
+        description: "Demonstrates Map<String, Int> operations"
+        purpose: "Example of generic Map with String keys and Int values"
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let scores: Map<String, Int> = map_new()
+
+        map_insert(scores, "alice", 95)
+        map_insert(scores, "bob", 87)
+        map_insert(scores, "carol", 92)
+
+        let alice_score: Int = map_get(scores, "alice")
+        println(f"Alice: {alice_score}")
+
+        let bob_score: Int = map_get(scores, "bob")
+        println(f"Bob: {bob_score}")
+
+        let has_carol: Bool = map_contains_key(scores, "carol")
+        if has_carol {
+            println("Carol is in the map")
+        }
+
+        let len: Int = map_length(scores)
+        println(f"Total students: {len}")
+
+        // Update score
+        map_insert(scores, "bob", 91)
+        let updated: Int = map_get(scores, "bob")
+        println(f"Bob updated: {updated}")
+    }
+}

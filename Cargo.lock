@@ -1378,6 +1378,7 @@ dependencies = [
  "insta",
  "kodo_ast",
  "kodo_parser",
+ "proptest",
  "strsim",
  "thiserror",
 ]

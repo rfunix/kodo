@@ -2943,4 +2943,1153 @@ mod tests {
         let resolved = result.unwrap_or_else(|e| panic!("unexpected: {e}"));
         assert!(resolved.description.contains("/v1/status"));
     }
+
+    // ===== Diagnostic trait implementation tests =====
+
+    #[test]
+    fn diagnostic_severity_is_always_error() {
+        use kodo_ast::Diagnostic;
+
+        let errors: Vec<ResolverError> = vec![
+            ResolverError::NoResolver {
+                intent: "x".to_string(),
+                span: Span::new(0, 1),
+            },
+            ResolverError::ContractViolation {
+                intent: "x".to_string(),
+                reason: "y".to_string(),
+            },
+            ResolverError::UnknownConfig {
+                key: "k".to_string(),
+                intent: "x".to_string(),
+                span: Span::new(0, 1),
+            },
+            ResolverError::ConfigTypeMismatch {
+                key: "k".to_string(),
+                intent: "x".to_string(),
+                expected: "string".to_string(),
+                found: "int".to_string(),
+                span: Span::new(0, 1),
+            },
+        ];
+
+        for err in &errors {
+            assert_eq!(err.severity(), kodo_ast::Severity::Error);
+        }
+    }
+
+    #[test]
+    fn diagnostic_span_returns_some_for_located_errors() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::NoResolver {
+            intent: "x".to_string(),
+            span: Span::new(5, 10),
+        };
+        assert_eq!(err.span(), Some(Span::new(5, 10)));
+
+        let err = ResolverError::UnknownConfig {
+            key: "k".to_string(),
+            intent: "x".to_string(),
+            span: Span::new(3, 7),
+        };
+        assert_eq!(err.span(), Some(Span::new(3, 7)));
+
+        let err = ResolverError::ConfigTypeMismatch {
+            key: "k".to_string(),
+            intent: "x".to_string(),
+            expected: "s".to_string(),
+            found: "i".to_string(),
+            span: Span::new(1, 2),
+        };
+        assert_eq!(err.span(), Some(Span::new(1, 2)));
+    }
+
+    #[test]
+    fn diagnostic_span_returns_none_for_contract_violation() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::ContractViolation {
+            intent: "x".to_string(),
+            reason: "y".to_string(),
+        };
+        assert_eq!(err.span(), None);
+    }
+
+    #[test]
+    fn diagnostic_message_matches_display() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::NoResolver {
+            intent: "foo".to_string(),
+            span: Span::new(0, 3),
+        };
+        assert_eq!(err.message(), err.to_string());
+    }
+
+    #[test]
+    fn diagnostic_suggestion_for_no_resolver_lists_intents() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::NoResolver {
+            intent: "unknown".to_string(),
+            span: Span::new(0, 7),
+        };
+        let suggestion = err.suggestion().expect("should have a suggestion");
+        assert!(suggestion.contains("console_app"));
+        assert!(suggestion.contains("math_module"));
+        assert!(suggestion.contains("cli"));
+        assert!(suggestion.contains("http_server"));
+        assert!(suggestion.contains("worker"));
+        assert!(suggestion.contains("file_processor"));
+    }
+
+    #[test]
+    fn diagnostic_suggestion_for_unknown_config_shows_valid_keys() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::UnknownConfig {
+            key: "bad_key".to_string(),
+            intent: "console_app".to_string(),
+            span: Span::new(0, 7),
+        };
+        let suggestion = err.suggestion().expect("should have a suggestion");
+        assert!(suggestion.contains("greeting"));
+        assert!(suggestion.contains("entry_point"));
+    }
+
+    #[test]
+    fn diagnostic_suggestion_none_for_unknown_intent_config() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::UnknownConfig {
+            key: "bad_key".to_string(),
+            intent: "totally_unknown_intent".to_string(),
+            span: Span::new(0, 7),
+        };
+        assert!(err.suggestion().is_none());
+    }
+
+    #[test]
+    fn diagnostic_suggestion_none_for_contract_violation() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::ContractViolation {
+            intent: "x".to_string(),
+            reason: "y".to_string(),
+        };
+        assert!(err.suggestion().is_none());
+    }
+
+    #[test]
+    fn diagnostic_suggestion_none_for_config_type_mismatch() {
+        use kodo_ast::Diagnostic;
+
+        let err = ResolverError::ConfigTypeMismatch {
+            key: "k".to_string(),
+            intent: "x".to_string(),
+            expected: "string".to_string(),
+            found: "int".to_string(),
+            span: Span::new(0, 1),
+        };
+        assert!(err.suggestion().is_none());
+    }
+
+    // ===== valid_config_keys helper tests =====
+
+    #[test]
+    fn valid_config_keys_returns_correct_keys_for_each_intent() {
+        assert_eq!(
+            valid_config_keys("console_app"),
+            vec!["greeting", "entry_point"]
+        );
+        assert_eq!(valid_config_keys("math_module"), vec!["functions"]);
+        assert_eq!(valid_config_keys("serve_http"), vec!["port", "routes"]);
+        assert_eq!(
+            valid_config_keys("database"),
+            vec!["driver", "tables", "queries"]
+        );
+        assert_eq!(
+            valid_config_keys("json_api"),
+            vec!["routes", "models", "port", "base_path", "endpoints"]
+        );
+        assert_eq!(valid_config_keys("cache"), vec!["strategy", "max_size"]);
+        assert_eq!(valid_config_keys("queue"), vec!["backend", "topics"]);
+        assert_eq!(
+            valid_config_keys("cli"),
+            vec!["name", "version", "commands"]
+        );
+        assert_eq!(
+            valid_config_keys("http_server"),
+            vec!["port", "routes", "not_found"]
+        );
+        assert_eq!(
+            valid_config_keys("file_processor"),
+            vec!["input", "output", "transform"]
+        );
+        assert_eq!(
+            valid_config_keys("worker"),
+            vec!["task", "max_iterations", "on_error"]
+        );
+    }
+
+    #[test]
+    fn valid_config_keys_returns_empty_for_unknown_intent() {
+        assert!(valid_config_keys("nonexistent").is_empty());
+        assert!(valid_config_keys("").is_empty());
+    }
+
+    // ===== Config helper function tests =====
+
+    #[test]
+    fn get_string_config_finds_string_value() {
+        let intent = make_intent("test", vec![string_entry("key1", "value1")]);
+        assert_eq!(get_string_config(&intent, "key1"), Some("value1"));
+    }
+
+    #[test]
+    fn get_string_config_returns_none_for_missing_key() {
+        let intent = make_intent("test", vec![string_entry("key1", "value1")]);
+        assert_eq!(get_string_config(&intent, "missing"), None);
+    }
+
+    #[test]
+    fn get_string_config_returns_none_for_non_string_value() {
+        let intent = make_intent("test", vec![int_entry("count", 42)]);
+        assert_eq!(get_string_config(&intent, "count"), None);
+    }
+
+    #[test]
+    fn get_int_config_finds_int_value() {
+        let intent = make_intent("test", vec![int_entry("count", 42)]);
+        assert_eq!(get_int_config(&intent, "count"), Some(42));
+    }
+
+    #[test]
+    fn get_int_config_returns_none_for_missing_key() {
+        let intent = make_intent("test", vec![int_entry("count", 42)]);
+        assert_eq!(get_int_config(&intent, "missing"), None);
+    }
+
+    #[test]
+    fn get_int_config_returns_none_for_non_int_value() {
+        let intent = make_intent("test", vec![string_entry("name", "hello")]);
+        assert_eq!(get_int_config(&intent, "name"), None);
+    }
+
+    #[test]
+    fn get_string_list_config_extracts_strings() {
+        let intent = make_intent("test", vec![list_entry("items", vec!["a", "b", "c"])]);
+        assert_eq!(
+            get_string_list_config(&intent, "items"),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn get_string_list_config_extracts_fn_refs_as_strings() {
+        let intent = make_intent(
+            "test",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "funcs".to_string(),
+                value: IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::FnRef("add".to_string(), Span::new(0, 3)),
+                        IntentConfigValue::FnRef("sub".to_string(), Span::new(0, 3)),
+                    ],
+                    Span::new(0, 20),
+                ),
+                span: Span::new(0, 30),
+            }],
+        );
+        assert_eq!(
+            get_string_list_config(&intent, "funcs"),
+            vec!["add".to_string(), "sub".to_string()]
+        );
+    }
+
+    #[test]
+    fn get_string_list_config_returns_empty_for_missing_key() {
+        let intent = make_intent("test", vec![]);
+        assert!(get_string_list_config(&intent, "items").is_empty());
+    }
+
+    #[test]
+    fn get_string_list_config_returns_empty_for_non_list_value() {
+        let intent = make_intent("test", vec![string_entry("items", "not a list")]);
+        assert!(get_string_list_config(&intent, "items").is_empty());
+    }
+
+    #[test]
+    fn get_fn_ref_config_finds_fn_ref() {
+        let intent = make_intent("test", vec![fn_ref_entry("handler", "my_fn")]);
+        assert_eq!(get_fn_ref_config(&intent, "handler"), Some("my_fn"));
+    }
+
+    #[test]
+    fn get_fn_ref_config_returns_none_for_string_value() {
+        let intent = make_intent("test", vec![string_entry("handler", "my_fn")]);
+        assert_eq!(get_fn_ref_config(&intent, "handler"), None);
+    }
+
+    #[test]
+    fn get_fn_ref_config_returns_none_for_missing_key() {
+        let intent = make_intent("test", vec![]);
+        assert_eq!(get_fn_ref_config(&intent, "handler"), None);
+    }
+
+    #[test]
+    fn get_nested_list_config_extracts_nested_lists() {
+        let intent = make_intent(
+            "test",
+            vec![nested_list_entry(
+                "cmds",
+                vec![vec!["a", "b"], vec!["c", "d", "e"]],
+            )],
+        );
+        let result = get_nested_list_config(&intent, "cmds");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].len(), 2);
+        assert_eq!(result[1].len(), 3);
+    }
+
+    #[test]
+    fn get_nested_list_config_returns_empty_for_missing_key() {
+        let intent = make_intent("test", vec![]);
+        assert!(get_nested_list_config(&intent, "cmds").is_empty());
+    }
+
+    #[test]
+    fn get_nested_list_config_skips_non_list_items() {
+        let intent = make_intent(
+            "test",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "mixed".to_string(),
+                value: IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::StringLit("not_a_list".to_string(), Span::new(0, 5)),
+                        IntentConfigValue::List(
+                            vec![IntentConfigValue::StringLit(
+                                "inner".to_string(),
+                                Span::new(0, 5),
+                            )],
+                            Span::new(0, 10),
+                        ),
+                    ],
+                    Span::new(0, 20),
+                ),
+                span: Span::new(0, 30),
+            }],
+        );
+        let result = get_nested_list_config(&intent, "mixed");
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn config_value_as_str_extracts_string_lit() {
+        let v = IntentConfigValue::StringLit("hello".to_string(), Span::new(0, 5));
+        assert_eq!(config_value_as_str(&v), Some("hello"));
+    }
+
+    #[test]
+    fn config_value_as_str_extracts_fn_ref() {
+        let v = IntentConfigValue::FnRef("my_fn".to_string(), Span::new(0, 5));
+        assert_eq!(config_value_as_str(&v), Some("my_fn"));
+    }
+
+    #[test]
+    fn config_value_as_str_returns_none_for_int() {
+        let v = IntentConfigValue::IntLit(42, Span::new(0, 2));
+        assert_eq!(config_value_as_str(&v), None);
+    }
+
+    #[test]
+    fn config_value_as_str_returns_none_for_list() {
+        let v = IntentConfigValue::List(vec![], Span::new(0, 2));
+        assert_eq!(config_value_as_str(&v), None);
+    }
+
+    // ===== route_to_handler_name edge cases =====
+
+    #[test]
+    fn route_to_handler_name_simple_path() {
+        assert_eq!(route_to_handler_name("/users"), "handle_users");
+    }
+
+    #[test]
+    fn route_to_handler_name_nested_path() {
+        assert_eq!(route_to_handler_name("/api/users"), "handle_api_users");
+    }
+
+    #[test]
+    fn route_to_handler_name_empty_string() {
+        assert_eq!(route_to_handler_name(""), "handle_root");
+    }
+
+    #[test]
+    fn route_to_handler_name_only_slashes() {
+        assert_eq!(route_to_handler_name("///"), "handle_root");
+    }
+
+    #[test]
+    fn route_to_handler_name_with_special_chars() {
+        assert_eq!(route_to_handler_name("/api-v2"), "handle_api_v2");
+    }
+
+    // ===== generate_math_function edge cases =====
+
+    #[test]
+    fn generate_math_function_add() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("add", span).expect("should generate add");
+        assert_eq!(func.name, "add");
+        assert_eq!(func.params.len(), 2);
+        assert!(func.requires.is_empty());
+    }
+
+    #[test]
+    fn generate_math_function_sub() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("sub", span).expect("should generate sub");
+        assert_eq!(func.name, "sub");
+        assert!(func.requires.is_empty());
+    }
+
+    #[test]
+    fn generate_math_function_mul() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("mul", span).expect("should generate mul");
+        assert_eq!(func.name, "mul");
+        assert!(func.requires.is_empty());
+    }
+
+    #[test]
+    fn generate_math_function_safe_div_has_contract() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("safe_div", span).expect("should generate safe_div");
+        assert_eq!(func.name, "safe_div");
+        assert_eq!(func.requires.len(), 1);
+    }
+
+    #[test]
+    fn generate_math_function_unknown_returns_none() {
+        let span = Span::new(0, 10);
+        assert!(generate_math_function("sqrt", span).is_none());
+        assert!(generate_math_function("", span).is_none());
+        assert!(generate_math_function("pow", span).is_none());
+    }
+
+    // ===== resolve_all edge cases =====
+
+    #[test]
+    fn resolve_all_empty_list() {
+        let resolver = Resolver::with_builtins();
+        let results = resolver
+            .resolve_all(&[])
+            .expect("should succeed with empty list");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn resolve_all_stops_on_first_error() {
+        let resolver = Resolver::with_builtins();
+        let intents = vec![
+            make_intent("console_app", vec![]),
+            make_intent("nonexistent_intent", vec![]),
+            make_intent("console_app", vec![]),
+        ];
+        let result = resolver.resolve_all(&intents);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ResolverError::NoResolver { .. })));
+    }
+
+    #[test]
+    fn resolve_all_stops_on_unknown_config() {
+        let resolver = Resolver::with_builtins();
+        let intents = vec![make_intent(
+            "console_app",
+            vec![string_entry("bad_key", "value")],
+        )];
+        let result = resolver.resolve_all(&intents);
+        assert!(matches!(result, Err(ResolverError::UnknownConfig { .. })));
+    }
+
+    // ===== ResolverStrategy trait method tests =====
+
+    #[test]
+    fn console_app_strategy_handles_and_keys() {
+        let strategy = ConsoleAppStrategy;
+        assert_eq!(strategy.handles(), &["console_app"]);
+        assert_eq!(strategy.valid_keys(), &["greeting", "entry_point"]);
+    }
+
+    #[test]
+    fn math_module_strategy_handles_and_keys() {
+        let strategy = MathModuleStrategy;
+        assert_eq!(strategy.handles(), &["math_module"]);
+        assert_eq!(strategy.valid_keys(), &["functions"]);
+    }
+
+    #[test]
+    fn serve_http_strategy_handles_and_keys() {
+        let strategy = ServeHttpStrategy;
+        assert_eq!(strategy.handles(), &["serve_http"]);
+        assert_eq!(strategy.valid_keys(), &["port", "routes"]);
+    }
+
+    #[test]
+    fn database_strategy_handles_and_keys() {
+        let strategy = DatabaseStrategy;
+        assert_eq!(strategy.handles(), &["database"]);
+        assert_eq!(strategy.valid_keys(), &["driver", "tables", "queries"]);
+    }
+
+    #[test]
+    fn json_api_strategy_handles_and_keys() {
+        let strategy = JsonApiStrategy;
+        assert_eq!(strategy.handles(), &["json_api"]);
+        assert_eq!(
+            strategy.valid_keys(),
+            &["routes", "models", "port", "base_path", "endpoints"]
+        );
+    }
+
+    #[test]
+    fn cache_strategy_handles_and_keys() {
+        let strategy = CacheStrategy;
+        assert_eq!(strategy.handles(), &["cache"]);
+        assert_eq!(strategy.valid_keys(), &["strategy", "max_size"]);
+    }
+
+    #[test]
+    fn queue_strategy_handles_and_keys() {
+        let strategy = QueueStrategy;
+        assert_eq!(strategy.handles(), &["queue"]);
+        assert_eq!(strategy.valid_keys(), &["backend", "topics"]);
+    }
+
+    #[test]
+    fn cli_strategy_handles_and_keys() {
+        let strategy = CliStrategy;
+        assert_eq!(strategy.handles(), &["cli"]);
+        assert_eq!(strategy.valid_keys(), &["name", "version", "commands"]);
+    }
+
+    #[test]
+    fn http_server_strategy_handles_and_keys() {
+        let strategy = HttpServerStrategy;
+        assert_eq!(strategy.handles(), &["http_server"]);
+        assert_eq!(strategy.valid_keys(), &["port", "routes", "not_found"]);
+    }
+
+    #[test]
+    fn file_processor_strategy_handles_and_keys() {
+        let strategy = FileProcessorStrategy;
+        assert_eq!(strategy.handles(), &["file_processor"]);
+        assert_eq!(strategy.valid_keys(), &["input", "output", "transform"]);
+    }
+
+    #[test]
+    fn worker_strategy_handles_and_keys() {
+        let strategy = WorkerStrategy;
+        assert_eq!(strategy.handles(), &["worker"]);
+        assert_eq!(
+            strategy.valid_keys(),
+            &["task", "max_iterations", "on_error"]
+        );
+    }
+
+    // ===== Resolver registration and lookup tests =====
+
+    #[test]
+    fn custom_strategy_can_be_registered() {
+        struct CustomStrategy;
+        impl ResolverStrategy for CustomStrategy {
+            fn handles(&self) -> &[&str] {
+                &["custom"]
+            }
+            fn valid_keys(&self) -> &[&str] {
+                &["option"]
+            }
+            fn resolve(&self, intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec![],
+                    description: format!("Custom resolved: {}", intent.name),
+                })
+            }
+        }
+
+        let mut resolver = Resolver::new();
+        resolver.register(Box::new(CustomStrategy));
+
+        let intent = make_intent("custom", vec![]);
+        let result = resolver
+            .resolve(&intent)
+            .expect("should resolve custom intent");
+        assert!(result.description.contains("Custom resolved: custom"));
+    }
+
+    #[test]
+    fn first_matching_strategy_wins() {
+        struct StrategyA;
+        impl ResolverStrategy for StrategyA {
+            fn handles(&self) -> &[&str] {
+                &["shared"]
+            }
+            fn valid_keys(&self) -> &[&str] {
+                &[]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec![],
+                    description: "Strategy A".to_string(),
+                })
+            }
+        }
+
+        struct StrategyB;
+        impl ResolverStrategy for StrategyB {
+            fn handles(&self) -> &[&str] {
+                &["shared"]
+            }
+            fn valid_keys(&self) -> &[&str] {
+                &[]
+            }
+            fn resolve(&self, _intent: &IntentDecl) -> Result<ResolvedIntent> {
+                Ok(ResolvedIntent {
+                    generated_functions: vec![],
+                    generated_types: vec![],
+                    description: "Strategy B".to_string(),
+                })
+            }
+        }
+
+        let mut resolver = Resolver::new();
+        resolver.register(Box::new(StrategyA));
+        resolver.register(Box::new(StrategyB));
+
+        let intent = make_intent("shared", vec![]);
+        let result = resolver.resolve(&intent).expect("should resolve");
+        assert_eq!(result.description, "Strategy A");
+    }
+
+    // ===== format_resolved_intent detailed tests =====
+
+    #[test]
+    fn format_resolved_intent_includes_params() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "math_module",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "functions".to_string(),
+                value: IntentConfigValue::List(
+                    vec![IntentConfigValue::FnRef("add".to_string(), Span::new(0, 3))],
+                    Span::new(0, 10),
+                ),
+                span: Span::new(0, 20),
+            }],
+        );
+        let resolved = resolver
+            .resolve(&intent)
+            .expect("should resolve math_module");
+        let formatted = format_resolved_intent(&resolved);
+        assert!(formatted.contains("add"));
+        assert!(formatted.contains("a:"));
+        assert!(formatted.contains("b:"));
+    }
+
+    #[test]
+    fn format_resolved_intent_includes_contracts() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "math_module",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "functions".to_string(),
+                value: IntentConfigValue::List(
+                    vec![IntentConfigValue::FnRef(
+                        "safe_div".to_string(),
+                        Span::new(0, 8),
+                    )],
+                    Span::new(0, 10),
+                ),
+                span: Span::new(0, 20),
+            }],
+        );
+        let resolved = resolver
+            .resolve(&intent)
+            .expect("should resolve math_module");
+        let formatted = format_resolved_intent(&resolved);
+        assert!(formatted.contains("requires"));
+    }
+
+    #[test]
+    fn format_resolved_intent_empty_functions() {
+        let resolved = ResolvedIntent {
+            generated_functions: vec![],
+            generated_types: vec![],
+            description: "Empty resolution".to_string(),
+        };
+        let formatted = format_resolved_intent(&resolved);
+        assert!(formatted.contains("Generated by intent resolver"));
+        assert!(formatted.contains("Empty resolution"));
+    }
+
+    // ===== Generated function structure verification =====
+
+    #[test]
+    fn console_app_function_is_not_async() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("console_app", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(!resolved.generated_functions[0].is_async);
+    }
+
+    #[test]
+    fn console_app_function_is_private() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("console_app", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(matches!(
+            resolved.generated_functions[0].visibility,
+            Visibility::Private
+        ));
+    }
+
+    #[test]
+    fn console_app_function_returns_unit() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("console_app", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(matches!(
+            resolved.generated_functions[0].return_type,
+            TypeExpr::Unit
+        ));
+    }
+
+    #[test]
+    fn console_app_function_has_no_params() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("console_app", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.generated_functions[0].params.is_empty());
+    }
+
+    #[test]
+    fn math_module_empty_functions_list() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "math_module",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "functions".to_string(),
+                value: IntentConfigValue::List(vec![], Span::new(0, 5)),
+                span: Span::new(0, 10),
+            }],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.generated_functions.is_empty());
+        assert!(resolved.description.contains("No math functions generated"));
+    }
+
+    #[test]
+    fn math_module_unknown_function_name_is_skipped() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "math_module",
+            vec![kodo_ast::IntentConfigEntry {
+                key: "functions".to_string(),
+                value: IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::FnRef("add".to_string(), Span::new(0, 3)),
+                        IntentConfigValue::FnRef("unknown_op".to_string(), Span::new(0, 10)),
+                        IntentConfigValue::FnRef("mul".to_string(), Span::new(0, 3)),
+                    ],
+                    Span::new(0, 20),
+                ),
+                span: Span::new(0, 30),
+            }],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        // unknown_op should be skipped, only add and mul generated
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert_eq!(resolved.generated_functions[0].name, "add");
+        assert_eq!(resolved.generated_functions[1].name, "mul");
+    }
+
+    #[test]
+    fn math_function_params_are_int_typed() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("add", span).expect("should generate");
+        assert_eq!(func.params[0].name, "a");
+        assert!(matches!(func.params[0].ty, TypeExpr::Named(ref n) if n == "Int"));
+        assert_eq!(func.params[1].name, "b");
+        assert!(matches!(func.params[1].ty, TypeExpr::Named(ref n) if n == "Int"));
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn math_function_params_are_owned() {
+        let span = Span::new(0, 10);
+        let func = generate_math_function("add", span).expect("should generate");
+        assert!(matches!(func.params[0].ownership, Ownership::Owned));
+        assert!(matches!(func.params[1].ownership, Ownership::Owned));
+    }
+
+    // ===== Worker structure tests =====
+
+    #[test]
+    fn worker_main_returns_int() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        let main_fn = &resolved.generated_functions[0];
+        assert!(matches!(main_fn.return_type, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn worker_with_zero_iterations() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("worker", vec![int_entry("max_iterations", 0)]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.description.contains("max_iterations=0"));
+    }
+
+    // ===== HTTP Server structure tests =====
+
+    #[test]
+    fn http_server_main_returns_int() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        let main_fn = &resolved.generated_functions[0];
+        assert!(matches!(main_fn.return_type, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn http_server_no_routes_still_generates_main() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("http_server", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+        assert!(resolved.description.contains("0 routes"));
+    }
+
+    // ===== File Processor structure tests =====
+
+    #[test]
+    fn file_processor_main_returns_int() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent("file_processor", vec![]);
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        let main_fn = &resolved.generated_functions[0];
+        assert!(matches!(main_fn.return_type, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn file_processor_with_string_transform() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "file_processor",
+            vec![string_entry("transform", "uppercase")],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.description.contains("uppercase"));
+    }
+
+    // ===== CLI structure tests =====
+
+    #[test]
+    fn cli_with_command_missing_description() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "cli",
+            vec![nested_list_entry("commands", vec![vec!["run", "do_run"]])],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert!(resolved.description.contains("1 commands"));
+    }
+
+    #[test]
+    fn cli_with_command_too_few_entries_skipped() {
+        let resolver = Resolver::with_builtins();
+        // A command with only 1 element should be skipped (needs >= 2)
+        let intent = make_intent(
+            "cli",
+            vec![nested_list_entry("commands", vec![vec!["only_name"]])],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.description.contains("0 commands"));
+    }
+
+    // ===== Resolver default tests =====
+
+    #[test]
+    fn resolver_default_is_empty() {
+        let resolver = Resolver::default();
+        let intent = make_intent("console_app", vec![]);
+        assert!(resolver.resolve(&intent).is_err());
+    }
+
+    #[test]
+    fn resolver_new_is_same_as_default() {
+        let resolver = Resolver::new();
+        let intent = make_intent("console_app", vec![]);
+        assert!(resolver.resolve(&intent).is_err());
+    }
+
+    // ===== Error message content tests =====
+
+    #[test]
+    fn config_type_mismatch_error_message_contains_details() {
+        let err = ResolverError::ConfigTypeMismatch {
+            key: "port".to_string(),
+            intent: "serve_http".to_string(),
+            expected: "integer".to_string(),
+            found: "string".to_string(),
+            span: Span::new(10, 20),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("port"));
+        assert!(msg.contains("serve_http"));
+        assert!(msg.contains("integer"));
+        assert!(msg.contains("string"));
+    }
+
+    // ===== Database additional tests =====
+
+    #[test]
+    fn database_connect_returns_string() {
+        let span = Span::new(0, 10);
+        let func = generate_db_connect("postgres", span);
+        assert_eq!(func.name, "db_connect");
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "String"));
+        assert!(func.params.is_empty());
+        assert!(func.requires.is_empty());
+    }
+
+    #[test]
+    fn database_table_query_has_id_param() {
+        let span = Span::new(0, 10);
+        let func = generate_db_table_query("users", span);
+        assert_eq!(func.name, "query_users");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "id");
+        assert!(matches!(func.params[0].ty, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn database_named_query_has_id_param() {
+        let span = Span::new(0, 10);
+        let func = generate_db_named_query("find_by_email", span);
+        assert_eq!(func.name, "find_by_email");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "id");
+    }
+
+    // ===== Cache additional tests =====
+
+    #[test]
+    fn cache_get_has_key_param() {
+        let span = Span::new(0, 10);
+        let func = generate_cache_get(span);
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "key");
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "String"));
+    }
+
+    #[test]
+    fn cache_set_has_key_and_value_params() {
+        let span = Span::new(0, 10);
+        let func = generate_cache_set(512, span);
+        assert_eq!(func.params.len(), 2);
+        assert_eq!(func.params[0].name, "key");
+        assert_eq!(func.params[1].name, "value");
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "Bool"));
+    }
+
+    #[test]
+    fn cache_invalidate_has_key_param() {
+        let span = Span::new(0, 10);
+        let func = generate_cache_invalidate(span);
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "key");
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "Bool"));
+    }
+
+    // ===== Queue additional tests =====
+
+    #[test]
+    fn queue_produce_has_message_param() {
+        let span = Span::new(0, 10);
+        let func = generate_queue_produce("events", span);
+        assert_eq!(func.name, "produce_events");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "message");
+        assert!(matches!(func.return_type, TypeExpr::Unit));
+    }
+
+    #[test]
+    fn queue_consume_has_no_params() {
+        let span = Span::new(0, 10);
+        let func = generate_queue_consume("events", span);
+        assert_eq!(func.name, "consume_events");
+        assert!(func.params.is_empty());
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "String"));
+    }
+
+    // ===== JSON API additional tests =====
+
+    #[test]
+    fn json_api_model_creates_have_data_param() {
+        let span = Span::new(0, 10);
+        let func = generate_api_create_model("user", span);
+        assert_eq!(func.name, "create_user");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "data");
+        assert!(matches!(func.params[0].ty, TypeExpr::Named(ref n) if n == "String"));
+    }
+
+    #[test]
+    fn json_api_model_gets_have_id_param() {
+        let span = Span::new(0, 10);
+        let func = generate_api_get_model("user", span);
+        assert_eq!(func.name, "get_user");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "id");
+        assert!(matches!(func.params[0].ty, TypeExpr::Named(ref n) if n == "Int"));
+    }
+
+    #[test]
+    fn json_api_route_to_handler_preserves_alphanumeric() {
+        assert_eq!(route_to_handler_name("/abc123"), "handle_abc123");
+    }
+
+    // ===== Multiple config entries with same key =====
+
+    #[test]
+    fn get_string_config_returns_first_matching_entry() {
+        let intent = make_intent(
+            "test",
+            vec![string_entry("key", "first"), string_entry("key", "second")],
+        );
+        assert_eq!(get_string_config(&intent, "key"), Some("first"));
+    }
+
+    #[test]
+    fn get_int_config_returns_first_matching_entry() {
+        let intent = make_intent("test", vec![int_entry("n", 1), int_entry("n", 2)]);
+        assert_eq!(get_int_config(&intent, "n"), Some(1));
+    }
+
+    // ===== JSON API endpoints with empty base_path =====
+
+    #[test]
+    fn json_api_endpoints_with_empty_base_path() {
+        let resolver = Resolver::with_builtins();
+        let intent = make_intent(
+            "json_api",
+            vec![nested_list_entry(
+                "endpoints",
+                vec![vec!["GET", "/health", "check"]],
+            )],
+        );
+        let resolved = resolver.resolve(&intent).expect("should resolve");
+        assert!(resolved.description.contains("/health"));
+    }
+
+    // ===== HTTP handler generation test =====
+
+    #[test]
+    fn generate_http_handler_creates_correct_function() {
+        let span = Span::new(0, 10);
+        let func = generate_http_handler("my_handler", span);
+        assert_eq!(func.name, "my_handler");
+        assert!(func.params.is_empty());
+        assert!(matches!(func.return_type, TypeExpr::Unit));
+        assert!(func.requires.is_empty());
+        assert!(!func.is_async);
+    }
+
+    // ===== Make helpers tests =====
+
+    #[test]
+    fn make_function_helper_creates_valid_function() {
+        let span = Span::new(0, 10);
+        let func = make_function(
+            "test_fn",
+            TypeExpr::Named("Int".to_string()),
+            vec![Stmt::Return {
+                span,
+                value: Some(Expr::IntLit(42, span)),
+            }],
+            span,
+        );
+        assert_eq!(func.name, "test_fn");
+        assert!(matches!(func.return_type, TypeExpr::Named(ref n) if n == "Int"));
+        assert!(func.params.is_empty());
+        assert!(func.requires.is_empty());
+        assert!(func.ensures.is_empty());
+        assert!(!func.is_async);
+        assert!(matches!(func.visibility, Visibility::Private));
+        assert_eq!(func.body.stmts.len(), 1);
+    }
+
+    #[test]
+    fn make_if_chain_empty_branches() {
+        let span = Span::new(0, 10);
+        let result = make_if_chain(vec![], &[], span);
+        // With no branches and no else, falls back to IntLit(0)
+        assert!(matches!(result, Expr::IntLit(0, _)));
+    }
+
+    #[test]
+    fn make_if_chain_single_branch_no_else() {
+        let span = Span::new(0, 10);
+        let condition = Expr::BoolLit(true, span);
+        let body = vec![Stmt::Expr(Expr::IntLit(1, span))];
+        let result = make_if_chain(vec![(condition, body)], &[], span);
+        assert!(matches!(result, Expr::If { .. }));
+    }
+
+    #[test]
+    fn make_if_chain_single_branch_with_else() {
+        let span = Span::new(0, 10);
+        let condition = Expr::BoolLit(true, span);
+        let body = vec![Stmt::Expr(Expr::IntLit(1, span))];
+        let else_body = vec![Stmt::Expr(Expr::IntLit(2, span))];
+        let result = make_if_chain(vec![(condition, body)], &else_body, span);
+        match result {
+            Expr::If { else_branch, .. } => {
+                assert!(else_branch.is_some());
+            }
+            _ => panic!("expected If expression"),
+        }
+    }
+
+    #[test]
+    fn make_if_chain_multiple_branches() {
+        let span = Span::new(0, 10);
+        let branches = vec![
+            (
+                Expr::BoolLit(true, span),
+                vec![Stmt::Expr(Expr::IntLit(1, span))],
+            ),
+            (
+                Expr::BoolLit(false, span),
+                vec![Stmt::Expr(Expr::IntLit(2, span))],
+            ),
+        ];
+        let else_body = vec![Stmt::Expr(Expr::IntLit(3, span))];
+        let result = make_if_chain(branches, &else_body, span);
+        // Should be a nested if-else chain
+        match result {
+            Expr::If { else_branch, .. } => {
+                assert!(else_branch.is_some());
+            }
+            _ => panic!("expected If expression"),
+        }
+    }
 }

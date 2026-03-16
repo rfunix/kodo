@@ -160,40 +160,43 @@ let has: Bool = list_contains(nums, 10)  // true
 
 ### Map\<K, V\>
 
-A key-value hash map. Maps support both `Int` and `String` keys:
-
-#### Int-keyed Maps
+A generic key-value hash map. Keys and values can be `Int` or `String` in any combination. The type is determined by the annotation on the `let` binding:
 
 ```rust
+// Map<Int, Int>
 let scores: Map<Int, Int> = map_new()
 map_insert(scores, 1, 100)
 let val: Int = map_get(scores, 1)           // 100
-let has: Bool = map_contains_key(scores, 1)  // true
-let len: Int = map_length(scores)            // 1
+
+// Map<String, Int>
+let config: Map<String, Int> = map_new()
+map_insert(config, "port", 8080)
+let port: Int = map_get(config, "port")     // 8080
+
+// Map<Int, String>
+let names: Map<Int, String> = map_new()
+map_insert(names, 1, "one")
+let first: String = map_get(names, 1)       // "one"
+
+// Map<String, String>
+let headers: Map<String, String> = map_new()
+map_insert(headers, "Content-Type", "application/json")
+let ct: String = map_get(headers, "Content-Type")
 ```
 
-#### String-keyed Maps
+#### Map API
 
-```rust
-let config: Map<String, Int> = map_string_new()
-map_string_insert(config, "port", 8080)
-map_string_insert(config, "timeout", 30)
-let port: Int = map_string_get(config, "port")            // 8080
-let has: Bool = map_string_contains(config, "timeout")     // true
-map_string_remove(config, "timeout")
-let len: Int = map_string_len(config)                      // 1
-```
+All functions work with any `Map<K, V>` where K, V are `Int` or `String`:
 
-#### Full Map API
-
-| Function (Int keys) | Function (String keys) | Description |
-|---------------------|----------------------|-------------|
-| `map_new()` | `map_string_new()` | Create a new empty map |
-| `map_insert(m, k, v)` | `map_string_insert(m, k, v)` | Insert or update a key-value pair |
-| `map_get(m, k)` | `map_string_get(m, k)` | Get value by key |
-| `map_contains_key(m, k)` | `map_string_contains(m, k)` | Check if key exists |
-| `map_length(m)` | `map_string_len(m)` | Number of entries |
-| `map_remove(m, k)` | `map_string_remove(m, k)` | Remove a key-value pair |
+| Function | Description |
+|----------|-------------|
+| `map_new()` | Create a new empty map (type from annotation) |
+| `map_insert(m, k, v)` | Insert or update a key-value pair |
+| `map_get(m, k)` | Get value by key |
+| `map_contains_key(m, k)` | Check if key exists |
+| `map_length(m)` | Number of entries |
+| `m.remove(k)` | Remove a key-value pair |
+| `m.is_empty()` | Check if map is empty |
 
 ### String Methods
 

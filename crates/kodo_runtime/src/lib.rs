@@ -19,6 +19,7 @@
 //! - [`server`] — HTTP server builtins (`tiny_http`)
 //! - `helpers` — Internal helper functions
 
+#![deny(missing_docs)]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 

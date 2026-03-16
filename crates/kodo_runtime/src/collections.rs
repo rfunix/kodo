@@ -818,6 +818,621 @@ pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// Map with String keys/values (monomorphized variants)
+// ---------------------------------------------------------------------------
+
+/// Hashes a string key using FNV-1a over its bytes.
+fn map_hash_str(key_ptr: *const u8, key_len: usize, capacity: usize) -> usize {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+                                               // SAFETY: caller guarantees key_ptr points to key_len valid bytes.
+    for i in 0..key_len {
+        let byte = unsafe { *key_ptr.add(i) };
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let index = hash as usize;
+    index % capacity
+}
+
+/// Packs a `(ptr, len)` pair into a heap-allocated `[i64; 2]`, returning the
+/// pointer as i64. This is the same encoding used for String values in Kōdo.
+fn pack_string_pair(ptr: *const u8, len: usize) -> i64 {
+    #[allow(clippy::cast_possible_wrap)]
+    let pair = Box::new([ptr as i64, len as i64]);
+    Box::into_raw(pair) as i64
+}
+
+/// Unpacks an i64 handle back to `(ptr, len)`.
+///
+/// # Safety
+///
+/// `handle` must be a value returned by `pack_string_pair`.
+unsafe fn unpack_string_pair(handle: i64) -> (*const u8, usize) {
+    let pair = unsafe { &*(handle as *const [i64; 2]) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    (pair[0] as *const u8, pair[1] as usize)
+}
+
+/// Compares a packed string key (stored in an entry) with the given raw bytes.
+///
+/// # Safety
+///
+/// `entry_key` must be a value returned by `pack_string_pair`.
+/// `key_ptr` must point to `key_len` valid bytes.
+unsafe fn map_str_key_eq(entry_key: i64, key_ptr: *const u8, key_len: usize) -> bool {
+    let (stored_ptr, stored_len) = unsafe { unpack_string_pair(entry_key) };
+    if stored_len != key_len {
+        return false;
+    }
+    if key_len == 0 {
+        return true;
+    }
+    // SAFETY: both pointers are valid for their respective lengths.
+    let stored = unsafe { std::slice::from_raw_parts(stored_ptr, stored_len) };
+    let given = unsafe { std::slice::from_raw_parts(key_ptr, key_len) };
+    stored == given
+}
+
+/// Grows a map that uses string keys, rehashing with `map_hash_str`.
+fn map_grow_sk(map: &mut KodoMap) {
+    let new_cap = map.capacity * 2;
+    let new_entries = vec![
+        KodoMapEntry {
+            key: 0,
+            value: 0,
+            occupied: false,
+        };
+        new_cap
+    ];
+    let new_boxed = new_entries.into_boxed_slice();
+    // SAFETY: intentionally leaks the new entries array; ownership moves to KodoMap.
+    let new_ptr = Box::into_raw(new_boxed).cast::<KodoMapEntry>();
+
+    // Rehash existing entries using string key hash.
+    for i in 0..map.capacity {
+        // SAFETY: i < old capacity, entries is valid.
+        let old_entry = unsafe { &*map.entries.add(i) };
+        if old_entry.occupied {
+            // SAFETY: old_entry.key is a packed string pair.
+            let (key_ptr, key_len) = unsafe { unpack_string_pair(old_entry.key) };
+            let mut idx = map_hash_str(key_ptr, key_len, new_cap);
+            loop {
+                // SAFETY: idx < new_cap, new_ptr is valid.
+                let new_entry = unsafe { &mut *new_ptr.add(idx) };
+                if !new_entry.occupied {
+                    new_entry.key = old_entry.key;
+                    new_entry.value = old_entry.value;
+                    new_entry.occupied = true;
+                    break;
+                }
+                idx = (idx + 1) % new_cap;
+            }
+        }
+    }
+
+    // Free old entries array.
+    // SAFETY: entries was allocated as a Box<[KodoMapEntry]> with capacity elements.
+    let _ = unsafe {
+        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            map.entries,
+            map.capacity,
+        ))
+    };
+    map.entries = new_ptr;
+    map.capacity = new_cap;
+}
+
+/// Duplicates a string so the map owns its own copy of the key bytes.
+fn dup_string(ptr: *const u8, len: usize) -> i64 {
+    if len == 0 {
+        return pack_string_pair(std::ptr::null(), 0);
+    }
+    // SAFETY: caller guarantees ptr points to len valid bytes.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let owned = bytes.to_vec().into_boxed_slice();
+    let new_ptr = Box::into_raw(owned) as *const u8;
+    pack_string_pair(new_ptr, len)
+}
+
+// -- String Key variants (Map<String, Int> and Map<String, String>) --
+
+/// Inserts a key-value pair with a String key into the map.
+///
+/// The key bytes are copied so the map owns its own copy.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_insert_sk(
+    map_ptr: i64,
+    key_ptr: *const u8,
+    key_len: i64,
+    value: i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+
+    // Grow if load factor > 0.75.
+    if map.len * 4 >= map.capacity * 3 {
+        map_grow_sk(map);
+    }
+
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    loop {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            entry.key = dup_string(key_ptr, klen);
+            entry.value = value;
+            entry.occupied = true;
+            map.len += 1;
+            return;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            entry.value = value;
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+}
+
+/// Gets the value for a String key.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+/// `out_value` and `out_is_some` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_get_sk(
+    map_ptr: i64,
+    key_ptr: *const u8,
+    key_len: i64,
+    out_value: *mut i64,
+    out_is_some: *mut i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_value = 0;
+                *out_is_some = 0;
+            }
+            return;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_value = entry.value;
+                *out_is_some = 1;
+            }
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    // SAFETY: caller guarantees out pointers are valid.
+    unsafe {
+        *out_value = 0;
+        *out_is_some = 0;
+    }
+}
+
+/// Returns 1 if the map contains the given String key, 0 otherwise.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_contains_key_sk(
+    map_ptr: i64,
+    key_ptr: *const u8,
+    key_len: i64,
+) -> i64 {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            return 0;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            return 1;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    0
+}
+
+/// Removes a String key from the map.
+///
+/// Returns 1 if the key was found and removed, 0 otherwise.
+/// Frees the packed string key on removal.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_remove_sk(map_ptr: i64, key_ptr: *const u8, key_len: i64) -> i64 {
+    if map_ptr == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+    if map.entries.is_null() || map.capacity == 0 {
+        return 0;
+    }
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            return 0;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            // Free the packed key.
+            free_packed_string(entry.key);
+            entry.occupied = false;
+            entry.key = 0;
+            entry.value = 0;
+            map.len -= 1;
+            return 1;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    0
+}
+
+// -- String Value variants (Map<Int, String>) --
+
+/// Inserts a key-value pair with an Int key and String value.
+///
+/// The value bytes are copied so the map owns its own copy.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `val_ptr` must point to `val_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_insert_sv(
+    map_ptr: i64,
+    key: i64,
+    val_ptr: *const u8,
+    val_len: i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let vlen = val_len as usize;
+
+    // Grow if load factor > 0.75.
+    if map.len * 4 >= map.capacity * 3 {
+        map_grow(map);
+    }
+
+    let mut idx = map_hash(key, map.capacity);
+    loop {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            entry.key = key;
+            entry.value = dup_string(val_ptr, vlen);
+            entry.occupied = true;
+            map.len += 1;
+            return;
+        }
+        if entry.key == key {
+            // Free old value, store new.
+            free_packed_string(entry.value);
+            entry.value = dup_string(val_ptr, vlen);
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+}
+
+/// Gets the String value for an Int key.
+///
+/// Returns the value via out parameters as (ptr, len) pair.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// Out pointers must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_get_sv(
+    map_ptr: i64,
+    key: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut i64,
+    out_is_some: *mut i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    let mut idx = map_hash(key, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_ptr = std::ptr::null();
+                *out_len = 0;
+                *out_is_some = 0;
+            }
+            return;
+        }
+        if entry.key == key {
+            // SAFETY: entry.value is a packed string pair.
+            let (vp, vl) = unsafe { unpack_string_pair(entry.value) };
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_ptr = vp;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *out_len = vl as i64;
+                }
+                *out_is_some = 1;
+            }
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    // SAFETY: caller guarantees out pointers are valid.
+    unsafe {
+        *out_ptr = std::ptr::null();
+        *out_len = 0;
+        *out_is_some = 0;
+    }
+}
+
+// -- Both String variants (Map<String, String>) --
+
+/// Inserts a key-value pair where both key and value are Strings.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+/// `val_ptr` must point to `val_len` valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_insert_ss(
+    map_ptr: i64,
+    key_ptr: *const u8,
+    key_len: i64,
+    val_ptr: *const u8,
+    val_len: i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &mut *(map_ptr as *mut KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let vlen = val_len as usize;
+
+    if map.len * 4 >= map.capacity * 3 {
+        map_grow_sk(map);
+    }
+
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    loop {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &mut *map.entries.add(idx) };
+        if !entry.occupied {
+            entry.key = dup_string(key_ptr, klen);
+            entry.value = dup_string(val_ptr, vlen);
+            entry.occupied = true;
+            map.len += 1;
+            return;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            // Free old value, store new.
+            free_packed_string(entry.value);
+            entry.value = dup_string(val_ptr, vlen);
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+}
+
+/// Gets the String value for a String key.
+///
+/// Returns the value via out parameters as (ptr, len) pair.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `key_ptr` must point to `key_len` valid bytes.
+/// Out pointers must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_get_ss(
+    map_ptr: i64,
+    key_ptr: *const u8,
+    key_len: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut i64,
+    out_is_some: *mut i64,
+) {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let klen = key_len as usize;
+    let mut idx = map_hash_str(key_ptr, klen, map.capacity);
+    for _ in 0..map.capacity {
+        // SAFETY: idx < capacity, entries is valid.
+        let entry = unsafe { &*map.entries.add(idx) };
+        if !entry.occupied {
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_ptr = std::ptr::null();
+                *out_len = 0;
+                *out_is_some = 0;
+            }
+            return;
+        }
+        // SAFETY: entry.key is a packed string pair.
+        if unsafe { map_str_key_eq(entry.key, key_ptr, klen) } {
+            // SAFETY: entry.value is a packed string pair.
+            let (vp, vl) = unsafe { unpack_string_pair(entry.value) };
+            // SAFETY: caller guarantees out pointers are valid.
+            unsafe {
+                *out_ptr = vp;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *out_len = vl as i64;
+                }
+                *out_is_some = 1;
+            }
+            return;
+        }
+        idx = (idx + 1) % map.capacity;
+    }
+    // SAFETY: caller guarantees out pointers are valid.
+    unsafe {
+        *out_ptr = std::ptr::null();
+        *out_len = 0;
+        *out_is_some = 0;
+    }
+}
+
+/// Frees a packed string pair (Box<[i64; 2]>) and the owned bytes it points to.
+fn free_packed_string(handle: i64) {
+    if handle == 0 {
+        return;
+    }
+    // SAFETY: handle was returned by pack_string_pair / dup_string.
+    let pair = unsafe { Box::from_raw(handle as *mut [i64; 2]) };
+    let ptr = pair[0] as *mut u8;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let len = pair[1] as usize;
+    if !ptr.is_null() && len > 0 {
+        // SAFETY: ptr was allocated via Vec::into_boxed_slice in dup_string.
+        let _ = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) };
+    }
+}
+
+/// Frees a map with String keys (Map<String, Int>).
+///
+/// Deallocates all packed string keys, the entry array, and the map struct.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_free_sk(map_ptr: i64) {
+    if map_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { Box::from_raw(map_ptr as *mut KodoMap) };
+    if !map.entries.is_null() && map.capacity > 0 {
+        for i in 0..map.capacity {
+            // SAFETY: i < capacity, entries is valid.
+            let entry = unsafe { &*map.entries.add(i) };
+            if entry.occupied {
+                free_packed_string(entry.key);
+            }
+        }
+        // SAFETY: entries was allocated as a Box<[KodoMapEntry]>.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                map.entries,
+                map.capacity,
+            ))
+        };
+    }
+}
+
+/// Frees a map with String values (Map<Int, String>).
+///
+/// Deallocates all packed string values, the entry array, and the map struct.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_free_sv(map_ptr: i64) {
+    if map_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { Box::from_raw(map_ptr as *mut KodoMap) };
+    if !map.entries.is_null() && map.capacity > 0 {
+        for i in 0..map.capacity {
+            // SAFETY: i < capacity, entries is valid.
+            let entry = unsafe { &*map.entries.add(i) };
+            if entry.occupied {
+                free_packed_string(entry.value);
+            }
+        }
+        // SAFETY: entries was allocated as a Box<[KodoMapEntry]>.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                map.entries,
+                map.capacity,
+            ))
+        };
+    }
+}
+
+/// Frees a map with String keys and String values (Map<String, String>).
+///
+/// Deallocates all packed strings (keys and values), the entry array, and the map struct.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`, or zero.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_free_ss(map_ptr: i64) {
+    if map_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { Box::from_raw(map_ptr as *mut KodoMap) };
+    if !map.entries.is_null() && map.capacity > 0 {
+        for i in 0..map.capacity {
+            // SAFETY: i < capacity, entries is valid.
+            let entry = unsafe { &*map.entries.add(i) };
+            if entry.occupied {
+                free_packed_string(entry.key);
+                free_packed_string(entry.value);
+            }
+        }
+        // SAFETY: entries was allocated as a Box<[KodoMapEntry]>.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                map.entries,
+                map.capacity,
+            ))
+        };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Map iterator builtins
 // ---------------------------------------------------------------------------
 
@@ -1471,5 +2086,587 @@ mod tests {
         unsafe { kodo_list_push(list, 42) };
         unsafe { kodo_list_sort(list) };
         assert_eq!(unsafe { kodo_list_length(list) }, 1);
+    }
+
+    // -- String Key map tests (Map<String, Int>) --
+
+    #[test]
+    fn map_sk_insert_and_get() {
+        let map = kodo_map_new();
+        let key = b"hello";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 5, 42) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sk(map, key.as_ptr(), 5, &mut val, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(val, 42);
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_get_missing() {
+        let map = kodo_map_new();
+        let key = b"hello";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 5, 42) };
+        let missing = b"world";
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sk(map, missing.as_ptr(), 5, &mut val, &mut is_some) };
+        assert_eq!(is_some, 0);
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_contains_key() {
+        let map = kodo_map_new();
+        let key = b"test";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 4, 10) };
+        assert_eq!(unsafe { kodo_map_contains_key_sk(map, key.as_ptr(), 4) }, 1);
+        let other = b"nope";
+        assert_eq!(
+            unsafe { kodo_map_contains_key_sk(map, other.as_ptr(), 4) },
+            0
+        );
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_overwrite() {
+        let map = kodo_map_new();
+        let key = b"key";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 3, 1) };
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 3, 2) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sk(map, key.as_ptr(), 3, &mut val, &mut is_some) };
+        assert_eq!(val, 2);
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_remove() {
+        let map = kodo_map_new();
+        let key = b"remove_me";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 9, 99) };
+        assert_eq!(unsafe { kodo_map_remove_sk(map, key.as_ptr(), 9) }, 1);
+        assert_eq!(unsafe { kodo_map_length(map) }, 0);
+        assert_eq!(unsafe { kodo_map_remove_sk(map, key.as_ptr(), 9) }, 0);
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_grow() {
+        let map = kodo_map_new();
+        // Insert enough entries to trigger growth (> 12 entries for cap 16).
+        for i in 0..20 {
+            let key = format!("key_{i}");
+            unsafe {
+                kodo_map_insert_sk(map, key.as_ptr(), key.len() as i64, i);
+            }
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 20);
+        // Verify all entries are retrievable.
+        for i in 0..20 {
+            let key = format!("key_{i}");
+            let mut val: i64 = 0;
+            let mut is_some: i64 = 0;
+            unsafe {
+                kodo_map_get_sk(map, key.as_ptr(), key.len() as i64, &mut val, &mut is_some);
+            }
+            assert_eq!(is_some, 1);
+            assert_eq!(val, i);
+        }
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    // -- String Value map tests (Map<Int, String>) --
+
+    #[test]
+    fn map_sv_insert_and_get() {
+        let map = kodo_map_new();
+        let val = b"world";
+        unsafe { kodo_map_insert_sv(map, 1, val.as_ptr(), 5) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sv(map, 1, &mut out_ptr, &mut out_len, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(out_len, 5);
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
+        assert_eq!(result, b"world");
+        unsafe { kodo_map_free_sv(map) };
+    }
+
+    #[test]
+    fn map_sv_get_missing() {
+        let map = kodo_map_new();
+        let val = b"value";
+        unsafe { kodo_map_insert_sv(map, 1, val.as_ptr(), 5) };
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sv(map, 99, &mut out_ptr, &mut out_len, &mut is_some) };
+        assert_eq!(is_some, 0);
+        unsafe { kodo_map_free_sv(map) };
+    }
+
+    #[test]
+    fn map_sv_overwrite() {
+        let map = kodo_map_new();
+        let v1 = b"first";
+        let v2 = b"second";
+        unsafe { kodo_map_insert_sv(map, 1, v1.as_ptr(), 5) };
+        unsafe { kodo_map_insert_sv(map, 1, v2.as_ptr(), 6) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get_sv(map, 1, &mut out_ptr, &mut out_len, &mut is_some) };
+        assert_eq!(is_some, 1);
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
+        assert_eq!(result, b"second");
+        unsafe { kodo_map_free_sv(map) };
+    }
+
+    // -- Both String map tests (Map<String, String>) --
+
+    #[test]
+    fn map_ss_insert_and_get() {
+        let map = kodo_map_new();
+        let key = b"greeting";
+        let val = b"hello";
+        unsafe { kodo_map_insert_ss(map, key.as_ptr(), 8, val.as_ptr(), 5) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe {
+            kodo_map_get_ss(
+                map,
+                key.as_ptr(),
+                8,
+                &mut out_ptr,
+                &mut out_len,
+                &mut is_some,
+            );
+        }
+        assert_eq!(is_some, 1);
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
+        assert_eq!(result, b"hello");
+        unsafe { kodo_map_free_ss(map) };
+    }
+
+    #[test]
+    fn map_ss_overwrite() {
+        let map = kodo_map_new();
+        let key = b"key";
+        let v1 = b"old";
+        let v2 = b"new";
+        unsafe { kodo_map_insert_ss(map, key.as_ptr(), 3, v1.as_ptr(), 3) };
+        unsafe { kodo_map_insert_ss(map, key.as_ptr(), 3, v2.as_ptr(), 3) };
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe {
+            kodo_map_get_ss(
+                map,
+                key.as_ptr(),
+                3,
+                &mut out_ptr,
+                &mut out_len,
+                &mut is_some,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
+        assert_eq!(result, b"new");
+        unsafe { kodo_map_free_ss(map) };
+    }
+
+    #[test]
+    fn map_ss_get_missing() {
+        let map = kodo_map_new();
+        let key = b"key";
+        let val = b"val";
+        unsafe { kodo_map_insert_ss(map, key.as_ptr(), 3, val.as_ptr(), 3) };
+        let missing = b"nope";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe {
+            kodo_map_get_ss(
+                map,
+                missing.as_ptr(),
+                4,
+                &mut out_ptr,
+                &mut out_len,
+                &mut is_some,
+            );
+        }
+        assert_eq!(is_some, 0);
+        unsafe { kodo_map_free_ss(map) };
+    }
+
+    #[test]
+    fn map_ss_grow() {
+        let map = kodo_map_new();
+        for i in 0..20 {
+            let key = format!("k{i}");
+            let val = format!("v{i}");
+            unsafe {
+                kodo_map_insert_ss(
+                    map,
+                    key.as_ptr(),
+                    key.len() as i64,
+                    val.as_ptr(),
+                    val.len() as i64,
+                );
+            }
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 20);
+        for i in 0..20 {
+            let key = format!("k{i}");
+            let expected_val = format!("v{i}");
+            let mut out_ptr: *const u8 = std::ptr::null();
+            let mut out_len: i64 = 0;
+            let mut is_some: i64 = 0;
+            unsafe {
+                kodo_map_get_ss(
+                    map,
+                    key.as_ptr(),
+                    key.len() as i64,
+                    &mut out_ptr,
+                    &mut out_len,
+                    &mut is_some,
+                );
+            }
+            assert_eq!(is_some, 1);
+            let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
+            assert_eq!(result, expected_val.as_bytes());
+        }
+        unsafe { kodo_map_free_ss(map) };
+    }
+
+    #[test]
+    fn map_free_sk_null_safe() {
+        unsafe { kodo_map_free_sk(0) };
+    }
+
+    #[test]
+    fn map_free_sv_null_safe() {
+        unsafe { kodo_map_free_sv(0) };
+    }
+
+    #[test]
+    fn map_free_ss_null_safe() {
+        unsafe { kodo_map_free_ss(0) };
+    }
+
+    // -- List: pop, remove, set, is_empty, reverse, free --
+
+    #[test]
+    fn list_pop_returns_last_element() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+        }
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_pop(list, &mut value, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(value, 30);
+        assert_eq!(unsafe { kodo_list_length(list) }, 2);
+    }
+
+    #[test]
+    fn list_pop_empty_returns_none() {
+        let list = kodo_list_new();
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_pop(list, &mut value, &mut is_some) };
+        assert_eq!(is_some, 0);
+        assert_eq!(value, 0);
+    }
+
+    #[test]
+    fn list_pop_simple_returns_last() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 100);
+            kodo_list_push(list, 200);
+        }
+        let val = unsafe { kodo_list_pop_simple(list) };
+        assert_eq!(val, 200);
+        assert_eq!(unsafe { kodo_list_length(list) }, 1);
+    }
+
+    #[test]
+    fn list_pop_simple_empty_returns_zero() {
+        let list = kodo_list_new();
+        let val = unsafe { kodo_list_pop_simple(list) };
+        assert_eq!(val, 0);
+    }
+
+    #[test]
+    fn list_remove_shifts_elements() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+        }
+        let result = unsafe { kodo_list_remove(list, 1) };
+        assert_eq!(result, 1);
+        assert_eq!(unsafe { kodo_list_length(list) }, 2);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 10);
+        unsafe { kodo_list_get(list, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 30);
+    }
+
+    #[test]
+    fn list_remove_out_of_bounds() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 1) };
+        assert_eq!(unsafe { kodo_list_remove(list, 5) }, 0);
+        assert_eq!(unsafe { kodo_list_length(list) }, 1);
+    }
+
+    #[test]
+    fn list_remove_from_empty() {
+        let list = kodo_list_new();
+        assert_eq!(unsafe { kodo_list_remove(list, 0) }, 0);
+    }
+
+    #[test]
+    fn list_set_updates_value() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+        }
+        assert_eq!(unsafe { kodo_list_set(list, 0, 99) }, 1);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 99);
+    }
+
+    #[test]
+    fn list_set_out_of_bounds() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 10) };
+        assert_eq!(unsafe { kodo_list_set(list, 5, 99) }, 0);
+    }
+
+    #[test]
+    fn list_is_empty_new_list() {
+        let list = kodo_list_new();
+        assert_eq!(unsafe { kodo_list_is_empty(list) }, 1);
+    }
+
+    #[test]
+    fn list_is_empty_after_push() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 1) };
+        assert_eq!(unsafe { kodo_list_is_empty(list) }, 0);
+    }
+
+    #[test]
+    fn list_is_empty_after_pop_all() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 1) };
+        unsafe { kodo_list_pop_simple(list) };
+        assert_eq!(unsafe { kodo_list_is_empty(list) }, 1);
+    }
+
+    #[test]
+    fn list_reverse_multiple_elements() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 4);
+        }
+        unsafe { kodo_list_reverse(list) };
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 4);
+        unsafe { kodo_list_get(list, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 3);
+        unsafe { kodo_list_get(list, 2, &mut val, &mut is_some) };
+        assert_eq!(val, 2);
+        unsafe { kodo_list_get(list, 3, &mut val, &mut is_some) };
+        assert_eq!(val, 1);
+    }
+
+    #[test]
+    fn list_reverse_single_element() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 42) };
+        unsafe { kodo_list_reverse(list) };
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn list_reverse_empty() {
+        let list = kodo_list_new();
+        // Should not crash on empty list.
+        unsafe { kodo_list_reverse(list) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 0);
+    }
+
+    #[test]
+    fn list_free_null_safe() {
+        unsafe { kodo_list_free(0) };
+    }
+
+    #[test]
+    fn list_free_after_use() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_free(list);
+        }
+        // If we get here without crashing, the free worked.
+    }
+
+    #[test]
+    fn list_get_from_empty() {
+        let list = kodo_list_new();
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(is_some, 0);
+        assert_eq!(val, 0);
+    }
+
+    #[test]
+    fn list_contains_empty() {
+        let list = kodo_list_new();
+        assert_eq!(unsafe { kodo_list_contains(list, 42) }, 0);
+    }
+
+    // -- Map<Int, Int>: additional edge cases --
+
+    #[test]
+    fn map_get_from_empty() {
+        let map = kodo_map_new();
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get(map, 1, &mut val, &mut is_some) };
+        assert_eq!(is_some, 0);
+        assert_eq!(val, 0);
+    }
+
+    #[test]
+    fn map_overwrite_value() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 100);
+            kodo_map_insert(map, 1, 200);
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_map_get(map, 1, &mut val, &mut is_some) };
+        assert_eq!(is_some, 1);
+        assert_eq!(val, 200);
+    }
+
+    #[test]
+    fn map_free_null_safe() {
+        unsafe { kodo_map_free(0) };
+    }
+
+    #[test]
+    fn map_free_after_use() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 10);
+            kodo_map_insert(map, 2, 20);
+            kodo_map_free(map);
+        }
+    }
+
+    #[test]
+    fn map_grow_many_entries() {
+        let map = kodo_map_new();
+        for i in 0..50 {
+            unsafe { kodo_map_insert(map, i, i * 10) };
+        }
+        assert_eq!(unsafe { kodo_map_length(map) }, 50);
+        for i in 0..50 {
+            let mut val: i64 = 0;
+            let mut is_some: i64 = 0;
+            unsafe { kodo_map_get(map, i, &mut val, &mut is_some) };
+            assert_eq!(is_some, 1);
+            assert_eq!(val, i * 10);
+        }
+    }
+
+    // -- Map<String, Int>: remove nonexistent --
+
+    #[test]
+    fn map_sk_remove_nonexistent() {
+        let map = kodo_map_new();
+        let key = b"exists";
+        unsafe { kodo_map_insert_sk(map, key.as_ptr(), 6, 10) };
+        let other = b"nope";
+        assert_eq!(unsafe { kodo_map_remove_sk(map, other.as_ptr(), 4) }, 0);
+        assert_eq!(unsafe { kodo_map_length(map) }, 1);
+        unsafe { kodo_map_free_sk(map) };
+    }
+
+    #[test]
+    fn map_sk_remove_null_map() {
+        assert_eq!(unsafe { kodo_map_remove_sk(0, b"x".as_ptr(), 1) }, 0);
+    }
+
+    // -- List iterator tests --
+
+    #[test]
+    fn list_iterator_basic() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 30);
+        }
+        let iter = kodo_list_iter(list);
+        assert_ne!(iter, 0);
+
+        let mut values = Vec::new();
+        while kodo_list_iterator_advance(iter) == 1 {
+            values.push(kodo_list_iterator_value(iter));
+        }
+        assert_eq!(values, vec![10, 20, 30]);
+        kodo_list_iterator_free(iter);
+    }
+
+    #[test]
+    fn list_iterator_empty() {
+        let list = kodo_list_new();
+        let iter = kodo_list_iter(list);
+        assert_eq!(kodo_list_iterator_advance(iter), 0);
+        kodo_list_iterator_free(iter);
+    }
+
+    #[test]
+    fn list_iterator_free_null() {
+        kodo_list_iterator_free(0);
     }
 }

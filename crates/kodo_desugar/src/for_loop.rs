@@ -216,3 +216,470 @@ fn is_already_iterator_call(iterable: &Expr) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::Span;
+
+    fn s() -> Span {
+        Span::new(0, 10)
+    }
+
+    fn empty_block() -> Block {
+        Block {
+            span: s(),
+            stmts: vec![],
+        }
+    }
+
+    // ── desugar_for_stmt tests ──────────────────────────────────────
+
+    #[test]
+    fn for_exclusive_emits_let_and_while() {
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "i",
+            Expr::IntLit(0, s()),
+            Expr::IntLit(10, s()),
+            false,
+            empty_block(),
+        );
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(&stmts[0], Stmt::Let { mutable: true, name, .. } if name == "i"));
+        assert!(matches!(&stmts[1], Stmt::While { .. }));
+    }
+
+    #[test]
+    fn for_exclusive_uses_lt_operator() {
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "i",
+            Expr::IntLit(0, s()),
+            Expr::IntLit(5, s()),
+            false,
+            empty_block(),
+        );
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { op, .. } = condition {
+                assert_eq!(*op, BinOp::Lt);
+            } else {
+                panic!("expected BinaryOp");
+            }
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn for_inclusive_uses_le_operator() {
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "i",
+            Expr::IntLit(0, s()),
+            Expr::IntLit(5, s()),
+            true,
+            empty_block(),
+        );
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { op, .. } = condition {
+                assert_eq!(*op, BinOp::Le);
+            } else {
+                panic!("expected BinaryOp");
+            }
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn for_loop_appends_increment_to_body() {
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "i",
+            Expr::IntLit(0, s()),
+            Expr::IntLit(3, s()),
+            false,
+            empty_block(),
+        );
+        if let Stmt::While { body, .. } = &stmts[1] {
+            // Empty body + increment = 1 statement
+            assert_eq!(body.stmts.len(), 1);
+            if let Stmt::Assign { name, value, .. } = &body.stmts[0] {
+                assert_eq!(name, "i");
+                if let Expr::BinaryOp { op, .. } = value {
+                    assert_eq!(*op, BinOp::Add);
+                } else {
+                    panic!("expected BinaryOp for increment");
+                }
+            } else {
+                panic!("expected Assign for increment");
+            }
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn for_loop_preserves_body_stmts_before_increment() {
+        let body = Block {
+            span: s(),
+            stmts: vec![
+                Stmt::Expr(Expr::IntLit(1, s())),
+                Stmt::Expr(Expr::IntLit(2, s())),
+            ],
+        };
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "i",
+            Expr::IntLit(0, s()),
+            Expr::IntLit(5, s()),
+            false,
+            body,
+        );
+        if let Stmt::While { body, .. } = &stmts[1] {
+            assert_eq!(body.stmts.len(), 3); // 2 original + 1 increment
+            assert!(matches!(&body.stmts[0], Stmt::Expr(Expr::IntLit(1, _))));
+            assert!(matches!(&body.stmts[1], Stmt::Expr(Expr::IntLit(2, _))));
+            assert!(matches!(&body.stmts[2], Stmt::Assign { .. }));
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn for_loop_let_has_correct_start_value() {
+        let mut stmts = Vec::new();
+        desugar_for_stmt(
+            &mut stmts,
+            s(),
+            "x",
+            Expr::IntLit(42, s()),
+            Expr::IntLit(100, s()),
+            false,
+            empty_block(),
+        );
+        if let Stmt::Let { name, value, .. } = &stmts[0] {
+            assert_eq!(name, "x");
+            assert!(matches!(value, Expr::IntLit(42, _)));
+        } else {
+            panic!("expected Let");
+        }
+    }
+
+    #[test]
+    fn for_loop_desugars_sugar_in_start_and_end() {
+        let start = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("a".to_string(), s())),
+            right: Box::new(Expr::IntLit(0, s())),
+            span: s(),
+        };
+        let end = Expr::NullCoalesce {
+            left: Box::new(Expr::Ident("b".to_string(), s())),
+            right: Box::new(Expr::IntLit(10, s())),
+            span: s(),
+        };
+        let mut stmts = Vec::new();
+        desugar_for_stmt(&mut stmts, s(), "i", start, end, false, empty_block());
+        // Start expr should be desugared
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            assert!(matches!(value, Expr::Match { .. }));
+        } else {
+            panic!("expected Let");
+        }
+        // End expr in condition should be desugared
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { right, .. } = condition {
+                assert!(matches!(right.as_ref(), Expr::Match { .. }));
+            }
+        }
+    }
+
+    // ── desugar_for_in_stmt tests ───────────────────────────────────
+
+    #[test]
+    fn for_in_emits_let_while_free() {
+        let mut stmts = Vec::new();
+        desugar_for_in_stmt(
+            &mut stmts,
+            s(),
+            "x",
+            Expr::Ident("items".to_string(), s()),
+            empty_block(),
+        );
+        assert_eq!(stmts.len(), 3);
+        assert!(matches!(&stmts[0], Stmt::Let { name, .. } if name == "__iter_x"));
+        assert!(matches!(&stmts[1], Stmt::While { .. }));
+        assert!(matches!(&stmts[2], Stmt::Expr(Expr::Call { .. })));
+    }
+
+    #[test]
+    fn for_in_uses_list_iterator_for_plain_iterable() {
+        let mut stmts = Vec::new();
+        desugar_for_in_stmt(
+            &mut stmts,
+            s(),
+            "x",
+            Expr::Ident("my_list".to_string(), s()),
+            empty_block(),
+        );
+        // Init call should be list_iter
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            if let Expr::Call { callee, .. } = value {
+                assert!(matches!(callee.as_ref(), Expr::Ident(name, _) if name == "list_iter"));
+            } else {
+                panic!("expected Call");
+            }
+        } else {
+            panic!("expected Let");
+        }
+        // Free call should be list_iterator_free
+        if let Stmt::Expr(Expr::Call { callee, .. }) = &stmts[2] {
+            assert!(
+                matches!(callee.as_ref(), Expr::Ident(name, _) if name == "list_iterator_free")
+            );
+        }
+    }
+
+    #[test]
+    fn for_in_uses_map_keys_protocol_for_map_keys() {
+        let mut stmts = Vec::new();
+        let iterable = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_keys".to_string(), s())),
+            args: vec![Expr::Ident("my_map".to_string(), s())],
+            span: s(),
+        };
+        desugar_for_in_stmt(&mut stmts, s(), "k", iterable, empty_block());
+        // Init should use the Map_keys call directly (already iterator)
+        if let Stmt::Let { value, .. } = &stmts[0] {
+            if let Expr::Call { callee, .. } = value {
+                assert!(matches!(callee.as_ref(), Expr::Ident(name, _) if name == "Map_keys"));
+            } else {
+                panic!("expected Call");
+            }
+        }
+        // Advance should use map_keys_advance
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { left, .. } = condition {
+                if let Expr::Call { callee, .. } = left.as_ref() {
+                    assert!(
+                        matches!(callee.as_ref(), Expr::Ident(name, _) if name == "map_keys_advance")
+                    );
+                }
+            }
+        }
+        // Free should use map_keys_free
+        if let Stmt::Expr(Expr::Call { callee, .. }) = &stmts[2] {
+            assert!(matches!(callee.as_ref(), Expr::Ident(name, _) if name == "map_keys_free"));
+        }
+    }
+
+    #[test]
+    fn for_in_uses_map_values_protocol() {
+        let mut stmts = Vec::new();
+        let iterable = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_values".to_string(), s())),
+            args: vec![Expr::Ident("m".to_string(), s())],
+            span: s(),
+        };
+        desugar_for_in_stmt(&mut stmts, s(), "v", iterable, empty_block());
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { left, .. } = condition {
+                if let Expr::Call { callee, .. } = left.as_ref() {
+                    assert!(
+                        matches!(callee.as_ref(), Expr::Ident(name, _) if name == "map_values_advance")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn for_in_uses_string_chars_protocol() {
+        let mut stmts = Vec::new();
+        let iterable = Expr::Call {
+            callee: Box::new(Expr::Ident("String_chars".to_string(), s())),
+            args: vec![Expr::Ident("text".to_string(), s())],
+            span: s(),
+        };
+        desugar_for_in_stmt(&mut stmts, s(), "ch", iterable, empty_block());
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { left, .. } = condition {
+                if let Expr::Call { callee, .. } = left.as_ref() {
+                    assert!(
+                        matches!(callee.as_ref(), Expr::Ident(name, _) if name == "string_chars_advance")
+                    );
+                }
+            }
+        }
+        if let Stmt::Expr(Expr::Call { callee, .. }) = &stmts[2] {
+            assert!(matches!(callee.as_ref(), Expr::Ident(name, _) if name == "string_chars_free"));
+        }
+    }
+
+    #[test]
+    fn for_in_while_body_starts_with_let_binding() {
+        let body = Block {
+            span: s(),
+            stmts: vec![Stmt::Expr(Expr::IntLit(99, s()))],
+        };
+        let mut stmts = Vec::new();
+        desugar_for_in_stmt(
+            &mut stmts,
+            s(),
+            "elem",
+            Expr::Ident("list".to_string(), s()),
+            body,
+        );
+        if let Stmt::While { body, .. } = &stmts[1] {
+            // First stmt is `let elem = list_iterator_value(__iter_elem)`
+            assert!(matches!(&body.stmts[0], Stmt::Let { name, .. } if name == "elem"));
+            // Second stmt is the original body stmt
+            assert!(matches!(&body.stmts[1], Stmt::Expr(Expr::IntLit(99, _))));
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    #[test]
+    fn for_in_condition_checks_advance_gt_zero() {
+        let mut stmts = Vec::new();
+        desugar_for_in_stmt(
+            &mut stmts,
+            s(),
+            "x",
+            Expr::Ident("items".to_string(), s()),
+            empty_block(),
+        );
+        if let Stmt::While { condition, .. } = &stmts[1] {
+            if let Expr::BinaryOp { op, right, .. } = condition {
+                assert_eq!(*op, BinOp::Gt);
+                assert!(matches!(right.as_ref(), Expr::IntLit(0, _)));
+            } else {
+                panic!("expected BinaryOp");
+            }
+        } else {
+            panic!("expected While");
+        }
+    }
+
+    // ── detect_iterator_protocol tests ──────────────────────────────
+
+    #[test]
+    fn detect_protocol_default_for_plain_ident() {
+        let expr = Expr::Ident("list".to_string(), s());
+        let (init, advance, value, free) = detect_iterator_protocol(&expr);
+        assert_eq!(init, "list_iter");
+        assert_eq!(advance, "list_iterator_advance");
+        assert_eq!(value, "list_iterator_value");
+        assert_eq!(free, "list_iterator_free");
+    }
+
+    #[test]
+    fn detect_protocol_for_map_keys() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_keys".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        let (_, advance, value, free) = detect_iterator_protocol(&expr);
+        assert_eq!(advance, "map_keys_advance");
+        assert_eq!(value, "map_keys_value");
+        assert_eq!(free, "map_keys_free");
+    }
+
+    #[test]
+    fn detect_protocol_for_map_values() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_values".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        let (_, advance, value, free) = detect_iterator_protocol(&expr);
+        assert_eq!(advance, "map_values_advance");
+        assert_eq!(value, "map_values_value");
+        assert_eq!(free, "map_values_free");
+    }
+
+    #[test]
+    fn detect_protocol_for_string_chars() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("String_chars".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        let (_, advance, value, free) = detect_iterator_protocol(&expr);
+        assert_eq!(advance, "string_chars_advance");
+        assert_eq!(value, "string_chars_value");
+        assert_eq!(free, "string_chars_free");
+    }
+
+    #[test]
+    fn detect_protocol_unknown_call_uses_list() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("something_else".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        let (init, _, _, _) = detect_iterator_protocol(&expr);
+        assert_eq!(init, "list_iter");
+    }
+
+    // ── is_already_iterator_call tests ──────────────────────────────
+
+    #[test]
+    fn is_iterator_call_for_map_keys() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_keys".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        assert!(is_already_iterator_call(&expr));
+    }
+
+    #[test]
+    fn is_iterator_call_for_map_values() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Map_values".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        assert!(is_already_iterator_call(&expr));
+    }
+
+    #[test]
+    fn is_iterator_call_for_string_chars() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("String_chars".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        assert!(is_already_iterator_call(&expr));
+    }
+
+    #[test]
+    fn is_not_iterator_call_for_plain_ident() {
+        let expr = Expr::Ident("list".to_string(), s());
+        assert!(!is_already_iterator_call(&expr));
+    }
+
+    #[test]
+    fn is_not_iterator_call_for_unknown_call() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("foo".to_string(), s())),
+            args: vec![],
+            span: s(),
+        };
+        assert!(!is_already_iterator_call(&expr));
+    }
+}

@@ -789,6 +789,13 @@ impl TypeChecker {
                 Ok(left_ty)
             }
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                // String == String and String != String are supported
+                if (op == BinOp::Eq || op == BinOp::Ne)
+                    && left_ty == Type::String
+                    && right_ty == Type::String
+                {
+                    return Ok(Type::Bool);
+                }
                 if !left_ty.is_numeric() {
                     return Err(TypeError::Mismatch {
                         expected: "numeric type".to_string(),
@@ -922,6 +929,36 @@ impl TypeChecker {
                 })
             });
         if let Some((mangled_name, param_types, ret_type)) = lookup_result {
+            // For Map methods on non-Int-Int maps, use polymorphic checking.
+            if type_name == "Map" {
+                if let Type::Generic(_, ref map_params) = obj_ty {
+                    if map_params.len() == 2
+                        && !(map_params[0] == Type::Int && map_params[1] == Type::Int)
+                    {
+                        let key_ty = &map_params[0];
+                        let (expected_params, poly_ret): (Vec<Type>, Type) = match method {
+                            "remove" => (vec![key_ty.clone()], Type::Bool),
+                            "is_empty" => (vec![], Type::Bool),
+                            "keys" | "values" => (vec![], Type::Int),
+                            _ => (vec![], ret_type.clone()),
+                        };
+                        if expected_params.len() != args.len() {
+                            return Err(TypeError::ArityMismatch {
+                                expected: expected_params.len(),
+                                found: args.len(),
+                                span,
+                            });
+                        }
+                        for (param_ty, arg) in expected_params.iter().zip(args) {
+                            let arg_ty = self.infer_expr(arg)?;
+                            TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
+                        }
+                        self.method_resolutions.insert(span.start, mangled_name);
+                        return Ok(Some(poly_ret));
+                    }
+                }
+            }
+
             let method_params = if param_types.len() > 1 {
                 &param_types[1..]
             } else {
@@ -1045,6 +1082,13 @@ impl TypeChecker {
             None
         };
 
+        // Polymorphic map builtins: check based on the map's actual type params.
+        if let Some(ref name) = callee_name {
+            if let Some(ret) = self.try_check_polymorphic_map(name, args, span)? {
+                return Ok(ret);
+            }
+        }
+
         let callee_ty = self.infer_expr(callee)?;
         match callee_ty {
             Type::Function(param_types, ret_type) => {
@@ -1108,6 +1152,80 @@ impl TypeChecker {
                 found: callee_ty.to_string(),
                 span,
             }),
+        }
+    }
+
+    /// Checks polymorphic map builtin calls (`map_insert`, `map_get`, etc.)
+    /// by inferring the key/value types from the map argument.
+    ///
+    /// Returns `Some(return_type)` if this is a polymorphic map call,
+    /// `None` if it should fall through to normal checking.
+    fn try_check_polymorphic_map(
+        &mut self,
+        callee_name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> crate::Result<Option<Type>> {
+        // Only handle known map builtins with at least one argument.
+        let expected_arity = match callee_name {
+            "map_insert" => 3,
+            "map_get" | "map_contains_key" | "map_remove" => 2,
+            "map_length" | "map_is_empty" => 1,
+            _ => return Ok(None),
+        };
+        if args.len() != expected_arity {
+            return Err(TypeError::ArityMismatch {
+                expected: expected_arity,
+                found: args.len(),
+                span,
+            });
+        }
+
+        // Infer the map argument's type.
+        let map_ty = self.infer_expr(&args[0])?;
+        let (key_ty, val_ty) = match &map_ty {
+            Type::Generic(name, params) if name == "Map" && params.len() == 2 => {
+                (params[0].clone(), params[1].clone())
+            }
+            // Not a generic Map — fall through to normal checking.
+            _ => return Ok(None),
+        };
+
+        // If it's the default Map<Int, Int>, let normal checking handle it.
+        if key_ty == Type::Int && val_ty == Type::Int {
+            return Ok(None);
+        }
+
+        // Validate key/value types are Int or String.
+        let valid = [Type::Int, Type::String];
+        if !valid.contains(&key_ty) || !valid.contains(&val_ty) {
+            return Err(TypeError::Mismatch {
+                expected: "Int or String".to_string(),
+                found: format!("Map<{key_ty}, {val_ty}>"),
+                span,
+            });
+        }
+
+        match callee_name {
+            "map_insert" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&key_ty, &arg1_ty, expr_span(&args[1]))?;
+                let arg2_ty = self.infer_expr(&args[2])?;
+                TypeEnv::check_eq(&val_ty, &arg2_ty, expr_span(&args[2]))?;
+                Ok(Some(Type::Unit))
+            }
+            "map_get" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&key_ty, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(val_ty))
+            }
+            "map_contains_key" | "map_remove" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&key_ty, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(Type::Bool))
+            }
+            "map_length" | "map_is_empty" => Ok(Some(Type::Int)),
+            _ => Ok(None),
         }
     }
 

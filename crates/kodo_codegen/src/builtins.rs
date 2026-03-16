@@ -526,6 +526,7 @@ fn declare_list_builtins(
 }
 
 /// Declares map builtins (new, insert, get, etc.).
+#[allow(clippy::too_many_lines)]
 fn declare_map_builtins_impl(
     module: &mut ObjectModule,
     call_conv: CallConv,
@@ -581,6 +582,81 @@ fn declare_map_builtins_impl(
         [types::I64],
         types::I64
     );
+
+    // -- String Key variants (Map<String, Int> and Map<String, String>) --
+    decl_void!(
+        "kodo_map_insert_sk",
+        "map_insert_sk",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_map_get_sk",
+        "map_get_sk",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_ret!(
+        "kodo_map_contains_key_sk",
+        "map_contains_key_sk",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_map_remove_sk",
+        "map_remove_sk",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_void!("kodo_map_free_sk", "map_free_sk", types::I64);
+
+    // -- String Value variants (Map<Int, String>) --
+    decl_void!(
+        "kodo_map_insert_sv",
+        "map_insert_sv",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_map_get_sv",
+        "map_get_sv",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!("kodo_map_free_sv", "map_free_sv", types::I64);
+
+    // -- Both String variants (Map<String, String>) --
+    decl_void!(
+        "kodo_map_insert_ss",
+        "map_insert_ss",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_map_get_ss",
+        "map_get_ss",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!("kodo_map_free_ss", "map_free_ss", types::I64);
+
     Ok(())
 }
 

@@ -58,6 +58,14 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "file_write"
             | "list_get"
             | "map_get"
+            | "map_get_sk"
+            | "map_get_sv"
+            | "map_get_ss"
+            | "map_insert_sk"
+            | "map_insert_sv"
+            | "map_insert_ss"
+            | "map_contains_key_sk"
+            | "map_remove_sk"
             | "http_get"
             | "http_post"
             | "json_parse"
@@ -1182,8 +1190,15 @@ fn emit_string_builtin_call(
     }
 
     // list_get and map_get use out-parameters: (out_value, out_is_some).
-    if callee == "list_get" || callee == "map_get" {
+    if callee == "list_get" || callee == "map_get" || callee == "map_get_sk" {
         return emit_list_map_get(callee, &arg_vals, dest, builder, module, builtins, var_map);
+    }
+
+    // map_get_sv and map_get_ss return String via (out_ptr, out_len, out_is_some).
+    if callee == "map_get_sv" || callee == "map_get_ss" {
+        return emit_map_get_string_value(
+            callee, &arg_vals, dest, builder, module, builtins, var_map,
+        );
     }
 
     // For builtins that return a String via out-parameters.
@@ -1357,6 +1372,73 @@ fn emit_list_map_get(
         .load(types::I64, MemFlags::new(), out_value_addr, 0);
     let var = var_map.get(dest)?;
     builder.def_var(var, result_val);
+    Ok(true)
+}
+
+/// Emits a `map_get_sv` or `map_get_ss` call that returns a String via
+/// out-parameters `(out_ptr, out_len, out_is_some)`.
+fn emit_map_get_string_value(
+    callee: &str,
+    arg_vals: &[cranelift_codegen::ir::Value],
+    dest: LocalId,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+) -> Result<bool> {
+    // Allocate 24 bytes: 8 for ptr, 8 for len, 8 for is_some.
+    let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+        24,
+        0,
+    ));
+    let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+    let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+    let out_is_some_addr = builder.ins().stack_addr(types::I64, out_slot, 16);
+    let mut all_args = arg_vals.to_vec();
+    all_args.push(out_ptr_addr);
+    all_args.push(out_len_addr);
+    all_args.push(out_is_some_addr);
+
+    let builtin = builtins
+        .get(callee)
+        .ok_or_else(|| CodegenError::Unsupported(format!("builtin {callee}")))?;
+    let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+    builder.ins().call(func_ref, &all_args);
+
+    // Store the String result (ptr, len) into the destination stack slot.
+    if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(&dest) {
+        if dest_name == "_String" {
+            let result_ptr = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+            let result_len = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), out_len_addr, 0);
+            let dest_ptr_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), result_ptr, dest_ptr_addr, 0);
+            let dest_len_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), result_len, dest_len_addr, 0);
+            let var = var_map.get(dest)?;
+            let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+            builder.def_var(var, addr);
+            return Ok(true);
+        }
+    }
+    // Fallback: store pointer as scalar.
+    let result_ptr = builder
+        .ins()
+        .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+    let var = var_map.get(dest)?;
+    builder.def_var(var, result_ptr);
     Ok(true)
 }
 

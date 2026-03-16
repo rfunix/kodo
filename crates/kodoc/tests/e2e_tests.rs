@@ -1682,6 +1682,12 @@ e2e_example_test!(run: e2e_map_iteration, "map_iteration.ko", contains: ["60", "
 e2e_example_test!(run: e2e_list_operations, "list_operations.ko", contains: ["empty", "3", "10", "99", "found 99"]);
 e2e_example_test!(run: e2e_map_operations, "map_operations.ko", contains: ["empty", "3", "200", "has key 1", "key 2 removed"]);
 
+// --- Generic Map<K,V> examples ---
+
+e2e_example_test!(run: e2e_map_string_string, "map_string_string.ko", contains: ["name = Kodo", "lang = Rust", "Has key 'name': true", "updated lang = Kodo", "Removed 'type': true", "Final length: 2"]);
+e2e_example_test!(run: e2e_map_string_int, "map_string_int.ko", contains: ["Alice: 95", "Bob: 87", "Carol is in the map", "Total students: 3", "Bob updated: 91"]);
+e2e_example_test!(run: e2e_map_int_string, "map_int_string.ko", contains: ["1 = one", "2 = two", "3 = three", "Map size: 3", "1 updated = uno"]);
+
 // --- Examples that intentionally fail to compile ---
 
 e2e_example_test!(fail: e2e_type_errors, "type_errors.ko");

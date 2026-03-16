@@ -435,6 +435,7 @@ fn generate_validator(function: &Function) -> Result<MirFunction> {
 
 /// Registers return types for builtin functions so that MIR locals receiving
 /// their results get the correct type (e.g. `Type::String` for `Int_to_string`).
+#[allow(clippy::too_many_lines)]
 fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
     // Builtins that return String.
     for name in &[
@@ -445,6 +446,8 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
         "String_to_upper",
         "String_to_lower",
         "String_substring",
+        "map_get_sv",
+        "map_get_ss",
     ] {
         fn_return_types
             .entry((*name).to_string())
@@ -464,6 +467,9 @@ fn register_builtin_return_types(fn_return_types: &mut HashMap<String, Type>) {
         "list_contains",
         "map_length",
         "map_contains_key",
+        "map_contains_key_sk",
+        "map_remove_sk",
+        "map_get_sk",
     ] {
         fn_return_types
             .entry((*name).to_string())

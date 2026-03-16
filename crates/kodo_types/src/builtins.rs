@@ -943,7 +943,7 @@ impl TypeChecker {
         );
         self.env.insert(
             "json_get_string".to_string(),
-            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::String)),
         );
         self.env.insert(
             "json_get_int".to_string(),
