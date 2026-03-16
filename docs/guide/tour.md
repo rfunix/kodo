@@ -46,7 +46,7 @@ fn greet(name: String) {
 }
 ```
 
-Kōdo supports three primitive types: `Int`, `Bool`, and `String`.
+Kōdo supports several primitive types including `Int`, `Float64`, `Bool`, and `String`. Additional numeric types are available: `Int8`–`Int64`, `Uint`–`Uint64`, `Float32`, and `Byte`.
 
 ## Variables
 

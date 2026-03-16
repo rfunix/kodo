@@ -7,10 +7,10 @@ Kōdo provides functional combinators on iterators that let you transform, filte
 `map` applies a closure to each element, producing a new list:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(1)
-numbers.push(2)
-numbers.push(3)
+let numbers: List<Int> = list_new()
+list_push(numbers, 1)
+list_push(numbers, 2)
+list_push(numbers, 3)
 
 let doubled: List<Int> = numbers.iter().map(fn(x: Int) -> Int { return x * 2 })
 // doubled contains [2, 4, 6]
@@ -21,11 +21,11 @@ let doubled: List<Int> = numbers.iter().map(fn(x: Int) -> Int { return x * 2 })
 `filter` keeps only elements where the predicate returns `true`:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(1)
-numbers.push(2)
-numbers.push(3)
-numbers.push(4)
+let numbers: List<Int> = list_new()
+list_push(numbers, 1)
+list_push(numbers, 2)
+list_push(numbers, 3)
+list_push(numbers, 4)
 
 let evens: List<Int> = numbers.iter().filter(fn(x: Int) -> Bool { return x % 2 == 0 })
 // evens contains [2, 4]
@@ -36,10 +36,10 @@ let evens: List<Int> = numbers.iter().filter(fn(x: Int) -> Bool { return x % 2 =
 `fold` reduces a collection to a single value by applying a combining function:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(1)
-numbers.push(2)
-numbers.push(3)
+let numbers: List<Int> = list_new()
+list_push(numbers, 1)
+list_push(numbers, 2)
+list_push(numbers, 3)
 
 let sum: Int = numbers.iter().fold(0, fn(acc: Int, x: Int) -> Int { return acc + x })
 // sum is 6
@@ -52,9 +52,9 @@ The first argument is the initial accumulator value. The closure receives the cu
 `count` returns the number of elements in the iterator:
 
 ```rust
-let items: List<Int> = List.new()
-items.push(10)
-items.push(20)
+let items: List<Int> = list_new()
+list_push(items, 10)
+list_push(items, 20)
 
 let n: Int = items.iter().count()
 // n is 2
@@ -65,10 +65,10 @@ let n: Int = items.iter().count()
 `any` returns `true` if at least one element satisfies the predicate:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(1)
-numbers.push(2)
-numbers.push(3)
+let numbers: List<Int> = list_new()
+list_push(numbers, 1)
+list_push(numbers, 2)
+list_push(numbers, 3)
 
 let has_even: Bool = numbers.iter().any(fn(x: Int) -> Bool { return x % 2 == 0 })
 // has_even is true
@@ -79,10 +79,10 @@ let has_even: Bool = numbers.iter().any(fn(x: Int) -> Bool { return x % 2 == 0 }
 `all` returns `true` if every element satisfies the predicate:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(2)
-numbers.push(4)
-numbers.push(6)
+let numbers: List<Int> = list_new()
+list_push(numbers, 2)
+list_push(numbers, 4)
+list_push(numbers, 6)
 
 let all_even: Bool = numbers.iter().all(fn(x: Int) -> Bool { return x % 2 == 0 })
 // all_even is true
@@ -93,10 +93,10 @@ let all_even: Bool = numbers.iter().all(fn(x: Int) -> Bool { return x % 2 == 0 }
 `reduce` is like `fold` but uses the first element as the initial accumulator:
 
 ```rust
-let numbers: List<Int> = List.new()
-numbers.push(1)
-numbers.push(2)
-numbers.push(3)
+let numbers: List<Int> = list_new()
+list_push(numbers, 1)
+list_push(numbers, 2)
+list_push(numbers, 3)
 
 let sum: Int = numbers.iter().reduce(fn(acc: Int, x: Int) -> Int { return acc + x })
 // sum is 6
@@ -107,12 +107,12 @@ let sum: Int = numbers.iter().reduce(fn(acc: Int, x: Int) -> Int { return acc + 
 Combinators chain naturally to form data processing pipelines:
 
 ```rust
-let data: List<Int> = List.new()
-data.push(1)
-data.push(2)
-data.push(3)
-data.push(4)
-data.push(5)
+let data: List<Int> = list_new()
+list_push(data, 1)
+list_push(data, 2)
+list_push(data, 3)
+list_push(data, 4)
+list_push(data, 5)
 
 // Filter even numbers, double them, then sum
 let result: Int = data.iter()

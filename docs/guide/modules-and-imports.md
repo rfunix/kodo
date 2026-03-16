@@ -195,8 +195,8 @@ All functions work with any `Map<K, V>` where K, V are `Int` or `String`:
 | `map_get(m, k)` | Get value by key |
 | `map_contains_key(m, k)` | Check if key exists |
 | `map_length(m)` | Number of entries |
-| `m.remove(k)` | Remove a key-value pair |
-| `m.is_empty()` | Check if map is empty |
+| `map_remove(m, k)` | Remove a key-value pair |
+| `map_is_empty(m)` | Check if map is empty |
 
 ### String Methods
 

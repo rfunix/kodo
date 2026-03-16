@@ -25,6 +25,7 @@ kodoc build <file> [options]
 | `-o, --output <path>` | Output file path | Input filename without `.ko` extension |
 | `--json-errors` | Emit errors as JSON (for AI agent consumption) | `false` |
 | `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `recoverable`, `none` | `runtime` |
+| `--emit-mir` | Print the MIR (Mid-level IR) to stdout before code generation | `false` |
 
 **Examples:**
 
@@ -52,7 +53,9 @@ kodoc check <file> [options]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--json-errors` | Emit errors as JSON | `false` |
+| `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `recoverable`, `none` | `runtime` |
 | `--emit-cert` | Emit a `.ko.cert.json` compilation certificate alongside diagnostics | `false` |
+| `--repair-plan` | Emit repair plans as JSON for each error (for AI agent consumption) | `false` |
 
 **Example:**
 
@@ -94,6 +97,116 @@ kodoc parse <file>
 ```bash
 kodoc parse hello.ko
 # Output: Debug representation of the AST
+```
+
+### `kodoc mir`
+
+Lower a source file to MIR (Mid-level IR) and print it without generating code. Useful for inspecting the compiler's intermediate representation.
+
+```bash
+kodoc mir <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `recoverable`, `none` | `runtime` |
+
+**Example:**
+
+```bash
+kodoc mir hello.ko
+# Output: MIR representation of the program
+```
+
+### `kodoc explain`
+
+Explain an error code in detail with examples. Useful for understanding what caused a specific compiler error.
+
+```bash
+kodoc explain <code> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<code>` | The error code to explain (e.g., `E0200`) |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json` | Output as JSON instead of human-readable format | `false` |
+
+**Example:**
+
+```bash
+kodoc explain E0200
+# Output: Detailed explanation of the error with examples and fix suggestions
+
+kodoc explain E0200 --json
+# Output: JSON explanation for agent consumption
+```
+
+### `kodoc describe`
+
+Inspect metadata embedded in a compiled Kōdo binary. Shows the compilation certificate stored in the binary.
+
+```bash
+kodoc describe <binary> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<binary>` | Path to the compiled binary |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json` | Output as raw JSON instead of human-readable format | `false` |
+
+**Example:**
+
+```bash
+kodoc describe ./hello
+# Output: Module name, purpose, version, functions, contracts, confidence scores
+
+kodoc describe ./hello --json
+# Output: JSON metadata for agent consumption
+```
+
+### `kodoc test`
+
+Run tests defined in a Kōdo source file. See [Testing](testing.md) for details on writing tests.
+
+```bash
+kodoc test <file> [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--filter <pattern>` | Filter tests by name substring | (none — run all) |
+| `--json` | Output results as JSON for agent consumption | `false` |
+| `--contracts <mode>` | Contract checking mode: `static`, `runtime`, `both`, `recoverable`, `none` | `runtime` |
+
+**Examples:**
+
+```bash
+# Run all tests
+kodoc test examples/testing.ko
+
+# Run only tests matching a pattern
+kodoc test examples/testing.ko --filter "add"
+
+# JSON output for agents
+kodoc test examples/testing.ko --json
 ```
 
 ### `kodoc intent-explain`
@@ -145,6 +258,7 @@ kodoc confidence-report <file> [options]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--json` | Output as JSON instead of human-readable table | `false` |
+| `--threshold <float>` | Confidence threshold — functions below this value are flagged | `0.8` |
 
 **Example:**
 
@@ -279,6 +393,10 @@ cargo run -p kodoc -- build hello.ko -o hello
 cargo run -p kodoc -- check hello.ko
 cargo run -p kodoc -- lex hello.ko
 cargo run -p kodoc -- parse hello.ko
+cargo run -p kodoc -- mir hello.ko
+cargo run -p kodoc -- explain E0200
+cargo run -p kodoc -- describe ./hello
+cargo run -p kodoc -- test examples/testing.ko
 cargo run -p kodoc -- intent-explain intent_demo.ko
 cargo run -p kodoc -- fmt hello.ko
 cargo run -p kodoc -- repl

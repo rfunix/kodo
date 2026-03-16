@@ -7,10 +7,10 @@ Kōdo provides a built-in iterator protocol that lets you traverse collections u
 The simplest way to iterate is with `for-in`:
 
 ```rust
-let items: List<Int> = List.new()
-items.push(10)
-items.push(20)
-items.push(30)
+let items: List<Int> = list_new()
+list_push(items, 10)
+list_push(items, 20)
+list_push(items, 30)
 
 for item in items {
     print_int(item)
@@ -29,10 +29,10 @@ Output:
 `for-in` on a `List<T>` visits each element in order:
 
 ```rust
-let names: List<String> = List.new()
-names.push("alice")
-names.push("bob")
-names.push("carol")
+let names: List<String> = list_new()
+list_push(names, "alice")
+list_push(names, "bob")
+list_push(names, "carol")
 
 for name in names {
     print(name)
@@ -44,9 +44,9 @@ for name in names {
 Iterating over a `Map<K, V>` visits keys:
 
 ```rust
-let scores: Map<String, Int> = Map.new()
-scores.insert("alice", 95)
-scores.insert("bob", 87)
+let scores: Map<String, Int> = map_new()
+map_insert(scores, "alice", 95)
+map_insert(scores, "bob", 87)
 
 for key in scores.keys() {
     print(key)

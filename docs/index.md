@@ -34,6 +34,10 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [Testing](guide/testing.md) — built-in test framework with assertions and `kodoc test`
 - [Real-World Examples](guide/real-world-examples.md) — complete programs: todo app, URL shortener, word counter, config validator, health checker
 
+### Standard Library
+
+- [Standard Library Reference](guide/stdlib-reference.md) — complete reference for all built-in functions and methods
+
 ### Tools
 
 - [CLI Reference](guide/cli-reference.md) — all `kodoc` commands, flags, and environment variables, including `confidence-report`, `fix`, and `audit`

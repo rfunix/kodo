@@ -75,13 +75,13 @@ Use `kodoc test` to run tests in a file:
 
 ```bash
 # Run all tests in a file
-kodoc test examples/math_utils.ko
+kodoc test examples/testing.ko
 
 # Run only tests whose name matches a pattern
-kodoc test examples/math_utils.ko --filter "add"
+kodoc test examples/testing.ko --filter "add"
 
 # Output results as JSON (for agent consumption)
-kodoc test examples/math_utils.ko --json
+kodoc test examples/testing.ko --json
 ```
 
 ### Exit Codes
@@ -161,7 +161,7 @@ module string_utils {
 Run it:
 
 ```bash
-$ kodoc test string_utils.ko
+$ kodoc test testing.ko
 Running 3 tests...
   PASS  repeat_string builds repeated output
   PASS  is_empty detects empty strings
