@@ -325,6 +325,9 @@ fn define_params(
                     Type::String => STRING_LAYOUT_SIZE,
                     Type::Struct(name) => struct_layouts.get(name).map_or(8, |l| l.total_size),
                     Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
+                    Type::DynTrait(_) => crate::layout::DYN_TRAIT_LAYOUT_SIZE,
+                    #[allow(clippy::cast_possible_truncation)]
+                    Type::Tuple(elems) => 8 + (elems.len() as u32) * 8,
                     _ => 8,
                 };
                 let num_words = slot_size.div_ceil(8);

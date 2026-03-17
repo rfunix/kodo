@@ -1259,6 +1259,7 @@ fn lower_spawn_without_captures() {
         &HashSet::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashMap::new(),
     )
     .unwrap();
     mir.validate().unwrap();
@@ -1310,6 +1311,7 @@ fn lower_spawn_with_captures() {
         &HashMap::new(),
         &HashMap::new(),
         &HashSet::new(),
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
     )

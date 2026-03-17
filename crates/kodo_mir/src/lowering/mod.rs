@@ -110,6 +110,11 @@ pub struct MirBuilder {
     /// Used by `lower_virtual_call` to resolve the correct parameter and
     /// return types for `dyn Trait` virtual dispatch calls.
     trait_registry: HashMap<String, Vec<(String, Vec<kodo_types::Type>, kodo_types::Type)>>,
+    /// Registry of function parameter types: name to list of param types.
+    ///
+    /// Used during call lowering to insert `MakeDynTrait` coercions when a
+    /// concrete type is passed to a `dyn Trait` parameter.
+    fn_param_types: HashMap<String, Vec<kodo_types::Type>>,
 }
 
 impl MirBuilder {
@@ -137,6 +142,7 @@ impl MirBuilder {
             actor_names: HashSet::new(),
             type_alias_registry: HashMap::new(),
             trait_registry: HashMap::new(),
+            fn_param_types: HashMap::new(),
         }
     }
 
@@ -217,13 +223,14 @@ fn lower_function_with_registries(
         &HashSet::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashMap::new(),
     )?;
     Ok(func)
 }
 
 /// Lowers a single AST [`Function`] into a [`MirFunction`] and any
 /// lambda-lifted closure functions.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn lower_function_with_closures(
     function: &Function,
     struct_registry: &HashMap<String, Vec<(String, Type)>>,
@@ -232,6 +239,7 @@ fn lower_function_with_closures(
     actor_names: &HashSet<String>,
     type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>)>,
     trait_registry: &HashMap<String, Vec<(String, Vec<Type>, Type)>>,
+    fn_param_types: &HashMap<String, Vec<Type>>,
 ) -> Result<(MirFunction, Vec<MirFunction>)> {
     let mut builder = MirBuilder::new();
     builder.actor_names.clone_from(actor_names);
@@ -240,6 +248,7 @@ fn lower_function_with_closures(
     builder.fn_return_types.clone_from(fn_return_types);
     builder.type_alias_registry.clone_from(type_alias_registry);
     builder.trait_registry.clone_from(trait_registry);
+    builder.fn_param_types.clone_from(fn_param_types);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
@@ -362,6 +371,21 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     }
     registry::register_builtin_return_types(&mut fn_return_types);
 
+    // Build function parameter type registry for dyn Trait coercions.
+    let mut fn_param_types: HashMap<String, Vec<Type>> = HashMap::new();
+    for func in &module.functions {
+        if !func.generic_params.is_empty() {
+            continue;
+        }
+        let param_tys: std::result::Result<Vec<Type>, _> = func
+            .params
+            .iter()
+            .map(|p| resolve_type_with_enums(&p.ty, p.span, &enum_ns))
+            .collect();
+        let param_tys = param_tys.map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        fn_param_types.insert(func.name.clone(), param_tys);
+    }
+
     // Collect actor names so the builder can distinguish actors from structs.
     let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
 
@@ -379,6 +403,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             &actor_names,
             &alias_reg,
             &trait_reg,
+            &fn_param_types,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -405,6 +430,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
                 &actor_names,
                 &alias_reg,
                 &trait_reg,
+                &fn_param_types,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -461,6 +487,21 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         trait_reg.insert(trait_decl.name.clone(), methods);
     }
 
+    // Build function parameter type registry for dyn Trait coercions.
+    let mut fn_param_types: HashMap<String, Vec<Type>> = HashMap::new();
+    for func in &module.functions {
+        if !func.generic_params.is_empty() {
+            continue;
+        }
+        let param_tys: std::result::Result<Vec<Type>, _> = func
+            .params
+            .iter()
+            .map(|p| resolve_type_with_enums(&p.ty, p.span, &enum_names))
+            .collect();
+        let param_tys = param_tys.map_err(|e| MirError::TypeResolution(e.to_string()))?;
+        fn_param_types.insert(func.name.clone(), param_tys);
+    }
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
@@ -475,6 +516,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             &actor_names,
             &alias_reg,
             &trait_reg,
+            &fn_param_types,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -501,6 +543,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
                 &actor_names,
                 &alias_reg,
                 &trait_reg,
+                &fn_param_types,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
