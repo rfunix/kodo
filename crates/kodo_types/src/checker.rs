@@ -126,6 +126,11 @@ pub struct TypeChecker {
     /// When a module is imported and its symbols are registered, private symbols
     /// are recorded here so that cross-module access can be rejected.
     pub(crate) private_symbols: std::collections::HashMap<String, String>,
+    /// Spans of `ForIn` statements that iterate over a `Map<K,V>`.
+    ///
+    /// Used to rewrite the iterable to `Map_keys(iterable)` before desugaring,
+    /// since the desugar pass operates without type information.
+    pub(crate) map_for_in_spans: Vec<Span>,
 }
 
 impl TypeChecker {
@@ -168,6 +173,7 @@ impl TypeChecker {
             trait_impl_set: std::collections::HashMap::new(),
             loop_depth: 0,
             private_symbols: std::collections::HashMap::new(),
+            map_for_in_spans: Vec::new(),
         };
         checker.register_builtins();
         checker
@@ -275,6 +281,13 @@ impl TypeChecker {
     #[must_use]
     pub fn method_resolutions(&self) -> &std::collections::HashMap<u32, String> {
         &self.method_resolutions
+    }
+
+    /// Returns the spans of `ForIn` statements that iterate over Maps.
+    /// Used to rewrite iterables to `Map_keys(...)` before desugaring.
+    #[must_use]
+    pub fn map_for_in_spans(&self) -> &[Span] {
+        &self.map_for_in_spans
     }
 
     /// Returns the list of monomorphized function instances.

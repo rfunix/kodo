@@ -971,6 +971,59 @@ pub(crate) fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
     }
 }
 
+/// Rewrites `for-in` over Maps to use `Map_keys(iterable)` so the desugar
+/// pass selects the correct iterator protocol.
+pub(crate) fn rewrite_map_for_in(module: &mut kodo_ast::Module, spans: &[kodo_ast::Span]) {
+    if spans.is_empty() {
+        return;
+    }
+    for func in &mut module.functions {
+        rewrite_map_for_in_in_block(&mut func.body, spans);
+    }
+}
+
+/// Rewrites `for-in` statements in a block that iterate over Maps.
+fn rewrite_map_for_in_in_block(block: &mut kodo_ast::Block, spans: &[kodo_ast::Span]) {
+    for stmt in &mut block.stmts {
+        match stmt {
+            kodo_ast::Stmt::ForIn {
+                span,
+                iterable,
+                body,
+                ..
+            } => {
+                if spans.contains(span) {
+                    // Wrap iterable: `map_expr` → `Map_keys(map_expr)`
+                    let original = std::mem::replace(
+                        iterable,
+                        kodo_ast::Expr::IntLit(0, *span), // placeholder
+                    );
+                    *iterable = kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("Map_keys".to_string(), *span)),
+                        args: vec![original],
+                        span: *span,
+                    };
+                }
+                rewrite_map_for_in_in_block(body, spans);
+            }
+            kodo_ast::Stmt::While { body, .. } | kodo_ast::Stmt::For { body, .. } => {
+                rewrite_map_for_in_in_block(body, spans);
+            }
+            kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            }) => {
+                rewrite_map_for_in_in_block(then_branch, spans);
+                if let Some(eb) = else_branch {
+                    rewrite_map_for_in_in_block(eb, spans);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Rewrites method calls in a block by replacing `obj.method(args)` with
 /// `TypeName_method(obj, args)` where a method call was resolved during type checking.
 pub(crate) fn rewrite_method_calls_in_block(

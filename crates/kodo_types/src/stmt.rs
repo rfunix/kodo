@@ -226,7 +226,7 @@ impl TypeChecker {
     /// For `Map<K,V>`, the loop variable is bound to `K` (iterates over keys).
     fn check_for_in_stmt(
         &mut self,
-        _span: kodo_ast::Span,
+        span: kodo_ast::Span,
         name: &str,
         iterable: &Expr,
         body: &kodo_ast::Block,
@@ -237,6 +237,9 @@ impl TypeChecker {
                 args[0].clone()
             }
             Type::Generic(name_str, args) if name_str == "Map" && args.len() == 2 => {
+                // Record this span so the build pipeline can rewrite
+                // the iterable to Map_keys(iterable) before desugaring.
+                self.map_for_in_spans.push(span);
                 // Iterating over Map yields keys (K).
                 args[0].clone()
             }
