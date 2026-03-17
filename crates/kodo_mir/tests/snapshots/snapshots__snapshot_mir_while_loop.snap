@@ -1,0 +1,118 @@
+---
+source: crates/kodo_mir/tests/snapshots.rs
+expression: mir
+---
+MirFunction {
+    name: "count_to_ten",
+    return_type: Int,
+    param_count: 0,
+    locals: [
+        Local {
+            id: LocalId(
+                0,
+            ),
+            ty: Int,
+            mutable: true,
+        },
+    ],
+    blocks: [
+        BasicBlock {
+            id: BlockId(
+                0,
+            ),
+            instructions: [
+                Assign(
+                    LocalId(
+                        0,
+                    ),
+                    IntConst(
+                        0,
+                    ),
+                ),
+            ],
+            terminator: Goto(
+                BlockId(
+                    1,
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                1,
+            ),
+            instructions: [],
+            terminator: Branch {
+                condition: BinOp(
+                    Lt,
+                    Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                    IntConst(
+                        10,
+                    ),
+                ),
+                true_block: BlockId(
+                    2,
+                ),
+                false_block: BlockId(
+                    3,
+                ),
+            },
+        },
+        BasicBlock {
+            id: BlockId(
+                2,
+            ),
+            instructions: [
+                Assign(
+                    LocalId(
+                        0,
+                    ),
+                    BinOp(
+                        Add,
+                        Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        IntConst(
+                            1,
+                        ),
+                    ),
+                ),
+            ],
+            terminator: Goto(
+                BlockId(
+                    1,
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                3,
+            ),
+            instructions: [],
+            terminator: Return(
+                Local(
+                    LocalId(
+                        0,
+                    ),
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                4,
+            ),
+            instructions: [],
+            terminator: Return(
+                Unit,
+            ),
+        },
+    ],
+    entry: BlockId(
+        0,
+    ),
+}

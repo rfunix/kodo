@@ -1,0 +1,17 @@
+// Struct literal missing a required field — must fail.
+// ERROR E0214
+module missing_struct_field_test {
+    meta {
+        purpose: "Test missing struct field detection"
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10 }
+    }
+}

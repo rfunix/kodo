@@ -9,3 +9,7 @@ description = "Standard library stubs for the Kōdo language"
 [dependencies]
 kodo_ast.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+kodo_lexer.workspace = true
+kodo_parser.workspace = true

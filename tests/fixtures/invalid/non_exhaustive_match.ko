@@ -1,0 +1,23 @@
+// Match missing a variant — must fail.
+// ERROR E0222
+module non_exhaustive_match {
+    meta {
+        purpose: "Test non-exhaustive match detection"
+        version: "0.1.0"
+    }
+
+    enum Direction {
+        North,
+        South,
+        East,
+        West
+    }
+
+    fn main() {
+        let d: Direction = Direction::North
+        let x: Int = match d {
+            Direction::North => 1,
+            Direction::South => 2
+        }
+    }
+}

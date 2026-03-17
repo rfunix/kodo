@@ -1,0 +1,33 @@
+// Exhaustive match on enums.
+
+module enums_match_fixture {
+    meta {
+        purpose: "Test enum definition and exhaustive match"
+        version: "0.1.0"
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn color_code(c: Color) -> Int {
+        return match c {
+            Color::Red => 1,
+            Color::Green => 2,
+            Color::Blue => 3
+        }
+    }
+
+    fn main() -> Int {
+        let r: Color = Color::Red
+        let g: Color = Color::Green
+        let b: Color = Color::Blue
+
+        print_int(color_code(r))
+        print_int(color_code(g))
+        print_int(color_code(b))
+        return 0
+    }
+}

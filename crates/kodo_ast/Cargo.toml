@@ -10,6 +10,9 @@ description = "Abstract Syntax Tree definitions for the Kōdo language"
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [features]
 default = []
 serde = ["dep:serde"]

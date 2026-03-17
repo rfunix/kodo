@@ -1,0 +1,314 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        2,
+    ),
+    span: Span {
+        start: 36,
+        end: 409,
+    },
+    name: "closures_fixture",
+    imports: [],
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 66,
+                end: 168,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Test closure expressions and variable capture",
+                    span: Span {
+                        start: 66,
+                        end: 137,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 66,
+                        end: 162,
+                    },
+                },
+            ],
+        },
+    ),
+    type_aliases: [],
+    type_decls: [],
+    enum_decls: [],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    invariants: [],
+    functions: [
+        Function {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 174,
+                end: 407,
+            },
+            name: "main",
+            visibility: Private,
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 191,
+                    end: 407,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 201,
+                            end: 221,
+                        },
+                        mutable: false,
+                        name: "factor",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: IntLit(
+                            10,
+                            Span {
+                                start: 219,
+                                end: 221,
+                            },
+                        ),
+                    },
+                    Let {
+                        span: Span {
+                            start: 230,
+                            end: 284,
+                        },
+                        mutable: false,
+                        name: "mul",
+                        ty: Some(
+                            Function(
+                                [
+                                    Named(
+                                        "Int",
+                                    ),
+                                ],
+                                Named(
+                                    "Int",
+                                ),
+                            ),
+                        ),
+                        value: Closure {
+                            params: [
+                                ClosureParam {
+                                    name: "x",
+                                    ty: Some(
+                                        Named(
+                                            "Int",
+                                        ),
+                                    ),
+                                    span: Span {
+                                        start: 255,
+                                        end: 261,
+                                    },
+                                },
+                            ],
+                            return_type: Some(
+                                Named(
+                                    "Int",
+                                ),
+                            ),
+                            body: Block(
+                                Block {
+                                    span: Span {
+                                        start: 270,
+                                        end: 284,
+                                    },
+                                    stmts: [
+                                        Expr(
+                                            BinaryOp {
+                                                left: Ident(
+                                                    "x",
+                                                    Span {
+                                                        start: 272,
+                                                        end: 273,
+                                                    },
+                                                ),
+                                                op: Mul,
+                                                right: Ident(
+                                                    "factor",
+                                                    Span {
+                                                        start: 276,
+                                                        end: 282,
+                                                    },
+                                                ),
+                                                span: Span {
+                                                    start: 272,
+                                                    end: 282,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
+                            span: Span {
+                                start: 254,
+                                end: 284,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 294,
+                            end: 313,
+                        },
+                        mutable: false,
+                        name: "a",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: Call {
+                            callee: Ident(
+                                "mul",
+                                Span {
+                                    start: 307,
+                                    end: 310,
+                                },
+                            ),
+                            args: [
+                                IntLit(
+                                    3,
+                                    Span {
+                                        start: 311,
+                                        end: 312,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 307,
+                                end: 313,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 322,
+                            end: 341,
+                        },
+                        mutable: false,
+                        name: "b",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: Call {
+                            callee: Ident(
+                                "mul",
+                                Span {
+                                    start: 335,
+                                    end: 338,
+                                },
+                            ),
+                            args: [
+                                IntLit(
+                                    7,
+                                    Span {
+                                        start: 339,
+                                        end: 340,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 335,
+                                end: 341,
+                            },
+                        },
+                    },
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 351,
+                                    end: 360,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "a",
+                                    Span {
+                                        start: 361,
+                                        end: 362,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 351,
+                                end: 363,
+                            },
+                        },
+                    ),
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 372,
+                                    end: 381,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "b",
+                                    Span {
+                                        start: 382,
+                                        end: 383,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 372,
+                                end: 384,
+                            },
+                        },
+                    ),
+                    Return {
+                        span: Span {
+                            start: 393,
+                            end: 401,
+                        },
+                        value: Some(
+                            IntLit(
+                                0,
+                                Span {
+                                    start: 400,
+                                    end: 401,
+                                },
+                            ),
+                        ),
+                    },
+                ],
+            },
+        },
+    ],
+    test_decls: [],
+}

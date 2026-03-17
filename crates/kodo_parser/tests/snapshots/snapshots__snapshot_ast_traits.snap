@@ -1,0 +1,547 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        9,
+    ),
+    span: Span {
+        start: 42,
+        end: 747,
+    },
+    name: "traits_fixture",
+    imports: [],
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 70,
+                end: 169,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Test trait definitions and implementations",
+                    span: Span {
+                        start: 70,
+                        end: 138,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 70,
+                        end: 163,
+                    },
+                },
+            ],
+        },
+    ),
+    type_aliases: [],
+    type_decls: [
+        TypeDecl {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 175,
+                end: 216,
+            },
+            name: "Circle",
+            visibility: Private,
+            generic_params: [],
+            fields: [
+                FieldDef {
+                    name: "radius",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 199,
+                        end: 210,
+                    },
+                },
+            ],
+        },
+        TypeDecl {
+            id: NodeId(
+                2,
+            ),
+            span: Span {
+                start: 222,
+                end: 261,
+            },
+            name: "Square",
+            visibility: Private,
+            generic_params: [],
+            fields: [
+                FieldDef {
+                    name: "side",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 246,
+                        end: 255,
+                    },
+                },
+            ],
+        },
+    ],
+    enum_decls: [],
+    trait_decls: [
+        TraitDecl {
+            id: NodeId(
+                3,
+            ),
+            span: Span {
+                start: 267,
+                end: 314,
+            },
+            name: "Area",
+            associated_types: [],
+            methods: [
+                TraitMethod {
+                    name: "area",
+                    params: [
+                        Param {
+                            name: "self",
+                            ty: Named(
+                                "Self",
+                            ),
+                            span: Span {
+                                start: 296,
+                                end: 300,
+                            },
+                            ownership: Owned,
+                        },
+                    ],
+                    return_type: Named(
+                        "Int",
+                    ),
+                    has_self: true,
+                    body: None,
+                    span: Span {
+                        start: 288,
+                        end: 308,
+                    },
+                },
+            ],
+        },
+    ],
+    impl_blocks: [
+        ImplBlock {
+            id: NodeId(
+                5,
+            ),
+            span: Span {
+                start: 320,
+                end: 438,
+            },
+            trait_name: Some(
+                "Area",
+            ),
+            type_name: "Circle",
+            type_bindings: [],
+            methods: [
+                Function {
+                    id: NodeId(
+                        4,
+                    ),
+                    span: Span {
+                        start: 351,
+                        end: 432,
+                    },
+                    name: "area",
+                    visibility: Private,
+                    is_async: false,
+                    generic_params: [],
+                    annotations: [],
+                    params: [
+                        Param {
+                            name: "self",
+                            ty: Named(
+                                "Circle",
+                            ),
+                            span: Span {
+                                start: 359,
+                                end: 363,
+                            },
+                            ownership: Owned,
+                        },
+                    ],
+                    return_type: Named(
+                        "Int",
+                    ),
+                    requires: [],
+                    ensures: [],
+                    body: Block {
+                        span: Span {
+                            start: 372,
+                            end: 432,
+                        },
+                        stmts: [
+                            Return {
+                                span: Span {
+                                    start: 386,
+                                    end: 422,
+                                },
+                                value: Some(
+                                    BinaryOp {
+                                        left: BinaryOp {
+                                            left: FieldAccess {
+                                                object: Ident(
+                                                    "self",
+                                                    Span {
+                                                        start: 393,
+                                                        end: 397,
+                                                    },
+                                                ),
+                                                field: "radius",
+                                                span: Span {
+                                                    start: 393,
+                                                    end: 404,
+                                                },
+                                            },
+                                            op: Mul,
+                                            right: FieldAccess {
+                                                object: Ident(
+                                                    "self",
+                                                    Span {
+                                                        start: 407,
+                                                        end: 411,
+                                                    },
+                                                ),
+                                                field: "radius",
+                                                span: Span {
+                                                    start: 407,
+                                                    end: 418,
+                                                },
+                                            },
+                                            span: Span {
+                                                start: 393,
+                                                end: 418,
+                                            },
+                                        },
+                                        op: Mul,
+                                        right: IntLit(
+                                            3,
+                                            Span {
+                                                start: 421,
+                                                end: 422,
+                                            },
+                                        ),
+                                        span: Span {
+                                            start: 393,
+                                            end: 422,
+                                        },
+                                    },
+                                ),
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+        ImplBlock {
+            id: NodeId(
+                7,
+            ),
+            span: Span {
+                start: 444,
+                end: 554,
+            },
+            trait_name: Some(
+                "Area",
+            ),
+            type_name: "Square",
+            type_bindings: [],
+            methods: [
+                Function {
+                    id: NodeId(
+                        6,
+                    ),
+                    span: Span {
+                        start: 475,
+                        end: 548,
+                    },
+                    name: "area",
+                    visibility: Private,
+                    is_async: false,
+                    generic_params: [],
+                    annotations: [],
+                    params: [
+                        Param {
+                            name: "self",
+                            ty: Named(
+                                "Square",
+                            ),
+                            span: Span {
+                                start: 483,
+                                end: 487,
+                            },
+                            ownership: Owned,
+                        },
+                    ],
+                    return_type: Named(
+                        "Int",
+                    ),
+                    requires: [],
+                    ensures: [],
+                    body: Block {
+                        span: Span {
+                            start: 496,
+                            end: 548,
+                        },
+                        stmts: [
+                            Return {
+                                span: Span {
+                                    start: 510,
+                                    end: 538,
+                                },
+                                value: Some(
+                                    BinaryOp {
+                                        left: FieldAccess {
+                                            object: Ident(
+                                                "self",
+                                                Span {
+                                                    start: 517,
+                                                    end: 521,
+                                                },
+                                            ),
+                                            field: "side",
+                                            span: Span {
+                                                start: 517,
+                                                end: 526,
+                                            },
+                                        },
+                                        op: Mul,
+                                        right: FieldAccess {
+                                            object: Ident(
+                                                "self",
+                                                Span {
+                                                    start: 529,
+                                                    end: 533,
+                                                },
+                                            ),
+                                            field: "side",
+                                            span: Span {
+                                                start: 529,
+                                                end: 538,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 517,
+                                            end: 538,
+                                        },
+                                    },
+                                ),
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+    ],
+    actor_decls: [],
+    intent_decls: [],
+    invariants: [],
+    functions: [
+        Function {
+            id: NodeId(
+                8,
+            ),
+            span: Span {
+                start: 560,
+                end: 745,
+            },
+            name: "main",
+            visibility: Private,
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 577,
+                    end: 745,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 587,
+                            end: 623,
+                        },
+                        mutable: false,
+                        name: "c",
+                        ty: Some(
+                            Named(
+                                "Circle",
+                            ),
+                        ),
+                        value: StructLit {
+                            name: "Circle",
+                            fields: [
+                                FieldInit {
+                                    name: "radius",
+                                    value: IntLit(
+                                        5,
+                                        Span {
+                                            start: 620,
+                                            end: 621,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 612,
+                                        end: 621,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 603,
+                                end: 623,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 632,
+                            end: 666,
+                        },
+                        mutable: false,
+                        name: "s",
+                        ty: Some(
+                            Named(
+                                "Square",
+                            ),
+                        ),
+                        value: StructLit {
+                            name: "Square",
+                            fields: [
+                                FieldInit {
+                                    name: "side",
+                                    value: IntLit(
+                                        4,
+                                        Span {
+                                            start: 663,
+                                            end: 664,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 657,
+                                        end: 664,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 648,
+                                end: 666,
+                            },
+                        },
+                    },
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 675,
+                                    end: 684,
+                                },
+                            ),
+                            args: [
+                                Call {
+                                    callee: FieldAccess {
+                                        object: Ident(
+                                            "c",
+                                            Span {
+                                                start: 685,
+                                                end: 686,
+                                            },
+                                        ),
+                                        field: "area",
+                                        span: Span {
+                                            start: 685,
+                                            end: 691,
+                                        },
+                                    },
+                                    args: [],
+                                    span: Span {
+                                        start: 685,
+                                        end: 693,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 675,
+                                end: 694,
+                            },
+                        },
+                    ),
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 703,
+                                    end: 712,
+                                },
+                            ),
+                            args: [
+                                Call {
+                                    callee: FieldAccess {
+                                        object: Ident(
+                                            "s",
+                                            Span {
+                                                start: 713,
+                                                end: 714,
+                                            },
+                                        ),
+                                        field: "area",
+                                        span: Span {
+                                            start: 713,
+                                            end: 719,
+                                        },
+                                    },
+                                    args: [],
+                                    span: Span {
+                                        start: 713,
+                                        end: 721,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 703,
+                                end: 722,
+                            },
+                        },
+                    ),
+                    Return {
+                        span: Span {
+                            start: 731,
+                            end: 739,
+                        },
+                        value: Some(
+                            IntLit(
+                                0,
+                                Span {
+                                    start: 738,
+                                    end: 739,
+                                },
+                            ),
+                        ),
+                    },
+                ],
+            },
+        },
+    ],
+    test_decls: [],
+}

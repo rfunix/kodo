@@ -1,0 +1,16 @@
+// Function called with wrong number of arguments — must fail.
+// ERROR E0202
+module arity_mismatch_test {
+    meta {
+        purpose: "Test arity mismatch detection"
+        version: "0.1.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2, 3)
+    }
+}

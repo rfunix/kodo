@@ -1,0 +1,134 @@
+---
+source: crates/kodo_mir/tests/snapshots.rs
+expression: mir
+---
+MirFunction {
+    name: "abs_value",
+    return_type: Int,
+    param_count: 1,
+    locals: [
+        Local {
+            id: LocalId(
+                0,
+            ),
+            ty: Int,
+            mutable: false,
+        },
+        Local {
+            id: LocalId(
+                1,
+            ),
+            ty: Unknown,
+            mutable: false,
+        },
+        Local {
+            id: LocalId(
+                2,
+            ),
+            ty: Unknown,
+            mutable: false,
+        },
+    ],
+    blocks: [
+        BasicBlock {
+            id: BlockId(
+                0,
+            ),
+            instructions: [],
+            terminator: Branch {
+                condition: BinOp(
+                    Gt,
+                    Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                    IntConst(
+                        0,
+                    ),
+                ),
+                true_block: BlockId(
+                    1,
+                ),
+                false_block: BlockId(
+                    2,
+                ),
+            },
+        },
+        BasicBlock {
+            id: BlockId(
+                1,
+            ),
+            instructions: [
+                Assign(
+                    LocalId(
+                        1,
+                    ),
+                    Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                ),
+            ],
+            terminator: Goto(
+                BlockId(
+                    3,
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                2,
+            ),
+            instructions: [
+                Assign(
+                    LocalId(
+                        2,
+                    ),
+                    BinOp(
+                        Sub,
+                        IntConst(
+                            0,
+                        ),
+                        Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                    ),
+                ),
+            ],
+            terminator: Goto(
+                BlockId(
+                    3,
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                3,
+            ),
+            instructions: [],
+            terminator: Return(
+                Local(
+                    LocalId(
+                        1,
+                    ),
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                4,
+            ),
+            instructions: [],
+            terminator: Return(
+                Unit,
+            ),
+        },
+    ],
+    entry: BlockId(
+        0,
+    ),
+}

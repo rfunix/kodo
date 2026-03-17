@@ -1,0 +1,29 @@
+// List and Map operations.
+
+module collections_fixture {
+    meta {
+        purpose: "Test collection builtins"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let items = list_new()
+        list_push(items, 10)
+        list_push(items, 20)
+        list_push(items, 30)
+
+        let len: Int = list_length(items)
+        print_int(len)
+
+        let first: Int = list_get(items, 0)
+        print_int(first)
+
+        let m = map_new()
+        map_insert(m, 1, 100)
+        map_insert(m, 2, 200)
+        let v: Int = map_get(m, 1)
+        print_int(v)
+
+        return 0
+    }
+}

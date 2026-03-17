@@ -1270,22 +1270,23 @@ dependencies = [
 
 [[package]]
 name = "ko"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "kodo_ast"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "proptest",
  "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "kodo_codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -1295,29 +1296,32 @@ dependencies = [
  "kodo_ast",
  "kodo_mir",
  "kodo_types",
+ "proptest",
  "thiserror",
 ]
 
 [[package]]
 name = "kodo_contracts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
  "kodo_types",
+ "proptest",
  "thiserror",
  "z3",
 ]
 
 [[package]]
 name = "kodo_desugar"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
+ "proptest",
 ]
 
 [[package]]
 name = "kodo_lexer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1329,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
  "kodo_parser",
@@ -1340,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
  "kodo_codegen",
@@ -1358,8 +1362,9 @@ dependencies = [
 
 [[package]]
 name = "kodo_mir"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "insta",
  "kodo_ast",
  "kodo_types",
  "proptest",
@@ -1368,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_parser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1380,17 +1385,18 @@ dependencies = [
 
 [[package]]
 name = "kodo_resolver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
  "kodo_contracts",
  "kodo_types",
+ "proptest",
  "thiserror",
 ]
 
 [[package]]
 name = "kodo_runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastrand",
  "rusqlite",
@@ -1401,15 +1407,17 @@ dependencies = [
 
 [[package]]
 name = "kodo_std"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kodo_ast",
+ "kodo_lexer",
+ "kodo_parser",
  "thiserror",
 ]
 
 [[package]]
 name = "kodo_types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1422,7 +1430,7 @@ dependencies = [
 
 [[package]]
 name = "kodoc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ariadne",
  "clap",

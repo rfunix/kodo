@@ -1,0 +1,5 @@
+---
+source: crates/kodo_types/tests/snapshots.rs
+expression: err.to_string()
+---
+cannot use `x` after move (moved at line 229) at Span { start: 263, end: 264 }

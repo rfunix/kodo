@@ -43,3 +43,31 @@ fn snapshot_ast_contracts() {
     let module = kodo_parser::parse(&source).unwrap();
     insta::assert_debug_snapshot!(module);
 }
+
+#[test]
+fn snapshot_ast_generics() {
+    let source = read_fixture("valid/generics.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    insta::assert_debug_snapshot!(module);
+}
+
+#[test]
+fn snapshot_ast_traits() {
+    let source = read_fixture("valid/traits.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    insta::assert_debug_snapshot!(module);
+}
+
+#[test]
+fn snapshot_ast_closures() {
+    let source = read_fixture("valid/closures.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    insta::assert_debug_snapshot!(module);
+}
+
+#[test]
+fn snapshot_ast_async_await() {
+    let source = read_fixture("valid/async_await.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    insta::assert_debug_snapshot!(module);
+}

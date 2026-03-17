@@ -1,0 +1,5 @@
+---
+source: crates/kodo_types/tests/snapshots.rs
+expression: err.to_string()
+---
+expected 2 arguments, found 3 at Span { start: 302, end: 314 }

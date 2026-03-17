@@ -1,0 +1,36 @@
+// Ownership patterns: own, ref, and mut.
+
+module ownership_fixture {
+    meta {
+        purpose: "Test ownership transfer and borrowing"
+        version: "0.1.0"
+    }
+
+    struct Data {
+        value: Int
+    }
+
+    fn read_data(ref d: Data) -> Int {
+        return d.value
+    }
+
+    fn consume_data(own d: Data) -> Int {
+        return d.value
+    }
+
+    fn main() -> Int {
+        let d: Data = Data { value: 42 }
+
+        // ref borrow — d still alive
+        let x: Int = read_data(d)
+        let y: Int = read_data(d)
+
+        // ownership transfer — d consumed
+        let z: Int = consume_data(d)
+
+        print_int(x)
+        print_int(y)
+        print_int(z)
+        return 0
+    }
+}

@@ -1,0 +1,24 @@
+// Async function with await expression.
+
+module async_await_fixture {
+    meta {
+        purpose: "Test async function and await expression parsing"
+        version: "0.1.0"
+    }
+
+    async fn compute(x: Int) -> Int {
+        let result: Int = x + 10
+        return result
+    }
+
+    async fn run() -> Int {
+        let val: Int = compute(32).await
+        return val
+    }
+
+    fn main() -> Int {
+        let result: Int = run()
+        print_int(result)
+        return 0
+    }
+}

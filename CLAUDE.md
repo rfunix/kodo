@@ -182,6 +182,7 @@ Examples:
 | `clippy.toml` | Lint configuration |
 | `deny.toml` | Dependency audit rules |
 | `Makefile` | Build, test, and run shortcuts |
+| `~/dev/kodo-website` | Kōdo language website (update when user-facing changes occur) |
 
 ## Quick Language Reference
 
@@ -299,6 +300,7 @@ After completing ANY task (feature, bugfix, refactor, etc.), you MUST execute AL
 - Update `docs/error_index.md` if new error codes were added.
 - Ensure all new public items have `///` doc comments.
 - Update examples table in `README.md` if new `.ko` examples were added.
+- If any user-facing feature, documentation, or README content was changed, check if `~/dev/kodo-website` needs updates and update it accordingly.
 
 ### 4. Verification
 

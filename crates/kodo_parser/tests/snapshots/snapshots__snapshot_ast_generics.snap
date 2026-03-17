@@ -1,0 +1,465 @@
+---
+source: crates/kodo_parser/tests/snapshots.rs
+expression: module
+---
+Module {
+    id: NodeId(
+        4,
+    ),
+    span: Span {
+        start: 47,
+        end: 640,
+    },
+    name: "generics_fixture",
+    imports: [],
+    meta: Some(
+        Meta {
+            id: NodeId(
+                0,
+            ),
+            span: Span {
+                start: 77,
+                end: 178,
+            },
+            entries: [
+                MetaEntry {
+                    key: "purpose",
+                    value: "Test generic types and enum monomorphization",
+                    span: Span {
+                        start: 77,
+                        end: 147,
+                    },
+                },
+                MetaEntry {
+                    key: "version",
+                    value: "0.1.0",
+                    span: Span {
+                        start: 77,
+                        end: 172,
+                    },
+                },
+            ],
+        },
+    ),
+    type_aliases: [],
+    type_decls: [],
+    enum_decls: [
+        EnumDecl {
+            id: NodeId(
+                1,
+            ),
+            span: Span {
+                start: 184,
+                end: 234,
+            },
+            name: "Box",
+            generic_params: [
+                GenericParam {
+                    name: "T",
+                    bounds: [],
+                    span: Span {
+                        start: 193,
+                        end: 194,
+                    },
+                },
+            ],
+            variants: [
+                EnumVariant {
+                    name: "Full",
+                    fields: [
+                        Named(
+                            "T",
+                        ),
+                    ],
+                    span: Span {
+                        start: 206,
+                        end: 213,
+                    },
+                },
+                EnumVariant {
+                    name: "Empty",
+                    fields: [],
+                    span: Span {
+                        start: 223,
+                        end: 228,
+                    },
+                },
+            ],
+        },
+    ],
+    trait_decls: [],
+    impl_blocks: [],
+    actor_decls: [],
+    intent_decls: [],
+    invariants: [],
+    functions: [
+        Function {
+            id: NodeId(
+                2,
+            ),
+            span: Span {
+                start: 240,
+                end: 397,
+            },
+            name: "unbox_or",
+            visibility: Private,
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [
+                Param {
+                    name: "val",
+                    ty: Generic(
+                        "Box",
+                        [
+                            Named(
+                                "Int",
+                            ),
+                        ],
+                    ),
+                    span: Span {
+                        start: 252,
+                        end: 265,
+                    },
+                    ownership: Owned,
+                },
+                Param {
+                    name: "default",
+                    ty: Named(
+                        "Int",
+                    ),
+                    span: Span {
+                        start: 267,
+                        end: 279,
+                    },
+                    ownership: Owned,
+                },
+            ],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 288,
+                    end: 397,
+                },
+                stmts: [
+                    Return {
+                        span: Span {
+                            start: 298,
+                            end: 304,
+                        },
+                        value: None,
+                    },
+                    Expr(
+                        Match {
+                            expr: Ident(
+                                "val",
+                                Span {
+                                    start: 311,
+                                    end: 314,
+                                },
+                            ),
+                            arms: [
+                                MatchArm {
+                                    pattern: Variant {
+                                        enum_name: Some(
+                                            "Box",
+                                        ),
+                                        variant: "Full",
+                                        bindings: [
+                                            "v",
+                                        ],
+                                        span: Span {
+                                            start: 329,
+                                            end: 341,
+                                        },
+                                    },
+                                    body: Ident(
+                                        "v",
+                                        Span {
+                                            start: 345,
+                                            end: 346,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 329,
+                                        end: 346,
+                                    },
+                                },
+                                MatchArm {
+                                    pattern: Variant {
+                                        enum_name: Some(
+                                            "Box",
+                                        ),
+                                        variant: "Empty",
+                                        bindings: [],
+                                        span: Span {
+                                            start: 360,
+                                            end: 370,
+                                        },
+                                    },
+                                    body: Ident(
+                                        "default",
+                                        Span {
+                                            start: 374,
+                                            end: 381,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 360,
+                                        end: 381,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 305,
+                                end: 391,
+                            },
+                        },
+                    ),
+                ],
+            },
+        },
+        Function {
+            id: NodeId(
+                3,
+            ),
+            span: Span {
+                start: 403,
+                end: 638,
+            },
+            name: "main",
+            visibility: Private,
+            is_async: false,
+            generic_params: [],
+            annotations: [],
+            params: [],
+            return_type: Named(
+                "Int",
+            ),
+            requires: [],
+            ensures: [],
+            body: Block {
+                span: Span {
+                    start: 420,
+                    end: 638,
+                },
+                stmts: [
+                    Let {
+                        span: Span {
+                            start: 430,
+                            end: 461,
+                        },
+                        mutable: false,
+                        name: "b",
+                        ty: Some(
+                            Generic(
+                                "Box",
+                                [
+                                    Named(
+                                        "Int",
+                                    ),
+                                ],
+                            ),
+                        ),
+                        value: EnumVariantExpr {
+                            enum_name: "Box",
+                            variant: "Full",
+                            args: [
+                                IntLit(
+                                    42,
+                                    Span {
+                                        start: 458,
+                                        end: 460,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 448,
+                                end: 461,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 470,
+                            end: 498,
+                        },
+                        mutable: false,
+                        name: "e",
+                        ty: Some(
+                            Generic(
+                                "Box",
+                                [
+                                    Named(
+                                        "Int",
+                                    ),
+                                ],
+                            ),
+                        ),
+                        value: EnumVariantExpr {
+                            enum_name: "Box",
+                            variant: "Empty",
+                            args: [],
+                            span: Span {
+                                start: 488,
+                                end: 498,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 508,
+                            end: 535,
+                        },
+                        mutable: false,
+                        name: "x",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: Call {
+                            callee: Ident(
+                                "unbox_or",
+                                Span {
+                                    start: 521,
+                                    end: 529,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "b",
+                                    Span {
+                                        start: 530,
+                                        end: 531,
+                                    },
+                                ),
+                                IntLit(
+                                    0,
+                                    Span {
+                                        start: 533,
+                                        end: 534,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 521,
+                                end: 535,
+                            },
+                        },
+                    },
+                    Let {
+                        span: Span {
+                            start: 544,
+                            end: 572,
+                        },
+                        mutable: false,
+                        name: "y",
+                        ty: Some(
+                            Named(
+                                "Int",
+                            ),
+                        ),
+                        value: Call {
+                            callee: Ident(
+                                "unbox_or",
+                                Span {
+                                    start: 557,
+                                    end: 565,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "e",
+                                    Span {
+                                        start: 566,
+                                        end: 567,
+                                    },
+                                ),
+                                IntLit(
+                                    99,
+                                    Span {
+                                        start: 569,
+                                        end: 571,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 557,
+                                end: 572,
+                            },
+                        },
+                    },
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 582,
+                                    end: 591,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "x",
+                                    Span {
+                                        start: 592,
+                                        end: 593,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 582,
+                                end: 594,
+                            },
+                        },
+                    ),
+                    Expr(
+                        Call {
+                            callee: Ident(
+                                "print_int",
+                                Span {
+                                    start: 603,
+                                    end: 612,
+                                },
+                            ),
+                            args: [
+                                Ident(
+                                    "y",
+                                    Span {
+                                        start: 613,
+                                        end: 614,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 603,
+                                end: 615,
+                            },
+                        },
+                    ),
+                    Return {
+                        span: Span {
+                            start: 624,
+                            end: 632,
+                        },
+                        value: Some(
+                            IntLit(
+                                0,
+                                Span {
+                                    start: 631,
+                                    end: 632,
+                                },
+                            ),
+                        ),
+                    },
+                ],
+            },
+        },
+    ],
+    test_decls: [],
+}

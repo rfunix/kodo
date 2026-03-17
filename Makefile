@@ -1,4 +1,4 @@
-.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall
+.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report
 
 # Default: run all checks
 all: fmt clippy test doc
@@ -96,3 +96,12 @@ tree:
 
 deps:
 	cargo tree --workspace --depth 1
+
+# === Coverage ===
+
+coverage:
+	cargo llvm-cov --workspace --summary-only
+
+coverage-report:
+	cargo llvm-cov --workspace --html
+	@echo "Coverage report generated at target/llvm-cov/html/index.html"

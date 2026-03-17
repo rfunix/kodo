@@ -1,0 +1,12 @@
+// Wrong number of type arguments — must fail.
+// ERROR E0260
+module wrong_type_args {
+    meta {
+        purpose: "Test wrong type argument count detection"
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let x: Option<Int, String> = Option::None
+    }
+}

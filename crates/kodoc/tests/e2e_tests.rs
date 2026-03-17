@@ -1692,6 +1692,44 @@ e2e_example_test!(run: e2e_map_int_string, "map_int_string.ko", contains: ["1 = 
 
 e2e_example_test!(compile: e2e_crud_api, "crud_api.ko");
 
+// --- Testing framework examples (via kodoc test) ---
+
+macro_rules! e2e_kodoc_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let root = workspace_root();
+            let kodoc = get_kodoc_path();
+            let result = std::process::Command::new(&kodoc)
+                .arg("test")
+                .arg(root.join(concat!("examples/", $file)))
+                .output()
+                .expect("failed to run kodoc test");
+            assert!(
+                result.status.success(),
+                concat!(
+                    stringify!($name),
+                    " (kodoc test) should exit 0\nstdout: {}\nstderr: {}"
+                ),
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr),
+            );
+        }
+    };
+}
+
+e2e_kodoc_test!(e2e_test_framework_testing, "testing.ko");
+e2e_kodoc_test!(e2e_test_closures, "test_closures.ko");
+e2e_kodoc_test!(e2e_test_contracts, "test_contracts.ko");
+e2e_kodoc_test!(e2e_test_enums, "test_enums.ko");
+e2e_kodoc_test!(e2e_test_expressions, "test_expressions.ko");
+e2e_kodoc_test!(e2e_test_fibonacci, "test_fibonacci.ko");
+e2e_kodoc_test!(e2e_test_generics, "test_generics.ko");
+e2e_kodoc_test!(e2e_test_loops, "test_loops.ko");
+e2e_kodoc_test!(e2e_test_strings, "test_strings.ko");
+e2e_kodoc_test!(e2e_test_structs, "test_structs.ko");
+e2e_kodoc_test!(e2e_test_traits, "test_traits.ko");
+
 // --- Examples that intentionally fail to compile ---
 
 e2e_example_test!(fail: e2e_type_errors, "type_errors.ko");

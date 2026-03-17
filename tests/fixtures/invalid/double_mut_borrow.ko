@@ -1,0 +1,17 @@
+// Two mutable borrows of the same value — must fail.
+// ERROR E0243
+module double_mut_borrow {
+    meta {
+        purpose: "Test double mutable borrow detection"
+        version: "0.1.0"
+    }
+
+    fn mutate(mut x: String) {
+    }
+
+    fn main() {
+        let s: String = "hello"
+        mutate(s)
+        mutate(s)
+    }
+}

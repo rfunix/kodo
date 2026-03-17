@@ -16,3 +16,6 @@ cranelift-module.workspace = true
 cranelift-native.workspace = true
 cranelift-object.workspace = true
 kodo_ast.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

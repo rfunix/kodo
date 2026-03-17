@@ -83,3 +83,116 @@ pub(crate) fn rename_symbol(source: &str, position: Position, new_name: &str) ->
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    fn source_with_fn() -> &'static str {
+        r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2)
+    }
+}"#
+    }
+
+    #[test]
+    fn prepare_rename_on_function_name() {
+        let source = source_with_fn();
+        // Position on "add" in the function definition (line 6, col 7)
+        let result = prepare_rename_at(source, Position::new(6, 7));
+        assert!(result.is_some(), "should find renamable function name");
+        let (range, name) = result.unwrap();
+        assert_eq!(name, "add");
+        // Range should span exactly the word "add"
+        assert_eq!(range.start.line, range.end.line);
+    }
+
+    #[test]
+    fn prepare_rename_on_parameter_name() {
+        let source = source_with_fn();
+        // Position on "a" in "fn add(a: Int, ...)" (line 6)
+        let result = prepare_rename_at(source, Position::new(6, 11));
+        assert!(result.is_some(), "should find renamable parameter name");
+        let (_, name) = result.unwrap();
+        assert_eq!(name, "a");
+    }
+
+    #[test]
+    fn rename_symbol_changes_all_occurrences() {
+        let source = source_with_fn();
+        // Position on "add" in the function definition
+        let edits = rename_symbol(source, Position::new(6, 7), "sum");
+        assert!(
+            edits.len() >= 2,
+            "should create at least 2 rename edits (definition + call), got {}",
+            edits.len()
+        );
+        for edit in &edits {
+            assert_eq!(edit.new_text, "sum");
+        }
+    }
+
+    #[test]
+    fn prepare_rename_at_invalid_position_returns_none() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        // Position on "meta" — not a user-defined symbol
+        let result = prepare_rename_at(source, Position::new(1, 5));
+        assert!(
+            result.is_none(),
+            "should return None for non-renamable positions"
+        );
+    }
+
+    #[test]
+    fn prepare_rename_on_space_returns_none() {
+        let source = "   ";
+        let result = prepare_rename_at(source, Position::new(0, 1));
+        assert!(result.is_none(), "should return None on whitespace");
+    }
+
+    #[test]
+    fn rename_empty_source_returns_empty() {
+        let edits = rename_symbol("", Position::new(0, 0), "foo");
+        assert!(edits.is_empty(), "empty source should produce no edits");
+    }
+
+    #[test]
+    fn rename_symbol_on_parameter() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        // Position on "a" in function body "return a + b"
+        let edits = rename_symbol(source, Position::new(7, 15), "first");
+        assert!(
+            edits.len() >= 2,
+            "should rename parameter in definition and usage, got {} edits",
+            edits.len()
+        );
+        for edit in &edits {
+            assert_eq!(edit.new_text, "first");
+        }
+    }
+}

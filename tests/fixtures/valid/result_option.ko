@@ -1,0 +1,36 @@
+// Result and Option stdlib types.
+
+module result_option_fixture {
+    meta {
+        purpose: "Test Result and Option with match"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ok_val: Result<Int, String> = Result::Ok(42)
+        let err_val: Result<Int, String> = Result::Err("oops")
+
+        let x: Int = match ok_val {
+            Result::Ok(v) => v,
+            Result::Err(e) => 0
+        }
+
+        let some_val: Option<Int> = Option::Some(99)
+        let none_val: Option<Int> = Option::None
+
+        let y: Int = match some_val {
+            Option::Some(v) => v,
+            Option::None => 0
+        }
+
+        let z: Int = match none_val {
+            Option::Some(v) => v,
+            Option::None => -1
+        }
+
+        print_int(x)
+        print_int(y)
+        print_int(z)
+        return 0
+    }
+}

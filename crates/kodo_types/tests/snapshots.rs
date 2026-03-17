@@ -33,3 +33,39 @@ fn snapshot_type_error_undefined_var() {
     let err = checker.check_module(&module).unwrap_err();
     insta::assert_snapshot!(err.to_string());
 }
+
+#[test]
+fn snapshot_type_error_arity_mismatch() {
+    let source = read_fixture("invalid/arity_mismatch.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    insta::assert_snapshot!(err.to_string());
+}
+
+#[test]
+fn snapshot_type_error_non_exhaustive_match() {
+    let source = read_fixture("invalid/non_exhaustive_match.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    insta::assert_snapshot!(err.to_string());
+}
+
+#[test]
+fn snapshot_type_error_missing_struct_field() {
+    let source = read_fixture("invalid/missing_struct_field.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    insta::assert_snapshot!(err.to_string());
+}
+
+#[test]
+fn snapshot_type_error_use_after_move() {
+    let source = read_fixture("invalid/use_after_move.ko");
+    let module = kodo_parser::parse(&source).unwrap();
+    let mut checker = kodo_types::TypeChecker::new();
+    let err = checker.check_module(&module).unwrap_err();
+    insta::assert_snapshot!(err.to_string());
+}

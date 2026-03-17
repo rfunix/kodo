@@ -1,0 +1,17 @@
+// Using ? operator in a function that does not return Result — must fail.
+// ERROR E0253
+module try_in_non_result {
+    meta {
+        purpose: "Test try operator outside Result function"
+        version: "0.1.0"
+    }
+
+    fn fallible() -> Result<Int, String> {
+        return Result::Ok(42)
+    }
+
+    fn main() -> Int {
+        let x: Int = fallible()?
+        return x
+    }
+}

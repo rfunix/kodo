@@ -1,0 +1,40 @@
+// Traits with impl and method dispatch.
+
+module traits_fixture {
+    meta {
+        purpose: "Test trait definitions and implementations"
+        version: "0.1.0"
+    }
+
+    struct Circle {
+        radius: Int
+    }
+
+    struct Square {
+        side: Int
+    }
+
+    trait Area {
+        fn area(self) -> Int
+    }
+
+    impl Area for Circle {
+        fn area(self) -> Int {
+            return self.radius * self.radius * 3
+        }
+    }
+
+    impl Area for Square {
+        fn area(self) -> Int {
+            return self.side * self.side
+        }
+    }
+
+    fn main() -> Int {
+        let c: Circle = Circle { radius: 5 }
+        let s: Square = Square { side: 4 }
+        print_int(c.area())
+        print_int(s.area())
+        return 0
+    }
+}

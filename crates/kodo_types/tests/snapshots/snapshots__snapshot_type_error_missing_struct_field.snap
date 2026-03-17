@@ -1,0 +1,5 @@
+---
+source: crates/kodo_types/tests/snapshots.rs
+expression: err.to_string()
+---
+missing field `y` in struct `Point` at Span { start: 301, end: 316 }

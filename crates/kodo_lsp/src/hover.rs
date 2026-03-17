@@ -89,3 +89,182 @@ pub(crate) fn hover_at_position(source: &str, position: Position) -> Option<Stri
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    /// Helper source with a function containing parameters and a let binding.
+    fn sample_source() -> &'static str {
+        r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        let result: Int = a + b
+        return result
+    }
+}"#
+    }
+
+    #[test]
+    fn hover_over_function_name_shows_signature() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        // Position on "return" keyword in the function body (not a param or variable name)
+        // which falls through to the function-level hover
+        let hover = hover_at_position(source, Position::new(7, 10));
+        assert!(
+            hover.is_some(),
+            "should find hover info inside function body"
+        );
+        let info = hover.unwrap();
+        assert!(
+            info.contains("fn add"),
+            "hover should contain function name, got: {info}"
+        );
+        assert!(
+            info.contains("Returns:"),
+            "hover should contain return type, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_over_parameter_shows_type() {
+        let source = sample_source();
+        // Position on "a" in "let result: Int = a + b" (line 7, col ~26)
+        let hover = hover_at_position(source, Position::new(7, 26));
+        assert!(hover.is_some(), "should find hover info for parameter");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("**param a**"),
+            "hover should show param info, got: {info}"
+        );
+        assert!(
+            info.contains("Int"),
+            "hover should show param type, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_over_variable_shows_type() {
+        let source = sample_source();
+        // Position on "result" in "let result: Int = a + b" (line 7)
+        let hover = hover_at_position(source, Position::new(7, 12));
+        assert!(hover.is_some(), "should find hover info for variable");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("**let result**"),
+            "hover should show let variable info, got: {info}"
+        );
+        assert!(
+            info.contains("Int"),
+            "hover should show variable type, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_at_empty_position_returns_none() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        // Position in the meta block — outside any function
+        let hover = hover_at_position(source, Position::new(0, 0));
+        assert!(
+            hover.is_none(),
+            "hover outside functions should return None"
+        );
+    }
+
+    #[test]
+    fn hover_shows_contracts_when_present() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+}"#;
+        // Position in the function body (not on a param name)
+        let hover = hover_at_position(source, Position::new(10, 17));
+        assert!(hover.is_some(), "should find hover info");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("requires"),
+            "hover should contain contract info, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_shows_annotations() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    @confidence(0.9)
+    fn process(x: Int) -> Int {
+        return x
+    }
+}"#;
+        // Position inside the function body
+        let hover = hover_at_position(source, Position::new(8, 10));
+        assert!(hover.is_some(), "should find hover info");
+        let info = hover.unwrap();
+        assert!(
+            info.contains("@confidence"),
+            "hover should show annotation, got: {info}"
+        );
+    }
+
+    #[test]
+    fn hover_infers_untyped_variable() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x = 42
+        return x
+    }
+}"#;
+        // Position on "x" in the let binding
+        let hover = hover_at_position(source, Position::new(7, 12));
+        assert!(
+            hover.is_some(),
+            "should find hover info for untyped variable"
+        );
+        let info = hover.unwrap();
+        assert!(
+            info.contains("**let x**"),
+            "hover should show let variable info, got: {info}"
+        );
+        assert!(
+            info.contains("Int"),
+            "hover should infer Int type, got: {info}"
+        );
+    }
+}

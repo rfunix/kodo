@@ -262,3 +262,231 @@ fn add_string_method_completions(items: &mut Vec<CompletionItem>) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    fn module_with_function() -> &'static str {
+        r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn my_func(x: Int) -> Int {
+        return x
+    }
+}"#
+    }
+
+    #[test]
+    fn completions_include_function_names() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"my_func"),
+            "completions should include user-defined function names"
+        );
+        let func_item = items.iter().find(|i| i.label == "my_func").unwrap();
+        assert_eq!(func_item.kind, Some(CompletionItemKind::FUNCTION));
+        assert!(
+            func_item
+                .detail
+                .as_deref()
+                .unwrap_or("")
+                .contains("fn my_func"),
+            "function detail should show signature"
+        );
+    }
+
+    #[test]
+    fn completions_include_struct_names() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 1, y: 2 }
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let struct_items: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::STRUCT))
+            .collect();
+        assert!(
+            !struct_items.is_empty(),
+            "completions should include struct names"
+        );
+        assert_eq!(struct_items[0].label, "Point");
+    }
+
+    #[test]
+    fn completions_include_builtin_functions() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        for builtin in &["println", "abs", "min", "max", "list_new", "map_new"] {
+            assert!(
+                labels.contains(builtin),
+                "completions should include builtin function: {builtin}"
+            );
+        }
+    }
+
+    #[test]
+    fn qualified_prefix_extraction() {
+        // "Shape::" should extract "Shape"
+        let source = "let x = Shape::";
+        let result = qualified_prefix_at(source, Position::new(0, 15));
+        assert_eq!(result, Some("Shape".to_string()));
+
+        // Without :: should return None
+        let source_no_colon = "let x = Shape.";
+        let result_none = qualified_prefix_at(source_no_colon, Position::new(0, 14));
+        assert!(
+            result_none.is_none(),
+            "dot should not trigger qualified prefix"
+        );
+
+        // Nested namespace like "a::b::" — extracts "b"
+        let source_nested = "let x = a::b::";
+        let result_nested = qualified_prefix_at(source_nested, Position::new(0, 14));
+        assert_eq!(result_nested, Some("b".to_string()));
+    }
+
+    #[test]
+    fn completions_for_enum_variants_after_double_colon() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main() {
+        let c: Color = Color::
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(13, 30));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"Red"));
+        assert!(labels.contains(&"Green"));
+        assert!(labels.contains(&"Blue"));
+        assert_eq!(items.len(), 3, "should only return enum variants");
+        for item in &items {
+            assert_eq!(item.kind, Some(CompletionItemKind::ENUM_MEMBER));
+        }
+    }
+
+    #[test]
+    fn completions_for_unknown_prefix_returns_empty() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let c: Int = Unknown::
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(7, 30));
+        assert!(
+            items.is_empty(),
+            "unknown prefix after :: should return empty"
+        );
+    }
+
+    #[test]
+    fn completions_include_enum_names() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    enum Direction {
+        North,
+        South
+    }
+
+    fn main() {
+        let d: Direction = Direction::North
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let enum_items: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::ENUM))
+            .collect();
+        assert!(!enum_items.is_empty(), "completions should include enums");
+        assert_eq!(enum_items[0].label, "Direction");
+    }
+
+    #[test]
+    fn completions_include_string_methods() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let method_labels: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .map(|i| i.label.as_str())
+            .collect();
+        for method in &[
+            "length",
+            "contains",
+            "trim",
+            "to_upper",
+            "to_lower",
+            "substring",
+        ] {
+            assert!(
+                method_labels.contains(method),
+                "completions should include string method: {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_show_contracts_in_documentation() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+    {
+        return a
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let divide_item = items.iter().find(|i| i.label == "divide");
+        assert!(divide_item.is_some(), "should find divide in completions");
+        let doc = match &divide_item.unwrap().documentation {
+            Some(Documentation::String(s)) => s.clone(),
+            _ => String::new(),
+        };
+        assert!(
+            doc.contains("requires"),
+            "documentation should mention contracts, got: {doc}"
+        );
+    }
+}

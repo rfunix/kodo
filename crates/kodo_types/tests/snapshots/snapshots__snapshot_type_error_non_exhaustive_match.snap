@@ -1,0 +1,5 @@
+---
+source: crates/kodo_types/tests/snapshots.rs
+expression: err.to_string()
+---
+non-exhaustive match on `Direction`: missing variants ["East", "West"] at Span { start: 351, end: 439 }

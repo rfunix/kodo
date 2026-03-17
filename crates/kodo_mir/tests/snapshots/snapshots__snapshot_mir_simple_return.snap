@@ -1,0 +1,35 @@
+---
+source: crates/kodo_mir/tests/snapshots.rs
+expression: mir
+---
+MirFunction {
+    name: "return_42",
+    return_type: Int,
+    param_count: 0,
+    locals: [],
+    blocks: [
+        BasicBlock {
+            id: BlockId(
+                0,
+            ),
+            instructions: [],
+            terminator: Return(
+                IntConst(
+                    42,
+                ),
+            ),
+        },
+        BasicBlock {
+            id: BlockId(
+                1,
+            ),
+            instructions: [],
+            terminator: Return(
+                Unit,
+            ),
+        },
+    ],
+    entry: BlockId(
+        0,
+    ),
+}

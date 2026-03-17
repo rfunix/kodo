@@ -680,12 +680,13 @@ fn repair_plan_for_error(err: &TypeError) -> Option<Vec<(String, Vec<kodo_ast::F
 
 /// Returns a machine-applicable fix patch for the given type error.
 ///
-/// Covers ~22 error variants with auto-applicable patches that AI agents
+/// Covers ~30 error variants with auto-applicable patches that AI agents
 /// can use to fix code without human interpretation.
 fn fix_patch_for_error(err: &TypeError) -> Option<kodo_ast::FixPatch> {
     fix_patch_meta_and_policy(err)
         .or_else(|| fix_patch_names_and_fields(err))
         .or_else(|| fix_patch_types_and_ownership(err))
+        .or_else(|| fix_patch_concurrency_and_control(err))
 }
 
 /// Fix patches for meta block, confidence, and security errors.
@@ -811,6 +812,72 @@ fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
                 start_offset: span.start as usize,
                 end_offset: span.end as usize,
                 replacement: format!("({params})"),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Fix patches for concurrency, control flow, and access errors.
+fn fix_patch_concurrency_and_control(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
+        TypeError::AwaitOutsideAsync { span } => Some(kodo_ast::FixPatch {
+            description: "mark function as async".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: "async ".to_string(),
+        }),
+        TypeError::BreakOutsideLoop { span } => Some(kodo_ast::FixPatch {
+            description: "remove break statement outside loop".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::ContinueOutsideLoop { span } => Some(kodo_ast::FixPatch {
+            description: "remove continue statement outside loop".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::PrivateAccess { name, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("add `pub` to make `{name}` public"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: "pub ".to_string(),
+        }),
+        TypeError::SpawnCaptureMutableRef { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("change `mut {name}` to `ref {name}` for spawn capture"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::BorrowEscapesScope { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("clone `{name}` instead of borrowing"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("{name}.clone()"),
+        }),
+        TypeError::NotCallable { span, .. } => Some(kodo_ast::FixPatch {
+            description: "remove function call syntax".to_string(),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::TupleIndexOutOfBounds { length, span, .. } => {
+            let max_idx = if *length > 0 { length - 1 } else { 0 };
+            Some(kodo_ast::FixPatch {
+                description: format!("use a valid tuple index (0..{max_idx})"),
+                file: String::new(),
+                start_offset: span.start as usize,
+                end_offset: span.end as usize,
+                replacement: format!(".{max_idx}"),
             })
         }
         _ => None,

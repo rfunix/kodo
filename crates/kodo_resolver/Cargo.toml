@@ -11,3 +11,6 @@ kodo_ast.workspace = true
 kodo_types.workspace = true
 kodo_contracts.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -9,6 +9,9 @@ description = "Desugaring pass for the Kōdo compiler"
 [dependencies]
 kodo_ast = { workspace = true }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints.rust]
 missing_docs = "deny"
 

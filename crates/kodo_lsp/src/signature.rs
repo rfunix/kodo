@@ -123,3 +123,158 @@ pub(crate) fn signature_at_position(source: &str, position: Position) -> Option<
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    fn source_with_call() -> &'static str {
+        r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1, 2)
+    }
+}"#
+    }
+
+    #[test]
+    fn signature_help_inside_function_call() {
+        let source = source_with_call();
+        // Position after the opening paren of add(1, 2) on line 11
+        let sig = signature_at_position(source, Position::new(11, 26));
+        assert!(sig.is_some(), "should find signature help for add");
+        let help = sig.unwrap();
+        assert_eq!(help.signatures.len(), 1);
+        assert!(help.signatures[0].label.contains("add"));
+        assert!(help.signatures[0].label.contains("Int"));
+        // Should have parameter info
+        assert!(help.signatures[0].parameters.is_some());
+        let params = help.signatures[0].parameters.as_ref().unwrap();
+        assert_eq!(params.len(), 2, "add has 2 parameters");
+    }
+
+    #[test]
+    fn signature_help_outside_call_returns_none() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = 42
+    }
+}"#;
+        // Position on `let x: Int = 42` — no parentheses
+        let sig = signature_at_position(source, Position::new(11, 10));
+        assert!(
+            sig.is_none(),
+            "should return None when cursor is not inside parentheses"
+        );
+    }
+
+    #[test]
+    fn active_parameter_tracking() {
+        let source = source_with_call();
+        // Position after first arg, before comma — active param should be 0
+        let sig_first = signature_at_position(source, Position::new(11, 26));
+        assert!(sig_first.is_some());
+        assert_eq!(
+            sig_first.unwrap().active_parameter,
+            Some(0),
+            "first parameter should be active"
+        );
+
+        // Position after the comma — active param should be 1
+        let sig_second = signature_at_position(source, Position::new(11, 29));
+        assert!(sig_second.is_some());
+        assert_eq!(
+            sig_second.unwrap().active_parameter,
+            Some(1),
+            "second parameter should be active after the comma"
+        );
+    }
+
+    #[test]
+    fn signature_help_includes_contract_documentation() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let x: Int = divide(10, 2)
+    }
+}"#;
+        // Position inside divide(10, 2)
+        let sig = signature_at_position(source, Position::new(14, 28));
+        assert!(sig.is_some(), "should find signature help for divide");
+        let help = sig.unwrap();
+        assert!(help.signatures[0].label.contains("divide"));
+        assert!(
+            help.signatures[0].documentation.is_some(),
+            "signature help should include contract documentation"
+        );
+        let doc = match &help.signatures[0].documentation {
+            Some(Documentation::String(s)) => s.clone(),
+            _ => String::new(),
+        };
+        assert!(
+            doc.contains("requires"),
+            "documentation should mention requires, got: {doc}"
+        );
+        assert!(
+            doc.contains("ensures"),
+            "documentation should mention ensures, got: {doc}"
+        );
+    }
+
+    #[test]
+    fn signature_help_no_documentation_without_contracts() {
+        let source = source_with_call();
+        let sig = signature_at_position(source, Position::new(11, 26));
+        assert!(sig.is_some());
+        let help = sig.unwrap();
+        assert!(
+            help.signatures[0].documentation.is_none(),
+            "function without contracts should have no documentation"
+        );
+    }
+
+    #[test]
+    fn signature_help_on_source_without_calls_returns_none() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        // Position in the meta block — no function call
+        let sig = signature_at_position(source, Position::new(2, 10));
+        assert!(
+            sig.is_none(),
+            "should return None when no function call is nearby"
+        );
+    }
+}

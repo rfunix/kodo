@@ -201,3 +201,229 @@ fn add_fix_patch_actions(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::{Position, Range, Url};
+
+    #[test]
+    fn code_action_for_type_error_via_fix_patch() {
+        // Source without meta block — triggers MissingMeta type error with FixPatch
+        let source = r#"module test {
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let full_range = Range::new(Position::new(0, 0), Position::new(4, 1));
+        let actions = code_actions_for_source(source, &uri, &full_range);
+        let fix_patch_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.diagnostics.is_some() {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !fix_patch_actions.is_empty(),
+            "should generate code actions from fix patches for missing meta"
+        );
+        for action in &fix_patch_actions {
+            assert!(
+                action.edit.is_some(),
+                "fix patch action should have an edit"
+            );
+            assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+        }
+    }
+
+    #[test]
+    fn code_action_for_missing_contract() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(6, 0), Position::new(8, 0));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let contract_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add missing contract") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !contract_actions.is_empty(),
+            "should suggest adding contract for function without contracts"
+        );
+        assert!(contract_actions[0].title.contains("add"));
+        assert!(contract_actions[0].edit.is_some());
+    }
+
+    #[test]
+    fn no_contract_action_when_contracts_exist() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+    {
+        return a / b
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(6, 0), Position::new(10, 0));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let contract_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add missing contract") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            contract_actions.is_empty(),
+            "should NOT suggest contract action when contracts already exist"
+        );
+    }
+
+    #[test]
+    fn code_action_add_type_annotation_for_untyped_let() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x = 42
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(7, 0), Position::new(7, 20));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let type_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add type annotation") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !type_actions.is_empty(),
+            "should suggest adding type annotation for untyped let"
+        );
+        assert!(type_actions[0].title.contains("x"));
+    }
+
+    #[test]
+    fn no_type_annotation_action_when_typed() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn main() {
+        let x: Int = 42
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(7, 0), Position::new(7, 20));
+        let actions = code_actions_for_source(source, &uri, &range);
+
+        let type_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add type annotation") {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            type_actions.is_empty(),
+            "should NOT suggest type annotation when type already present"
+        );
+    }
+
+    #[test]
+    fn code_actions_empty_for_range_outside_functions() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+}"#;
+        let uri = Url::parse("file:///test.ko").unwrap();
+        let range = Range::new(Position::new(0, 0), Position::new(0, 10));
+        let actions = code_actions_for_source(source, &uri, &range);
+        // No functions means no contract or type annotation actions
+        // (there may be fix_patch actions for meta-level errors though)
+        let contract_actions: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    if ca.title.contains("Add missing contract")
+                        || ca.title.contains("Add type annotation")
+                    {
+                        Some(ca)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            contract_actions.is_empty(),
+            "no contract/type annotation actions outside functions"
+        );
+    }
+}

@@ -1,0 +1,12 @@
+// Closure parameter without type annotation — must fail.
+// ERROR E0252
+module closure_missing_type {
+    meta {
+        purpose: "Test closure parameter type requirement"
+        version: "0.1.0"
+    }
+
+    fn main() {
+        let f: (Int) -> Int = |x| { x + 1 }
+    }
+}

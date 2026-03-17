@@ -1,0 +1,32 @@
+// Generics with bounds and monomorphization.
+
+module generics_fixture {
+    meta {
+        purpose: "Test generic types and enum monomorphization"
+        version: "0.1.0"
+    }
+
+    enum Box<T> {
+        Full(T),
+        Empty
+    }
+
+    fn unbox_or(val: Box<Int>, default: Int) -> Int {
+        return match val {
+            Box::Full(v) => v,
+            Box::Empty => default
+        }
+    }
+
+    fn main() -> Int {
+        let b: Box<Int> = Box::Full(42)
+        let e: Box<Int> = Box::Empty
+
+        let x: Int = unbox_or(b, 0)
+        let y: Int = unbox_or(e, 99)
+
+        print_int(x)
+        print_int(y)
+        return 0
+    }
+}
