@@ -928,6 +928,7 @@ impl TypeChecker {
     /// Verifies the callee is a function type, the argument count matches,
     /// and each argument type matches the corresponding parameter type.
     /// Also tracks ownership: arguments passed to `own` parameters are moved.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn check_call(
         &mut self,
         callee: &Expr,
@@ -945,6 +946,57 @@ impl TypeChecker {
                 if self.imported_module_names.contains(module_name) {
                     let field_ident = Expr::Ident(field.clone(), span);
                     return self.check_call(&field_ident, args, span);
+                }
+            }
+        }
+
+        // Check for static method call pattern: Type.method(args)
+        // When the callee is FieldAccess(Ident(type_name), method_name) and
+        // type_name is a known struct or enum, treat it as a static method call.
+        // This handles patterns like `Counter.new()` where `Counter` is a type,
+        // not a variable, so `infer_expr` would fail on it.
+        if let Expr::FieldAccess {
+            object,
+            field,
+            span: _fa_span,
+        } = callee
+        {
+            if let Expr::Ident(type_name, _) = object.as_ref() {
+                let is_known_type = self.struct_registry.contains_key(type_name)
+                    || self.enum_registry.contains_key(type_name)
+                    || self.generic_structs.contains_key(type_name)
+                    || self.generic_enums.contains_key(type_name);
+                if is_known_type {
+                    if let Some((mangled_name, param_types, ret_type)) = self
+                        .method_lookup
+                        .get(&(type_name.clone(), field.clone()))
+                        .cloned()
+                    {
+                        // Only handle static methods here — those whose first
+                        // param is NOT the type itself (i.e., no `self`).
+                        // Instance methods fall through to try_check_method_call.
+                        let has_self = param_types.first().is_some_and(|first| {
+                            matches!(first,
+                                Type::Struct(n) | Type::Enum(n) if n == type_name
+                            )
+                        });
+                        if !has_self {
+                            if param_types.len() != args.len() {
+                                return Err(TypeError::ArityMismatch {
+                                    expected: param_types.len(),
+                                    found: args.len(),
+                                    span,
+                                });
+                            }
+                            for (param_ty, arg) in param_types.iter().zip(args) {
+                                let arg_ty = self.infer_expr(arg)?;
+                                TypeEnv::check_eq(param_ty, &arg_ty, expr_span(arg))?;
+                            }
+                            self.method_resolutions.insert(span.start, mangled_name);
+                            self.static_method_calls.insert(span.start);
+                            return Ok(ret_type);
+                        }
+                    }
                 }
             }
         }

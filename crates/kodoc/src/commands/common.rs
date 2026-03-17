@@ -1029,6 +1029,7 @@ fn rewrite_map_for_in_in_block(block: &mut kodo_ast::Block, spans: &[kodo_ast::S
 pub(crate) fn rewrite_method_calls_in_block(
     block: &mut kodo_ast::Block,
     resolutions: &std::collections::HashMap<u32, String>,
+    static_calls: &std::collections::HashSet<u32>,
 ) {
     for stmt in &mut block.stmts {
         match stmt {
@@ -1036,12 +1037,14 @@ pub(crate) fn rewrite_method_calls_in_block(
                 *value = rewrite_method_calls_in_expr(
                     std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
             }
             kodo_ast::Stmt::Expr(expr) => {
                 *expr = rewrite_method_calls_in_expr(
                     std::mem::replace(expr, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
             }
             kodo_ast::Stmt::Return { value, .. } => {
@@ -1049,6 +1052,7 @@ pub(crate) fn rewrite_method_calls_in_block(
                     *v = rewrite_method_calls_in_expr(
                         std::mem::replace(v, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                         resolutions,
+                        static_calls,
                     );
                 }
             }
@@ -1061,8 +1065,9 @@ pub(crate) fn rewrite_method_calls_in_block(
                         kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
                     ),
                     resolutions,
+                    static_calls,
                 );
-                rewrite_method_calls_in_block(body, resolutions);
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
             }
             kodo_ast::Stmt::For {
                 start, end, body, ..
@@ -1070,12 +1075,14 @@ pub(crate) fn rewrite_method_calls_in_block(
                 *start = rewrite_method_calls_in_expr(
                     std::mem::replace(start, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
                 *end = rewrite_method_calls_in_expr(
                     std::mem::replace(end, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
-                rewrite_method_calls_in_block(body, resolutions);
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
             }
             kodo_ast::Stmt::ForIn { iterable, body, .. } => {
                 *iterable = rewrite_method_calls_in_expr(
@@ -1084,8 +1091,9 @@ pub(crate) fn rewrite_method_calls_in_block(
                         kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
                     ),
                     resolutions,
+                    static_calls,
                 );
-                rewrite_method_calls_in_block(body, resolutions);
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
             }
             kodo_ast::Stmt::IfLet {
                 value,
@@ -1096,25 +1104,27 @@ pub(crate) fn rewrite_method_calls_in_block(
                 *value = rewrite_method_calls_in_expr(
                     std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
-                rewrite_method_calls_in_block(body, resolutions);
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
                 if let Some(eb) = else_body {
-                    rewrite_method_calls_in_block(eb, resolutions);
+                    rewrite_method_calls_in_block(eb, resolutions, static_calls);
                 }
             }
             kodo_ast::Stmt::LetPattern { value, .. } => {
                 *value = rewrite_method_calls_in_expr(
                     std::mem::replace(value, kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0))),
                     resolutions,
+                    static_calls,
                 );
             }
             kodo_ast::Stmt::Spawn { body, .. } => {
-                rewrite_method_calls_in_block(body, resolutions);
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
             }
             kodo_ast::Stmt::Parallel { body, .. } => {
                 for stmt in body {
                     if let kodo_ast::Stmt::Spawn { body, .. } = stmt {
-                        rewrite_method_calls_in_block(body, resolutions);
+                        rewrite_method_calls_in_block(body, resolutions, static_calls);
                     }
                 }
             }
@@ -1130,6 +1140,7 @@ pub(crate) fn rewrite_method_calls_in_block(
 pub(crate) fn rewrite_method_calls_in_expr(
     expr: kodo_ast::Expr,
     resolutions: &std::collections::HashMap<u32, String>,
+    static_calls: &std::collections::HashSet<u32>,
 ) -> kodo_ast::Expr {
     match expr {
         kodo_ast::Expr::Call { callee, args, span } => {
@@ -1140,16 +1151,23 @@ pub(crate) fn rewrite_method_calls_in_expr(
             } = *callee
             {
                 // Rewrite sub-expressions first
-                let object = rewrite_method_calls_in_expr(*object, resolutions);
+                let object = rewrite_method_calls_in_expr(*object, resolutions, static_calls);
                 let args: Vec<_> = args
                     .into_iter()
-                    .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                    .map(|a| rewrite_method_calls_in_expr(a, resolutions, static_calls))
                     .collect();
 
                 // Check if this call span was resolved as a method call
                 if let Some(mangled) = resolutions.get(&span.start) {
-                    let mut new_args = vec![object];
-                    new_args.extend(args);
+                    // Static method calls don't prepend the object (type name)
+                    // as an argument — they have no `self` parameter.
+                    let new_args = if static_calls.contains(&span.start) {
+                        args
+                    } else {
+                        let mut with_self = vec![object];
+                        with_self.extend(args);
+                        with_self
+                    };
                     return kodo_ast::Expr::Call {
                         callee: Box::new(kodo_ast::Expr::Ident(mangled.clone(), span)),
                         args: new_args,
@@ -1168,10 +1186,10 @@ pub(crate) fn rewrite_method_calls_in_expr(
                     span,
                 }
             } else {
-                let callee = rewrite_method_calls_in_expr(*callee, resolutions);
+                let callee = rewrite_method_calls_in_expr(*callee, resolutions, static_calls);
                 let args: Vec<_> = args
                     .into_iter()
-                    .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                    .map(|a| rewrite_method_calls_in_expr(a, resolutions, static_calls))
                     .collect();
                 kodo_ast::Expr::Call {
                     callee: Box::new(callee),
@@ -1186,14 +1204,26 @@ pub(crate) fn rewrite_method_calls_in_expr(
             right,
             span,
         } => kodo_ast::Expr::BinaryOp {
-            left: Box::new(rewrite_method_calls_in_expr(*left, resolutions)),
+            left: Box::new(rewrite_method_calls_in_expr(
+                *left,
+                resolutions,
+                static_calls,
+            )),
             op,
-            right: Box::new(rewrite_method_calls_in_expr(*right, resolutions)),
+            right: Box::new(rewrite_method_calls_in_expr(
+                *right,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::UnaryOp { op, operand, span } => kodo_ast::Expr::UnaryOp {
             op,
-            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            operand: Box::new(rewrite_method_calls_in_expr(
+                *operand,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::If {
@@ -1202,10 +1232,10 @@ pub(crate) fn rewrite_method_calls_in_expr(
             else_branch,
             span,
         } => {
-            let condition = rewrite_method_calls_in_expr(*condition, resolutions);
-            rewrite_method_calls_in_block(&mut then_branch, resolutions);
+            let condition = rewrite_method_calls_in_expr(*condition, resolutions, static_calls);
+            rewrite_method_calls_in_block(&mut then_branch, resolutions, static_calls);
             let else_branch = else_branch.map(|mut b| {
-                rewrite_method_calls_in_block(&mut b, resolutions);
+                rewrite_method_calls_in_block(&mut b, resolutions, static_calls);
                 b
             });
             kodo_ast::Expr::If {
@@ -1220,7 +1250,11 @@ pub(crate) fn rewrite_method_calls_in_expr(
             field,
             span,
         } => kodo_ast::Expr::FieldAccess {
-            object: Box::new(rewrite_method_calls_in_expr(*object, resolutions)),
+            object: Box::new(rewrite_method_calls_in_expr(
+                *object,
+                resolutions,
+                static_calls,
+            )),
             field,
             span,
         },
@@ -1230,7 +1264,7 @@ pub(crate) fn rewrite_method_calls_in_expr(
                 .into_iter()
                 .map(|f| kodo_ast::FieldInit {
                     name: f.name,
-                    value: rewrite_method_calls_in_expr(f.value, resolutions),
+                    value: rewrite_method_calls_in_expr(f.value, resolutions, static_calls),
                     span: f.span,
                 })
                 .collect(),
@@ -1246,24 +1280,28 @@ pub(crate) fn rewrite_method_calls_in_expr(
             variant,
             args: args
                 .into_iter()
-                .map(|a| rewrite_method_calls_in_expr(a, resolutions))
+                .map(|a| rewrite_method_calls_in_expr(a, resolutions, static_calls))
                 .collect(),
             span,
         },
         kodo_ast::Expr::Match { expr, arms, span } => kodo_ast::Expr::Match {
-            expr: Box::new(rewrite_method_calls_in_expr(*expr, resolutions)),
+            expr: Box::new(rewrite_method_calls_in_expr(
+                *expr,
+                resolutions,
+                static_calls,
+            )),
             arms: arms
                 .into_iter()
                 .map(|arm| kodo_ast::MatchArm {
                     pattern: arm.pattern,
-                    body: rewrite_method_calls_in_expr(arm.body, resolutions),
+                    body: rewrite_method_calls_in_expr(arm.body, resolutions, static_calls),
                     span: arm.span,
                 })
                 .collect(),
             span,
         },
         kodo_ast::Expr::Block(mut block) => {
-            rewrite_method_calls_in_block(&mut block, resolutions);
+            rewrite_method_calls_in_block(&mut block, resolutions, static_calls);
             kodo_ast::Expr::Block(block)
         }
         kodo_ast::Expr::Closure {
@@ -1274,16 +1312,32 @@ pub(crate) fn rewrite_method_calls_in_expr(
         } => kodo_ast::Expr::Closure {
             params,
             return_type,
-            body: Box::new(rewrite_method_calls_in_expr(*body, resolutions)),
+            body: Box::new(rewrite_method_calls_in_expr(
+                *body,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::NullCoalesce { left, right, span } => kodo_ast::Expr::NullCoalesce {
-            left: Box::new(rewrite_method_calls_in_expr(*left, resolutions)),
-            right: Box::new(rewrite_method_calls_in_expr(*right, resolutions)),
+            left: Box::new(rewrite_method_calls_in_expr(
+                *left,
+                resolutions,
+                static_calls,
+            )),
+            right: Box::new(rewrite_method_calls_in_expr(
+                *right,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::Try { operand, span } => kodo_ast::Expr::Try {
-            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            operand: Box::new(rewrite_method_calls_in_expr(
+                *operand,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::OptionalChain {
@@ -1291,7 +1345,11 @@ pub(crate) fn rewrite_method_calls_in_expr(
             field,
             span,
         } => kodo_ast::Expr::OptionalChain {
-            object: Box::new(rewrite_method_calls_in_expr(*object, resolutions)),
+            object: Box::new(rewrite_method_calls_in_expr(
+                *object,
+                resolutions,
+                static_calls,
+            )),
             field,
             span,
         },
@@ -1301,8 +1359,16 @@ pub(crate) fn rewrite_method_calls_in_expr(
             inclusive,
             span,
         } => kodo_ast::Expr::Range {
-            start: Box::new(rewrite_method_calls_in_expr(*start, resolutions)),
-            end: Box::new(rewrite_method_calls_in_expr(*end, resolutions)),
+            start: Box::new(rewrite_method_calls_in_expr(
+                *start,
+                resolutions,
+                static_calls,
+            )),
+            end: Box::new(rewrite_method_calls_in_expr(
+                *end,
+                resolutions,
+                static_calls,
+            )),
             inclusive,
             span,
         },
@@ -1311,12 +1377,20 @@ pub(crate) fn rewrite_method_calls_in_expr(
             type_name,
             span,
         } => kodo_ast::Expr::Is {
-            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            operand: Box::new(rewrite_method_calls_in_expr(
+                *operand,
+                resolutions,
+                static_calls,
+            )),
             type_name,
             span,
         },
         kodo_ast::Expr::Await { operand, span } => kodo_ast::Expr::Await {
-            operand: Box::new(rewrite_method_calls_in_expr(*operand, resolutions)),
+            operand: Box::new(rewrite_method_calls_in_expr(
+                *operand,
+                resolutions,
+                static_calls,
+            )),
             span,
         },
         kodo_ast::Expr::StringInterp { parts, span } => {
@@ -1325,7 +1399,7 @@ pub(crate) fn rewrite_method_calls_in_expr(
                 .map(|p| match p {
                     kodo_ast::StringPart::Literal(s) => kodo_ast::StringPart::Literal(s),
                     kodo_ast::StringPart::Expr(e) => kodo_ast::StringPart::Expr(Box::new(
-                        rewrite_method_calls_in_expr(*e, resolutions),
+                        rewrite_method_calls_in_expr(*e, resolutions, static_calls),
                     )),
                 })
                 .collect();
@@ -1334,12 +1408,16 @@ pub(crate) fn rewrite_method_calls_in_expr(
         kodo_ast::Expr::TupleLit(elems, span) => kodo_ast::Expr::TupleLit(
             elems
                 .into_iter()
-                .map(|e| rewrite_method_calls_in_expr(e, resolutions))
+                .map(|e| rewrite_method_calls_in_expr(e, resolutions, static_calls))
                 .collect(),
             span,
         ),
         kodo_ast::Expr::TupleIndex { tuple, index, span } => kodo_ast::Expr::TupleIndex {
-            tuple: Box::new(rewrite_method_calls_in_expr(*tuple, resolutions)),
+            tuple: Box::new(rewrite_method_calls_in_expr(
+                *tuple,
+                resolutions,
+                static_calls,
+            )),
             index,
             span,
         },

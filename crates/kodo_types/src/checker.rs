@@ -64,6 +64,9 @@ pub struct TypeChecker {
     /// Method call resolutions: call span start to mangled function name.
     /// Used by kodoc to rewrite method calls in the AST before MIR lowering.
     pub(crate) method_resolutions: std::collections::HashMap<u32, String>,
+    /// Static method call sites: span starts where the call is a static method
+    /// (no `self` parameter), so the rewrite should NOT prepend the object as an argument.
+    pub(crate) static_method_calls: std::collections::HashSet<u32>,
     /// Whether the currently-checked function is `async`.
     pub(crate) in_async_fn: bool,
     /// Call graph: function name to set of called function names.
@@ -157,6 +160,7 @@ impl TypeChecker {
             current_impl_context: None,
             method_lookup: std::collections::HashMap::new(),
             method_resolutions: std::collections::HashMap::new(),
+            static_method_calls: std::collections::HashSet::new(),
             in_async_fn: false,
             call_graph: std::collections::HashMap::new(),
             current_function_name: None,
@@ -281,6 +285,14 @@ impl TypeChecker {
     #[must_use]
     pub fn method_resolutions(&self) -> &std::collections::HashMap<u32, String> {
         &self.method_resolutions
+    }
+
+    /// Returns the set of span start positions for static method calls.
+    /// These calls should NOT have the object prepended as a `self` argument
+    /// during AST rewriting.
+    #[must_use]
+    pub fn static_method_calls(&self) -> &std::collections::HashSet<u32> {
+        &self.static_method_calls
     }
 
     /// Returns the spans of `ForIn` statements that iterate over Maps.

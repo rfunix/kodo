@@ -358,9 +358,14 @@ pub(crate) fn run_test(
 
     // Method call rewriting.
     let method_resolutions = checker.method_resolutions().clone();
+    let static_method_calls = checker.static_method_calls().clone();
     if !method_resolutions.is_empty() {
         for func in &mut module.functions {
-            rewrite_method_calls_in_block(&mut func.body, &method_resolutions);
+            rewrite_method_calls_in_block(
+                &mut func.body,
+                &method_resolutions,
+                &static_method_calls,
+            );
         }
     }
 

@@ -6955,3 +6955,129 @@ fn generic_struct_literal_without_annotation_infers_type_args() {
         "Pair__Int should be monomorphized from field inference"
     );
 }
+
+/// Static method calls (Type.method() syntax) should resolve through method_lookup
+/// without requiring the type name to be a variable in scope.
+#[test]
+fn static_method_call_on_struct() {
+    let module = Module {
+        test_decls: vec![],
+        id: NodeId(0),
+        span: Span::new(0, 500),
+        name: "test".to_string(),
+        imports: vec![],
+        meta: Some(Meta {
+            id: NodeId(99),
+            span: Span::new(0, 50),
+            entries: vec![MetaEntry {
+                key: "purpose".to_string(),
+                value: "test static methods".to_string(),
+                span: Span::new(10, 40),
+            }],
+        }),
+        type_aliases: vec![],
+        type_decls: vec![kodo_ast::TypeDecl {
+            id: NodeId(1),
+            span: Span::new(50, 90),
+            name: "Counter".to_string(),
+            visibility: Visibility::Private,
+            generic_params: vec![],
+            fields: vec![kodo_ast::FieldDef {
+                name: "value".to_string(),
+                ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                span: Span::new(60, 80),
+            }],
+        }],
+        enum_decls: vec![],
+        trait_decls: vec![],
+        impl_blocks: vec![kodo_ast::ImplBlock {
+            id: NodeId(2),
+            span: Span::new(100, 200),
+            trait_name: None,
+            type_name: "Counter".to_string(),
+            type_bindings: vec![],
+            methods: vec![Function {
+                id: NodeId(3),
+                span: Span::new(110, 190),
+                name: "new".to_string(),
+                visibility: Visibility::Private,
+                is_async: false,
+                generic_params: vec![],
+                annotations: vec![],
+                params: vec![], // No self — static method
+                return_type: kodo_ast::TypeExpr::Named("Counter".to_string()),
+                requires: vec![],
+                ensures: vec![],
+                body: Block {
+                    span: Span::new(140, 190),
+                    stmts: vec![Stmt::Return {
+                        span: Span::new(145, 185),
+                        value: Some(Expr::StructLit {
+                            name: "Counter".to_string(),
+                            fields: vec![kodo_ast::FieldInit {
+                                name: "value".to_string(),
+                                value: Expr::IntLit(0, Span::new(170, 171)),
+                                span: Span::new(160, 175),
+                            }],
+                            span: Span::new(152, 180),
+                        }),
+                    }],
+                },
+            }],
+        }],
+        actor_decls: vec![],
+        intent_decls: vec![],
+        invariants: vec![],
+        functions: vec![Function {
+            id: NodeId(4),
+            span: Span::new(200, 300),
+            name: "main".to_string(),
+            visibility: Visibility::Private,
+            is_async: false,
+            generic_params: vec![],
+            annotations: vec![],
+            params: vec![],
+            return_type: kodo_ast::TypeExpr::Unit,
+            requires: vec![],
+            ensures: vec![],
+            body: Block {
+                span: Span::new(210, 300),
+                stmts: vec![Stmt::Let {
+                    name: "c".to_string(),
+                    ty: Some(kodo_ast::TypeExpr::Named("Counter".to_string())),
+                    value: Expr::Call {
+                        callee: Box::new(Expr::FieldAccess {
+                            object: Box::new(Expr::Ident(
+                                "Counter".to_string(),
+                                Span::new(230, 237),
+                            )),
+                            field: "new".to_string(),
+                            span: Span::new(230, 241),
+                        }),
+                        args: vec![],
+                        span: Span::new(230, 243),
+                    },
+                    span: Span::new(220, 250),
+                    mutable: false,
+                }],
+            },
+        }],
+    };
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "static method call Counter.new() should type-check: {result:?}"
+    );
+    // Verify method resolution was recorded as static.
+    assert!(
+        checker.static_method_calls().contains(&230),
+        "Counter.new() call should be recorded as a static method call"
+    );
+    // Verify method resolution maps to mangled name.
+    assert_eq!(
+        checker.method_resolutions().get(&230),
+        Some(&"Counter_new".to_string()),
+        "Counter.new() should resolve to Counter_new"
+    );
+}

@@ -236,15 +236,24 @@ pub(crate) fn run_build(
     // Rewrite method calls in the AST: `obj.method(args)` -> `TypeName_method(obj, args)`
     // Uses span-based resolutions from the type checker to precisely identify method calls.
     let method_resolutions = checker.method_resolutions().clone();
+    let static_method_calls = checker.static_method_calls().clone();
     if !method_resolutions.is_empty() {
         for func in &mut module.functions {
-            rewrite_method_calls_in_block(&mut func.body, &method_resolutions);
+            rewrite_method_calls_in_block(
+                &mut func.body,
+                &method_resolutions,
+                &static_method_calls,
+            );
         }
         // Also rewrite method calls inside actor handler bodies so that
         // handler-to-handler calls and self-calls are properly mangled.
         for actor_decl in &mut module.actor_decls {
             for handler in &mut actor_decl.handlers {
-                rewrite_method_calls_in_block(&mut handler.body, &method_resolutions);
+                rewrite_method_calls_in_block(
+                    &mut handler.body,
+                    &method_resolutions,
+                    &static_method_calls,
+                );
             }
         }
     }
