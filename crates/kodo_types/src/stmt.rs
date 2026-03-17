@@ -173,7 +173,11 @@ impl TypeChecker {
             Some(expr) => self.infer_expr(expr)?,
             None => Type::Unit,
         };
-        TypeEnv::check_eq(&self.current_return_type, &value_ty, span)?;
+        if !Self::compatible_enum_types(&self.current_return_type, &value_ty)
+            && !Self::compatible_map_annotation(&self.current_return_type, &value_ty)
+        {
+            TypeEnv::check_eq(&self.current_return_type, &value_ty, span)?;
+        }
         if let Some(Expr::Ident(name, _)) = value {
             if let Some(OwnershipState::Borrowed | OwnershipState::MutBorrowed) =
                 self.ownership_map.get(name)
