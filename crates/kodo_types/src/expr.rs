@@ -302,14 +302,25 @@ impl TypeChecker {
             self.env.insert(p.name.clone(), ty.clone());
             param_types.push(ty);
         }
+        // Save and set current_return_type so that return statements inside
+        // the closure body are checked against the closure's return type.
+        let saved_return_type = self.current_return_type.clone();
+        if let Some(ret_expr) = return_type {
+            self.current_return_type = self.resolve_type_mono(ret_expr, span)?;
+        }
         let body_type = self.infer_expr(body)?;
         let ret_type = if let Some(ret_expr) = return_type {
             let expected = self.resolve_type_mono(ret_expr, span)?;
-            TypeEnv::check_eq(&expected, &body_type, span)?;
+            // If body type is Unit (due to return statements), accept it —
+            // the return values are already checked against current_return_type.
+            if body_type != Type::Unit {
+                TypeEnv::check_eq(&expected, &body_type, span)?;
+            }
             expected
         } else {
             body_type
         };
+        self.current_return_type = saved_return_type;
         self.env.truncate(scope);
         Ok(Type::Function(param_types, Box::new(ret_type)))
     }
@@ -627,10 +638,9 @@ impl TypeChecker {
                     self.infer_expr(value)?;
                     last_ty = Type::Unit;
                 }
-                Stmt::Return { value, .. } => {
-                    if let Some(expr) = value {
-                        self.infer_expr(expr)?;
-                    }
+                Stmt::Return { span, value } => {
+                    self.check_stmt(stmt)?;
+                    let _ = (span, value);
                     last_ty = Type::Unit;
                 }
                 Stmt::While {
@@ -1136,9 +1146,12 @@ impl TypeChecker {
             None
         };
 
-        // Polymorphic map builtins: check based on the map's actual type params.
+        // Polymorphic collection builtins: check based on actual type params.
         if let Some(ref name) = callee_name {
             if let Some(ret) = self.try_check_polymorphic_map(name, args, span)? {
+                return Ok(ret);
+            }
+            if let Some(ret) = self.try_check_polymorphic_list(name, args, span)? {
                 return Ok(ret);
             }
         }
@@ -1279,6 +1292,81 @@ impl TypeChecker {
                 Ok(Some(Type::Bool))
             }
             "map_length" | "map_is_empty" => Ok(Some(Type::Int)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Checks polymorphic list builtin calls (`list_push`, `list_get`, etc.)
+    /// by inferring the element type from the list argument.
+    ///
+    /// Returns `Some(return_type)` if this is a polymorphic list call,
+    /// `None` if it should fall through to normal checking.
+    fn try_check_polymorphic_list(
+        &mut self,
+        callee_name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> crate::Result<Option<Type>> {
+        let expected_arity = match callee_name {
+            "list_push" => 2,
+            "list_get" | "list_contains" | "list_remove" | "list_set" => match callee_name {
+                "list_set" => 3,
+                _ => 2,
+            },
+            "list_length" | "list_is_empty" | "list_pop" | "list_reverse" => 1,
+            _ => return Ok(None),
+        };
+        if args.len() != expected_arity {
+            return Err(TypeError::ArityMismatch {
+                expected: expected_arity,
+                found: args.len(),
+                span,
+            });
+        }
+
+        let list_ty = self.infer_expr(&args[0])?;
+        let elem_ty = match &list_ty {
+            Type::Generic(name, params) if name == "List" && params.len() == 1 => params[0].clone(),
+            _ => return Ok(None),
+        };
+
+        // If it's the default List<Int>, let normal checking handle it.
+        if elem_ty == Type::Int {
+            return Ok(None);
+        }
+
+        match callee_name {
+            "list_push" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&elem_ty, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(Type::Unit))
+            }
+            "list_get" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&Type::Int, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(elem_ty))
+            }
+            "list_contains" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&elem_ty, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(Type::Bool))
+            }
+            "list_remove" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&Type::Int, &arg1_ty, expr_span(&args[1]))?;
+                Ok(Some(Type::Bool))
+            }
+            "list_set" => {
+                let arg1_ty = self.infer_expr(&args[1])?;
+                TypeEnv::check_eq(&Type::Int, &arg1_ty, expr_span(&args[1]))?;
+                let arg2_ty = self.infer_expr(&args[2])?;
+                TypeEnv::check_eq(&elem_ty, &arg2_ty, expr_span(&args[2]))?;
+                Ok(Some(Type::Bool))
+            }
+            "list_length" => Ok(Some(Type::Int)),
+            "list_is_empty" => Ok(Some(Type::Bool)),
+            "list_pop" => Ok(Some(elem_ty)),
+            "list_reverse" => Ok(Some(Type::Unit)),
             _ => Ok(None),
         }
     }

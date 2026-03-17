@@ -125,16 +125,16 @@ impl TypeChecker {
         false
     }
 
-    /// Checks if a Map type annotation is compatible with a `map_new()` return type.
-    ///
-    /// `map_new()` is registered as returning `Map<Int, Int>`, but when the user
-    /// provides a type annotation like `let m: Map<String, Int> = map_new()`,
-    /// the annotated type should prevail (the annotation drives monomorphization).
+    /// Checks if a collection type annotation is compatible with a constructor's
+    /// return type (`map_new()` returns `Map<Int, Int>`, `list_new()` returns
+    /// `List<Int>`), allowing the annotation to drive monomorphization.
     pub(crate) fn compatible_map_annotation(expected: &Type, found: &Type) -> bool {
         if let (Type::Generic(e_name, e_args), Type::Generic(f_name, f_args)) = (expected, found) {
+            let valid_types = [Type::Int, Type::String];
             if e_name == "Map" && f_name == "Map" && e_args.len() == 2 && f_args.len() == 2 {
-                // Accept any Map<K,V> annotation when the value is Map<Int, Int> (from map_new).
-                let valid_types = [Type::Int, Type::String];
+                return e_args.iter().all(|t| valid_types.contains(t));
+            }
+            if e_name == "List" && f_name == "List" && e_args.len() == 1 && f_args.len() == 1 {
                 return e_args.iter().all(|t| valid_types.contains(t));
             }
         }
