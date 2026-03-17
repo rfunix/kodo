@@ -326,20 +326,77 @@ impl TypeChecker {
     }
 
     /// Checks a struct literal expression.
+    ///
+    /// If the struct name is not found in the concrete `struct_registry`, checks
+    /// whether it is a generic struct definition. If so, infers type arguments
+    /// from the field values, monomorphizes the struct, and validates against
+    /// the resulting concrete fields.
     fn check_struct_lit(
         &mut self,
         name: &str,
         fields: &[kodo_ast::FieldInit],
         span: Span,
     ) -> crate::Result<Type> {
-        let expected_fields =
-            self.struct_registry
-                .get(name)
-                .cloned()
-                .ok_or_else(|| TypeError::UnknownStruct {
+        // If the struct name is not concrete, try to monomorphize a generic struct
+        // by inferring type arguments from the provided field values.
+        let (effective_name, expected_fields) =
+            if let Some(concrete) = self.struct_registry.get(name).cloned() {
+                (name.to_string(), concrete)
+            } else if let Some(def) = self.generic_structs.get(name).cloned() {
+                // Infer each field value's type first.
+                let mut field_type_map: std::collections::HashMap<String, Type> =
+                    std::collections::HashMap::new();
+                for field in fields {
+                    let ty = self.infer_expr(&field.value)?;
+                    field_type_map.insert(field.name.clone(), ty);
+                }
+
+                // Build a substitution from type parameters to concrete types
+                // by matching field value types against the generic field definitions.
+                let mut subst: std::collections::HashMap<String, Type> =
+                    std::collections::HashMap::new();
+                for (fname, ftype_expr) in &def.fields {
+                    if let kodo_ast::TypeExpr::Named(param_name) = ftype_expr {
+                        if def.params.contains(param_name) {
+                            if let Some(concrete_ty) = field_type_map.get(fname) {
+                                subst.insert(param_name.clone(), concrete_ty.clone());
+                            }
+                        }
+                    }
+                }
+
+                // Verify all type parameters were resolved.
+                let resolved_args: Vec<Type> = def
+                    .params
+                    .iter()
+                    .map(|p| {
+                        subst
+                            .get(p)
+                            .cloned()
+                            .ok_or_else(|| TypeError::UnknownStruct {
+                                name: name.to_string(),
+                                span,
+                            })
+                    })
+                    .collect::<crate::Result<Vec<_>>>()?;
+
+                let mono_name = Self::mono_name(name, &resolved_args);
+                self.monomorphize_struct(&mono_name, &def, &resolved_args, span)?;
+                let concrete = self
+                    .struct_registry
+                    .get(&mono_name)
+                    .cloned()
+                    .ok_or_else(|| TypeError::UnknownStruct {
+                        name: name.to_string(),
+                        span,
+                    })?;
+                (mono_name, concrete)
+            } else {
+                return Err(TypeError::UnknownStruct {
                     name: name.to_string(),
                     span,
-                })?;
+                });
+            };
 
         // Check for duplicate fields.
         let mut seen = std::collections::HashSet::new();
@@ -347,7 +404,7 @@ impl TypeChecker {
             if !seen.insert(field.name.clone()) {
                 return Err(TypeError::DuplicateStructField {
                     field: field.name.clone(),
-                    struct_name: name.to_string(),
+                    struct_name: effective_name.clone(),
                     span: field.span,
                 });
             }
@@ -360,7 +417,7 @@ impl TypeChecker {
                     find_similar_in(&field.name, expected_fields.iter().map(|(n, _)| n.as_str()));
                 return Err(TypeError::ExtraStructField {
                     field: field.name.clone(),
-                    struct_name: name.to_string(),
+                    struct_name: effective_name.clone(),
                     span: field.span,
                     similar,
                 });
@@ -372,7 +429,7 @@ impl TypeChecker {
             if !fields.iter().any(|f| &f.name == expected_name) {
                 return Err(TypeError::MissingStructField {
                     field: expected_name.clone(),
-                    struct_name: name.to_string(),
+                    struct_name: effective_name.clone(),
                     span,
                 });
             }
@@ -390,7 +447,7 @@ impl TypeChecker {
             }
         }
 
-        Ok(Type::Struct(name.to_string()))
+        Ok(Type::Struct(effective_name))
     }
 
     /// Checks an enum variant expression, or a qualified module function call.

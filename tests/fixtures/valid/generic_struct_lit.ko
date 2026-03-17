@@ -1,0 +1,14 @@
+module generic_struct_test {
+    meta { purpose: "test generic structs", version: "1.0" }
+
+    struct Pair<T> {
+        first: T,
+        second: T
+    }
+
+    fn main() {
+        let p: Pair<Int> = Pair { first: 1, second: 2 }
+        print_int(p.first)
+        print_int(p.second)
+    }
+}

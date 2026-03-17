@@ -6820,3 +6820,138 @@ fn let_mut_inside_if_with_reassignment() {
         "let mut x inside if with reassignment should work"
     );
 }
+
+#[test]
+fn generic_struct_literal_infers_type_args() {
+    // Defines `struct Pair<T> { first: T, second: T }` and then uses
+    // `let p: Pair<Int> = Pair { first: 1, second: 2 }`.
+    // Previously this failed with E0213 (unknown struct "Pair") because
+    // `check_struct_lit` only looked in `struct_registry`, not `generic_structs`.
+    let struct_decl = kodo_ast::TypeDecl {
+        id: NodeId(10),
+        span: Span::new(0, 50),
+        name: "Pair".to_string(),
+        visibility: Visibility::Private,
+        generic_params: vec![gp("T")],
+        fields: vec![
+            kodo_ast::FieldDef {
+                name: "first".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            },
+            kodo_ast::FieldDef {
+                name: "second".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            },
+        ],
+    };
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Let {
+            span: Span::new(0, 50),
+            mutable: false,
+            name: "p".to_string(),
+            ty: Some(TypeExpr::Generic(
+                "Pair".to_string(),
+                vec![TypeExpr::Named("Int".to_string())],
+            )),
+            value: Expr::StructLit {
+                name: "Pair".to_string(),
+                fields: vec![
+                    kodo_ast::FieldInit {
+                        name: "first".to_string(),
+                        value: Expr::IntLit(1, Span::new(0, 1)),
+                        span: Span::new(0, 10),
+                    },
+                    kodo_ast::FieldInit {
+                        name: "second".to_string(),
+                        value: Expr::IntLit(2, Span::new(0, 1)),
+                        span: Span::new(0, 10),
+                    },
+                ],
+                span: Span::new(0, 40),
+            },
+        }],
+    );
+    let module = make_module_with_decls(vec![struct_decl], vec![], vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "generic struct literal should type-check: {result:?}"
+    );
+    assert!(
+        checker.struct_registry().contains_key("Pair__Int"),
+        "Pair__Int should be in struct_registry after monomorphization"
+    );
+    let fields = checker.struct_registry().get("Pair__Int").unwrap();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0], ("first".to_string(), Type::Int));
+    assert_eq!(fields[1], ("second".to_string(), Type::Int));
+}
+
+#[test]
+fn generic_struct_literal_without_annotation_infers_type_args() {
+    // `let p = Pair { first: 1, second: 2 }` — no type annotation.
+    // The type checker should still infer Pair<Int> from the field values.
+    let struct_decl = kodo_ast::TypeDecl {
+        id: NodeId(10),
+        span: Span::new(0, 50),
+        name: "Pair".to_string(),
+        visibility: Visibility::Private,
+        generic_params: vec![gp("T")],
+        fields: vec![
+            kodo_ast::FieldDef {
+                name: "first".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            },
+            kodo_ast::FieldDef {
+                name: "second".to_string(),
+                ty: TypeExpr::Named("T".to_string()),
+                span: Span::new(0, 20),
+            },
+        ],
+    };
+    let func = make_function(
+        "main",
+        vec![],
+        TypeExpr::Unit,
+        vec![Stmt::Let {
+            span: Span::new(0, 50),
+            mutable: false,
+            name: "p".to_string(),
+            ty: None,
+            value: Expr::StructLit {
+                name: "Pair".to_string(),
+                fields: vec![
+                    kodo_ast::FieldInit {
+                        name: "first".to_string(),
+                        value: Expr::IntLit(1, Span::new(0, 1)),
+                        span: Span::new(0, 10),
+                    },
+                    kodo_ast::FieldInit {
+                        name: "second".to_string(),
+                        value: Expr::IntLit(2, Span::new(0, 1)),
+                        span: Span::new(0, 10),
+                    },
+                ],
+                span: Span::new(0, 40),
+            },
+        }],
+    );
+    let module = make_module_with_decls(vec![struct_decl], vec![], vec![func]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "generic struct literal without annotation should type-check: {result:?}"
+    );
+    assert!(
+        checker.struct_registry().contains_key("Pair__Int"),
+        "Pair__Int should be monomorphized from field inference"
+    );
+}

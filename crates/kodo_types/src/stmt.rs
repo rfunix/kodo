@@ -114,6 +114,12 @@ impl TypeChecker {
     }
 
     /// Checks a `let` statement: resolves type annotation, infers initializer, tracks ownership.
+    ///
+    /// When a type annotation is present, resolves it *before* inferring the
+    /// initializer expression. This ensures that generic type annotations
+    /// (e.g., `Pair<Int>`) trigger monomorphization before the initializer
+    /// (e.g., `Pair { first: 1, second: 2 }`) is type-checked, making the
+    /// concrete struct available in the registry.
     pub(crate) fn check_let_stmt(
         &mut self,
         span: kodo_ast::Span,
@@ -121,9 +127,15 @@ impl TypeChecker {
         ty: Option<&kodo_ast::TypeExpr>,
         value: &Expr,
     ) -> crate::Result<()> {
+        // Resolve the annotation first so generic types are monomorphized
+        // before we try to infer the value expression's type.
+        let annotation_ty = if let Some(annotation) = ty {
+            Some(self.resolve_type_mono(annotation, span)?)
+        } else {
+            None
+        };
         let value_ty = self.infer_expr(value)?;
-        if let Some(annotation) = ty {
-            let expected = self.resolve_type_mono(annotation, span)?;
+        if let Some(expected) = annotation_ty {
             if !Self::compatible_enum_types(&expected, &value_ty)
                 && !Self::compatible_map_annotation(&expected, &value_ty)
             {
