@@ -15,6 +15,7 @@ impl MirBuilder {
     ///
     /// Compound expressions (calls, if/else) may emit instructions and
     /// create new basic blocks as a side effect.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn lower_expr(&mut self, expr: &Expr) -> Result<Value> {
         match expr {
             Expr::IntLit(n, _) => Ok(Value::IntConst(*n)),
@@ -264,6 +265,44 @@ impl MirBuilder {
                 .cloned()
                 .unwrap_or(callee_name)
         };
+        // Wrap concrete-type arguments in MakeDynTrait when the callee
+        // expects a `dyn Trait` parameter.  This inserts the fat-pointer
+        // construction (data_ptr + vtable_ptr) that codegen needs for
+        // dynamic dispatch.
+        //
+        // Clone param types up-front to avoid holding an immutable borrow
+        // on `self.fn_param_types` while mutating the builder.
+        let maybe_param_tys = self.fn_param_types.get(&resolved_callee).cloned();
+        if let Some(param_tys) = maybe_param_tys {
+            for (i, pt) in param_tys.iter().enumerate() {
+                if let Type::DynTrait(trait_name) = pt {
+                    if i < arg_values.len() {
+                        let concrete_type = self.infer_value_concrete_type(&arg_values[i]);
+                        // Only wrap if the arg is not already a MakeDynTrait.
+                        if !matches!(arg_values[i], Value::MakeDynTrait { .. }) {
+                            // Materialise the arg into a local first so that
+                            // codegen can take its stack-slot address.
+                            let arg_val = arg_values[i].clone();
+                            let arg_ty = self.infer_value_type(&arg_val);
+                            let tmp = self.alloc_local(arg_ty, false);
+                            self.emit(Instruction::Assign(tmp, arg_val));
+                            let dyn_local =
+                                self.alloc_local(Type::DynTrait(trait_name.clone()), false);
+                            self.emit(Instruction::Assign(
+                                dyn_local,
+                                Value::MakeDynTrait {
+                                    value: Box::new(Value::Local(tmp)),
+                                    concrete_type,
+                                    trait_name: trait_name.clone(),
+                                },
+                            ));
+                            arg_values[i] = Value::Local(dyn_local);
+                        }
+                    }
+                }
+            }
+        }
+
         // Look up return type from fn_return_types so composite types
         // get proper stack slot allocation in codegen.
         let ret_ty = self
@@ -598,6 +637,10 @@ impl MirBuilder {
     }
 
     /// Lowers a field access expression on a struct or actor.
+    ///
+    /// Handles both concrete struct types (`Type::Struct`) and monomorphized
+    /// generic types (`Type::Generic`) by resolving the monomorphized struct
+    /// name from the registry.
     fn lower_field_access(&mut self, object: &Expr, field: &str) -> Result<Value> {
         let obj_val = self.lower_expr(object)?;
         // Resolve struct name from the object's type.
@@ -610,6 +653,17 @@ impl MirBuilder {
                     .ok_or_else(|| MirError::UndefinedVariable(name.clone()))?;
                 match self.local_types.get(&local_id) {
                     Some(Type::Struct(s)) => s.clone(),
+                    // Handle monomorphized generic types: Generic("Pair", [Int])
+                    // resolves to the monomorphized name "Pair__Int".
+                    Some(Type::Generic(base, args)) => {
+                        let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                        let mono = format!("{base}__{}", arg_strs.join("_"));
+                        if self.struct_registry.contains_key(&mono) {
+                            mono
+                        } else {
+                            return Ok(Value::Unit);
+                        }
+                    }
                     _ => return Ok(Value::Unit),
                 }
             }
@@ -719,12 +773,28 @@ impl MirBuilder {
     }
 
     /// Lowers a regular struct literal value.
+    ///
+    /// When the struct name is a generic type (e.g., `Pair`) that has been
+    /// monomorphized by the type checker (e.g., `Pair__Int`), this method
+    /// resolves the effective name by searching the struct registry for a
+    /// monomorphized variant.
     fn lower_regular_struct_lit(
         &mut self,
         name: &str,
         fields: &[kodo_ast::FieldInit],
     ) -> Result<Value> {
-        let decl_fields = self.struct_registry.get(name).cloned().unwrap_or_default();
+        // If the name is not directly in the registry, try to find a
+        // monomorphized variant (e.g., Pair → Pair__Int).
+        let effective_name = if self.struct_registry.contains_key(name) {
+            name.to_string()
+        } else {
+            self.resolve_monomorphized_struct_name(name)
+        };
+        let decl_fields = self
+            .struct_registry
+            .get(&effective_name)
+            .cloned()
+            .unwrap_or_default();
         let mut ordered_fields = Vec::with_capacity(fields.len());
         for (decl_name, _) in &decl_fields {
             if let Some(init) = fields.iter().find(|f| &f.name == decl_name) {
@@ -732,14 +802,29 @@ impl MirBuilder {
                 ordered_fields.push((decl_name.clone(), val));
             }
         }
-        let local_id = self.alloc_local(Type::Struct(name.to_string()), false);
+        let local_id = self.alloc_local(Type::Struct(effective_name.clone()), false);
         self.emit(Instruction::Assign(
             local_id,
             Value::StructLit {
-                name: name.to_string(),
+                name: effective_name,
                 fields: ordered_fields,
             },
         ));
         Ok(Value::Local(local_id))
+    }
+
+    /// Searches the struct registry for a monomorphized variant of a generic
+    /// struct name.
+    ///
+    /// For example, given `"Pair"`, finds `"Pair__Int"` if it exists. When
+    /// multiple monomorphized variants exist, returns the first match.
+    /// Falls back to the original name if no variant is found.
+    fn resolve_monomorphized_struct_name(&self, name: &str) -> String {
+        let prefix = format!("{name}__");
+        self.struct_registry
+            .keys()
+            .find(|k| k.starts_with(&prefix))
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 }
