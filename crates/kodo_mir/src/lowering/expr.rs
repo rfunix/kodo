@@ -271,6 +271,10 @@ impl MirBuilder {
             .get(&resolved_callee)
             .cloned()
             .unwrap_or(Type::Unknown);
+        // Infer element type for list_get: if the list is List<String>,
+        // the return type must be String so codegen allocates a _String
+        // stack slot and handles the composite string calling convention.
+        let ret_ty = self.infer_list_get_return_type(&resolved_callee, &arg_values, ret_ty);
         let dest = self.alloc_local(ret_ty, false);
         self.emit(Instruction::Call {
             dest,
@@ -390,6 +394,36 @@ impl MirBuilder {
             return callee_name;
         }
         format!("{callee_name}{suffix}")
+    }
+
+    /// Infers the return type of `list_get` based on the list's element type.
+    ///
+    /// When `list_get` is called on a `List<String>`, the returned value is a
+    /// pointer to a `KodoString` struct (ptr + len). The MIR local must have
+    /// type `String` so codegen allocates a `_String` stack slot and handles
+    /// the composite string calling convention correctly.
+    fn infer_list_get_return_type(
+        &self,
+        callee: &str,
+        arg_values: &[Value],
+        default_ty: Type,
+    ) -> Type {
+        if callee != "list_get" || arg_values.is_empty() {
+            return default_ty;
+        }
+        let list_local = match &arg_values[0] {
+            Value::Local(id) => *id,
+            _ => return default_ty,
+        };
+        let Some(list_ty) = self.local_types.get(&list_local) else {
+            return default_ty;
+        };
+        match list_ty {
+            Type::Generic(name, params) if name == "List" && !params.is_empty() => {
+                params[0].clone()
+            }
+            _ => default_ty,
+        }
     }
 
     /// Lowers an indirect call through a function pointer local.

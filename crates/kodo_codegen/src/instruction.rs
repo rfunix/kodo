@@ -1434,10 +1434,44 @@ fn emit_list_map_get(
     let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
     builder.ins().call(func_ref, &all_args);
 
-    // Load the value as the result.
+    // Load the raw value from the out-parameter.
     let result_val = builder
         .ins()
         .load(types::I64, MemFlags::new(), out_value_addr, 0);
+
+    // If the destination has a _String stack slot, the retrieved value is a
+    // pointer to a KodoString struct (ptr + len at offsets 0 and 8).
+    // We need to copy the string data into the destination stack slot so
+    // that downstream consumers (e.g. println) can read (ptr, len) from it.
+    if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(&dest) {
+        if dest_name == "_String" {
+            let str_ptr = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), result_val, 0);
+            let str_len =
+                builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), result_val, STRING_LEN_OFFSET);
+            let dest_ptr_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), str_ptr, dest_ptr_addr, 0);
+            let dest_len_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), str_len, dest_len_addr, 0);
+            let var = var_map.get(dest)?;
+            let addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+            builder.def_var(var, addr);
+            return Ok(true);
+        }
+    }
+
+    // Default: store the raw i64 value as a scalar.
     let var = var_map.get(dest)?;
     builder.def_var(var, result_val);
     Ok(true)
