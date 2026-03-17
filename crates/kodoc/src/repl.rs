@@ -430,6 +430,7 @@ pub fn compile_and_run(source: &str) -> Result<String, String> {
         checker.enum_registry(),
         checker.enum_names(),
         checker.type_alias_registry(),
+        checker.trait_registry(),
     )
     .map_err(|e| format!("MIR lowering error: {e}"))?;
 
@@ -542,6 +543,7 @@ pub fn show_mir(source: &str) -> Result<String, String> {
         checker.enum_registry(),
         checker.enum_names(),
         checker.type_alias_registry(),
+        checker.trait_registry(),
     )
     .map_err(|e| format!("MIR lowering error: {e}"))?;
 

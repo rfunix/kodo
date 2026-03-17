@@ -405,6 +405,7 @@ pub(crate) fn run_test(
             checker.enum_registry(),
             checker.enum_names(),
             checker.type_alias_registry(),
+            checker.trait_registry(),
         ) {
             Ok(fns) => all_mir_functions.extend(fns),
             Err(e) => {
@@ -419,6 +420,7 @@ pub(crate) fn run_test(
         checker.enum_registry(),
         checker.enum_names(),
         checker.type_alias_registry(),
+        checker.trait_registry(),
     ) {
         Ok(fns) => fns,
         Err(e) => {

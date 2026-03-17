@@ -915,6 +915,7 @@ pub(crate) fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
         checker.enum_registry(),
         checker.enum_names(),
         checker.type_alias_registry(),
+        checker.trait_registry(),
     ) {
         Ok(fns) => fns,
         Err(e) => {

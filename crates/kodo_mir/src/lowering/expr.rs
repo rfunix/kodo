@@ -454,10 +454,51 @@ impl MirBuilder {
     /// The callee name encodes the trait and vtable index as
     /// `__dyn_TraitName_methodName_vtableIndex`. The first argument (args\[0\])
     /// is the dyn Trait object (fat pointer).
+    ///
+    /// The trait registry is consulted to resolve the actual parameter types
+    /// and return type for the method, which are critical for correct codegen
+    /// signature construction (especially sret handling for composite returns).
     fn lower_virtual_call(&mut self, callee_name: &str, args: &[Expr]) -> Result<Value> {
-        // Parse vtable index from the callee name: __dyn_Trait_method_INDEX
+        // Parse vtable index and method/trait names from:
+        // __dyn_TraitName_methodName_vtableIndex
         let parts: Vec<&str> = callee_name.rsplitn(2, '_').collect();
         let vtable_index: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // Extract trait name and method name from the callee.
+        // Format: __dyn_{TraitName}_{methodName}_{index}
+        // After stripping "__dyn_" prefix and the trailing "_{index}", we have
+        // "{TraitName}_{methodName}". We split on the last '_' to separate them.
+        let without_prefix = callee_name.strip_prefix("__dyn_").unwrap_or(callee_name);
+        let without_suffix = without_prefix
+            .rsplit_once('_')
+            .map_or(without_prefix, |x| x.0);
+        // Now without_suffix is "{TraitName}_{methodName}".
+        // Split on the last '_' to get trait name and method name.
+        let (trait_name, method_name) = if let Some(pos) = without_suffix.rfind('_') {
+            (&without_suffix[..pos], &without_suffix[pos + 1..])
+        } else {
+            (without_suffix, without_suffix)
+        };
+
+        // Resolve actual param types and return type from the trait registry.
+        let (resolved_param_types, resolved_return_type) =
+            self.trait_registry
+                .get(trait_name)
+                .and_then(|methods| {
+                    methods.iter().find(|(name, _, _)| name == method_name).map(
+                        |(_, params, ret)| {
+                            // Skip self parameter — codegen adds data_ptr as the
+                            // first argument separately.
+                            let non_self_params = if params.len() > 1 {
+                                params[1..].to_vec()
+                            } else {
+                                vec![]
+                            };
+                            (non_self_params, ret.clone())
+                        },
+                    )
+                })
+                .unwrap_or_else(|| (vec![], Type::Unknown));
 
         // First arg is the dyn Trait object (self).
         let object_val = self.lower_expr(&args[0])?;
@@ -476,14 +517,14 @@ impl MirBuilder {
             arg_values.push(self.lower_expr(arg)?);
         }
 
-        let dest = self.alloc_local(Type::Unknown, false);
+        let dest = self.alloc_local(resolved_return_type.clone(), false);
         self.emit(Instruction::VirtualCall {
             dest,
             object: object_local,
             vtable_index,
             args: arg_values,
-            return_type: Type::Unknown,
-            param_types: vec![],
+            return_type: resolved_return_type,
+            param_types: resolved_param_types,
         });
         Ok(Value::Local(dest))
     }

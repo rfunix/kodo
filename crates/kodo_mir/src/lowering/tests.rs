@@ -1208,12 +1208,14 @@ fn test_field_access_type_resolution() {
     let enum_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let type_alias_registry: HashMap<String, (Type, Option<kodo_ast::Expr>)> = HashMap::new();
+    let trait_registry: HashMap<String, Vec<(String, Vec<Type>, Type)>> = HashMap::new();
     let result = lower_module_with_type_info(
         &module,
         &struct_registry,
         &enum_registry,
         &enum_names,
         &type_alias_registry,
+        &trait_registry,
     );
     assert!(result.is_ok(), "field access lowering failed: {result:?}");
 
@@ -1255,6 +1257,7 @@ fn lower_spawn_without_captures() {
         &HashMap::new(),
         &HashMap::new(),
         &HashSet::new(),
+        &HashMap::new(),
         &HashMap::new(),
     )
     .unwrap();
@@ -1307,6 +1310,7 @@ fn lower_spawn_with_captures() {
         &HashMap::new(),
         &HashMap::new(),
         &HashSet::new(),
+        &HashMap::new(),
         &HashMap::new(),
     )
     .unwrap();

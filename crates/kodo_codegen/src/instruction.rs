@@ -19,7 +19,7 @@ use crate::function::{HeapKind, VarMap};
 use crate::layout::{
     EnumLayout, StructLayout, STRING_LAYOUT_SIZE, STRING_LEN_OFFSET, STRING_PTR_OFFSET,
 };
-use crate::module::{cranelift_type, is_unit};
+use crate::module::{cranelift_type, is_composite, is_unit};
 use crate::value::{
     create_string_data, expand_string_value_with_builtins, infer_value_type, resolve_enum_addr,
     translate_value,
@@ -1798,19 +1798,41 @@ fn translate_virtual_call(
         .ins()
         .load(types::I64, MemFlags::trusted(), vtable_ptr, fn_ptr_offset);
 
-    // Build the signature: first param is data_ptr (self), then the method args.
+    // Build the signature, replicating sret logic from `build_signature`
+    // in `module.rs`. When the return type is composite (struct, String,
+    // enum, etc.), the callee expects an sret pointer as its first param
+    // and writes the result there instead of returning it in a register.
+    let has_sret = is_composite(return_type);
+    let dest_is_composite = var_map.stack_slots.contains_key(&dest);
     let mut sig = Signature::new(CallConv::SystemV);
+
+    if has_sret {
+        sig.params.push(AbiParam::new(types::I64)); // sret pointer
+    }
+
     sig.params.push(AbiParam::new(types::I64)); // self (data_ptr)
     for pt in param_types {
-        sig.params.push(AbiParam::new(cranelift_type(pt)));
+        if is_composite(pt) {
+            sig.params.push(AbiParam::new(types::I64)); // pointer
+        } else {
+            sig.params.push(AbiParam::new(cranelift_type(pt)));
+        }
     }
-    if !is_unit(return_type) {
+    // Only add a scalar return if the return type is not composite and not unit.
+    if !has_sret && !is_unit(return_type) {
         sig.returns.push(AbiParam::new(cranelift_type(return_type)));
     }
     let sig_ref = builder.import_signature(sig);
 
-    // Build argument list: data_ptr first, then the user-provided args.
-    let mut arg_vals = Vec::with_capacity(1 + args.len());
+    // Build argument list.
+    let mut arg_vals = Vec::with_capacity(2 + args.len());
+    // sret pointer first if needed — use the pre-allocated stack slot of dest.
+    if dest_is_composite {
+        if let Some((slot, _)) = var_map.stack_slots.get(&dest) {
+            let sret_addr = builder.ins().stack_addr(types::I64, *slot, 0);
+            arg_vals.push(sret_addr);
+        }
+    }
     arg_vals.push(data_ptr);
     for arg in args {
         arg_vals.push(translate_value(
@@ -1825,18 +1847,6 @@ fn translate_virtual_call(
     }
 
     let call = builder.ins().call_indirect(sig_ref, fn_ptr, &arg_vals);
-    let var = var_map.get(dest)?;
-    if is_unit(return_type) {
-        let zero = builder.ins().iconst(types::I64, 0);
-        builder.def_var(var, zero);
-    } else {
-        let results = builder.inst_results(call);
-        if results.is_empty() {
-            let zero = builder.ins().iconst(types::I64, 0);
-            builder.def_var(var, zero);
-        } else {
-            builder.def_var(var, results[0]);
-        }
-    }
+    define_call_result(dest, dest_is_composite, call, builder, var_map)?;
     Ok(())
 }

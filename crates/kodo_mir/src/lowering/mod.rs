@@ -104,6 +104,12 @@ pub struct MirBuilder {
     /// When a `let` binding has a type annotation that matches a refined alias,
     /// the MIR builder emits a runtime contract check after the assignment.
     type_alias_registry: HashMap<String, (kodo_types::Type, Option<kodo_ast::Expr>)>,
+    /// Registry of trait method signatures: trait name to list of
+    /// `(method_name, param_types, return_type)`.
+    ///
+    /// Used by `lower_virtual_call` to resolve the correct parameter and
+    /// return types for `dyn Trait` virtual dispatch calls.
+    trait_registry: HashMap<String, Vec<(String, Vec<kodo_types::Type>, kodo_types::Type)>>,
 }
 
 impl MirBuilder {
@@ -130,6 +136,7 @@ impl MirBuilder {
             loop_stack: Vec::new(),
             actor_names: HashSet::new(),
             type_alias_registry: HashMap::new(),
+            trait_registry: HashMap::new(),
         }
     }
 
@@ -209,12 +216,14 @@ fn lower_function_with_registries(
         fn_return_types,
         &HashSet::new(),
         &HashMap::new(),
+        &HashMap::new(),
     )?;
     Ok(func)
 }
 
 /// Lowers a single AST [`Function`] into a [`MirFunction`] and any
 /// lambda-lifted closure functions.
+#[allow(clippy::type_complexity)]
 fn lower_function_with_closures(
     function: &Function,
     struct_registry: &HashMap<String, Vec<(String, Type)>>,
@@ -222,6 +231,7 @@ fn lower_function_with_closures(
     fn_return_types: &HashMap<String, Type>,
     actor_names: &HashSet<String>,
     type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>)>,
+    trait_registry: &HashMap<String, Vec<(String, Vec<Type>, Type)>>,
 ) -> Result<(MirFunction, Vec<MirFunction>)> {
     let mut builder = MirBuilder::new();
     builder.actor_names.clone_from(actor_names);
@@ -229,6 +239,7 @@ fn lower_function_with_closures(
     builder.enum_registry.clone_from(enum_registry);
     builder.fn_return_types.clone_from(fn_return_types);
     builder.type_alias_registry.clone_from(type_alias_registry);
+    builder.trait_registry.clone_from(trait_registry);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
@@ -311,12 +322,14 @@ fn lower_function_with_closures(
 /// # Errors
 ///
 /// Returns the first [`MirError`] encountered during lowering.
+#[allow(clippy::type_complexity)]
 pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     module: &Module,
     struct_registry: &HashMap<String, Vec<(String, Type)>, S>,
     enum_registry: &HashMap<String, Vec<(String, Vec<Type>)>, S>,
     enum_names: &std::collections::HashSet<String, S>,
     type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>), S>,
+    trait_registry: &HashMap<String, Vec<(String, Vec<Type>, Type)>, S>,
 ) -> Result<Vec<MirFunction>> {
     // Copy to standard HashMaps for internal use.
     let struct_reg: HashMap<String, Vec<(String, Type)>> = struct_registry
@@ -329,6 +342,10 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
         .collect();
     let enum_ns: std::collections::HashSet<String> = enum_names.iter().cloned().collect();
     let alias_reg: HashMap<String, (Type, Option<kodo_ast::Expr>)> = type_alias_registry
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let trait_reg: HashMap<String, Vec<(String, Vec<Type>, Type)>> = trait_registry
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
@@ -361,6 +378,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             &fn_return_types,
             &actor_names,
             &alias_reg,
+            &trait_reg,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -386,6 +404,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
                 &fn_return_types,
                 &actor_names,
                 &alias_reg,
+                &trait_reg,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -424,6 +443,24 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
 
     let enum_names: std::collections::HashSet<String> = enum_registry.keys().cloned().collect();
 
+    // Build trait registry from AST trait declarations.
+    let mut trait_reg: HashMap<String, Vec<(String, Vec<Type>, Type)>> = HashMap::new();
+    for trait_decl in &module.trait_decls {
+        let mut methods = Vec::new();
+        for method in &trait_decl.methods {
+            let param_types: std::result::Result<Vec<_>, _> = method
+                .params
+                .iter()
+                .map(|p| resolve_type_with_enums(&p.ty, p.span, &enum_names))
+                .collect();
+            let param_types = param_types.map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            let ret_type = resolve_type_with_enums(&method.return_type, method.span, &enum_names)
+                .map_err(|e| MirError::TypeResolution(e.to_string()))?;
+            methods.push((method.name.clone(), param_types, ret_type));
+        }
+        trait_reg.insert(trait_decl.name.clone(), methods);
+    }
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
@@ -437,6 +474,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             &fn_return_types,
             &actor_names,
             &alias_reg,
+            &trait_reg,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -462,6 +500,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
                 &fn_return_types,
                 &actor_names,
                 &alias_reg,
+                &trait_reg,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
