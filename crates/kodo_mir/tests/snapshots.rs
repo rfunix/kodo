@@ -4,8 +4,7 @@
 //! Any change to MIR structure will be flagged as a snapshot diff.
 
 use kodo_ast::{
-    BinOp, Block, Expr, Function, Module, NodeId, Ownership, Param, Span, Stmt, TypeExpr,
-    Visibility,
+    BinOp, Block, Expr, Function, NodeId, Ownership, Param, Span, Stmt, TypeExpr, Visibility,
 };
 use kodo_mir::lowering::lower_function;
 
@@ -27,26 +26,6 @@ fn make_fn(name: &str, params: Vec<Param>, body: Block, ret: TypeExpr) -> Functi
         requires: vec![],
         ensures: vec![],
         body,
-    }
-}
-
-fn make_module(functions: Vec<Function>) -> Module {
-    Module {
-        test_decls: vec![],
-        id: NodeId(0),
-        name: "test".to_string(),
-        span: span(),
-        meta: None,
-        imports: vec![],
-        functions,
-        type_aliases: vec![],
-        type_decls: vec![],
-        enum_decls: vec![],
-        trait_decls: vec![],
-        impl_blocks: vec![],
-        intent_decls: vec![],
-        invariants: vec![],
-        actor_decls: vec![],
     }
 }
 
