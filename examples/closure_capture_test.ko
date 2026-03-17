@@ -1,0 +1,10 @@
+module capture_test {
+    meta { purpose: "test", version: "1.0" }
+    fn make_adder(n: Int) -> (Int) -> Int {
+        return |x: Int| -> Int { return x + n }
+    }
+    fn main() {
+        let add5 = make_adder(5)
+        print_int(add5(10))
+    }
+}

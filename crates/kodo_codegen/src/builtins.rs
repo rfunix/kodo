@@ -1033,6 +1033,23 @@ fn declare_rc_builtins(
         types::I64,
         types::I64
     );
+
+    // Closure handle functions
+    {
+        let sig = sig_ret(call_conv, &[types::I64, types::I64], types::I64);
+        let func_id = declare_builtin(module, "kodo_closure_new", &sig)?;
+        builtins.insert("kodo_closure_new".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let sig = sig_ret(call_conv, &[types::I64], types::I64);
+        let func_id = declare_builtin(module, "kodo_closure_func", &sig)?;
+        builtins.insert("kodo_closure_func".to_string(), BuiltinInfo { func_id });
+    }
+    {
+        let sig = sig_ret(call_conv, &[types::I64], types::I64);
+        let func_id = declare_builtin(module, "kodo_closure_env", &sig)?;
+        builtins.insert("kodo_closure_env".to_string(), BuiltinInfo { func_id });
+    }
     Ok(())
 }
 

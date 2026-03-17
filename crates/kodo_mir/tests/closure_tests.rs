@@ -101,7 +101,7 @@ fn closure_generates_lifted_function_in_module() {
         "expected a lambda-lifted closure function"
     );
     let closure_fn = closure_fn.unwrap();
-    assert_eq!(closure_fn.param_count, 1);
+    assert_eq!(closure_fn.param_count, 2);
     closure_fn.validate().unwrap();
 }
 
@@ -168,8 +168,8 @@ fn closure_with_multiple_captures_in_module() {
         .find(|f| f.name.starts_with("__closure_"))
         .expect("expected a lambda-lifted closure function");
     assert_eq!(
-        closure_fn.param_count, 3,
-        "closure should have 3 params (2 captures + 1 param), got {}",
+        closure_fn.param_count, 2,
+        "closure should have 2 params (env_ptr + 1 user param), got {},",
         closure_fn.param_count
     );
 }
@@ -250,10 +250,10 @@ fn closure_empty_params_no_captures() {
     let has_call = mir.blocks.iter().any(|b| {
         b.instructions.iter().any(|i| {
             matches!(i, Instruction::Call { callee, args, .. }
-                if callee.starts_with("__closure_") && args.is_empty())
+                if callee.starts_with("__closure_") && args.len() == 1)
         })
     });
-    assert!(has_call, "expected call to __closure_ with 0 args");
+    assert!(has_call, "expected call to __closure_ with 1 arg (env_ptr)");
 }
 
 #[test]
@@ -361,13 +361,13 @@ fn closure_two_params_bool_return() {
     );
     let mir = lower_function(&func).unwrap();
     mir.validate().unwrap();
-    let has_2arg_call = mir.blocks.iter().any(|b| {
+    let has_3arg_call = mir.blocks.iter().any(|b| {
         b.instructions.iter().any(|i| {
             matches!(i, Instruction::Call { callee, args, .. }
-                if callee.starts_with("__closure_") && args.len() == 2)
+                if callee.starts_with("__closure_") && args.len() == 3)
         })
     });
-    assert!(has_2arg_call, "expected call to __closure_ with 2 args");
+    assert!(has_3arg_call, "expected call to __closure_ with 3 args");
 }
 
 #[test]

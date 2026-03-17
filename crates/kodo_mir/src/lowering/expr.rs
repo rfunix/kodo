@@ -64,7 +64,8 @@ impl MirBuilder {
             | Expr::OptionalChain { .. }
             | Expr::NullCoalesce { .. }
             | Expr::Is { .. } => Ok(Value::Unit),
-            // Lambda-lift closures into top-level functions.
+            // Lambda-lift closures into top-level functions and create
+            // a heap-allocated closure handle `(func_ptr, env_ptr)`.
             Expr::Closure {
                 params,
                 return_type,
@@ -75,14 +76,37 @@ impl MirBuilder {
                     self.lift_closure(params, return_type.as_ref(), body)?;
 
                 // Register this local's variable name to closure mapping.
-                // The caller (Let statement) will pick up the closure_registry
-                // entry using the variable name.
-                self.closure_registry
-                    .insert(closure_name.clone(), (closure_name.clone(), captures));
+                self.closure_registry.insert(
+                    closure_name.clone(),
+                    (closure_name.clone(), captures.clone()),
+                );
 
-                // Return a FuncRef so the closure can be used as a value
-                // (e.g., assigned to a variable, passed as argument).
-                Ok(Value::FuncRef(closure_name))
+                // Pack captures into a heap-allocated environment buffer.
+                let env_local = self.alloc_local(Type::Int, false);
+                let mut pack_args = Vec::with_capacity(captures.len());
+                for cap_name in &captures {
+                    let cap_lid = self
+                        .name_map
+                        .get(cap_name)
+                        .copied()
+                        .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
+                    pack_args.push(Value::Local(cap_lid));
+                }
+                self.emit(Instruction::Call {
+                    dest: env_local,
+                    callee: "__env_pack".to_string(),
+                    args: pack_args,
+                });
+
+                // Create a closure handle: kodo_closure_new(func_ptr, env_ptr).
+                let handle_local = self.alloc_local(Type::Int, false);
+                self.emit(Instruction::Call {
+                    dest: handle_local,
+                    callee: "kodo_closure_new".to_string(),
+                    args: vec![Value::FuncRef(closure_name), Value::Local(env_local)],
+                });
+
+                Ok(Value::Local(handle_local))
             }
             Expr::TupleLit(elems, _) => {
                 let mut values = Vec::with_capacity(elems.len());
@@ -195,15 +219,93 @@ impl MirBuilder {
     }
 
     /// Lowers an identifier reference to either a local or a function pointer.
-    fn lower_ident(&self, name: &str) -> Result<Value> {
+    ///
+    /// When a named function is referenced as a value (not called directly),
+    /// it is wrapped in a closure handle so that `IndirectCall` can uniformly
+    /// extract `(func_ptr, env_ptr)` from any callable value.
+    fn lower_ident(&mut self, name: &str) -> Result<Value> {
         if let Some(local_id) = self.name_map.get(name).copied() {
             Ok(Value::Local(local_id))
         } else if self.fn_return_types.contains_key(name) {
-            // The identifier refers to a function — produce a function pointer.
-            Ok(Value::FuncRef(name.to_string()))
+            // The identifier refers to a function -- wrap it in a closure
+            // handle with a trampoline that ignores env_ptr.
+            let handle = self.wrap_func_as_closure_handle(name)?;
+            Ok(Value::Local(handle))
         } else {
             Err(MirError::UndefinedVariable(name.to_string()))
         }
+    }
+
+    /// Wraps a named function in a closure handle by generating a trampoline
+    /// function `__trampoline_<name>(env_ptr, ...params) -> ret` that ignores
+    /// `env_ptr` and forward-calls the original function.
+    #[allow(clippy::unnecessary_wraps)]
+    fn wrap_func_as_closure_handle(&mut self, func_name: &str) -> Result<crate::LocalId> {
+        let trampoline_name = format!("__trampoline_{func_name}");
+
+        // Generate the trampoline MIR function if we haven't already.
+        if !self.fn_return_types.contains_key(&trampoline_name) {
+            let ret_ty = self
+                .fn_return_types
+                .get(func_name)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            let param_tys = self
+                .fn_param_types
+                .get(func_name)
+                .cloned()
+                .unwrap_or_default();
+
+            let mut tb = super::MirBuilder::new();
+            tb.fn_name.clone_from(&trampoline_name);
+            tb.fn_return_types.clone_from(&self.fn_return_types);
+
+            // env_ptr parameter (ignored).
+            let _env_param = tb.alloc_local(Type::Int, false);
+
+            // User-visible parameters.
+            let mut forward_args = Vec::with_capacity(param_tys.len());
+            for pt in &param_tys {
+                let pid = tb.alloc_local(pt.clone(), false);
+                forward_args.push(Value::Local(pid));
+            }
+
+            let param_count = 1 + param_tys.len();
+
+            let call_dest = tb.alloc_local(ret_ty.clone(), false);
+            tb.emit(Instruction::Call {
+                dest: call_dest,
+                callee: func_name.to_string(),
+                args: forward_args,
+            });
+
+            tb.seal_block_final(crate::Terminator::Return(Value::Local(call_dest)));
+
+            let mir_func = crate::MirFunction {
+                name: trampoline_name.clone(),
+                return_type: ret_ty.clone(),
+                param_count,
+                locals: tb.locals,
+                blocks: tb.blocks,
+                entry: crate::BlockId(0),
+            };
+
+            self.generated_closures.push(mir_func);
+            self.fn_return_types.insert(trampoline_name.clone(), ret_ty);
+        }
+
+        // Create closure handle: kodo_closure_new(FuncRef(trampoline), 0)
+        let env_local = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Assign(env_local, Value::IntConst(0)));
+
+        let handle_local = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Call {
+            dest: handle_local,
+            callee: "kodo_closure_new".to_string(),
+            args: vec![Value::FuncRef(trampoline_name), Value::Local(env_local)],
+        });
+
+        Ok(handle_local)
     }
 
     /// Lowers a function call expression, handling closures, indirect calls,
@@ -323,22 +425,35 @@ impl MirBuilder {
         Ok(Value::Local(dest))
     }
 
-    /// Lowers a closure call by prepending captured variables to the argument list.
+    /// Lowers a closure call by packing captures into a heap-allocated
+    /// environment buffer and calling the lifted function with
+    /// `(env_ptr, ...user_args)`.
     fn lower_closure_call(
         &mut self,
         closure_func: &str,
         captures: &[String],
         args: &[Expr],
     ) -> Result<Value> {
-        let mut arg_values = Vec::with_capacity(captures.len() + args.len());
+        // Pack captures into env buffer.
+        let env_local = self.alloc_local(Type::Int, false);
+        let mut pack_args = Vec::with_capacity(captures.len());
         for cap_name in captures {
-            let cap_local = self
+            let cap_lid = self
                 .name_map
                 .get(cap_name)
                 .copied()
                 .ok_or_else(|| MirError::UndefinedVariable(cap_name.clone()))?;
-            arg_values.push(Value::Local(cap_local));
+            pack_args.push(Value::Local(cap_lid));
         }
+        self.emit(Instruction::Call {
+            dest: env_local,
+            callee: "__env_pack".to_string(),
+            args: pack_args,
+        });
+
+        // Build args: env_ptr first, then user arguments.
+        let mut arg_values = Vec::with_capacity(1 + args.len());
+        arg_values.push(Value::Local(env_local));
         for arg in args {
             arg_values.push(self.lower_expr(arg)?);
         }

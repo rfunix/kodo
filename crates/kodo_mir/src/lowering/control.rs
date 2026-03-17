@@ -233,17 +233,8 @@ impl MirBuilder {
             .clone_from(&self.fn_return_types);
         closure_builder.fn_name.clone_from(&closure_name);
 
-        // Allocate locals for captured variables (extra params).
-        for cap_name in &captures {
-            let cap_ty = self
-                .name_map
-                .get(cap_name)
-                .and_then(|lid| self.local_types.get(lid))
-                .cloned()
-                .unwrap_or(Type::Unknown);
-            let local_id = closure_builder.alloc_local(cap_ty, false);
-            closure_builder.name_map.insert(cap_name.clone(), local_id);
-        }
+        // First parameter is always env_ptr (even if no captures).
+        let env_param = closure_builder.alloc_local(Type::Int, false);
 
         // Allocate locals for closure parameters.
         for param in closure_params {
@@ -259,7 +250,27 @@ impl MirBuilder {
                 .insert(param.name.clone(), local_id);
         }
 
-        let param_count = captures.len() + closure_params.len();
+        // param_count = 1 (env_ptr) + user params
+        let param_count = 1 + closure_params.len();
+
+        // Unpack captured variables from the environment buffer via __env_load.
+        for (idx, cap_name) in captures.iter().enumerate() {
+            let cap_ty = self
+                .name_map
+                .get(cap_name)
+                .and_then(|lid| self.local_types.get(lid))
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            let cap_local = closure_builder.alloc_local(cap_ty, false);
+            #[allow(clippy::cast_possible_wrap)]
+            let byte_offset = (idx as i64) * 8;
+            closure_builder.emit(Instruction::Call {
+                dest: cap_local,
+                callee: "__env_load".to_string(),
+                args: vec![Value::Local(env_param), Value::IntConst(byte_offset)],
+            });
+            closure_builder.name_map.insert(cap_name.clone(), cap_local);
+        }
 
         // Lower the closure body.
         let body_val = closure_builder.lower_expr(body)?;

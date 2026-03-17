@@ -1130,13 +1130,18 @@ fn translate_env_pack(
     struct_layouts: &HashMap<String, StructLayout>,
 ) -> Result<()> {
     let num_captures = args.len();
-    #[allow(clippy::cast_possible_truncation)]
-    let slot_size = (num_captures * 8) as u32;
-    let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-        slot_size,
-        0,
-    ));
+    #[allow(clippy::cast_possible_wrap)]
+    let alloc_size = (num_captures as i64) * 8;
+
+    // Heap-allocate via kodo_alloc so the buffer outlives the current frame.
+    let alloc_builtin = builtins
+        .get("kodo_alloc")
+        .ok_or_else(|| CodegenError::Unsupported("kodo_alloc not declared".to_string()))?;
+    let alloc_ref = module.declare_func_in_func(alloc_builtin.func_id, builder.func);
+    let size_val = builder.ins().iconst(types::I64, alloc_size);
+    let alloc_call = builder.ins().call(alloc_ref, &[size_val]);
+    let env_ptr = builder.inst_results(alloc_call)[0];
+
     for (idx, arg) in args.iter().enumerate() {
         let val = translate_value(
             arg,
@@ -1149,12 +1154,10 @@ fn translate_env_pack(
         )?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let offset = (idx * 8) as i32;
-        let addr = builder.ins().stack_addr(types::I64, slot, offset);
-        builder.ins().store(MemFlags::new(), val, addr, 0);
+        builder.ins().store(MemFlags::new(), val, env_ptr, offset);
     }
-    let base_addr = builder.ins().stack_addr(types::I64, slot, 0);
     let var = var_map.get(dest)?;
-    builder.def_var(var, base_addr);
+    builder.def_var(var, env_ptr);
     Ok(())
 }
 
@@ -1173,18 +1176,8 @@ fn translate_indirect_call(
     var_map: &VarMap,
     struct_layouts: &HashMap<String, StructLayout>,
 ) -> Result<()> {
-    // Build the signature for the indirect call.
-    let mut sig = Signature::new(CallConv::SystemV);
-    for pt in param_types {
-        sig.params.push(AbiParam::new(cranelift_type(pt)));
-    }
-    if !is_unit(return_type) {
-        sig.returns.push(AbiParam::new(cranelift_type(return_type)));
-    }
-    let sig_ref = builder.import_signature(sig);
-
-    // Translate the function pointer value.
-    let callee_val = translate_value(
+    // The closure handle is an i64 -- extract func_ptr and env_ptr.
+    let handle_val = translate_value(
         callee,
         builder,
         module,
@@ -1194,8 +1187,34 @@ fn translate_indirect_call(
         struct_layouts,
     )?;
 
-    // Translate arguments.
-    let mut arg_vals = Vec::with_capacity(args.len());
+    let closure_func_bi = builtins
+        .get("kodo_closure_func")
+        .ok_or_else(|| CodegenError::Unsupported("kodo_closure_func not declared".to_string()))?;
+    let closure_func_ref = module.declare_func_in_func(closure_func_bi.func_id, builder.func);
+    let func_call = builder.ins().call(closure_func_ref, &[handle_val]);
+    let func_ptr = builder.inst_results(func_call)[0];
+
+    let closure_env_bi = builtins
+        .get("kodo_closure_env")
+        .ok_or_else(|| CodegenError::Unsupported("kodo_closure_env not declared".to_string()))?;
+    let closure_env_ref = module.declare_func_in_func(closure_env_bi.func_id, builder.func);
+    let env_call = builder.ins().call(closure_env_ref, &[handle_val]);
+    let env_ptr = builder.inst_results(env_call)[0];
+
+    // Build the signature: env_ptr (i64) + original params.
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(types::I64)); // env_ptr
+    for pt in param_types {
+        sig.params.push(AbiParam::new(cranelift_type(pt)));
+    }
+    if !is_unit(return_type) {
+        sig.returns.push(AbiParam::new(cranelift_type(return_type)));
+    }
+    let sig_ref = builder.import_signature(sig);
+
+    // Build args: env_ptr first, then the user-visible arguments.
+    let mut arg_vals = Vec::with_capacity(args.len() + 1);
+    arg_vals.push(env_ptr);
     for arg in args {
         arg_vals.push(translate_value(
             arg,
@@ -1208,7 +1227,7 @@ fn translate_indirect_call(
         )?);
     }
 
-    let call = builder.ins().call_indirect(sig_ref, callee_val, &arg_vals);
+    let call = builder.ins().call_indirect(sig_ref, func_ptr, &arg_vals);
     let var = var_map.get(dest)?;
     if is_unit(return_type) {
         let zero = builder.ins().iconst(types::I64, 0);

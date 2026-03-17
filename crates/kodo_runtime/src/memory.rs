@@ -217,6 +217,46 @@ pub extern "C" fn kodo_rc_dec_string(ptr: i64, len: i64) {
     let _ = (ptr, len);
 }
 
+/// Allocates a closure handle on the heap.
+#[no_mangle]
+pub extern "C" fn kodo_closure_new(func_ptr: i64, env_ptr: i64) -> i64 {
+    let handle = kodo_alloc(16);
+    if handle == 0 {
+        return 0;
+    }
+    unsafe {
+        #[allow(clippy::cast_ptr_alignment)]
+        let base = handle as *mut i64;
+        std::ptr::write(base, func_ptr);
+        std::ptr::write(base.add(1), env_ptr);
+    }
+    handle
+}
+
+/// Extracts the function pointer from a closure handle.
+#[no_mangle]
+pub extern "C" fn kodo_closure_func(handle: i64) -> i64 {
+    if handle == 0 {
+        return 0;
+    }
+    unsafe {
+        #[allow(clippy::cast_ptr_alignment)]
+        std::ptr::read(handle as *const i64)
+    }
+}
+
+/// Extracts the environment pointer from a closure handle.
+#[no_mangle]
+pub extern "C" fn kodo_closure_env(handle: i64) -> i64 {
+    if handle == 0 {
+        return 0;
+    }
+    unsafe {
+        #[allow(clippy::cast_ptr_alignment)]
+        std::ptr::read((handle as *const i64).add(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
