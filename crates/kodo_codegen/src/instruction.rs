@@ -1678,7 +1678,17 @@ fn emit_string_returning_call(
     ));
     let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
     let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
-    let mut all_args = arg_vals.to_vec();
+    // Widen I8 args (Bool) to I64 to match runtime function signatures.
+    let mut all_args: Vec<cranelift_codegen::ir::Value> = arg_vals
+        .iter()
+        .map(|val| {
+            if builder.func.dfg.value_type(*val) == types::I8 {
+                builder.ins().uextend(types::I64, *val)
+            } else {
+                *val
+            }
+        })
+        .collect();
     all_args.push(out_ptr_addr);
     all_args.push(out_len_addr);
 
