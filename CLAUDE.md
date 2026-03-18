@@ -182,6 +182,7 @@ Examples:
 | `clippy.toml` | Lint configuration |
 | `deny.toml` | Dependency audit rules |
 | `Makefile` | Build, test, and run shortcuts |
+| `scripts/validate-doc-examples.sh` | Validates every doc example compiles, runs, and produces correct output |
 | `~/dev/kodo-website` | Kōdo language website (update when user-facing changes occur) |
 
 ## Quick Language Reference
@@ -311,6 +312,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
 ```
+
+If any user-facing feature or codegen change was made, also run:
+
+```bash
+make validate-docs
+```
+
+This compiles, runs, and **verifies the output** of every code example from the `kodo-website` documentation against the real compiler. If any example fails, either fix the compiler or update the documentation before reporting the task as complete.
 
 If any step fails, fix the issue before reporting the task as complete.
 
