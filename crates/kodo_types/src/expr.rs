@@ -1197,7 +1197,7 @@ impl TypeChecker {
                         .unwrap_or(0);
                     // Record virtual dispatch resolution: use a special mangled name
                     // that encodes the trait name and vtable index.
-                    let virtual_name = format!("__dyn_{trait_name}_{method}_{vtable_index}");
+                    let virtual_name = format!("__dyn_{trait_name}::{method}_{vtable_index}");
                     self.method_resolutions.insert(span.start, virtual_name);
                     return Ok(Some(ret_type));
                 }

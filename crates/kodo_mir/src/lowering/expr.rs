@@ -333,7 +333,7 @@ impl MirBuilder {
         }
 
         // Check for virtual dispatch (dyn Trait method call).
-        // Virtual dispatch names have the form: __dyn_TraitName_methodName_vtableIndex
+        // Virtual dispatch names have the form: __dyn_TraitName::methodName_vtableIndex
         if callee_name.starts_with("__dyn_") {
             return self.lower_virtual_call(&callee_name, args);
         }
@@ -606,7 +606,7 @@ impl MirBuilder {
     /// Lowers a virtual method call on a `dyn Trait` value.
     ///
     /// The callee name encodes the trait and vtable index as
-    /// `__dyn_TraitName_methodName_vtableIndex`. The first argument (args\[0\])
+    /// `__dyn_TraitName::methodName_vtableIndex`. The first argument (args\[0\])
     /// is the dyn Trait object (fat pointer).
     ///
     /// The trait registry is consulted to resolve the actual parameter types
@@ -614,25 +614,23 @@ impl MirBuilder {
     /// signature construction (especially sret handling for composite returns).
     fn lower_virtual_call(&mut self, callee_name: &str, args: &[Expr]) -> Result<Value> {
         // Parse vtable index and method/trait names from:
-        // __dyn_TraitName_methodName_vtableIndex
-        let parts: Vec<&str> = callee_name.rsplitn(2, '_').collect();
-        let vtable_index: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-
-        // Extract trait name and method name from the callee.
-        // Format: __dyn_{TraitName}_{methodName}_{index}
-        // After stripping "__dyn_" prefix and the trailing "_{index}", we have
-        // "{TraitName}_{methodName}". We split on the last '_' to separate them.
+        // __dyn_TraitName::methodName_vtableIndex
+        // The vtable index is the last segment after the final '_' in the
+        // method+index portion.
         let without_prefix = callee_name.strip_prefix("__dyn_").unwrap_or(callee_name);
-        let without_suffix = without_prefix
-            .rsplit_once('_')
-            .map_or(without_prefix, |x| x.0);
-        // Now without_suffix is "{TraitName}_{methodName}".
-        // Split on the last '_' to get trait name and method name.
-        let (trait_name, method_name) = if let Some(pos) = without_suffix.rfind('_') {
-            (&without_suffix[..pos], &without_suffix[pos + 1..])
-        } else {
-            (without_suffix, without_suffix)
-        };
+
+        // Split on "::" to separate trait name from "methodName_vtableIndex".
+        let (trait_name, method_and_index) = without_prefix
+            .split_once("::")
+            .unwrap_or((without_prefix, without_prefix));
+
+        // Split method_and_index on the last '_' to get method name and index.
+        let (method_name, vtable_index) =
+            if let Some((method, idx_str)) = method_and_index.rsplit_once('_') {
+                (method, idx_str.parse::<u32>().unwrap_or(0))
+            } else {
+                (method_and_index, 0)
+            };
 
         // Resolve actual param types and return type from the trait registry.
         let (resolved_param_types, resolved_return_type) =
