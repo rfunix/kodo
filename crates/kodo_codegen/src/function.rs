@@ -202,6 +202,7 @@ pub(crate) fn translate_function(
 }
 
 /// Declares Cranelift variables and stack slots for each MIR local.
+#[allow(clippy::too_many_lines)]
 fn declare_locals(
     mir_fn: &MirFunction,
     builder: &mut FunctionBuilder,
@@ -289,6 +290,40 @@ fn declare_locals(
                 var_map.vars.insert(local.id, var);
                 var_map.var_types.insert(local.id, types::I64);
             }
+            Type::Generic(ref base, ref args) => {
+                // Resolve monomorphized generic types (e.g. Generic("Option", [String])
+                // -> enum "Option__String") so they get the correct stack slot layout.
+                let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                let mono_name = format!("{base}__{}", arg_strs.join("_"));
+                if let Some(layout) = enum_layouts.get(&mono_name) {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            layout.total_size,
+                            0,
+                        ));
+                    var_map.stack_slots.insert(local.id, (slot, mono_name));
+                    let var = builder.declare_var(types::I64);
+                    var_map.vars.insert(local.id, var);
+                    var_map.var_types.insert(local.id, types::I64);
+                } else if let Some(layout) = struct_layouts.get(&mono_name) {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            layout.total_size,
+                            0,
+                        ));
+                    var_map.stack_slots.insert(local.id, (slot, mono_name));
+                    let var = builder.declare_var(types::I64);
+                    var_map.vars.insert(local.id, var);
+                    var_map.var_types.insert(local.id, types::I64);
+                } else {
+                    let cl_ty = cranelift_type(&local.ty);
+                    let var = builder.declare_var(cl_ty);
+                    var_map.vars.insert(local.id, var);
+                    var_map.var_types.insert(local.id, cl_ty);
+                }
+            }
             _ => {
                 let cl_ty = cranelift_type(&local.ty);
                 let var = builder.declare_var(cl_ty);
@@ -328,6 +363,11 @@ fn define_params(
                     Type::DynTrait(_) => crate::layout::DYN_TRAIT_LAYOUT_SIZE,
                     #[allow(clippy::cast_possible_truncation)]
                     Type::Tuple(elems) => 8 + (elems.len() as u32) * 8,
+                    Type::Generic(base, args) => {
+                        let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                        let mono = format!("{base}__{}", arg_strs.join("_"));
+                        enum_layouts.get(&mono).map_or(8, |l| l.total_size)
+                    }
                     _ => 8,
                 };
                 let num_words = slot_size.div_ceil(8);

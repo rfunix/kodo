@@ -30,9 +30,14 @@ impl MirBuilder {
         expr: &Expr,
         arms: &[kodo_ast::MatchArm],
     ) -> Result<Value> {
-        // Lower the matched expression.
+        // Lower the matched expression, propagating its type to the
+        // matched local so generic enum resolution can inspect it later.
         let matched_val = self.lower_expr(expr)?;
-        let matched_local = self.alloc_local(Type::Unknown, false);
+        let matched_ty = match &matched_val {
+            Value::Local(id) => self.local_types.get(id).cloned().unwrap_or(Type::Unknown),
+            _ => Type::Unknown,
+        };
+        let matched_local = self.alloc_local(matched_ty, false);
         self.emit(Instruction::Assign(matched_local, matched_val));
 
         let merge_block = self.new_block();
@@ -150,27 +155,46 @@ impl MirBuilder {
         // Resolve discriminant for this variant.
         // For generic enums, fall back to the matched local's
         // type which already carries the monomorphized name.
-        let enum_name_resolved = enum_name
-            .and_then(|en| {
-                self.enum_registry.get(en).or_else(|| {
-                    // Try monomorphized prefix match.
-                    let prefix = format!("{en}__");
-                    self.enum_registry
-                        .keys()
-                        .find(|k| k.starts_with(&prefix))
-                        .and_then(|k| self.enum_registry.get(k))
+        // Resolve the enum variants and extract disc_idx + field types up front,
+        // before the mutable borrow in seal_block.
+        let (disc_idx, variant_field_types) = {
+            let enum_name_resolved = enum_name
+                .and_then(|en| {
+                    self.enum_registry.get(en).or_else(|| {
+                        // Try monomorphized prefix match.
+                        let prefix = format!("{en}__");
+                        self.enum_registry
+                            .keys()
+                            .find(|k| k.starts_with(&prefix))
+                            .and_then(|k| self.enum_registry.get(k))
+                    })
                 })
-            })
-            .or_else(|| {
-                if let Some(Type::Enum(en)) = self.local_types.get(&ctx.matched_local) {
-                    self.enum_registry.get(en)
-                } else {
-                    None
+                .or_else(|| {
+                    if let Some(Type::Enum(en)) = self.local_types.get(&ctx.matched_local) {
+                        self.enum_registry.get(en)
+                    } else {
+                        None
+                    }
+                });
+            let di = enum_name_resolved
+                .and_then(|vs| vs.iter().position(|(n, _)| n == variant))
+                .unwrap_or(0);
+            let mut ft: Vec<Type> = enum_name_resolved
+                .and_then(|vs| vs.iter().find(|(n, _)| n == variant))
+                .map(|(_, fields)| fields.clone())
+                .unwrap_or_default();
+
+            // For generic enums (Option<T>, Result<T,E>), the field types from the
+            // unmonomorphized registry are Unknown. Resolve them from the matched
+            // local's Generic type arguments so bound variables get concrete types.
+            if ft.iter().any(|t| matches!(t, Type::Unknown)) {
+                if let Some(Type::Generic(_, ref args)) = self.local_types.get(&ctx.matched_local) {
+                    ft = resolve_generic_field_types(variant, &ft, args);
                 }
-            });
-        let disc_idx = enum_name_resolved
-            .and_then(|vs| vs.iter().position(|(n, _)| n == variant))
-            .unwrap_or(0);
+            }
+
+            (di, ft)
+        };
 
         // Branch: compare discriminant.
         let arm_block = self.new_block();
@@ -199,7 +223,11 @@ impl MirBuilder {
 
         // Bind pattern variables to payload fields.
         for (idx, binding) in bindings.iter().enumerate() {
-            let bind_local = self.alloc_local(Type::Unknown, false);
+            let field_ty = variant_field_types
+                .get(idx)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            let bind_local = self.alloc_local(field_ty, false);
             self.name_map.insert(binding.clone(), bind_local);
             #[allow(clippy::cast_possible_truncation)]
             let field_idx = idx as u32;
@@ -255,4 +283,38 @@ impl MirBuilder {
 
         Ok(())
     }
+}
+
+/// Resolves concrete field types for a generic enum variant by substituting
+/// `Unknown` fields with the matched local's generic type arguments.
+///
+/// For `Option<String>::Some(v)`, the registry has `Some([Unknown])` but
+/// the matched local's type is `Generic("Option", [String])`, so we
+/// resolve `Unknown` → `String`. For `Result<T, E>::Ok(v)` the first
+/// type arg is used; for `Result<T, E>::Err(e)` the second.
+fn resolve_generic_field_types(
+    variant: &str,
+    registry_fields: &[Type],
+    generic_args: &[Type],
+) -> Vec<Type> {
+    // Determine which type argument index maps to each Unknown field.
+    // Standard patterns: Option::Some -> arg 0, Result::Ok -> arg 0,
+    // Result::Err -> arg 1. For arbitrary generics, map Unknown fields
+    // to args in order.
+    let base_arg_index = match variant {
+        "Err" => 1usize,
+        _ => 0,
+    };
+    registry_fields
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            if matches!(ty, Type::Unknown) {
+                let arg_idx = base_arg_index + i;
+                generic_args.get(arg_idx).cloned().unwrap_or(Type::Unknown)
+            } else {
+                ty.clone()
+            }
+        })
+        .collect()
 }

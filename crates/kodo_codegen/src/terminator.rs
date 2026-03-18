@@ -246,6 +246,11 @@ fn translate_composite_return(
                 Type::Enum(name) => enum_layouts.get(name).map_or(8, |l| l.total_size),
                 #[allow(clippy::cast_possible_truncation)]
                 Type::Tuple(elems) => 8 + (elems.len() as u32) * 8,
+                Type::Generic(base, args) => {
+                    let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                    let mono = format!("{base}__{}", arg_strs.join("_"));
+                    enum_layouts.get(&mono).map_or(8, |l| l.total_size)
+                }
                 _ => 8,
             };
             let num_words = slot_size.div_ceil(8);

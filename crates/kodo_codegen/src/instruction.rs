@@ -590,20 +590,67 @@ fn translate_enum_variant_assign(
         let disc_addr = builder.ins().stack_addr(types::I64, *slot, 0);
         builder.ins().store(MemFlags::new(), disc_val, disc_addr, 0);
         // Store payload fields at offsets 8, 16, 24, ...
+        // For String payloads, we store a pointer to a KodoString-like
+        // stack slot (ptr, len) so that payload extraction can dereference
+        // it uniformly — matching the layout used by runtime builtins.
         for (idx, arg) in args.iter().enumerate() {
-            let val = translate_value(
-                arg,
-                builder,
-                module,
-                func_ids,
-                builtins,
-                var_map,
-                struct_layouts,
-            )?;
             #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             let field_offset = (8 + idx * 8) as i32;
-            let addr = builder.ins().stack_addr(types::I64, *slot, field_offset);
-            builder.ins().store(MemFlags::new(), val, addr, 0);
+            let dest_addr = builder.ins().stack_addr(types::I64, *slot, field_offset);
+
+            // Check if this arg is a String (const or local with _String slot)
+            // and store a pointer to a (ptr, len) pair instead of a raw value.
+            let handled = match arg {
+                Value::StringConst(s) => {
+                    let data_id = create_string_data(module, s)?;
+                    let gv = module.declare_data_in_func(data_id, builder.func);
+                    let ptr = builder.ins().symbol_value(types::I64, gv);
+                    #[allow(clippy::cast_possible_wrap)]
+                    let len = builder.ins().iconst(types::I64, s.len() as i64);
+                    let tmp_slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            STRING_LAYOUT_SIZE,
+                            0,
+                        ));
+                    let tmp_addr = builder.ins().stack_addr(types::I64, tmp_slot, 0);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), ptr, tmp_addr, STRING_PTR_OFFSET);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), len, tmp_addr, STRING_LEN_OFFSET);
+                    builder.ins().store(MemFlags::new(), tmp_addr, dest_addr, 0);
+                    true
+                }
+                Value::Local(arg_id) => {
+                    if let Some((arg_slot, ref sn)) = var_map.stack_slots.get(arg_id) {
+                        if sn == "_String" {
+                            let str_addr = builder.ins().stack_addr(types::I64, *arg_slot, 0);
+                            builder.ins().store(MemFlags::new(), str_addr, dest_addr, 0);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if !handled {
+                let val = translate_value(
+                    arg,
+                    builder,
+                    module,
+                    func_ids,
+                    builtins,
+                    var_map,
+                    struct_layouts,
+                )?;
+                builder.ins().store(MemFlags::new(), val, dest_addr, 0);
+            }
         }
         let base_addr = builder.ins().stack_addr(types::I64, *slot, 0);
         let var = var_map.get(local_id)?;
@@ -694,6 +741,37 @@ fn translate_enum_payload_assign(
     let loaded = builder
         .ins()
         .load(types::I64, MemFlags::new(), field_addr, 0);
+
+    // If the destination has a _String stack slot, the extracted payload is a
+    // pointer to a KodoString struct (ptr at offset 0, len at offset 8).
+    // We must dereference it and copy (ptr, len) into the destination stack
+    // slot so that downstream consumers (e.g. println) receive both values.
+    if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(&local_id) {
+        if dest_name == "_String" {
+            let str_ptr = builder.ins().load(types::I64, MemFlags::new(), loaded, 0);
+            let str_len =
+                builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), loaded, STRING_LEN_OFFSET);
+            let dest_ptr_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_PTR_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), str_ptr, dest_ptr_addr, 0);
+            let dest_len_addr = builder
+                .ins()
+                .stack_addr(types::I64, *dest_slot, STRING_LEN_OFFSET);
+            builder
+                .ins()
+                .store(MemFlags::new(), str_len, dest_len_addr, 0);
+            let var = var_map.get(local_id)?;
+            let slot_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+            builder.def_var(var, slot_addr);
+            return Ok(());
+        }
+    }
+
     let var = var_map.get(local_id)?;
     builder.def_var(var, loaded);
     Ok(())
@@ -1676,20 +1754,20 @@ fn emit_file_io_call(
     let discriminant = builder.inst_results(call)[0]; // 0=Ok, 1=Err
 
     // Store the Result enum into the destination stack slot.
-    // Layout: [discriminant: i64] [payload: i64 (string ptr)]
+    // Layout: [discriminant: i64] [payload: i64 (pointer to KodoString-like (ptr, len))]
+    // The payload stores a pointer to the out_slot which contains (ptr, len),
+    // so that enum payload extraction can uniformly dereference it.
     if let Some((dest_slot, _)) = var_map.stack_slots.get(&dest) {
         let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
         // Store discriminant.
         builder
             .ins()
             .store(MemFlags::new(), discriminant, dest_addr, 0);
-        // Store string pointer (the out_ptr value) as payload.
-        let result_ptr = builder
-            .ins()
-            .load(types::I64, MemFlags::new(), out_ptr_addr, 0);
+        // Store pointer to the (ptr, len) pair as payload.
+        let kodo_str_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
         builder
             .ins()
-            .store(MemFlags::new(), result_ptr, dest_addr, 8);
+            .store(MemFlags::new(), kodo_str_addr, dest_addr, 8);
         let var = var_map.get(dest)?;
         builder.def_var(var, dest_addr);
     } else {

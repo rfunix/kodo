@@ -49,10 +49,13 @@ pub(crate) fn is_unit(ty: &Type) -> bool {
 ///
 /// `Type::DynTrait` is a 16-byte fat pointer `(data_ptr: i64, vtable_ptr: i64)`.
 pub(crate) fn is_composite(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Struct(_) | Type::Enum(_) | Type::String | Type::DynTrait(_) | Type::Tuple(_)
-    )
+    match ty {
+        Type::Struct(_) | Type::Enum(_) | Type::String | Type::DynTrait(_) | Type::Tuple(_) => true,
+        // Generic types that map to monomorphized enums (Option, Result)
+        // are composite. Others (e.g. List) are opaque handles and scalar.
+        Type::Generic(base, _) => matches!(base.as_str(), "Option" | "Result"),
+        _ => false,
+    }
 }
 
 /// Builds a Cranelift [`Signature`] from a [`MirFunction`].
@@ -512,7 +515,23 @@ mod tests {
     }
 
     #[test]
-    fn is_composite_false_for_generic() {
+    fn is_composite_true_for_generic_option() {
+        assert!(is_composite(&Type::Generic(
+            "Option".to_string(),
+            vec![Type::Int]
+        )));
+    }
+
+    #[test]
+    fn is_composite_true_for_generic_result() {
+        assert!(is_composite(&Type::Generic(
+            "Result".to_string(),
+            vec![Type::String, Type::String]
+        )));
+    }
+
+    #[test]
+    fn is_composite_false_for_generic_list() {
         assert!(!is_composite(&Type::Generic(
             "List".to_string(),
             vec![Type::Int]
