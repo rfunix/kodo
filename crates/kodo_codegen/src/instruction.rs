@@ -107,6 +107,16 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
     )
 }
 
+/// Returns true if the builtin returns a borrowed String slice via
+/// out-parameters (no heap allocation — must NOT be freed).
+///
+/// `substring` and `trim` return pointers into the original string data,
+/// so calling `kodo_string_free` on them would free memory that was never
+/// allocated by `Box::into_raw`, causing a double-free / SIGABRT on exit.
+pub(crate) fn is_borrowed_string_builtin(callee: &str) -> bool {
+    matches!(callee, "String_trim" | "String_substring")
+}
+
 /// Returns true if the builtin returns a String via out-parameters.
 pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
     matches!(
@@ -985,7 +995,9 @@ fn translate_call(
         )?;
         if handled {
             // Mark heap-allocated string locals for cleanup.
-            if is_string_returning_builtin(callee) {
+            // Borrowed builtins (substring, trim) return pointers into
+            // existing data and must NOT be freed.
+            if is_string_returning_builtin(callee) && !is_borrowed_string_builtin(callee) {
                 var_map.heap_locals.insert(dest, HeapKind::String);
             }
             return Ok(());
