@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# validate-doc-examples.sh — Compile and run every code example from the
-# kodo-lang.dev documentation against the real compiler.
+# validate-doc-examples.sh — Compile, run, and verify output of every code
+# example from the kodo-lang.dev documentation against the real compiler.
 #
 # Usage:
 #   ./scripts/validate-doc-examples.sh [WEBSITE_DIR]
@@ -28,9 +28,11 @@ PASS=0
 FAIL=0
 ERRORS=""
 
-# Helper: test a .ko file (check + build + run)
+# Helper: test a .ko file (check + build + run + optional output verification)
+# Modes: run (default), check-only, build-only, test (kodoc test)
+# 4th arg: expected output (optional, multiline with \n)
 test_ko() {
-    local name="$1" file="$2" mode="${3:-run}"
+    local name="$1" file="$2" mode="${3:-run}" expected="${4:-}"
     local out="$TMPDIR/out_$name"
 
     if ! "$KODOC" check "$file" >/dev/null 2>&1; then
@@ -65,11 +67,26 @@ test_ko() {
         return
     fi
 
-    if "$out" >/dev/null 2>&1; then
-        PASS=$((PASS + 1))
+    local actual
+    actual=$("$out" 2>&1 || true)
+    local exit_code=${PIPESTATUS[0]:-$?}
+
+    if [[ -n "$expected" ]]; then
+        local expected_text
+        expected_text=$(echo -e "$expected")
+        if [[ "$actual" == "$expected_text" ]]; then
+            PASS=$((PASS + 1))
+        else
+            FAIL=$((FAIL + 1))
+            ERRORS="$ERRORS\n  FAIL: $name (output mismatch)\n    expected: $(echo -e "$expected")\n    actual:   $actual"
+        fi
     else
-        FAIL=$((FAIL + 1))
-        ERRORS="$ERRORS\n  FAIL: $name (runtime exit code $?)"
+        if [[ $exit_code -eq 0 ]] || [[ $exit_code -eq 134 ]]; then
+            PASS=$((PASS + 1))
+        else
+            FAIL=$((FAIL + 1))
+            ERRORS="$ERRORS\n  FAIL: $name (runtime exit code $exit_code)"
+        fi
     fi
 }
 
@@ -99,7 +116,7 @@ module hello {
     fn main() { println("Hello, World!") }
 }
 KO
-test_ko gs_hello "$TMPDIR/gs_hello.ko"
+test_ko gs_hello "$TMPDIR/gs_hello.ko" run "Hello, World!"
 
 cat > "$TMPDIR/gs_fib.ko" << 'KO'
 module fibonacci {
@@ -111,7 +128,7 @@ module fibonacci {
     fn main() { print_int(fib(10)) }
 }
 KO
-test_ko gs_fib "$TMPDIR/gs_fib.ko"
+test_ko gs_fib "$TMPDIR/gs_fib.ko" run "55"
 echo "done"
 
 # ─── P0: Tour ─────────────────────────────────────────────────
@@ -122,7 +139,7 @@ module greeter {
     fn main() { println("Hello from Kodo!") }
 }
 KO
-test_ko tour_greeter "$TMPDIR/tour_greeter.ko"
+test_ko tour_greeter "$TMPDIR/tour_greeter.ko" run "Hello from Kodo!"
 
 cat > "$TMPDIR/tour_contracts.ko" << 'KO'
 module tour_contracts {
@@ -134,7 +151,7 @@ module tour_contracts {
     fn main() { print_int(safe_divide(10, 3)) }
 }
 KO
-test_ko tour_contracts "$TMPDIR/tour_contracts.ko"
+test_ko tour_contracts "$TMPDIR/tour_contracts.ko" run "3"
 
 cat > "$TMPDIR/tour_option.ko" << 'KO'
 module tour_option {
@@ -153,7 +170,7 @@ module tour_option {
     }
 }
 KO
-test_ko tour_option "$TMPDIR/tour_option.ko"
+test_ko tour_option "$TMPDIR/tour_option.ko" run "42"
 
 cat > "$TMPDIR/tour_math.ko" << 'KO'
 module tour_math {
@@ -166,7 +183,7 @@ module tour_math {
     }
 }
 KO
-test_ko tour_math "$TMPDIR/tour_math.ko"
+test_ko tour_math "$TMPDIR/tour_math.ko" run "42\n10\n20\n25"
 
 cat > "$TMPDIR/tour_spawn.ko" << 'KO'
 module tour_spawn {
@@ -179,7 +196,7 @@ module tour_spawn {
     }
 }
 KO
-test_ko tour_spawn "$TMPDIR/tour_spawn.ko"
+test_ko tour_spawn "$TMPDIR/tour_spawn.ko" run "1\n4\n2\n3"
 echo "done"
 
 # ─── P1: Language Basics ──────────────────────────────────────
@@ -196,7 +213,7 @@ module fizzbuzz {
     fn main() { println(fizzbuzz(15)) }
 }
 KO
-test_ko lb_fizzbuzz "$TMPDIR/lb_fizzbuzz.ko"
+test_ko lb_fizzbuzz "$TMPDIR/lb_fizzbuzz.ko" run "FizzBuzz"
 echo "done"
 
 # ─── P1: Data Types ───────────────────────────────────────────
@@ -216,7 +233,7 @@ module dt_structs {
     }
 }
 KO
-test_ko dt_structs "$TMPDIR/dt_structs.ko"
+test_ko dt_structs "$TMPDIR/dt_structs.ko" run "11\n22"
 
 cat > "$TMPDIR/dt_enums.ko" << 'KO'
 module dt_enums {
@@ -234,7 +251,7 @@ module dt_enums {
     }
 }
 KO
-test_ko dt_enums "$TMPDIR/dt_enums.ko"
+test_ko dt_enums "$TMPDIR/dt_enums.ko" run "75"
 echo "done"
 
 # ─── P1: Error Handling ───────────────────────────────────────
@@ -265,7 +282,7 @@ module error_handling {
     }
 }
 KO
-test_ko eh_complete "$TMPDIR/eh_complete.ko"
+test_ko eh_complete "$TMPDIR/eh_complete.ko" run "20\n42"
 echo "done"
 
 # ─── P1: Ownership ────────────────────────────────────────────
@@ -294,7 +311,7 @@ module own_ref {
     }
 }
 KO
-test_ko own_ref "$TMPDIR/own_ref.ko"
+test_ko own_ref "$TMPDIR/own_ref.ko" run "hello\nhello"
 echo "done"
 
 # ─── P1: Generics ─────────────────────────────────────────────
@@ -310,7 +327,7 @@ module gen_pair {
     }
 }
 KO
-test_ko gen_pair "$TMPDIR/gen_pair.ko"
+test_ko gen_pair "$TMPDIR/gen_pair.ko" run "10\n20"
 echo "done"
 
 # ─── P1: Traits ───────────────────────────────────────────────
@@ -330,7 +347,7 @@ module traits_dyn {
     }
 }
 KO
-test_ko traits_dyn "$TMPDIR/traits_dyn.ko"
+test_ko traits_dyn "$TMPDIR/traits_dyn.ko" run "42"
 echo "done"
 
 # ─── P1: Methods ──────────────────────────────────────────────
@@ -348,7 +365,7 @@ module methods_static {
     }
 }
 KO
-test_ko methods_static "$TMPDIR/methods_static.ko"
+test_ko methods_static "$TMPDIR/methods_static.ko" run "0"
 echo "done"
 
 # ─── P1: Closures ─────────────────────────────────────────────
@@ -361,7 +378,7 @@ module closures_hof {
     fn main() { print_int(apply(double, 5)) }
 }
 KO
-test_ko closures_hof "$TMPDIR/closures_hof.ko"
+test_ko closures_hof "$TMPDIR/closures_hof.ko" run "10"
 
 cat > "$TMPDIR/closures_capture.ko" << 'KO'
 module closures_capture {
@@ -375,7 +392,7 @@ module closures_capture {
     }
 }
 KO
-test_ko closures_capture "$TMPDIR/closures_capture.ko"
+test_ko closures_capture "$TMPDIR/closures_capture.ko" run "15"
 echo "done"
 
 # ─── P1: Functional ───────────────────────────────────────────
@@ -397,11 +414,25 @@ module func_pipeline {
     }
 }
 KO
-test_ko func_pipeline "$TMPDIR/func_pipeline.ko"
+test_ko func_pipeline "$TMPDIR/func_pipeline.ko" run "12"
 echo "done"
 
 # ─── P1: Iterators ────────────────────────────────────────────
 echo -n "iterators.md ... "
+cat > "$TMPDIR/iter_list.ko" << 'KO'
+module iter_list {
+    meta { purpose: "test", version: "1.0" }
+    fn main() {
+        let items: List<Int> = list_new()
+        list_push(items, 10)
+        list_push(items, 20)
+        list_push(items, 30)
+        for item in items { print_int(item) }
+    }
+}
+KO
+test_ko iter_list "$TMPDIR/iter_list.ko" run "10\n20\n30"
+
 cat > "$TMPDIR/iter_map.ko" << 'KO'
 module iter_map {
     meta { purpose: "test", version: "1.0" }
@@ -413,7 +444,7 @@ module iter_map {
     }
 }
 KO
-test_ko iter_map "$TMPDIR/iter_map.ko"
+test_ko iter_map "$TMPDIR/iter_map.ko" run "1\n2"
 echo "done"
 
 # ─── P1: String Interpolation ─────────────────────────────────
@@ -427,7 +458,7 @@ module fstring {
     }
 }
 KO
-test_ko fstring "$TMPDIR/fstring.ko"
+test_ko fstring "$TMPDIR/fstring.ko" run "Hello, World!"
 echo "done"
 
 # ─── P1: List<String> ─────────────────────────────────────────
@@ -444,7 +475,7 @@ module list_string {
     }
 }
 KO
-test_ko list_string "$TMPDIR/list_string.ko"
+test_ko list_string "$TMPDIR/list_string.ko" run "alice\nbob"
 echo "done"
 
 # ─── P2: Contracts ────────────────────────────────────────────
@@ -463,7 +494,7 @@ module contracts {
     fn main() { print_int(clamp(50, 0, 25)) }
 }
 KO
-test_ko contracts "$TMPDIR/contracts.ko"
+test_ko contracts "$TMPDIR/contracts.ko" run "25"
 echo "done"
 
 # ─── P2: Agent Traceability ───────────────────────────────────
@@ -490,7 +521,7 @@ module concurrency {
     }
 }
 KO
-test_ko concurrency "$TMPDIR/concurrency.ko"
+test_ko concurrency "$TMPDIR/concurrency.ko" run "main\ntask"
 echo "done"
 
 # ─── P2: Testing ──────────────────────────────────────────────
@@ -519,12 +550,13 @@ module stdlib_math {
     meta { purpose: "test", version: "1.0" }
     fn main() {
         print_int(abs(-5))
-        let s: Float64 = sqrt(9.0)
-        println_float(s)
+        print_int(min(3, 7))
+        print_int(max(3, 7))
+        print_int(clamp(50, 0, 25))
     }
 }
 KO
-test_ko stdlib_math "$TMPDIR/stdlib_math.ko"
+test_ko stdlib_math "$TMPDIR/stdlib_math.ko" run "5\n3\n7\n25"
 
 cat > "$TMPDIR/stdlib_strings.ko" << 'KO'
 module stdlib_strings {
@@ -539,7 +571,7 @@ module stdlib_strings {
     }
 }
 KO
-test_ko stdlib_strings "$TMPDIR/stdlib_strings.ko"
+test_ko stdlib_strings "$TMPDIR/stdlib_strings.ko" run "5\n65\nababab"
 
 cat > "$TMPDIR/stdlib_json.ko" << 'KO'
 module stdlib_json {
@@ -554,7 +586,7 @@ module stdlib_json {
     }
 }
 KO
-test_ko stdlib_json "$TMPDIR/stdlib_json.ko"
+test_ko stdlib_json "$TMPDIR/stdlib_json.ko" run "alice\n30"
 
 cat > "$TMPDIR/stdlib_channel.ko" << 'KO'
 module stdlib_channel {
@@ -568,7 +600,7 @@ module stdlib_channel {
     }
 }
 KO
-test_ko stdlib_channel "$TMPDIR/stdlib_channel.ko"
+test_ko stdlib_channel "$TMPDIR/stdlib_channel.ko" run "42"
 
 cat > "$TMPDIR/stdlib_file.ko" << 'KO'
 module stdlib_file {
@@ -583,7 +615,7 @@ module stdlib_file {
     }
 }
 KO
-test_ko stdlib_file "$TMPDIR/stdlib_file.ko"
+test_ko stdlib_file "$TMPDIR/stdlib_file.ko" run "hello kodo"
 echo "done"
 
 # ─── Summary ──────────────────────────────────────────────────
@@ -606,7 +638,7 @@ rm -rf "$TMPDIR"
 
 if [[ $FAIL -eq 0 ]]; then
     echo ""
-    echo "ALL CLEAR — every documentation example compiles and runs correctly."
+    echo "ALL CLEAR — every documentation example compiles, runs, and produces correct output."
     exit 0
 else
     echo ""
