@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-03-18
+
+### Added
+
+- `scripts/validate-doc-examples.sh` — validates all documentation examples compile, run, and produce correct output
+- `make validate-docs` target for documentation example verification
+- `examples/closure_capture_test.ko` — closure capture test example
+- `tests/fixtures/valid/generic_struct_lit.ko` — generic struct literal test fixture
+
+### Fixed
+
+**17 compiler bugs fixed:**
+
+- **Type inference**: `return Option::None` and `Result::Err(...)` now correctly infer generic type from function return type
+- **Closures**: inline closures with `return` in custom higher-order functions no longer typed as `()`
+- **Closures**: heap-allocated closure handles fix captured variable lifetime across function boundaries
+- **List\<String\>**: `list_new()` now accepts `List<String>` type annotation
+- **List\<String\>**: `println(list_get(names, 0))` codegen now handles string composite type correctly
+- **Map iteration**: `for key in map` now returns actual keys instead of zeros
+- **Generic structs**: `Pair { first: 1, second: 2 }` literal construction works via type inference
+- **Generic structs**: field access on monomorphized generics returns correct values
+- **dyn Trait**: Cranelift verifier error fixed (correct virtual call signature + sret handling)
+- **dyn Trait**: runtime segfault fixed (MakeDynTrait coercion + fat pointer copy)
+- **dyn Trait**: String return through virtual dispatch works (mangled name parsing fix)
+- **Static methods**: `Counter.new()` syntax now supported
+- **String methods**: `substring()`, `trim()` no longer SIGABRT on exit (prevent double-free)
+- **String builtins**: `char_at`, `repeat`, `join` codegen argument passing fixed
+- **JSON builtins**: `json_get_bool/float/array/object`, `json_set_float` argument passing fixed
+- **Result/Option**: String payload extraction from match arms works correctly
+- **`kodoc test`**: runtime symbols now link correctly
+
+### Changed
+
+- `CLAUDE.md` task completion checklist now includes `make validate-docs`
+- Test count: 1348 → 2118
+
 ## [0.1.0-alpha] — 2026-03-12
 
 ### Added

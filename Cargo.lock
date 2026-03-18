@@ -1270,14 +1270,14 @@ dependencies = [
 
 [[package]]
 name = "ko"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "kodo_ast"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1286,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_codegen"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -1302,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_contracts"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "kodo_types",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_desugar"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "proptest",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_lexer"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_lsp"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "kodo_parser",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_mcp"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "kodo_codegen",
@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_mir"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "insta",
  "kodo_ast",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_parser"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1385,7 +1385,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_resolver"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "kodo_contracts",
@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_runtime"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "fastrand",
  "rusqlite",
@@ -1407,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_std"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "kodo_ast",
  "kodo_lexer",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_types"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1430,7 +1430,7 @@ dependencies = [
 
 [[package]]
 name = "kodoc"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ariadne",
  "clap",
