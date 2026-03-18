@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] — 2026-03-18
+
+### Fixed
+
+- **f-string Bool interpolation**: `f"{is_positive(42)}"` crashed with Cranelift verifier error — Bool (`i8`) values were not widened to `i64` before calling `kodo_bool_to_string` in `emit_string_returning_call`
+
 ## [0.4.0] — 2026-03-18
 
 ### Added
