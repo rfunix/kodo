@@ -12,3 +12,6 @@ kodo_parser = { workspace = true }
 kodo_types = { workspace = true }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

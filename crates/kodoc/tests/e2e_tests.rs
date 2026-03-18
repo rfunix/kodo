@@ -2045,3 +2045,222 @@ module default_violation {
         "default contract mode should abort on violation"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Contract recovery mode — comprehensive E2E tests (Alpha → Beta blocker)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_contract_recoverable_multiple_violations_in_sequence() {
+    let source = r#"
+module multi_violation {
+    meta { purpose: "multiple recoverable violations in sequence" }
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+    fn main() {
+        let a: Int = positive_only(-1)
+        println("after first violation")
+        let b: Int = positive_only(-2)
+        println("after second violation")
+        let c: Int = positive_only(-3)
+        println("after third violation")
+        println("all done")
+    }
+}
+"#;
+    let binary =
+        compile_source_with_contracts(source, "e2e_recoverable_multi_violation", "recoverable");
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "recoverable mode should not crash even with multiple violations"
+    );
+    assert!(
+        stdout.contains("after first violation"),
+        "should continue after first violation, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("after second violation"),
+        "should continue after second violation, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("after third violation"),
+        "should continue after third violation, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("all done"),
+        "should reach end of program after all violations, got: {stdout}"
+    );
+    // Verify that stderr contains multiple warnings (one per violation).
+    let warning_count = stderr.matches("WARNING").count();
+    assert!(
+        warning_count >= 3,
+        "should have at least 3 warnings on stderr, got {warning_count}: {stderr}"
+    );
+}
+
+#[test]
+fn e2e_contract_recoverable_ensures_failure_continues() {
+    let source = r#"
+module ensures_recover {
+    meta { purpose: "recoverable ensures clause failure" }
+    fn bad_doubler(x: Int) -> Int
+        ensures { result > 100 }
+    {
+        return x * 2
+    }
+    fn main() {
+        let val: Int = bad_doubler(5)
+        println("ensures violation recovered")
+        print_int(val)
+        println("")
+    }
+}
+"#;
+    let binary =
+        compile_source_with_contracts(source, "e2e_recoverable_ensures_fail", "recoverable");
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "recoverable mode should not crash on ensures failure"
+    );
+    assert!(
+        stdout.contains("ensures violation recovered"),
+        "execution should continue after ensures violation, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("WARNING") || stderr.contains("contract"),
+        "ensures violation should produce a warning on stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn e2e_contract_recoverable_nested_calls_with_contracts() {
+    let source = r#"
+module nested_contracts {
+    meta { purpose: "nested function calls with recoverable contracts" }
+    fn inner(x: Int) -> Int
+        requires { x > 10 }
+    {
+        return x + 1
+    }
+    fn outer(y: Int) -> Int
+        requires { y > 0 }
+    {
+        let z: Int = inner(y)
+        return z
+    }
+    fn main() {
+        let r: Int = outer(3)
+        println("nested recovered")
+        print_int(r)
+        println("")
+    }
+}
+"#;
+    let binary = compile_source_with_contracts(source, "e2e_recoverable_nested", "recoverable");
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "recoverable mode should not crash on nested contract violations"
+    );
+    assert!(
+        stdout.contains("nested recovered"),
+        "execution should continue after nested violations, got: {stdout}"
+    );
+    // inner's requires { x > 10 } should be violated (y=3 passed to inner).
+    assert!(
+        stderr.contains("WARNING") || stderr.contains("contract"),
+        "nested violation should emit a warning on stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn e2e_contract_recoverable_vs_strict_same_source() {
+    let source = r#"
+module strict_vs_recover {
+    meta { purpose: "compare strict vs recoverable on same source" }
+    fn check_positive(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x
+    }
+    fn main() {
+        let r: Int = check_positive(-1)
+        println("survived")
+    }
+}
+"#;
+    // Strict mode: should abort.
+    let strict_binary =
+        compile_source_with_contracts(source, "e2e_strict_vs_recover_strict", "runtime");
+    let (strict_exit, strict_stdout, _strict_stderr) = run_binary(&strict_binary);
+    assert_ne!(
+        strict_exit, 0,
+        "strict mode should abort on contract violation"
+    );
+    assert!(
+        !strict_stdout.contains("survived"),
+        "strict mode should NOT reach code after violation, got: {strict_stdout}"
+    );
+
+    // Recoverable mode: should continue.
+    let recover_binary =
+        compile_source_with_contracts(source, "e2e_strict_vs_recover_recover", "recoverable");
+    let (recover_exit, recover_stdout, recover_stderr) = run_binary(&recover_binary);
+    assert_eq!(
+        recover_exit, 0,
+        "recoverable mode should NOT abort on contract violation"
+    );
+    assert!(
+        recover_stdout.contains("survived"),
+        "recoverable mode should continue past violation, got: {recover_stdout}"
+    );
+    assert!(
+        recover_stderr.contains("WARNING") || recover_stderr.contains("contract"),
+        "recoverable mode should warn on stderr, got: {recover_stderr}"
+    );
+}
+
+#[test]
+fn e2e_contract_recoverable_violation_output_format() {
+    let source = r#"
+module output_format {
+    meta { purpose: "verify recoverable warning message format" }
+    fn must_be_positive(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x
+    }
+    fn main() {
+        let r: Int = must_be_positive(-42)
+        println("format test done")
+    }
+}
+"#;
+    let binary =
+        compile_source_with_contracts(source, "e2e_recoverable_output_format", "recoverable");
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "recoverable mode should exit 0");
+    assert!(
+        stdout.contains("format test done"),
+        "should complete execution, got: {stdout}"
+    );
+    // The runtime emits: "WARNING: contract violation (recoverable): <msg>"
+    // where <msg> is "requires clause N failed in function `name`".
+    assert!(
+        stderr.contains("WARNING: contract violation (recoverable):"),
+        "warning should contain the full recoverable prefix, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("requires clause"),
+        "warning should mention 'requires clause', got: {stderr}"
+    );
+    assert!(
+        stderr.contains("must_be_positive"),
+        "warning should contain the function name, got: {stderr}"
+    );
+}

@@ -466,6 +466,46 @@ pub enum TypeError {
         /// Source location of the invariant.
         span: Span,
     },
+    /// A closure captures a variable that was already moved.
+    ///
+    /// Once a variable's ownership has been transferred (moved), it cannot
+    /// be captured by a closure. Use `ref` to borrow instead of moving.
+    #[error(
+        "closure captures `{name}` which was already moved (at line {moved_at_line}) at {span:?}"
+    )]
+    ClosureCaptureAfterMove {
+        /// The captured variable name.
+        name: String,
+        /// The line where the move occurred.
+        moved_at_line: u32,
+        /// Source location of the closure.
+        span: Span,
+    },
+    /// A closure captures an owned (non-Copy) variable, consuming it.
+    ///
+    /// After this closure captures the variable by move, the variable
+    /// cannot be used in the enclosing scope. This error fires when a
+    /// second closure or expression tries to use the same moved variable.
+    #[error("closure moves `{name}` out of enclosing scope at {span:?}")]
+    ClosureCaptureMovesVariable {
+        /// The captured variable name.
+        name: String,
+        /// Source location of the closure.
+        span: Span,
+    },
+    /// Multiple closures try to capture the same non-Copy variable by move.
+    ///
+    /// Only one closure can take ownership of a non-Copy variable. Use `ref`
+    /// to share the variable between closures, or clone it.
+    #[error("cannot capture `{name}` in multiple closures — already captured at line {first_capture_line} at {span:?}")]
+    ClosureDoubleCapture {
+        /// The captured variable name.
+        name: String,
+        /// The line where the first closure captured the variable.
+        first_capture_line: u32,
+        /// Source location of the second closure.
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -519,7 +559,10 @@ impl TypeError {
             | Self::ContinueOutsideLoop { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::PrivateAccess { span, .. }
-            | Self::InvariantNotBool { span, .. } => Some(*span),
+            | Self::InvariantNotBool { span, .. }
+            | Self::ClosureCaptureAfterMove { span, .. }
+            | Self::ClosureCaptureMovesVariable { span, .. }
+            | Self::ClosureDoubleCapture { span, .. } => Some(*span),
             Self::MissingMeta => None,
         }
     }
@@ -575,6 +618,9 @@ impl TypeError {
             Self::ContinueOutsideLoop { .. } => "E0244",
             Self::TupleIndexOutOfBounds { .. } => "E0253",
             Self::PrivateAccess { .. } => "E0270",
+            Self::ClosureCaptureAfterMove { .. } => "E0281",
+            Self::ClosureCaptureMovesVariable { .. } => "E0282",
+            Self::ClosureDoubleCapture { .. } => "E0283",
             Self::InvariantNotBool { .. } => "E0310",
         }
     }
@@ -977,6 +1023,27 @@ fn fix_patch_types_and_ownership(err: &TypeError) -> Option<kodo_ast::FixPatch> 
             end_offset: span.end as usize,
             replacement: format!("ref {name}"),
         }),
+        TypeError::ClosureCaptureAfterMove { name, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("use `ref {name}` to borrow instead of capturing moved variable"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::ClosureCaptureMovesVariable { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("use `ref` to borrow `{name}` in the closure"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::ClosureDoubleCapture { name, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("clone `{name}` before the second closure"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("let {name}_clone = {name}.clone()\n    "),
+        }),
         TypeError::InvariantNotBool { span, .. } => Some(kodo_ast::FixPatch {
             description: "wrap invariant in a boolean comparison".to_string(),
             file: String::new(),
@@ -1066,6 +1133,15 @@ fn suggestion_for_type_mismatch(err: &TypeError) -> Option<String> {
         )),
         TypeError::AssignThroughRef { name, .. } => Some(format!(
             "cannot assign to `{name}` because it is borrowed as immutable — use `mut` instead of `ref`"
+        )),
+        TypeError::ClosureCaptureAfterMove { name, .. } => Some(format!(
+            "variable `{name}` was already moved — use `ref` to borrow it, or restructure to avoid the move before the closure"
+        )),
+        TypeError::ClosureCaptureMovesVariable { name, .. } => Some(format!(
+            "closure takes ownership of `{name}` — use `ref` to borrow it if you need to use it after the closure"
+        )),
+        TypeError::ClosureDoubleCapture { name, .. } => Some(format!(
+            "only one closure can capture `{name}` by move — use `ref` in one or both closures, or clone the value"
         )),
         TypeError::TupleIndexOutOfBounds { length, .. } => Some(format!(
             "valid indices for this tuple are 0..{}",

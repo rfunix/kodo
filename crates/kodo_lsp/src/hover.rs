@@ -239,6 +239,47 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_hover_function_with_contracts_and_annotations() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    @confidence(0.95)
+    @authored_by(agent: "claude")
+    fn divide(a: Int, b: Int) -> Int
+        requires { b > 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+}"#;
+        // Position on "return" in the function body — triggers function-level hover
+        let hover = hover_at_position(source, Position::new(13, 10));
+        assert!(hover.is_some());
+        insta::assert_snapshot!(hover.unwrap());
+    }
+
+    #[test]
+    fn snapshot_hover_param_type() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn process(name: String, count: Int) -> Int {
+        return count
+    }
+}"#;
+        // Hover over "count" in "return count"
+        let hover = hover_at_position(source, Position::new(7, 15));
+        assert!(hover.is_some());
+        insta::assert_snapshot!(hover.unwrap());
+    }
+
+    #[test]
     fn hover_infers_untyped_variable() {
         let source = r#"module test {
     meta {

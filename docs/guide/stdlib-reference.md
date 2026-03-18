@@ -181,7 +181,7 @@ String methods are called with dot syntax on string values.
 
 ### `s.length() -> Int`
 
-Returns the byte length of the string.
+Returns the number of Unicode code points (characters) in the string. For ASCII-only strings this equals the byte length.
 
 ```rust
 let len: Int = "hello".length()  // 5
@@ -237,10 +237,26 @@ let l: String = "HELLO".to_lower()  // "hello"
 
 ### `s.substring(start: Int, end: Int) -> String`
 
-Extracts a substring from byte index `start` to `end` (exclusive). Note: byte-based, not Unicode-aware.
+Extracts a substring from character index `start` to `end` (exclusive). Indices are Unicode code point positions, so multi-byte characters (accented letters, CJK, emoji) are handled correctly. Out-of-range indices are clamped.
 
 ```rust
 let sub: String = "hello".substring(1, 4)  // "ell"
+```
+
+### `s.byte_length() -> Int`
+
+Returns the number of UTF-8 bytes in the string (as opposed to `length()` which returns the number of characters).
+
+```rust
+let bl: Int = "héllo".byte_length()  // 6 (é is 2 bytes)
+```
+
+### `s.char_count() -> Int`
+
+Returns the number of Unicode code points in the string. This is an alias for `length()`.
+
+```rust
+let cc: Int = "héllo".char_count()  // 5
 ```
 
 ### `s.split(sep: String) -> List<String>`

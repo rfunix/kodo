@@ -120,6 +120,70 @@ module closures_demo {
 }
 ```
 
+## Closure Ownership Analysis
+
+As of v0.4.0, the compiler performs **ownership analysis on closure captures**. Closures that capture variables from their enclosing scope are subject to the same ownership rules as regular code. The compiler tracks what each closure captures and enforces move/borrow rules on those captures.
+
+### Capture After Move (E0281)
+
+A closure cannot capture a variable that has already been moved:
+
+```rust
+fn main() {
+    let data: String = "hello"
+    let f1 = |x: Int| -> Int { println(data); return x }
+    // data was captured (moved) by f1
+    let f2 = |x: Int| -> Int { println(data); return x }
+    // ERROR E0281: variable `data` was moved and cannot be captured by this closure
+}
+```
+
+**Fix:** Clone the value before the first capture, or restructure so only one closure uses it.
+
+### Capture Moves Variable (E0282)
+
+When a closure captures a non-Copy variable by move, that variable becomes unavailable in the enclosing scope:
+
+```rust
+fn main() {
+    let data: String = "hello"
+    let f = |x: Int| -> Int { println(data); return x }
+    // data was moved into f's capture
+    let result: String = data + " world"
+    // ERROR E0282: closure captures `data` by move, making it unavailable after this point
+}
+```
+
+**Fix:** Clone the value before creating the closure, or use `ref` borrowing if applicable.
+
+### Double Capture (E0283)
+
+Two closures in the same scope cannot both capture the same non-Copy variable:
+
+```rust
+fn main() {
+    let data: String = "hello"
+    let f1 = |x: Int| -> Int { println(data); return x }
+    let f2 = |x: Int| -> Int { println(data); return x }
+    // ERROR E0283: variable `data` cannot be captured by two closures
+}
+```
+
+**Fix:** Clone the value so each closure gets its own copy.
+
+### Copy Types Are Fine
+
+Primitive types (`Int`, `Bool`, `Float64`, `Byte`) are implicitly Copy and can be captured by any number of closures without restriction:
+
+```rust
+fn main() {
+    let n: Int = 42
+    let f1 = |x: Int| -> Int { return x + n }
+    let f2 = |x: Int| -> Int { return x * n }
+    // OK — Int is Copy, so n is not moved
+}
+```
+
 ## Next Steps
 
 - [Generics](generics.md) — generic types and generic functions

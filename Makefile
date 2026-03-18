@@ -88,7 +88,28 @@ run-build:
 # === Benchmarks ===
 
 bench:
+	cargo bench --workspace
+
+bench-lexer:
 	cargo bench -p kodo_lexer
+
+bench-parser:
+	cargo bench -p kodo_parser
+
+bench-types:
+	cargo bench -p kodo_types
+
+# === Fuzzing ===
+
+fuzz-lexer:
+	cargo +nightly fuzz run fuzz_lexer -- -max_total_time=60
+
+fuzz-parser:
+	cargo +nightly fuzz run fuzz_parser -- -max_total_time=60
+
+fuzz:
+	$(MAKE) fuzz-lexer
+	$(MAKE) fuzz-parser
 
 # === Utilities ===
 

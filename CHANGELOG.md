@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] — 2026-03-18
+
+### Added
+
+- **Closure ownership analysis**: Type checker now tracks closure captures and detects use-after-move through closures (E0281, E0282, E0283)
+- **Unicode-aware strings**: `substring()` and `length()` now operate on Unicode code points, not bytes. New methods: `byte_length()`, `char_count()`
+- **Atomic RC**: Runtime allocator is now thread-safe with `AtomicI64` refcounts and `RwLock` registry — enables safe `parallel {}` blocks
+- **String RC tracking**: Strings from `concat`, `replace`, `repeat`, `to_upper`, `to_lower`, `int_to_string`, etc. are now RC-managed and properly freed
+- **Parser error recovery**: Malformed `requires`/`ensures` clauses no longer abort parsing — compiler reports the error and continues (E0104)
+- **LSP improvements**: `include_declaration` support in find-references, 57 new snapshot/unit tests for hover, completion, diagnostics, symbols
+- **VSCode extension**: Now connects to `kodoc lsp` via stdio for diagnostics, hover, and completions
+- **Codegen benchmarks**: 5 criterion benchmarks (simple, medium, large, structs, optimized)
+- **Fuzzing in CI**: Lexer and parser fuzz targets now run in CI (nightly, 60s each)
+- **Contract recovery e2e tests**: 5 new tests covering multiple violations, nested calls, strict vs recoverable comparison
+- **Security audit**: `UNSAFE_AUDIT.md` documenting all unsafe blocks (0 bugs, 5 risks, 8 reviews)
+
+### Fixed
+
+- **Memory leak (CRITICAL)**: String operations no longer leak memory — migrated from `Box::into_raw` to RC allocator (`alloc_string`)
+- **Undefined behavior**: `dealloc` now passes correct Layout with real allocation size instead of `Layout(1, 8)`
+- **Dead code**: Removed unused `CodegenOptions::recoverable_contracts` field
+- **Thread safety**: RC registry and refcounts are now atomic, fixing potential data races in `parallel {}` blocks
+
+### Changed
+
+- **Resolver refactored**: `lib.rs` reduced from 2347 → 169 LOC, logic split into 12 strategy modules
+- **Type checker tests split**: 7083-line monolithic `tests.rs` reorganized into 12 feature-area modules
+- **Makefile**: `bench` target now runs workspace-wide benchmarks; added `fuzz`, `fuzz-lexer`, `fuzz-parser` targets
+- **CI**: 9 jobs (was 8) — added fuzz job with nightly toolchain
+- **CLAUDE.md**: Updated collections section to reflect they are fully wired since v0.3.0
+- **KNOWN_LIMITATIONS.md**: Added closure ownership limitation, updated string operations to reflect Unicode support, updated memory section
+- Test count: 2118 → 2228
+
 ## [0.3.0] — 2026-03-18
 
 ### Added

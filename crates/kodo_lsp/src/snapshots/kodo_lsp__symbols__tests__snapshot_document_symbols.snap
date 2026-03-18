@@ -1,0 +1,8 @@
+---
+source: crates/kodo_lsp/src/symbols.rs
+expression: "summary.join(\"\\n\")"
+---
+[fn] add (container: mymod)
+[fn] main (container: mymod)
+[struct] Point (container: mymod)
+[enum] Color (container: mymod)

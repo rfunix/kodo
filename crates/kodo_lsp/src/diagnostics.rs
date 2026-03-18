@@ -60,3 +60,168 @@ pub(crate) fn analyze_source(source: &str) -> Vec<Diagnostic> {
 
     diagnostics
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_source_produces_no_diagnostics() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let diags = analyze_source(source);
+        assert!(
+            diags.is_empty(),
+            "valid source should produce no diagnostics, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn parse_error_produces_diagnostic_with_error_code() {
+        // Missing closing brace — parse error
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+"#;
+        let diags = analyze_source(source);
+        assert!(
+            !diags.is_empty(),
+            "incomplete source should produce at least one diagnostic"
+        );
+        for d in &diags {
+            assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+            assert_eq!(d.source.as_deref(), Some("kodo"));
+            assert!(d.code.is_some(), "diagnostic should have an error code");
+        }
+    }
+
+    #[test]
+    fn type_error_produces_diagnostic() {
+        // Missing meta block — type error
+        let source = r#"module test {
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let diags = analyze_source(source);
+        assert!(
+            !diags.is_empty(),
+            "source with type error should produce diagnostics"
+        );
+        let type_diag = diags.iter().find(|d| {
+            if let Some(NumberOrString::String(code)) = &d.code {
+                code.starts_with("E02")
+            } else {
+                false
+            }
+        });
+        assert!(
+            type_diag.is_some(),
+            "should produce a type error diagnostic (E02xx), got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_have_correct_source_field() {
+        let source = "invalid kodo source !!!";
+        let diags = analyze_source(source);
+        for d in &diags {
+            assert_eq!(
+                d.source.as_deref(),
+                Some("kodo"),
+                "all diagnostics should have source 'kodo'"
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_parse_errors_reported() {
+        // Source with multiple issues via recovery parser
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn foo( -> Int {
+        return 1
+    }
+
+    fn bar(a: ) -> Int {
+        return 2
+    }
+}"#;
+        let diags = analyze_source(source);
+        assert!(
+            diags.len() >= 2,
+            "recovery parser should report multiple errors, got {}",
+            diags.len()
+        );
+    }
+
+    #[test]
+    fn snapshot_diagnostics_for_missing_meta() {
+        let source = r#"module test {
+    fn main() {
+        return
+    }
+}"#;
+        let diags = analyze_source(source);
+        let summary: Vec<String> = diags
+            .iter()
+            .map(|d| {
+                let code = match &d.code {
+                    Some(NumberOrString::String(s)) => s.clone(),
+                    _ => "?".to_string(),
+                };
+                format!(
+                    "[{}] L{}:{} {}",
+                    code, d.range.start.line, d.range.start.character, d.message
+                )
+            })
+            .collect();
+        insta::assert_snapshot!(summary.join("\n"));
+    }
+
+    #[test]
+    fn snapshot_diagnostics_for_parse_error() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    fn foo(x: Int -> Int {
+        return x
+    }
+}"#;
+        let diags = analyze_source(source);
+        let summary: Vec<String> = diags
+            .iter()
+            .map(|d| {
+                let code = match &d.code {
+                    Some(NumberOrString::String(s)) => s.clone(),
+                    _ => "?".to_string(),
+                };
+                format!(
+                    "[{}] L{}:{} {}",
+                    code, d.range.start.line, d.range.start.character, d.message
+                )
+            })
+            .collect();
+        insta::assert_snapshot!(summary.join("\n"));
+    }
+}

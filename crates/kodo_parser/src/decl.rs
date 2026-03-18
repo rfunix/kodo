@@ -17,6 +17,112 @@ use crate::error::{ParseError, Result};
 use crate::Parser;
 
 impl Parser {
+    /// Synchronizes the parser to the closing `}` at the current brace depth.
+    ///
+    /// Tracks nested `{`/`}` pairs so that inner blocks are correctly skipped.
+    /// After this method returns, the parser is positioned just after the
+    /// closing `}` that matches the opening brace. If no matching `}` is
+    /// found before EOF, the parser is left at EOF.
+    ///
+    /// This is used for contract clause recovery: when the expression inside
+    /// a `requires { ... }` or `ensures { ... }` is malformed, we skip to the
+    /// matching `}` and continue parsing the rest of the function.
+    ///
+    /// # Academic Reference
+    ///
+    /// Brace-depth tracking for panic-mode recovery as described in
+    /// **\[EC\]** *Engineering a Compiler* Ch. 3.4.
+    pub(crate) fn synchronize_to_brace_close(&mut self) {
+        let mut depth: u32 = 0;
+        while let Some(token) = self.peek() {
+            match token.kind {
+                TokenKind::LBrace => {
+                    depth = depth.saturating_add(1);
+                    self.advance();
+                }
+                TokenKind::RBrace => {
+                    if depth == 0 {
+                        // Consume the closing brace and return.
+                        self.advance();
+                        return;
+                    }
+                    depth = depth.saturating_sub(1);
+                    self.advance();
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Parses contract clauses (`requires`/`ensures`) with error recovery.
+    ///
+    /// When a syntax error occurs inside a contract clause, the error is
+    /// recorded and the parser synchronizes to the closing `}` of that
+    /// clause. Parsing then continues with the next clause or the function
+    /// body, allowing the compiler to report more errors per compilation.
+    ///
+    /// Malformed clauses are omitted from the returned vectors — only
+    /// successfully parsed clauses appear in the AST. The errors are
+    /// collected into the `errors` vector for later reporting.
+    ///
+    /// # Academic Reference
+    ///
+    /// Clause-level panic-mode recovery extending the multi-level strategy
+    /// described in **\[CI\]** *Crafting Interpreters* Ch. 6.3.3.
+    pub(crate) fn parse_contract_clauses_with_recovery(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> (Vec<kodo_ast::Expr>, Vec<kodo_ast::Expr>) {
+        let mut requires = Vec::new();
+        let mut ensures = Vec::new();
+        loop {
+            if self.check(&TokenKind::Requires) {
+                let clause_span = self.advance().map_or(kodo_ast::Span::new(0, 0), |t| t.span);
+                match self.parse_single_contract_clause() {
+                    Ok(expr) => requires.push(expr),
+                    Err(inner_err) => {
+                        errors.push(ParseError::ContractClauseError {
+                            clause_kind: "requires".to_string(),
+                            message: inner_err.to_string(),
+                            span: clause_span,
+                        });
+                        // Synchronize to the closing `}` of this clause.
+                        self.synchronize_to_brace_close();
+                    }
+                }
+            } else if self.check(&TokenKind::Ensures) {
+                let clause_span = self.advance().map_or(kodo_ast::Span::new(0, 0), |t| t.span);
+                match self.parse_single_contract_clause() {
+                    Ok(expr) => ensures.push(expr),
+                    Err(inner_err) => {
+                        errors.push(ParseError::ContractClauseError {
+                            clause_kind: "ensures".to_string(),
+                            message: inner_err.to_string(),
+                            span: clause_span,
+                        });
+                        self.synchronize_to_brace_close();
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        (requires, ensures)
+    }
+
+    /// Parses the body of a single contract clause: `{ expr }`.
+    ///
+    /// Expects the `requires`/`ensures` keyword to already be consumed.
+    /// Returns the parsed expression or an error.
+    fn parse_single_contract_clause(&mut self) -> Result<kodo_ast::Expr> {
+        self.expect(&TokenKind::LBrace)?;
+        let expr = self.parse_expr()?;
+        self.expect(&TokenKind::RBrace)?;
+        Ok(expr)
+    }
+
     /// Parses annotations followed by a function definition.
     pub(crate) fn parse_annotated_function(&mut self) -> Result<Function> {
         let annotations = self.parse_annotations()?;
@@ -744,7 +850,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse;
+    use crate::{parse, parse_with_recovery};
     use kodo_ast::{TypeExpr, Visibility};
 
     #[test]
@@ -900,6 +1006,171 @@ mod tests {
         assert_eq!(
             module.imports[0].names,
             Some(vec!["sin".to_string(), "cos".to_string()])
+        );
+    }
+
+    // -- Contract clause error recovery tests --
+
+    #[test]
+    fn recovery_malformed_requires_continues_to_body() {
+        // The `requires` clause has a syntax error (missing operand after `>`),
+        // but the function body should still be parsed.
+        let source = r#"module test {
+            fn check(x: Int) -> Int
+                requires { x > }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        // The function should be recovered even though requires failed.
+        assert_eq!(output.module.functions.len(), 1);
+        assert_eq!(output.module.functions[0].name, "check");
+        // The malformed requires clause is omitted.
+        assert!(output.module.functions[0].requires.is_empty());
+        // There should be at least one error about the contract clause.
+        assert!(!output.errors.is_empty(), "expected errors but got none");
+        assert!(
+            output.errors.iter().any(|e| e.code() == "E0104"),
+            "expected E0104 contract clause error, got: {:?}",
+            output.errors
+        );
+    }
+
+    #[test]
+    fn recovery_malformed_ensures_continues_to_body() {
+        let source = r#"module test {
+            fn check(x: Int) -> Int
+                ensures { + }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        assert_eq!(output.module.functions.len(), 1);
+        assert_eq!(output.module.functions[0].name, "check");
+        assert!(output.module.functions[0].ensures.is_empty());
+        assert!(output.errors.iter().any(|e| e.code() == "E0104"));
+    }
+
+    #[test]
+    fn recovery_valid_requires_then_malformed_ensures() {
+        // First requires is valid; ensures has a syntax error.
+        // The valid requires should be kept; ensures is dropped.
+        let source = r#"module test {
+            fn bounded(x: Int) -> Int
+                requires { x > 0 }
+                ensures { ??? }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        assert_eq!(output.module.functions.len(), 1);
+        let func = &output.module.functions[0];
+        assert_eq!(func.name, "bounded");
+        // Valid requires is preserved.
+        assert_eq!(func.requires.len(), 1);
+        // Malformed ensures is dropped.
+        assert!(func.ensures.is_empty());
+        assert!(output.errors.iter().any(|e| e.code() == "E0104"));
+    }
+
+    #[test]
+    fn recovery_malformed_requires_then_valid_ensures() {
+        // requires has error, ensures is valid.
+        let source = r#"module test {
+            fn bounded(x: Int) -> Int
+                requires { > > > }
+                ensures { x > 0 }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        assert_eq!(output.module.functions.len(), 1);
+        let func = &output.module.functions[0];
+        assert_eq!(func.name, "bounded");
+        assert!(func.requires.is_empty());
+        assert_eq!(func.ensures.len(), 1);
+        assert!(output.errors.iter().any(|e| e.code() == "E0104"));
+    }
+
+    #[test]
+    fn recovery_contract_error_still_parses_next_function() {
+        // Two functions: first has a malformed contract, second is valid.
+        // Both should appear in the parsed module.
+        let source = r#"module test {
+            fn bad(x: Int) -> Int
+                requires { x > }
+            {
+                return x
+            }
+            fn good(y: Int) -> Int {
+                return y
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        assert_eq!(
+            output.module.functions.len(),
+            2,
+            "expected both functions to be parsed, got: {:?}",
+            output
+                .module
+                .functions
+                .iter()
+                .map(|f| &f.name)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(output.module.functions[0].name, "bad");
+        assert_eq!(output.module.functions[1].name, "good");
+        assert!(!output.errors.is_empty());
+    }
+
+    #[test]
+    fn recovery_nested_braces_in_malformed_contract() {
+        // The malformed clause contains nested braces — recovery must track depth.
+        let source = r#"module test {
+            fn nested(x: Int) -> Int
+                requires { if true { x } }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        // The function should still be parsed regardless of nested braces
+        // in the contract clause (whether it succeeds or recovers).
+        assert_eq!(output.module.functions.len(), 1);
+        assert_eq!(output.module.functions[0].name, "nested");
+    }
+
+    #[test]
+    fn recovery_both_contracts_malformed() {
+        let source = r#"module test {
+            fn both_bad(x: Int) -> Int
+                requires { > }
+                ensures { < }
+            {
+                return x
+            }
+        }"#;
+        let output = parse_with_recovery(source);
+        assert_eq!(output.module.functions.len(), 1);
+        assert_eq!(output.module.functions[0].name, "both_bad");
+        assert!(output.module.functions[0].requires.is_empty());
+        assert!(output.module.functions[0].ensures.is_empty());
+        // Should have two E0104 errors (one per clause).
+        let contract_errors: Vec<_> = output
+            .errors
+            .iter()
+            .filter(|e| e.code() == "E0104")
+            .collect();
+        assert_eq!(
+            contract_errors.len(),
+            2,
+            "expected 2 contract errors, got {}: {:?}",
+            contract_errors.len(),
+            contract_errors
         );
     }
 }

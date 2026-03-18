@@ -8,6 +8,205 @@ use crate::types::{expr_span, find_similar_in, GenericFunctionDef, OwnershipStat
 use crate::{Type, TypeError};
 use kodo_ast::{BinOp, Block, Expr, Pattern, Span, Stmt, UnaryOp};
 
+/// Collects free variable names referenced in an expression.
+///
+/// A "free variable" is an identifier that is not in the `bound` set (closure
+/// parameters or locally-bound names). This performs a conservative syntactic
+/// walk -- it does not resolve whether a name is actually in scope, leaving
+/// that to the type checker.
+///
+/// Used by closure capture analysis to determine which enclosing-scope
+/// variables are referenced inside a closure body.
+fn collect_free_variables(expr: &Expr, bound: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut free = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    collect_free_vars_inner(expr, bound, &mut free, &mut seen);
+    free
+}
+
+/// Recursive helper for [`collect_free_variables`].
+#[allow(clippy::too_many_lines)]
+fn collect_free_vars_inner(
+    expr: &Expr,
+    bound: &std::collections::HashSet<String>,
+    free: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    match expr {
+        Expr::Ident(name, _) => {
+            if !bound.contains(name) && seen.insert(name.clone()) {
+                free.push(name.clone());
+            }
+        }
+        Expr::BinaryOp { left, right, .. } | Expr::NullCoalesce { left, right, .. } => {
+            collect_free_vars_inner(left, bound, free, seen);
+            collect_free_vars_inner(right, bound, free, seen);
+        }
+        Expr::UnaryOp { operand, .. }
+        | Expr::Try { operand, .. }
+        | Expr::Is { operand, .. }
+        | Expr::Await { operand, .. } => {
+            collect_free_vars_inner(operand, bound, free, seen);
+        }
+        Expr::Call { callee, args, .. } => {
+            collect_free_vars_inner(callee, bound, free, seen);
+            for arg in args {
+                collect_free_vars_inner(arg, bound, free, seen);
+            }
+        }
+        Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_free_vars_inner(condition, bound, free, seen);
+            collect_free_vars_block(then_branch, bound, free, seen);
+            if let Some(eb) = else_branch {
+                collect_free_vars_block(eb, bound, free, seen);
+            }
+        }
+        Expr::FieldAccess { object, .. } | Expr::OptionalChain { object, .. } => {
+            collect_free_vars_inner(object, bound, free, seen);
+        }
+        Expr::TupleIndex { tuple, .. } => {
+            collect_free_vars_inner(tuple, bound, free, seen);
+        }
+        Expr::StructLit { fields, .. } => {
+            for f in fields {
+                collect_free_vars_inner(&f.value, bound, free, seen);
+            }
+        }
+        Expr::EnumVariantExpr { args, .. } => {
+            for arg in args {
+                collect_free_vars_inner(arg, bound, free, seen);
+            }
+        }
+        Expr::Match { expr, arms, .. } => {
+            collect_free_vars_inner(expr, bound, free, seen);
+            for arm in arms {
+                collect_free_vars_inner(&arm.body, bound, free, seen);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            collect_free_vars_inner(start, bound, free, seen);
+            collect_free_vars_inner(end, bound, free, seen);
+        }
+        Expr::Closure { params, body, .. } => {
+            let mut inner_bound = bound.clone();
+            for p in params {
+                inner_bound.insert(p.name.clone());
+            }
+            collect_free_vars_inner(body, &inner_bound, free, seen);
+        }
+        Expr::StringInterp { parts, .. } => {
+            for part in parts {
+                if let kodo_ast::StringPart::Expr(e) = part {
+                    collect_free_vars_inner(e, bound, free, seen);
+                }
+            }
+        }
+        Expr::TupleLit(elems, _) => {
+            for e in elems {
+                collect_free_vars_inner(e, bound, free, seen);
+            }
+        }
+        Expr::Block(block) => {
+            collect_free_vars_block(block, bound, free, seen);
+        }
+        Expr::IntLit(..) | Expr::FloatLit(..) | Expr::StringLit(..) | Expr::BoolLit(..) => {}
+    }
+}
+
+/// Collects free variables from a block's statements.
+#[allow(clippy::too_many_lines)]
+fn collect_free_vars_block(
+    block: &Block,
+    bound: &std::collections::HashSet<String>,
+    free: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let mut local_bound = bound.clone();
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, value, .. } => {
+                collect_free_vars_inner(value, &local_bound, free, seen);
+                local_bound.insert(name.clone());
+            }
+            Stmt::LetPattern { value, .. } => {
+                collect_free_vars_inner(value, &local_bound, free, seen);
+            }
+            Stmt::Expr(e) => {
+                collect_free_vars_inner(e, &local_bound, free, seen);
+            }
+            Stmt::Return { value, .. } => {
+                if let Some(v) = value {
+                    collect_free_vars_inner(v, &local_bound, free, seen);
+                }
+            }
+            Stmt::Assign { value, name, .. } => {
+                if !local_bound.contains(name) && seen.insert(name.clone()) {
+                    free.push(name.clone());
+                }
+                collect_free_vars_inner(value, &local_bound, free, seen);
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                collect_free_vars_inner(condition, &local_bound, free, seen);
+                collect_free_vars_block(body, &local_bound, free, seen);
+            }
+            Stmt::For {
+                name,
+                start,
+                end,
+                body,
+                ..
+            } => {
+                collect_free_vars_inner(start, &local_bound, free, seen);
+                collect_free_vars_inner(end, &local_bound, free, seen);
+                let mut for_bound = local_bound.clone();
+                for_bound.insert(name.clone());
+                collect_free_vars_block(body, &for_bound, free, seen);
+            }
+            Stmt::ForIn {
+                name,
+                iterable,
+                body,
+                ..
+            } => {
+                collect_free_vars_inner(iterable, &local_bound, free, seen);
+                let mut for_bound = local_bound.clone();
+                for_bound.insert(name.clone());
+                collect_free_vars_block(body, &for_bound, free, seen);
+            }
+            Stmt::IfLet {
+                value,
+                body,
+                else_body,
+                ..
+            } => {
+                collect_free_vars_inner(value, &local_bound, free, seen);
+                collect_free_vars_block(body, &local_bound, free, seen);
+                if let Some(eb) = else_body {
+                    collect_free_vars_block(eb, &local_bound, free, seen);
+                }
+            }
+            Stmt::Spawn { body, .. } => {
+                collect_free_vars_block(body, &local_bound, free, seen);
+            }
+            Stmt::Parallel { body, .. } => {
+                for s in body {
+                    if let Stmt::Spawn { body: sb, .. } = s {
+                        collect_free_vars_block(sb, &local_bound, free, seen);
+                    }
+                }
+            }
+            Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        }
+    }
+}
+
 /// Converts a primitive type name string to a [`Type`].
 ///
 /// Used when parsing monomorphized generic names like `Result__Int_String`.
@@ -280,7 +479,17 @@ impl TypeChecker {
         Ok(Type::Unknown)
     }
 
-    /// Checks a closure expression.
+    /// Checks a closure expression, including capture ownership analysis.
+    ///
+    /// Identifies free variables (those defined in the enclosing scope, not as
+    /// closure parameters) and checks their ownership state:
+    /// - If a captured variable was already moved, emits [`TypeError::ClosureCaptureAfterMove`].
+    /// - If a captured variable is non-Copy and owned, marks it as moved in the
+    ///   enclosing scope (the closure takes ownership by move).
+    /// - Copy types are implicitly copied into the closure without affecting
+    ///   the enclosing scope's ownership state.
+    ///
+    /// Based on **\[ATAPL\]** Ch. 1 — linear/affine capture semantics for closures.
     fn check_closure(
         &mut self,
         params: &[kodo_ast::ClosureParam],
@@ -290,6 +499,8 @@ impl TypeChecker {
     ) -> crate::Result<Type> {
         let scope = self.env.scope_level();
         let mut param_types = Vec::new();
+        let param_names: std::collections::HashSet<String> =
+            params.iter().map(|p| p.name.clone()).collect();
         for p in params {
             let ty = if let Some(type_expr) = &p.ty {
                 self.resolve_type_mono(type_expr, p.span)?
@@ -302,8 +513,33 @@ impl TypeChecker {
             self.env.insert(p.name.clone(), ty.clone());
             param_types.push(ty);
         }
-        // Save and set current_return_type so that return statements inside
-        // the closure body are checked against the closure's return type.
+
+        // Collect free variables referenced in the closure body that come from
+        // the enclosing scope (not closure parameters, not built-in functions).
+        let free_vars = collect_free_variables(body, &param_names);
+
+        // Check ownership of each captured variable and collect non-Copy ones.
+        let mut moved_captures: Vec<String> = Vec::new();
+        for name in &free_vars {
+            if let Some(ty) = self.env.lookup(name).cloned() {
+                if let Some(crate::types::OwnershipState::Moved(line)) =
+                    self.ownership_map.get(name.as_str())
+                {
+                    return Err(TypeError::ClosureCaptureAfterMove {
+                        name: name.clone(),
+                        moved_at_line: *line,
+                        span,
+                    });
+                }
+                if !ty.is_copy() {
+                    moved_captures.push(name.clone());
+                }
+            }
+        }
+
+        // Push ownership scope so the closure body sees captured vars as owned.
+        self.push_ownership_scope();
+
         let saved_return_type = self.current_return_type.clone();
         if let Some(ret_expr) = return_type {
             self.current_return_type = self.resolve_type_mono(ret_expr, span)?;
@@ -311,8 +547,6 @@ impl TypeChecker {
         let body_type = self.infer_expr(body)?;
         let ret_type = if let Some(ret_expr) = return_type {
             let expected = self.resolve_type_mono(ret_expr, span)?;
-            // If body type is Unit (due to return statements), accept it —
-            // the return values are already checked against current_return_type.
             if body_type != Type::Unit {
                 TypeEnv::check_eq(&expected, &body_type, span)?;
             }
@@ -321,6 +555,14 @@ impl TypeChecker {
             body_type
         };
         self.current_return_type = saved_return_type;
+
+        // Pop closure scope and mark non-Copy captures as moved in outer scope.
+        self.pop_ownership_scope();
+        for name in &moved_captures {
+            let line = span.start / 80;
+            self.track_moved(name, line);
+        }
+
         self.env.truncate(scope);
         Ok(Type::Function(param_types, Box::new(ret_type)))
     }

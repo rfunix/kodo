@@ -130,6 +130,20 @@ fn safe_divide(a: Int, b: Int) -> Int
 
 `requires` checks run at function entry; `ensures` checks run at function exit. Together, they form a complete contract: callers must satisfy preconditions, and the function guarantees postconditions.
 
+## Parser Error Recovery for Contracts (E0104)
+
+As of v0.4.0, the parser performs **graceful error recovery** when it encounters a malformed `requires` or `ensures` expression. Instead of halting compilation at the first contract syntax error, the parser skips to the closing `}` of the contract block and continues parsing the rest of the function and module. This allows the compiler to report multiple errors in a single pass, which is especially valuable for AI agents that benefit from seeing all issues at once.
+
+```rust
+fn example(x: Int) -> Int
+    requires { x > }   // malformed — parser recovers here (E0104)
+{
+    return x + 1        // function body is still parsed and type-checked
+}
+```
+
+The error E0104 is emitted for the malformed contract, but subsequent errors in the function body or other functions are also reported.
+
 ## When to Use Contracts
 
 Contracts are most useful for:

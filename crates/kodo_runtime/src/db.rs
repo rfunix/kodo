@@ -170,7 +170,7 @@ pub unsafe extern "C" fn kodo_db_row_get_string(
     let qr = unsafe { &*(result as *const QueryResult) };
     if qr.cursor >= qr.rows.len() {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out(String::new(), out_ptr, out_len) };
+        unsafe { write_string_out("", out_ptr, out_len) };
         return;
     }
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn kodo_db_row_get_string(
         String::new()
     };
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out(s, out_ptr, out_len) };
+    unsafe { write_string_out(&s, out_ptr, out_len) };
 }
 
 /// Reads a column value as an integer from the current row.
@@ -370,8 +370,11 @@ mod tests {
         let mut out_ptr: *const u8 = std::ptr::null();
         let mut out_len: usize = 0;
         unsafe { kodo_db_row_get_string(result, 0, &mut out_ptr, &mut out_len) };
-        let s = unsafe { String::from_raw_parts(out_ptr as *mut u8, out_len, out_len) };
-        assert_eq!(s, "hello");
+        // SAFETY: out_ptr points to out_len valid bytes (RC-managed memory).
+        let s = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(s, b"hello");
+        // Free via RC decrement.
+        crate::memory::kodo_rc_dec(out_ptr as i64);
 
         unsafe { kodo_db_result_free(result) };
         unsafe { kodo_db_close(db) };

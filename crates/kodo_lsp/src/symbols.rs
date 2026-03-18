@@ -321,6 +321,54 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_document_symbols() {
+        let source = r#"module mymod {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = 1
+    }
+}"#;
+        let symbols = document_symbols(source);
+        let summary: Vec<String> = symbols
+            .iter()
+            .map(|s| {
+                let kind = match s.kind {
+                    SymbolKind::FUNCTION => "fn",
+                    SymbolKind::STRUCT => "struct",
+                    SymbolKind::ENUM => "enum",
+                    SymbolKind::INTERFACE => "intent",
+                    _ => "other",
+                };
+                format!(
+                    "[{kind}] {} (container: {})",
+                    s.name,
+                    s.container_name.as_deref().unwrap_or("?")
+                )
+            })
+            .collect();
+        insta::assert_snapshot!(summary.join("\n"));
+    }
+
+    #[test]
     fn document_symbols_finds_intents() {
         let source = r#"module test {
     meta {

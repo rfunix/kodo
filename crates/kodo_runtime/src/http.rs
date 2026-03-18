@@ -30,27 +30,27 @@ pub unsafe extern "C" fn kodo_http_get(
     let url_bytes = unsafe { std::slice::from_raw_parts(url_ptr, url_len) };
     let Ok(url) = std::str::from_utf8(url_bytes) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len) };
+        unsafe { write_string_out_mut("invalid URL: not UTF-8", out_ptr, out_len) };
         return 1;
     };
     match ureq::get(url).call() {
         Ok(response) => match response.into_body().read_to_string() {
             Ok(body) => {
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-                unsafe { write_string_out_mut(body, out_ptr, out_len) };
+                unsafe { write_string_out_mut(&body, out_ptr, out_len) };
                 0
             }
             Err(e) => {
                 let msg = format!("failed to read response body: {e}");
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-                unsafe { write_string_out_mut(msg, out_ptr, out_len) };
+                unsafe { write_string_out_mut(&msg, out_ptr, out_len) };
                 1
             }
         },
         Err(e) => {
             let msg = format!("HTTP GET failed: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out_mut(msg, out_ptr, out_len) };
+            unsafe { write_string_out_mut(&msg, out_ptr, out_len) };
             1
         }
     }
@@ -85,12 +85,12 @@ pub unsafe extern "C" fn kodo_http_post(
     let post_body = unsafe { std::slice::from_raw_parts(body_ptr, body_len) };
     let Ok(url) = std::str::from_utf8(url_bytes) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out_mut("invalid URL: not UTF-8".to_string(), out_ptr, out_len) };
+        unsafe { write_string_out_mut("invalid URL: not UTF-8", out_ptr, out_len) };
         return 1;
     };
     let Ok(content) = std::str::from_utf8(post_body) else {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out_mut("invalid body: not UTF-8".to_string(), out_ptr, out_len) };
+        unsafe { write_string_out_mut("invalid body: not UTF-8", out_ptr, out_len) };
         return 1;
     };
     match ureq::post(url)
@@ -100,20 +100,20 @@ pub unsafe extern "C" fn kodo_http_post(
         Ok(response) => match response.into_body().read_to_string() {
             Ok(resp_body) => {
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-                unsafe { write_string_out_mut(resp_body, out_ptr, out_len) };
+                unsafe { write_string_out_mut(&resp_body, out_ptr, out_len) };
                 0
             }
             Err(e) => {
                 let msg = format!("failed to read response body: {e}");
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-                unsafe { write_string_out_mut(msg, out_ptr, out_len) };
+                unsafe { write_string_out_mut(&msg, out_ptr, out_len) };
                 1
             }
         },
         Err(e) => {
             let msg = format!("HTTP POST failed: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out_mut(msg, out_ptr, out_len) };
+            unsafe { write_string_out_mut(&msg, out_ptr, out_len) };
             1
         }
     }

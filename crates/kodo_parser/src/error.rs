@@ -31,6 +31,20 @@ pub enum ParseError {
     /// A lexer error propagated up.
     #[error("lexer error: {0}")]
     LexError(#[from] kodo_lexer::LexError),
+
+    /// A syntax error inside a contract clause (`requires` or `ensures` block).
+    ///
+    /// The parser recovered by skipping to the closing `}` of the clause.
+    /// The function body is still parsed, so subsequent errors are reported too.
+    #[error("malformed {clause_kind} clause at {span:?}: {message}")]
+    ContractClauseError {
+        /// Whether this was a `requires` or `ensures` clause.
+        clause_kind: String,
+        /// Human-readable description of what went wrong.
+        message: String,
+        /// Source location of the clause keyword.
+        span: Span,
+    },
 }
 
 impl ParseError {
@@ -38,7 +52,9 @@ impl ParseError {
     #[must_use]
     pub fn span(&self) -> Option<Span> {
         match self {
-            Self::UnexpectedToken { span, .. } => Some(*span),
+            Self::UnexpectedToken { span, .. } | Self::ContractClauseError { span, .. } => {
+                Some(*span)
+            }
             Self::UnexpectedEof { .. } | Self::LexError(_) => None,
         }
     }
@@ -50,6 +66,7 @@ impl ParseError {
             Self::UnexpectedToken { .. } => "E0100",
             Self::UnexpectedEof { .. } => "E0101",
             Self::LexError(_) => "E0001",
+            Self::ContractClauseError { .. } => "E0104",
         }
     }
 }
@@ -80,6 +97,9 @@ impl kodo_ast::Diagnostic for ParseError {
                 Some(format!("the file ended before the parser found {expected}"))
             }
             Self::LexError(_) => Some("check for invalid characters in the source".to_string()),
+            Self::ContractClauseError { clause_kind, .. } => Some(format!(
+                "check the expression inside the `{clause_kind}` block for syntax errors"
+            )),
         }
     }
 
@@ -126,7 +146,7 @@ impl kodo_ast::Diagnostic for ParseError {
                     replacement: text.to_string(),
                 })
             }
-            Self::LexError(_) => None,
+            Self::LexError(_) | Self::ContractClauseError { .. } => None,
         }
     }
 }

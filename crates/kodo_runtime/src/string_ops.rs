@@ -6,16 +6,57 @@
 
 use std::io::Write;
 
-/// Returns the length of a string (number of bytes).
+/// Returns the length of a string in Unicode code points (characters).
+///
+/// For ASCII-only strings this equals the byte length. For strings with
+/// multi-byte UTF-8 characters (accented letters, CJK, emoji) the result
+/// is the number of characters, which may be less than the byte length.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_length(ptr: *const u8, len: usize) -> i64 {
+    // SAFETY: Caller guarantees ptr/len form a valid UTF-8 byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let Ok(s) = std::str::from_utf8(bytes) else {
+        // Fallback: if somehow invalid UTF-8, return byte count.
+        #[allow(clippy::cast_possible_wrap)]
+        return len as i64;
+    };
+    #[allow(clippy::cast_possible_wrap)]
+    let result = s.chars().count() as i64;
+    result
+}
+
+/// Returns the byte length of a string (number of UTF-8 bytes).
+///
+/// Unlike [`kodo_string_length`] which counts Unicode code points,
+/// this function returns the raw byte count. Useful for low-level
+/// operations that need to work with the underlying byte representation.
 ///
 /// # Safety
 ///
 /// `ptr` must point to `len` valid bytes.
 #[no_mangle]
-pub extern "C" fn kodo_string_length(_ptr: *const u8, len: usize) -> i64 {
+pub extern "C" fn kodo_string_byte_length(_ptr: *const u8, len: usize) -> i64 {
     #[allow(clippy::cast_possible_wrap)]
     let result = len as i64;
     result
+}
+
+/// Returns the number of Unicode code points in a string.
+///
+/// This is an alias for [`kodo_string_length`] — both return
+/// character count, not byte count.
+///
+/// # Safety
+///
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_char_count(ptr: *const u8, len: usize) -> i64 {
+    // SAFETY: Caller guarantees ptr/len form a valid UTF-8 byte slice.
+    unsafe { kodo_string_length(ptr, len) }
 }
 
 /// Returns 1 if the haystack string contains the needle string, 0 otherwise.
@@ -121,15 +162,9 @@ pub unsafe extern "C" fn kodo_string_concat(
     let mut result = Vec::with_capacity(len1 + len2);
     result.extend_from_slice(s1);
     result.extend_from_slice(s2);
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: Box::into_raw intentionally leaks the allocation so the caller
-    // can manage the memory via (ptr, len). Freed by `kodo_string_free`.
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 
@@ -190,15 +225,10 @@ pub unsafe extern "C" fn kodo_string_replace(
     let replacement = unsafe { std::slice::from_raw_parts(replacement_ptr, replacement_len) };
 
     if pattern.is_empty() {
-        // Empty pattern: return the original string (no replacement)
-        let copy = haystack.to_vec().into_boxed_slice();
-        let result_len = copy.len();
-        // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-        let result_ptr = Box::into_raw(copy) as *const u8;
+        // Empty pattern: return a copy of the original string.
         // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
         unsafe {
-            *out_ptr = result_ptr;
-            *out_len = result_len;
+            crate::memory::alloc_string_out(haystack, out_ptr, out_len);
         }
         return;
     }
@@ -214,14 +244,9 @@ pub unsafe extern "C" fn kodo_string_replace(
             i += 1;
         }
     }
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 
@@ -269,14 +294,9 @@ pub unsafe extern "C" fn kodo_string_repeat(
     out_len: *mut usize,
 ) {
     if count <= 0 {
-        let empty: Box<[u8]> = Vec::new().into_boxed_slice();
-        let result_len = 0;
-        // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-        let result_ptr = Box::into_raw(empty) as *const u8;
         // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
         unsafe {
-            *out_ptr = result_ptr;
-            *out_len = result_len;
+            crate::memory::alloc_string_out(&[], out_ptr, out_len);
         }
         return;
     }
@@ -288,14 +308,9 @@ pub unsafe extern "C" fn kodo_string_repeat(
     for _ in 0..n {
         result.extend_from_slice(bytes);
     }
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 
@@ -367,20 +382,15 @@ pub unsafe extern "C" fn kodo_string_to_upper(
     for &b in bytes {
         result.push(b.to_ascii_uppercase());
     }
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 
 /// Returns a lowercase copy of the string.
 ///
-/// Allocates a new string on the heap.
+/// Allocates a new RC-managed string on the heap.
 ///
 /// # Safety
 ///
@@ -400,20 +410,24 @@ pub unsafe extern "C" fn kodo_string_to_lower(
     for &b in bytes {
         result.push(b.to_ascii_lowercase());
     }
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 
-/// Returns a substring from `start` to `end` byte indices.
+/// Returns a substring from character index `start` to `end` (exclusive).
 ///
-/// Clamps indices to valid range. The result is a sub-slice (no allocation).
+/// Indices are Unicode code point positions, not byte offsets. For example,
+/// `substring(0, 3)` on `"héllo"` returns `"hél"` (3 characters), not
+/// the first 3 bytes which would split the multi-byte `é`.
+///
+/// Out-of-range indices are clamped to the string's character length.
+/// If `start >= end` (after clamping), an empty string is returned.
+/// Negative indices are treated as 0.
+///
+/// The result is a sub-slice of the original string (no allocation needed)
+/// because UTF-8 character boundaries always align with byte boundaries.
 ///
 /// # Safety
 ///
@@ -428,18 +442,53 @@ pub unsafe extern "C" fn kodo_string_substring(
     out_ptr: *mut *const u8,
     out_len: *mut usize,
 ) {
-    // SAFETY: Caller guarantees ptr/len form a valid byte slice.
+    // SAFETY: Caller guarantees ptr/len form a valid UTF-8 byte slice.
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+
+    // Try to interpret as valid UTF-8 for character-based indexing.
+    let Ok(s) = std::str::from_utf8(bytes) else {
+        // Fallback for invalid UTF-8: return empty string.
+        // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe {
+            *out_ptr = bytes.as_ptr();
+            *out_len = 0;
+        }
+        return;
+    };
+
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let start_idx = (start.max(0) as usize).min(len);
+    let start_char = start.max(0) as usize;
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let end_idx = (end.max(0) as usize).min(len);
-    let actual_end = end_idx.max(start_idx);
-    // SAFETY: start_idx <= actual_end <= len, so the sub-slice is valid.
-    // Caller guarantees out_ptr and out_len are valid writable pointers.
+    let end_char = end.max(0) as usize;
+
+    if end_char <= start_char {
+        // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe {
+            *out_ptr = bytes.as_ptr();
+            *out_len = 0;
+        }
+        return;
+    }
+
+    // Map character positions to byte offsets using char_indices().
+    // We need byte offsets for positions `start_char` and `end_char`.
+    let mut start_byte = len; // default: beyond string (start past end)
+    let mut end_byte = len; // default: clamp to end of string
+    for (char_pos, (byte_idx, _ch)) in s.char_indices().enumerate() {
+        if char_pos == start_char {
+            start_byte = byte_idx;
+        }
+        if char_pos == end_char {
+            end_byte = byte_idx;
+            break;
+        }
+    }
+
+    // SAFETY: start_byte and end_byte are valid UTF-8 character boundaries
+    // within [0, len]. Caller guarantees out_ptr and out_len are valid.
     unsafe {
-        *out_ptr = bytes.as_ptr().add(start_idx);
-        *out_len = actual_end - start_idx;
+        *out_ptr = bytes.as_ptr().add(start_byte);
+        *out_len = end_byte - start_byte;
     }
 }
 
@@ -457,14 +506,9 @@ pub unsafe extern "C" fn kodo_int_to_string(
     out_len: *mut usize,
 ) {
     let s = value.to_string();
-    let boxed = s.into_boxed_str();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(s.as_bytes(), out_ptr, out_len);
     }
 }
 
@@ -488,14 +532,9 @@ pub unsafe extern "C" fn kodo_float64_to_string(
     out_len: *mut usize,
 ) {
     let s = value.to_string();
-    let boxed = s.into_boxed_str();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(s.as_bytes(), out_ptr, out_len);
     }
 }
 
@@ -511,14 +550,9 @@ pub unsafe extern "C" fn kodo_bool_to_string(
     out_len: *mut usize,
 ) {
     let s = if value != 0 { "true" } else { "false" };
-    let boxed = s.to_string().into_boxed_str();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(s.as_bytes(), out_ptr, out_len);
     }
 }
 
@@ -533,20 +567,25 @@ pub extern "C" fn kodo_float64_to_int(value: f64) -> i64 {
 /// Frees a heap-allocated string previously returned by runtime functions
 /// (e.g. `kodo_string_concat`, `kodo_string_replace`, `kodo_int_to_string`).
 ///
+/// For RC-managed strings (allocated via [`crate::memory::alloc_string`]),
+/// this decrements the refcount, freeing the memory when it reaches zero.
+///
 /// Does nothing if `ptr` is null or `len` is zero.
 ///
 /// # Safety
 ///
-/// `ptr` must have been allocated by `Box::into_raw` on a `Box<[u8]>` of
-/// exactly `len` bytes, or be null.
+/// `ptr` must have been allocated by the runtime (either via `alloc_string`
+/// or legacy `Box::into_raw`), or be null.
 #[no_mangle]
 pub unsafe extern "C" fn kodo_string_free(ptr: *mut u8, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
     }
-    // SAFETY: caller guarantees ptr was allocated via Box::into_raw on a
-    // Box<[u8]> of exactly `len` bytes.
-    let _ = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) };
+    // Delegate to the RC system. If the pointer is RC-managed, its refcount
+    // will be decremented (and the memory freed when it reaches zero).
+    // If it is not RC-managed, kodo_rc_dec is a safe no-op.
+    #[allow(clippy::cast_possible_wrap)]
+    crate::memory::kodo_rc_dec_string(ptr as i64, len as i64);
 }
 
 /// Splits a string by a separator and returns a `List<String>`.
@@ -917,9 +956,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn string_length_works() {
+    fn string_length_ascii() {
         let s = "hello";
-        assert_eq!(kodo_string_length(s.as_ptr(), s.len()), 5);
+        assert_eq!(unsafe { kodo_string_length(s.as_ptr(), s.len()) }, 5);
+    }
+
+    #[test]
+    fn string_length_unicode_accented() {
+        let s = "héllo"; // 'é' is 2 bytes, but 1 character
+        assert_eq!(unsafe { kodo_string_length(s.as_ptr(), s.len()) }, 5);
+        // byte_length should be 6 (h=1, é=2, l=1, l=1, o=1)
+        assert_eq!(kodo_string_byte_length(s.as_ptr(), s.len()), 6);
+    }
+
+    #[test]
+    fn string_length_unicode_emoji() {
+        let s = "hi\u{1F600}!"; // "hi😀!" — emoji is 4 bytes
+        assert_eq!(unsafe { kodo_string_length(s.as_ptr(), s.len()) }, 4);
+        assert_eq!(kodo_string_byte_length(s.as_ptr(), s.len()), 7);
+    }
+
+    #[test]
+    fn string_length_unicode_cjk() {
+        let s = "\u{4E16}\u{754C}"; // "世界" — 2 chars, 6 bytes
+        assert_eq!(unsafe { kodo_string_length(s.as_ptr(), s.len()) }, 2);
+        assert_eq!(kodo_string_byte_length(s.as_ptr(), s.len()), 6);
+    }
+
+    #[test]
+    fn string_length_empty() {
+        let s = "";
+        assert_eq!(unsafe { kodo_string_length(s.as_ptr(), s.len()) }, 0);
+    }
+
+    #[test]
+    fn string_char_count_matches_length() {
+        let s = "héllo\u{1F600}";
+        let len = unsafe { kodo_string_length(s.as_ptr(), s.len()) };
+        let count = unsafe { kodo_string_char_count(s.as_ptr(), s.len()) };
+        assert_eq!(len, count);
     }
 
     #[test]
@@ -1322,5 +1397,125 @@ mod tests {
         let bytes: [u8; 2] = [0xFF, 0xFE];
         // Should handle invalid UTF-8 gracefully without aborting.
         unsafe { kodo_contract_fail_recoverable(bytes.as_ptr(), bytes.len()) };
+    }
+
+    // -----------------------------------------------------------------------
+    // Unicode-aware substring tests
+    // -----------------------------------------------------------------------
+
+    /// Helper to call kodo_string_substring and return the result as a &str.
+    unsafe fn call_substring(s: &str, start: i64, end: i64) -> String {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_string_substring(s.as_ptr(), s.len(), start, end, &mut out_ptr, &mut out_len);
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        std::str::from_utf8(bytes).unwrap().to_string()
+    }
+
+    #[test]
+    fn substring_ascii_unchanged() {
+        // ASCII strings should behave identically to byte-based substring.
+        let result = unsafe { call_substring("hello", 1, 4) };
+        assert_eq!(result, "ell");
+    }
+
+    #[test]
+    fn substring_ascii_full_string() {
+        let result = unsafe { call_substring("hello", 0, 5) };
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn substring_multibyte_accented() {
+        // "héllo" — 'é' is 2 bytes but 1 character.
+        // substring(0, 3) should return "hél" (3 chars), not split 'é'.
+        let result = unsafe { call_substring("héllo", 0, 3) };
+        assert_eq!(result, "hél");
+    }
+
+    #[test]
+    fn substring_multibyte_skip_accented() {
+        // "héllo" — substring(1, 4) should return "éll".
+        let result = unsafe { call_substring("héllo", 1, 4) };
+        assert_eq!(result, "éll");
+    }
+
+    #[test]
+    fn substring_emoji() {
+        // "hi😀bye" — emoji is 4 bytes but 1 character.
+        let s = "hi\u{1F600}bye";
+        let result = unsafe { call_substring(s, 0, 3) };
+        assert_eq!(result, "hi\u{1F600}");
+    }
+
+    #[test]
+    fn substring_emoji_after() {
+        // "hi😀bye" — substring(3, 6) should return "bye".
+        let s = "hi\u{1F600}bye";
+        let result = unsafe { call_substring(s, 3, 6) };
+        assert_eq!(result, "bye");
+    }
+
+    #[test]
+    fn substring_cjk() {
+        // "世界你好" — each char is 3 bytes.
+        let s = "\u{4E16}\u{754C}\u{4F60}\u{597D}";
+        let result = unsafe { call_substring(s, 1, 3) };
+        assert_eq!(result, "\u{754C}\u{4F60}");
+    }
+
+    #[test]
+    fn substring_mixed_multibyte() {
+        // "Añ世😀" — 1-byte, 2-byte, 3-byte, 4-byte characters.
+        let s = "A\u{00F1}\u{4E16}\u{1F600}";
+        let result = unsafe { call_substring(s, 1, 3) };
+        assert_eq!(result, "\u{00F1}\u{4E16}");
+    }
+
+    #[test]
+    fn substring_empty_string() {
+        let result = unsafe { call_substring("", 0, 0) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn substring_start_equals_end() {
+        let result = unsafe { call_substring("hello", 2, 2) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn substring_start_greater_than_end() {
+        let result = unsafe { call_substring("hello", 3, 1) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn substring_start_beyond_length() {
+        let result = unsafe { call_substring("hi", 10, 20) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn substring_end_beyond_length_clamps() {
+        // Clamp end to string length.
+        let result = unsafe { call_substring("hello", 2, 100) };
+        assert_eq!(result, "llo");
+    }
+
+    #[test]
+    fn substring_negative_start() {
+        // Negative start treated as 0.
+        let result = unsafe { call_substring("hello", -5, 3) };
+        assert_eq!(result, "hel");
+    }
+
+    #[test]
+    fn substring_negative_end() {
+        // Negative end treated as 0, so start >= end → empty.
+        let result = unsafe { call_substring("hello", 0, -1) };
+        assert_eq!(result, "");
     }
 }

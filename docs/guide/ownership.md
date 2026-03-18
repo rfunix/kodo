@@ -122,6 +122,18 @@ fn escape(ref s: String) -> String {
 }
 ```
 
+## Closure Ownership (E0281, E0282, E0283)
+
+Closures that capture variables from their enclosing scope are subject to ownership analysis. The compiler tracks captures and enforces the same move/borrow rules:
+
+- **E0281 — Capture after move**: A closure cannot capture a variable that has already been moved (e.g., into another closure).
+- **E0282 — Capture moves variable**: When a closure captures a non-Copy variable, that variable is unavailable in the enclosing scope afterward.
+- **E0283 — Double capture**: Two closures cannot both capture the same non-Copy variable.
+
+Copy types (`Int`, `Bool`, `Float64`, `Byte`) can be captured by any number of closures without restriction.
+
+See the [Closures guide](closures.md#closure-ownership-analysis) for detailed examples.
+
 ## Design Philosophy
 
 Kōdo's ownership system catches the most common ownership bugs (use-after-move, dangling references, aliasing violations) while keeping the rules simple enough for AI agents to reason about deterministically. The borrow rules follow [ATAPL] Ch. 1 on linear and affine type systems.

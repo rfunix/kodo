@@ -121,3 +121,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libz3-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --no-run
+
+  fuzz:
+    name: Fuzz (lexer + parser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz
+      - name: Fuzz lexer (60s)
+        run: cargo +nightly fuzz run fuzz_lexer -- -max_total_time=60
+      - name: Fuzz parser (60s)
+        run: cargo +nightly fuzz run fuzz_parser -- -max_total_time=60

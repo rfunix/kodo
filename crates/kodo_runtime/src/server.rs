@@ -68,7 +68,7 @@ pub unsafe extern "C" fn kodo_http_request_method(
     let request = unsafe { &*(req as *const tiny_http::Request) };
     let method = request.method().to_string();
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(method, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&method, out_ptr, out_len) };
 }
 
 /// Gets the URL path of a request as a string.
@@ -90,7 +90,7 @@ pub unsafe extern "C" fn kodo_http_request_path(
     let request = unsafe { &*(req as *const tiny_http::Request) };
     let path = request.url().to_string();
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(path, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&path, out_ptr, out_len) };
 }
 
 /// Gets the request body as a string.
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn kodo_http_request_body(
     let mut body = String::new();
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut body);
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(body, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&body, out_ptr, out_len) };
 }
 
 /// Sends an HTTP response to a request.

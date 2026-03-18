@@ -443,11 +443,7 @@ pub(crate) fn run_test(
     // Code generation.
     let struct_defs = checker.struct_registry().clone();
     let enum_defs = checker.enum_registry().clone();
-    let is_recoverable = contract_mode == kodo_contracts::ContractMode::Recoverable;
-    let options = kodo_codegen::CodegenOptions {
-        recoverable_contracts: is_recoverable,
-        ..kodo_codegen::CodegenOptions::default()
-    };
+    let options = kodo_codegen::CodegenOptions::default();
     let vtable_defs = build_vtable_defs(&checker);
 
     let object_bytes = match kodo_codegen::compile_module_with_vtables(

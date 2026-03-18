@@ -1,0 +1,6 @@
+---
+source: crates/kodo_lsp/src/diagnostics.rs
+expression: "summary.join(\"\\n\")"
+---
+[E0100] L6:18 expected Comma, found Arrow at Span { start: 100, end: 102 }
+[E0101] L0:0 unexpected end of input, expected RBrace

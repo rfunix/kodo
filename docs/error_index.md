@@ -55,6 +55,9 @@ Modules must include a `meta` block (enforced in semantic analysis).
 ### E0103: Unexpected End of File
 The file ended before a complete construct was parsed.
 
+### E0104: Contract Clause Syntax Error
+A `requires` or `ensures` block contains a malformed expression. The parser recovers by skipping to the closing `}` and continues parsing the function body.
+
 ## Type Errors (E0200–E0299)
 
 ### E0200: Type Mismatch
@@ -500,6 +503,39 @@ error[E0262]: function `process_input` is marked `@security_sensitive` but has n
    |
  8 | fn process_input(data: String) -> String {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ add `requires { ... }` or `ensures { ... }` to function `process_input`
+```
+
+### E0281: Closure Capture After Move
+A closure captures a variable that has already been moved. Once a variable is moved (e.g., into another closure or by assignment), it cannot be captured again.
+
+```rust
+error[E0281]: variable `data` was moved and cannot be captured by this closure
+  --> src/main.ko:12:15
+   |
+12 |     let f2 = |x: Int| -> Int { println(data); x }
+   |               ^^^^^^^^^^^^^^^^ `data` was moved at line 8; consider cloning the value before the first move
+```
+
+### E0282: Closure Capture Moves Variable
+A closure captures a non-Copy variable by move, making it unavailable in the enclosing scope for subsequent use.
+
+```rust
+error[E0282]: closure captures `data` by move, making it unavailable after this point
+  --> src/main.ko:10:5
+   |
+10 |     let result = data + " world"
+   |                  ^^^^ `data` was moved into closure at line 8; consider cloning before capture
+```
+
+### E0283: Closure Double Capture
+Two closures in the same scope both attempt to capture the same non-Copy variable by move.
+
+```rust
+error[E0283]: variable `data` cannot be captured by two closures
+  --> src/main.ko:12:15
+   |
+12 |     let f2 = |x: Int| -> Int { println(data); x }
+   |               ^^^^^^^^^^^^^^^^ `data` already captured by closure at line 8; clone the value for each closure
 ```
 
 ### E0350: Policy Violation

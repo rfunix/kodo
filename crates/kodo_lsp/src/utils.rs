@@ -320,3 +320,383 @@ pub(crate) fn find_all_occurrences(source: &str, name: &str) -> Vec<Range> {
     }
     results
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── offset_to_line_col ──────────────────────────────────────────
+
+    #[test]
+    fn offset_to_line_col_start_of_source() {
+        let (line, col) = offset_to_line_col("hello\nworld", 0);
+        assert_eq!((line, col), (0, 0));
+    }
+
+    #[test]
+    fn offset_to_line_col_middle_of_first_line() {
+        let (line, col) = offset_to_line_col("hello\nworld", 3);
+        assert_eq!((line, col), (0, 3));
+    }
+
+    #[test]
+    fn offset_to_line_col_start_of_second_line() {
+        let (line, col) = offset_to_line_col("hello\nworld", 6);
+        assert_eq!((line, col), (1, 0));
+    }
+
+    #[test]
+    fn offset_to_line_col_end_of_second_line() {
+        let (line, col) = offset_to_line_col("ab\ncd\nef", 7);
+        assert_eq!((line, col), (2, 1));
+    }
+
+    #[test]
+    fn offset_to_line_col_at_newline_char() {
+        // Offset 5 is the '\n' character itself
+        let (line, col) = offset_to_line_col("hello\nworld", 5);
+        assert_eq!((line, col), (0, 5));
+    }
+
+    // ── line_col_to_offset ──────────────────────────────────────────
+
+    #[test]
+    fn line_col_to_offset_start() {
+        assert_eq!(line_col_to_offset("hello\nworld", 0, 0), Some(0));
+    }
+
+    #[test]
+    fn line_col_to_offset_second_line() {
+        assert_eq!(line_col_to_offset("hello\nworld", 1, 0), Some(6));
+    }
+
+    #[test]
+    fn line_col_to_offset_middle_of_line() {
+        assert_eq!(line_col_to_offset("hello\nworld", 1, 3), Some(9));
+    }
+
+    #[test]
+    fn line_col_to_offset_past_last_line_returns_none() {
+        assert_eq!(line_col_to_offset("hello", 5, 0), None);
+    }
+
+    #[test]
+    fn line_col_to_offset_col_past_end_returns_line_end() {
+        // Column beyond line length should return end of that line
+        let result = line_col_to_offset("ab\ncd", 0, 99);
+        // The function clamps at the newline position
+        assert_eq!(result, Some(2));
+    }
+
+    // ── word_at_offset ──────────────────────────────────────────────
+
+    #[test]
+    fn word_at_offset_simple_ident() {
+        assert_eq!(word_at_offset("let foo = 42", 5), "foo");
+    }
+
+    #[test]
+    fn word_at_offset_start_of_word() {
+        assert_eq!(word_at_offset("let foo = 42", 4), "foo");
+    }
+
+    #[test]
+    fn word_at_offset_end_of_word() {
+        assert_eq!(word_at_offset("let foo = 42", 6), "foo");
+    }
+
+    #[test]
+    fn word_at_offset_on_space_returns_empty() {
+        assert_eq!(word_at_offset("let foo = 42", 3), "");
+    }
+
+    #[test]
+    fn word_at_offset_past_end_returns_empty() {
+        assert_eq!(word_at_offset("hello", 99), "");
+    }
+
+    #[test]
+    fn word_at_offset_underscore_ident() {
+        assert_eq!(word_at_offset("let my_var = 1", 6), "my_var");
+    }
+
+    // ── is_ident_char ───────────────────────────────────────────────
+
+    #[test]
+    fn is_ident_char_letters_digits_underscore() {
+        assert!(is_ident_char(b'a'));
+        assert!(is_ident_char(b'Z'));
+        assert!(is_ident_char(b'0'));
+        assert!(is_ident_char(b'_'));
+        assert!(!is_ident_char(b' '));
+        assert!(!is_ident_char(b':'));
+        assert!(!is_ident_char(b'('));
+    }
+
+    // ── format_type_expr ────────────────────────────────────────────
+
+    #[test]
+    fn format_type_expr_named() {
+        let ty = kodo_ast::TypeExpr::Named("Int".to_string());
+        assert_eq!(format_type_expr(&ty), "Int");
+    }
+
+    #[test]
+    fn format_type_expr_unit() {
+        assert_eq!(format_type_expr(&kodo_ast::TypeExpr::Unit), "Unit");
+    }
+
+    #[test]
+    fn format_type_expr_generic() {
+        let ty = kodo_ast::TypeExpr::Generic(
+            "List".to_string(),
+            vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+        );
+        assert_eq!(format_type_expr(&ty), "List<Int>");
+    }
+
+    #[test]
+    fn format_type_expr_optional() {
+        let ty =
+            kodo_ast::TypeExpr::Optional(Box::new(kodo_ast::TypeExpr::Named("String".to_string())));
+        assert_eq!(format_type_expr(&ty), "String?");
+    }
+
+    #[test]
+    fn format_type_expr_tuple() {
+        let ty = kodo_ast::TypeExpr::Tuple(vec![
+            kodo_ast::TypeExpr::Named("Int".to_string()),
+            kodo_ast::TypeExpr::Named("Bool".to_string()),
+        ]);
+        assert_eq!(format_type_expr(&ty), "(Int, Bool)");
+    }
+
+    #[test]
+    fn format_type_expr_function() {
+        let ty = kodo_ast::TypeExpr::Function(
+            vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+            Box::new(kodo_ast::TypeExpr::Named("Bool".to_string())),
+        );
+        assert_eq!(format_type_expr(&ty), "(Int) -> Bool");
+    }
+
+    #[test]
+    fn format_type_expr_dyn_trait() {
+        let ty = kodo_ast::TypeExpr::DynTrait("Printable".to_string());
+        assert_eq!(format_type_expr(&ty), "dyn Printable");
+    }
+
+    // ── format_expr ─────────────────────────────────────────────────
+
+    #[test]
+    fn format_expr_ident() {
+        let span = kodo_ast::Span { start: 0, end: 1 };
+        let expr = kodo_ast::Expr::Ident("x".to_string(), span);
+        assert_eq!(format_expr(&expr), "x");
+    }
+
+    #[test]
+    fn format_expr_int_lit() {
+        let span = kodo_ast::Span { start: 0, end: 1 };
+        let expr = kodo_ast::Expr::IntLit(42, span);
+        assert_eq!(format_expr(&expr), "42");
+    }
+
+    #[test]
+    fn format_expr_bool_lit() {
+        let span = kodo_ast::Span { start: 0, end: 4 };
+        let expr = kodo_ast::Expr::BoolLit(true, span);
+        assert_eq!(format_expr(&expr), "true");
+    }
+
+    #[test]
+    fn format_expr_string_lit() {
+        let span = kodo_ast::Span { start: 0, end: 5 };
+        let expr = kodo_ast::Expr::StringLit("hi".to_string(), span);
+        assert_eq!(format_expr(&expr), "\"hi\"");
+    }
+
+    // ── format_annotation ───────────────────────────────────────────
+
+    #[test]
+    fn format_annotation_no_args() {
+        let ann = kodo_ast::Annotation {
+            name: "test".to_string(),
+            args: vec![],
+            span: kodo_ast::Span { start: 0, end: 5 },
+        };
+        assert_eq!(format_annotation(&ann), "@test");
+    }
+
+    #[test]
+    fn format_annotation_positional_float() {
+        let span = kodo_ast::Span { start: 0, end: 3 };
+        let ann = kodo_ast::Annotation {
+            name: "confidence".to_string(),
+            args: vec![kodo_ast::AnnotationArg::Positional(
+                kodo_ast::Expr::FloatLit(0.9, span),
+            )],
+            span: kodo_ast::Span { start: 0, end: 16 },
+        };
+        assert_eq!(format_annotation(&ann), "@confidence(0.9)");
+    }
+
+    #[test]
+    fn format_annotation_named_arg() {
+        let span = kodo_ast::Span { start: 0, end: 7 };
+        let ann = kodo_ast::Annotation {
+            name: "authored_by".to_string(),
+            args: vec![kodo_ast::AnnotationArg::Named(
+                "agent".to_string(),
+                kodo_ast::Expr::StringLit("claude".to_string(), span),
+            )],
+            span: kodo_ast::Span { start: 0, end: 30 },
+        };
+        assert_eq!(format_annotation(&ann), "@authored_by(agent: \"claude\")");
+    }
+
+    // ── format_type ─────────────────────────────────────────────────
+
+    #[test]
+    fn format_type_primitives() {
+        assert_eq!(format_type(&kodo_types::Type::Int), "Int");
+        assert_eq!(format_type(&kodo_types::Type::Bool), "Bool");
+        assert_eq!(format_type(&kodo_types::Type::String), "String");
+        assert_eq!(format_type(&kodo_types::Type::Float64), "Float64");
+        assert_eq!(format_type(&kodo_types::Type::Unit), "Unit");
+        assert_eq!(format_type(&kodo_types::Type::Byte), "Byte");
+        assert_eq!(format_type(&kodo_types::Type::Unknown), "TODO");
+    }
+
+    #[test]
+    fn format_type_generic() {
+        let ty = kodo_types::Type::Generic("List".to_string(), vec![kodo_types::Type::Int]);
+        assert_eq!(format_type(&ty), "List<Int>");
+    }
+
+    #[test]
+    fn format_type_function() {
+        let ty = kodo_types::Type::Function(
+            vec![kodo_types::Type::Int, kodo_types::Type::Bool],
+            Box::new(kodo_types::Type::String),
+        );
+        assert_eq!(format_type(&ty), "(Int, Bool) -> String");
+    }
+
+    #[test]
+    fn format_type_tuple() {
+        let ty = kodo_types::Type::Tuple(vec![kodo_types::Type::Int, kodo_types::Type::String]);
+        assert_eq!(format_type(&ty), "(Int, String)");
+    }
+
+    #[test]
+    fn format_type_dyn_trait() {
+        let ty = kodo_types::Type::DynTrait("Printable".to_string());
+        assert_eq!(format_type(&ty), "dyn Printable");
+    }
+
+    // ── infer_type_hint ─────────────────────────────────────────────
+
+    #[test]
+    fn infer_type_hint_literals() {
+        let span = kodo_ast::Span { start: 0, end: 1 };
+        assert_eq!(infer_type_hint(&kodo_ast::Expr::IntLit(42, span)), "Int");
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::FloatLit(3.14, span)),
+            "Float64"
+        );
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::BoolLit(true, span)),
+            "Bool"
+        );
+        assert_eq!(
+            infer_type_hint(&kodo_ast::Expr::StringLit("hi".to_string(), span)),
+            "String"
+        );
+    }
+
+    #[test]
+    fn infer_type_from_call_builtins() {
+        let span = kodo_ast::Span { start: 0, end: 1 };
+        let make_call = |name: &str| kodo_ast::Expr::Ident(name.to_string(), span);
+
+        assert_eq!(infer_type_from_call(&make_call("list_new")), "List<Int>");
+        assert_eq!(infer_type_from_call(&make_call("map_new")), "Map<Int, Int>");
+        assert_eq!(infer_type_from_call(&make_call("abs")), "Int");
+        assert_eq!(infer_type_from_call(&make_call("list_contains")), "Bool");
+        assert_eq!(infer_type_from_call(&make_call("file_read")), "String");
+        assert_eq!(infer_type_from_call(&make_call("unknown_fn")), "TODO");
+    }
+
+    // ── find_all_occurrences ────────────────────────────────────────
+
+    #[test]
+    fn find_all_occurrences_basic() {
+        let source = "let x = x + x";
+        let ranges = find_all_occurrences(source, "x");
+        assert_eq!(ranges.len(), 3, "should find 3 occurrences of x");
+    }
+
+    #[test]
+    fn find_all_occurrences_word_boundary() {
+        let source = "let xy = x + xyz";
+        let ranges = find_all_occurrences(source, "x");
+        assert_eq!(
+            ranges.len(),
+            1,
+            "should only match whole word 'x', not 'xy' or 'xyz'"
+        );
+    }
+
+    #[test]
+    fn find_all_occurrences_empty_name() {
+        let ranges = find_all_occurrences("hello world", "");
+        assert!(ranges.is_empty(), "empty name should return no results");
+    }
+
+    #[test]
+    fn find_all_occurrences_not_found() {
+        let ranges = find_all_occurrences("let a = b", "z");
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn find_all_occurrences_multiline() {
+        let source = "let a = 1\nlet b = a\nreturn a";
+        let ranges = find_all_occurrences(source, "a");
+        assert_eq!(ranges.len(), 3);
+        // First on line 0, second on line 1, third on line 2
+        assert_eq!(ranges[0].start.line, 0);
+        assert_eq!(ranges[1].start.line, 1);
+        assert_eq!(ranges[2].start.line, 2);
+    }
+
+    // ── snapshot tests ──────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_format_type_expr_nested_generic() {
+        let ty = kodo_ast::TypeExpr::Generic(
+            "Map".to_string(),
+            vec![
+                kodo_ast::TypeExpr::Named("String".to_string()),
+                kodo_ast::TypeExpr::Generic(
+                    "List".to_string(),
+                    vec![kodo_ast::TypeExpr::Named("Int".to_string())],
+                ),
+            ],
+        );
+        insta::assert_snapshot!(format_type_expr(&ty));
+    }
+
+    #[test]
+    fn snapshot_format_type_nested() {
+        let ty = kodo_types::Type::Generic(
+            "Result".to_string(),
+            vec![
+                kodo_types::Type::Generic("List".to_string(), vec![kodo_types::Type::String]),
+                kodo_types::Type::String,
+            ],
+        );
+        insta::assert_snapshot!(format_type(&ty));
+    }
+}

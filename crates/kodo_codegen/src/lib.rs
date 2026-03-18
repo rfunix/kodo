@@ -76,9 +76,6 @@ pub struct CodegenOptions {
     pub optimize: bool,
     /// Whether to emit debug information.
     pub debug_info: bool,
-    /// Whether contract failures should be recoverable (log + continue)
-    /// instead of aborting.
-    pub recoverable_contracts: bool,
 }
 
 impl Default for CodegenOptions {
@@ -86,7 +83,6 @@ impl Default for CodegenOptions {
         Self {
             optimize: false,
             debug_info: true,
-            recoverable_contracts: false,
         }
     }
 }
@@ -1830,21 +1826,13 @@ mod tests {
     }
 
     #[test]
-    fn codegen_options_default_recoverable_contracts_is_false() {
-        let opts = CodegenOptions::default();
-        assert!(!opts.recoverable_contracts);
-    }
-
-    #[test]
     fn codegen_options_custom_values() {
         let opts = CodegenOptions {
             optimize: true,
             debug_info: false,
-            recoverable_contracts: true,
         };
         assert!(opts.optimize);
         assert!(!opts.debug_info);
-        assert!(opts.recoverable_contracts);
     }
 
     // ---------------------------------------------------------------

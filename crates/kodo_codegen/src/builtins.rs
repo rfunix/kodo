@@ -215,6 +215,18 @@ fn declare_string_query_builtins(
         types::I64
     );
     decl_ret!(
+        "kodo_string_byte_length",
+        "String_byte_length",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_string_char_count",
+        "String_char_count",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
         "kodo_string_contains",
         "String_contains",
         [types::I64, types::I64, types::I64, types::I64],

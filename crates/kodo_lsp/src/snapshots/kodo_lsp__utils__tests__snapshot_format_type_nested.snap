@@ -1,0 +1,5 @@
+---
+source: crates/kodo_lsp/src/utils.rs
+expression: format_type(&ty)
+---
+Result<List<String>, String>

@@ -1,0 +1,7 @@
+---
+source: crates/kodo_lsp/src/completion.rs
+expression: "labels.join(\"\\n\")"
+---
+Circle — Shape::Circle(Float64)
+Rectangle — Shape::Rectangle(Float64, Float64)
+Triangle — Shape::Triangle

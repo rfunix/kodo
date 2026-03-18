@@ -1,14 +1,13 @@
-# Known Limitations — Kōdo v0.1.0-alpha
+# Known Limitations — Kōdo v0.4.0
 
 This document lists the known limitations of the current alpha release. These are deliberate trade-offs or features not yet fully implemented.
 
 ## Memory
 
-**Intermediate string leaks**: String operations (concatenation, split, substring, interpolation) allocate heap memory that is not automatically freed. Local string variables are cleaned up at function exit via `heap_locals`, but intermediate results (e.g., `"a" + "b" + "c"` produces a temporary `"ab"` that is never freed) accumulate until process exit.
+**Atomic reference counting for memory management**: As of v0.4.0, all heap-allocated values (strings, closures, collections) use **atomic reference counting** (Atomic RC) for thread-safe memory management. String operations (concatenation, replace, to_upper, to_lower, int/float/bool to_string, etc.) allocate via the RC allocator (`kodo_alloc`). Strings are freed when their reference count drops to zero via `kodo_rc_dec_string`. The MIR's `IncRef`/`DecRef` instructions properly track string lifetimes. The atomic operations ensure correctness when values are shared across `parallel {}` blocks and `spawn` tasks.
 
-- **Impact**: Memory usage grows over time in long-running programs with heavy string operations.
-- **Recommendation**: Safe for CLIs, scripts, and short-lived processes. Avoid tight loops with string concatenation in long-running services without periodic restarts.
-- **Plan**: Migrate string allocation to the RC allocator (`kodo_alloc`) in a future release.
+- **Remaining gap**: Strings stored inside `List<String>` (e.g., from `split`, `lines`, `args`) use RC-managed memory for the string data, but the `[ptr, len]` pair metadata is still allocated via `Box::into_raw`. These pairs are freed when the list is freed.
+- **Recommendation**: String memory management is now automatic for most use cases. Long-running services with heavy string operations should see significantly reduced memory growth compared to earlier releases.
 
 ## Concurrency
 
@@ -34,10 +33,12 @@ This document lists the known limitations of the current alpha release. These ar
 
 ## Strings
 
-**Byte-based substring**: The `substring(start, end)` method operates on byte offsets, not Unicode code points. Multi-byte UTF-8 characters (e.g., emojis, CJK characters) may be split in the middle, producing invalid UTF-8.
+**Unicode-aware string operations**: As of v0.3.0, `substring(start, end)` and `length()` operate on Unicode code points (characters), not byte offsets. Multi-byte UTF-8 characters (accented letters, CJK, emoji) are handled correctly.
 
-- **Impact**: Programs processing non-ASCII text with `substring` may produce garbled output.
-- **Recommendation**: Only use `substring` with ASCII text, or use `split` for safe Unicode handling.
+- `"héllo".length()` returns `5` (characters), not `6` (bytes).
+- `"héllo".substring(0, 3)` returns `"hél"` (3 characters), not a corrupted byte slice.
+- Use `byte_length()` if you need the raw UTF-8 byte count.
+- Use `char_count()` as an explicit alias for `length()` when clarity is desired.
 
 ## Contracts
 
@@ -65,6 +66,13 @@ Without the `smt` feature, contracts are checked at runtime only.
 **Host architecture only**: The compiler generates native binaries for the current host architecture only. Cross-compilation to other platforms is not supported.
 
 - **Recommendation**: Build on the target platform, or use CI with multiple OS runners.
+
+## Closures
+
+**Ownership analysis for captures**: As of v0.4.0, closures are subject to full ownership analysis. The compiler tracks what each closure captures and enforces move/borrow rules (E0281, E0282, E0283). Capturing a moved variable, using a variable after it was captured by a closure, or having two closures capture the same non-Copy variable are all compile-time errors.
+
+- **Remaining gap**: Closures that return captured references are not yet fully checked for lifetime escapes. The borrow-escapes-scope (E0241) check applies to function parameters but not yet to closure captures that escape via return values.
+- **Recommendation**: Prefer capturing owned values or Copy types in closures. Avoid returning closures that capture borrowed references.
 
 ## Numeric Limits
 

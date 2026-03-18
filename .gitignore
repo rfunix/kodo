@@ -33,6 +33,12 @@ target/criterion/
 # Z3 build artifacts
 z3-sys/
 
+# Node modules
+node_modules/
+
+# Wrangler cache
+.wrangler/
+
 # Temporary files
 *.tmp
 *.bak

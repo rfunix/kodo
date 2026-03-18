@@ -142,13 +142,41 @@ impl TypeChecker {
 
     /// Registers String query methods: `length`, `contains`, `starts_with`, `ends_with`.
     fn register_string_query_methods(&mut self) {
-        // String.length() -> Int
+        // String.length() -> Int (returns Unicode code point count)
         self.method_lookup.insert(
             ("String".to_string(), "length".to_string()),
             ("String_length".to_string(), vec![Type::String], Type::Int),
         );
         self.env.insert(
             "String_length".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // String.byte_length() -> Int (returns byte count)
+        self.method_lookup.insert(
+            ("String".to_string(), "byte_length".to_string()),
+            (
+                "String_byte_length".to_string(),
+                vec![Type::String],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "String_byte_length".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Int)),
+        );
+
+        // String.char_count() -> Int (alias for length — Unicode code point count)
+        self.method_lookup.insert(
+            ("String".to_string(), "char_count".to_string()),
+            (
+                "String_char_count".to_string(),
+                vec![Type::String],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "String_char_count".to_string(),
             Type::Function(vec![Type::String], Box::new(Type::Int)),
         );
 

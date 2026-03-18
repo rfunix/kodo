@@ -19,3 +19,8 @@ kodo_ast.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "codegen_bench"
+harness = false

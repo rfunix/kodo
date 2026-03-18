@@ -341,7 +341,16 @@ kodoc lsp
 - Hover information (function signatures, contracts, full annotations with args — e.g., `@confidence(0.85)`, `@authored_by(agent: "claude")`)
 - Code actions from FixPatch — automatic quick-fix suggestions for type errors with machine-applicable patches
 - Completions for 31 built-in functions with signature details, user-defined functions with contract info (`requires`/`ensures`)
-- Goto definition (functions, variables, parameters, structs, enums), find references, rename, signature help, document symbols
+- Goto definition (functions, variables, parameters, structs, enums), find references (with `include_declaration` support), rename, signature help, document symbols
+
+### VSCode Extension
+
+A dedicated VSCode extension is available that connects to the Kōdo LSP server. It provides:
+- Syntax highlighting for `.ko` files
+- Automatic LSP connection (diagnostics, hover, completions, goto definition, find references, code actions)
+- One-click installation from the VS Code marketplace
+
+To use it, install the extension and ensure `kodoc` is in your PATH. The extension automatically starts the LSP server when you open a `.ko` file.
 
 ### `kodoc audit`
 

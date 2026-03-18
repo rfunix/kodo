@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-2118%20passing-brightgreen" alt="Tests: 2118 passing">
+  <img src="https://img.shields.io/badge/tests-2228%20passing-brightgreen" alt="Tests: 2228 passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -210,8 +210,8 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 |----------|----------|
 | **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), `dyn Trait` (dynamic dispatch with vtables), local type inference, no implicit conversions |
 | **Pattern matching** | Exhaustive `match` on enums with destructuring |
-| **Closures** | Lambda lifting, capture analysis, higher-order functions, `(Int) -> Int` types |
-| **Ownership** | Linear ownership (`own`/`ref`/`mut`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), mut-borrow-while-ref-borrowed (E0245), ref-borrow-while-mut-borrowed (E0246), double-mut-borrow (E0247), assign-through-ref (E0248), functional reference counting (automatic deallocation) |
+| **Closures** | Lambda lifting, capture analysis with ownership tracking (E0281–E0283), higher-order functions, `(Int) -> Int` types |
+| **Ownership** | Linear ownership (`own`/`ref`/`mut`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), mut-borrow-while-ref-borrowed (E0245), ref-borrow-while-mut-borrowed (E0246), double-mut-borrow (E0247), assign-through-ref (E0248), closure capture ownership (E0281–E0283), atomic reference counting (thread-safe automatic deallocation) |
 | **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, `recoverable` mode, module-level `invariant` blocks |
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, multi-step `RepairPlan` for complex errors, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
@@ -223,7 +223,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Visibility** | `pub fn`, `pub struct` — declarations are private by default, `pub` makes them accessible from other modules |
 | **Multi-file** | `import module_name` across `.ko` files, selective imports (`import math { add, Point }`), qualified calls (`math.add(1, 2)`) |
 | **Concurrency** | `spawn` with captured variables (works), `actor` with state and message passing (works), `async`/`await` (syntax-only, planned for v2) |
-| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline and persistent history (`~/.kodo_history`); LSP server with diagnostics, hover (full annotations), goto-definition (functions, variables, params, structs, enums), find-references, contract-aware completions (31 builtins), and code actions from FixPatch; MCP server (`kodo-mcp`) for native AI agent integration via JSON-RPC over stdio; JSON error output; `kodoc explain` for any error code; `kodoc audit` for consolidated trust reports |
+| **Developer tools** | Interactive REPL (`kodoc repl`) with full compile-and-execute pipeline and persistent history (`~/.kodo_history`); LSP server with diagnostics, hover (full annotations), goto-definition (functions, variables, params, structs, enums), find-references (with `include_declaration`), contract-aware completions (31 builtins), and code actions from FixPatch; **VSCode extension** for seamless editor integration; MCP server (`kodo-mcp`) for native AI agent integration via JSON-RPC over stdio; JSON error output; `kodoc explain` for any error code; `kodoc audit` for consolidated trust reports |
 | **Build artifacts** | Compilation certificates (`.ko.cert.json`) with SHA-256 hashes, per-function confidence scores, per-function contract status (`static_verified`/`runtime_only`/`no_contracts`), and contract verification stats |
 
 ---

@@ -388,14 +388,9 @@ pub unsafe extern "C" fn kodo_list_join(
         }
     }
 
-    let boxed = result.into_boxed_slice();
-    let result_len = boxed.len();
-    // SAFETY: intentionally leaks so caller manages memory via (ptr, len).
-    let result_ptr = Box::into_raw(boxed) as *const u8;
     // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
     unsafe {
-        *out_ptr = result_ptr;
-        *out_len = result_len;
+        crate::memory::alloc_string_out(&result, out_ptr, out_len);
     }
 }
 

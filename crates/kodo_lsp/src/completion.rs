@@ -464,6 +464,75 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_completion_labels_for_simple_module() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let mut labels: Vec<String> = items
+            .iter()
+            .map(|i| {
+                let kind = match i.kind {
+                    Some(CompletionItemKind::FUNCTION) => "fn",
+                    Some(CompletionItemKind::STRUCT) => "struct",
+                    Some(CompletionItemKind::ENUM) => "enum",
+                    Some(CompletionItemKind::METHOD) => "method",
+                    Some(CompletionItemKind::FIELD) => "field",
+                    Some(CompletionItemKind::ENUM_MEMBER) => "variant",
+                    _ => "other",
+                };
+                format!("[{kind}] {}", i.label)
+            })
+            .collect();
+        labels.sort();
+        insta::assert_snapshot!(labels.join("\n"));
+    }
+
+    #[test]
+    fn snapshot_enum_variant_completions() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    enum Shape {
+        Circle(Float64),
+        Rectangle(Float64, Float64),
+        Triangle
+    }
+
+    fn main() {
+        let s: Shape = Shape::
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(13, 30));
+        let labels: Vec<String> = items
+            .iter()
+            .map(|i| format!("{} — {}", i.label, i.detail.as_deref().unwrap_or("?")))
+            .collect();
+        insta::assert_snapshot!(labels.join("\n"));
+    }
+
+    #[test]
     fn completions_show_contracts_in_documentation() {
         let source = r#"module test {
     meta {

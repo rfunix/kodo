@@ -45,20 +45,20 @@ pub unsafe extern "C" fn kodo_file_read(
         Err(e) => {
             let msg = format!("invalid path: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             return 1;
         }
     };
     match std::fs::read_to_string(path_str) {
         Ok(contents) => {
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(contents, out_ptr, out_len) };
+            unsafe { write_string_out(&contents, out_ptr, out_len) };
             0
         }
         Err(e) => {
             let msg = format!("{e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             1
         }
     }
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn kodo_file_write(
         Err(e) => {
             let msg = format!("invalid path: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             return 1;
         }
     };
@@ -101,7 +101,7 @@ pub unsafe extern "C" fn kodo_file_write(
         Err(e) => {
             let msg = format!("{e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             1
         }
     }
@@ -172,7 +172,7 @@ pub unsafe extern "C" fn kodo_time_format(
     let year = if month <= 2 { y_raw + 1 } else { y_raw };
     let formatted = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z");
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(formatted, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&formatted, out_ptr, out_len) };
 }
 
 /// Returns elapsed milliseconds since start timestamp.
@@ -208,7 +208,7 @@ pub unsafe extern "C" fn kodo_env_get(
     }
     if key_ptr.is_null() {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out_mut(String::new(), out_ptr, out_len) };
+        unsafe { write_string_out_mut("", out_ptr, out_len) };
         return;
     }
     // SAFETY: caller guarantees key_ptr/key_len form a valid UTF-8 slice.
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn kodo_env_get(
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
     let val = std::env::var(key).unwrap_or_default();
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(val, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&val, out_ptr, out_len) };
 }
 
 /// Sets an environment variable.
@@ -310,7 +310,7 @@ pub unsafe extern "C" fn kodo_json_get_string(
     match value.get(key) {
         Some(serde_json::Value::String(s)) => {
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out_mut(s.clone(), out_ptr, out_len) };
+            unsafe { write_string_out_mut(&s.clone(), out_ptr, out_len) };
             0
         }
         _ => -1,
@@ -368,14 +368,14 @@ pub unsafe extern "C" fn kodo_json_stringify(
     }
     if handle == 0 {
         // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-        unsafe { write_string_out_mut(String::new(), out_ptr, out_len) };
+        unsafe { write_string_out_mut("", out_ptr, out_len) };
         return;
     }
     // SAFETY: handle was returned by kodo_json_parse or kodo_json_new_object.
     let value = unsafe { &*(handle as *const serde_json::Value) };
     let s = serde_json::to_string(value).unwrap_or_default();
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(s, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&s, out_ptr, out_len) };
 }
 
 /// Gets a boolean value from a JSON object by key.
@@ -503,15 +503,12 @@ pub unsafe extern "C" fn kodo_json_free(handle: i64) {
 pub extern "C" fn kodo_args() -> i64 {
     let list = crate::collections::kodo_list_new();
     for arg in std::env::args() {
-        let bytes = arg.into_bytes().into_boxed_slice();
-        let len = bytes.len();
-        // SAFETY: intentionally leaks so caller manages via the list handle.
-        let ptr = Box::into_raw(bytes) as *const u8 as i64;
+        let (handle, len) = crate::memory::alloc_string(arg.as_bytes());
         #[allow(clippy::cast_possible_wrap)]
         let len_i64 = len as i64;
         // Store as heap-allocated [i64; 2] pair (ptr, len) — same format as
         // `kodo_string_split`, so `list_join` and other List<String> ops work.
-        let pair = Box::new([ptr, len_i64]);
+        let pair = Box::new([handle, len_i64]);
         // SAFETY: intentionally leaks so caller manages via the list handle.
         let pair_ptr = Box::into_raw(pair) as i64;
         // SAFETY: list was just created and is valid.
@@ -544,7 +541,7 @@ pub unsafe extern "C" fn kodo_readln(out_ptr: *mut *mut u8, out_len: *mut usize)
         }
     }
     // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-    unsafe { write_string_out_mut(line, out_ptr, out_len) };
+    unsafe { write_string_out_mut(&line, out_ptr, out_len) };
 }
 
 /// Exits the process with the given exit code.
@@ -584,7 +581,7 @@ pub unsafe extern "C" fn kodo_file_append(
         Err(e) => {
             let msg = format!("invalid path: {e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             return 1;
         }
     };
@@ -598,14 +595,14 @@ pub unsafe extern "C" fn kodo_file_append(
             Err(e) => {
                 let msg = format!("{e}");
                 // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-                unsafe { write_string_out(msg, out_ptr, out_len) };
+                unsafe { write_string_out(&msg, out_ptr, out_len) };
                 1
             }
         },
         Err(e) => {
             let msg = format!("{e}");
             // SAFETY: caller guarantees out_ptr and out_len are valid writable pointers.
-            unsafe { write_string_out(msg, out_ptr, out_len) };
+            unsafe { write_string_out(&msg, out_ptr, out_len) };
             1
         }
     }
@@ -651,14 +648,11 @@ pub unsafe extern "C" fn kodo_dir_list(path_ptr: *const u8, path_len: usize) -> 
     let list = crate::collections::kodo_list_new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let bytes = name.into_bytes().into_boxed_slice();
-        let len = bytes.len();
-        // SAFETY: intentionally leaks so caller manages via the list handle.
-        let ptr = Box::into_raw(bytes) as *const u8 as i64;
+        let (handle, len) = crate::memory::alloc_string(name.as_bytes());
         #[allow(clippy::cast_possible_wrap)]
         let len_i64 = len as i64;
         // Store as heap-allocated [i64; 2] pair — same format as string_split.
-        let pair = Box::new([ptr, len_i64]);
+        let pair = Box::new([handle, len_i64]);
         // SAFETY: intentionally leaks so caller manages via the list handle.
         let pair_ptr = Box::into_raw(pair) as i64;
         // SAFETY: list was just created and is valid.
@@ -876,8 +870,10 @@ mod tests {
         let mut p: *mut u8 = std::ptr::null_mut();
         let mut l: usize = 0;
         unsafe { kodo_time_format(0, &mut p, &mut l) };
-        let s = unsafe { String::from_raw_parts(p, l, l) };
-        assert_eq!(s, "1970-01-01T00:00:00Z");
+        // SAFETY: p points to l valid bytes (RC-managed memory).
+        let s = unsafe { std::slice::from_raw_parts(p, l) };
+        assert_eq!(s, b"1970-01-01T00:00:00Z");
+        crate::memory::kodo_rc_dec(p as i64);
     }
 
     #[test]
@@ -919,8 +915,10 @@ mod tests {
         let mut p: *mut u8 = std::ptr::null_mut();
         let mut l: usize = 0;
         unsafe { kodo_json_stringify(handle, &mut p, &mut l) };
-        let s = unsafe { String::from_raw_parts(p, l, l) };
-        assert!(s.contains("3.14"));
+        // SAFETY: p points to l valid bytes (RC-managed memory).
+        let s = unsafe { std::slice::from_raw_parts(p, l) };
+        assert!(s.windows(4).any(|w| w == b"3.14"));
+        crate::memory::kodo_rc_dec(p as i64);
         unsafe { kodo_json_free(handle) };
     }
 
@@ -933,8 +931,10 @@ mod tests {
         let mut p: *mut u8 = std::ptr::null_mut();
         let mut l: usize = 0;
         unsafe { kodo_json_stringify(handle, &mut p, &mut l) };
-        let s = unsafe { String::from_raw_parts(p, l, l) };
-        assert_eq!(s, "{}");
+        // SAFETY: p points to l valid bytes (RC-managed memory).
+        let s = unsafe { std::slice::from_raw_parts(p, l) };
+        assert_eq!(s, b"{}");
+        crate::memory::kodo_rc_dec(p as i64);
         unsafe { kodo_json_free(handle) };
     }
 
@@ -974,7 +974,9 @@ mod tests {
         unsafe {
             kodo_env_get(k.as_ptr(), k.len(), &mut p, &mut l);
         }
-        let s = unsafe { String::from_raw_parts(p, l, l) };
-        assert_eq!(s, "hi");
+        // SAFETY: p points to l valid bytes (RC-managed memory).
+        let s = unsafe { std::slice::from_raw_parts(p, l) };
+        assert_eq!(s, b"hi");
+        crate::memory::kodo_rc_dec(p as i64);
     }
 }

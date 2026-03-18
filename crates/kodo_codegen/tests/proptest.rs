@@ -9,7 +9,6 @@ fn default_options() -> CodegenOptions {
     CodegenOptions {
         optimize: false,
         debug_info: false,
-        recoverable_contracts: false,
     }
 }
 

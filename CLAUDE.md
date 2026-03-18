@@ -251,13 +251,17 @@ The `@confidence` → `@reviewed_by` enforcement is unique. Make it operationall
 - Enable policy-based automation: "deploy if all functions > 0.9 confidence and all contracts statically verified"
 - `kodoc audit` command combining confidence + contracts + annotations in one report
 
-### 5. Collections Must Be Complete for Real Programs
+### 5. Collections Are Complete — Maintain and Extend
 
-An agent can't write a real program if `List<T>` is append-only and `Map<K,V>` can't be iterated. Minimum viable collections:
-- **List**: pop, remove, set, slice, reverse, is_empty (not just push/get/length/contains)
-- **Map**: remove, is_empty, keys()/values()/entries() iteration via `for-in`
-- **JSON**: stringify (not just parse), get_bool, get_array, get_float
-- The runtime already has many of these (`kodo_map_keys`, `kodo_list_pop`, etc.) — they just need to be wired through type checker → codegen
+Collections are fully wired through type checker → codegen as of v0.3.0:
+- **List**: push, get, length, contains, pop, remove, set, slice, reverse, is_empty ✓
+- **Map**: insert, get, contains_key, length, remove, is_empty, keys()/values()/entries() + `for-in` ✓
+- **JSON**: parse, stringify, get_string, get_int, get_bool, get_array, get_float ✓
+
+Next priorities for collections:
+- **List**: sort, filter, map, reduce (higher-order collection methods)
+- **Map**: merge, filter
+- **Set<T>**: new collection type
 
 ### 6. LSP Is the Agent's Eyes
 

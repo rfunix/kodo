@@ -1,0 +1,5 @@
+---
+source: crates/kodo_lsp/src/diagnostics.rs
+expression: "summary.join(\"\\n\")"
+---
+[E0210] L0:0 module is missing a required `meta` block

@@ -504,25 +504,9 @@ impl Parser {
             TypeExpr::Unit
         };
 
-        let mut requires = Vec::new();
-        let mut ensures = Vec::new();
-        loop {
-            if self.check(&TokenKind::Requires) {
-                self.advance();
-                self.expect(&TokenKind::LBrace)?;
-                let expr = self.parse_expr()?;
-                self.expect(&TokenKind::RBrace)?;
-                requires.push(expr);
-            } else if self.check(&TokenKind::Ensures) {
-                self.advance();
-                self.expect(&TokenKind::LBrace)?;
-                let expr = self.parse_expr()?;
-                self.expect(&TokenKind::RBrace)?;
-                ensures.push(expr);
-            } else {
-                break;
-            }
-        }
+        // Use recovery-aware contract clause parsing so errors in
+        // requires/ensures don't prevent parsing the function body.
+        let (requires, ensures) = self.parse_contract_clauses_with_recovery(errors);
 
         // Use recovery-aware block parsing for the body.
         let body = self.parse_block_with_recovery(errors)?;

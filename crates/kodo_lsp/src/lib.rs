@@ -348,9 +348,12 @@ impl LanguageServer for KodoLanguageServer {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
 
         if let Some(source) = self.get_source(&uri)? {
-            if let Some(locations) = goto::references_at_position(&source, &uri, position) {
+            if let Some(locations) =
+                goto::references_at_position(&source, &uri, position, include_declaration)
+            {
                 return Ok(Some(locations));
             }
         }
@@ -1805,7 +1808,7 @@ mod tests {
 }"#;
         let uri = Url::parse("file:///test.ko").unwrap();
         // Position of "add" in the call at line 11
-        let refs = references_at_position(source, &uri, Position::new(11, 21));
+        let refs = references_at_position(source, &uri, Position::new(11, 21), false);
         assert!(refs.is_some(), "should find references to add");
         let locations = refs.unwrap();
         assert!(
@@ -1828,7 +1831,7 @@ mod tests {
 }"#;
         let uri = Url::parse("file:///test.ko").unwrap();
         // Position of "a" in "return a + b" at line 7
-        let refs = references_at_position(source, &uri, Position::new(7, 15));
+        let refs = references_at_position(source, &uri, Position::new(7, 15), false);
         assert!(refs.is_some(), "should find references to parameter a");
         let locations = refs.unwrap();
         assert!(
@@ -1851,7 +1854,7 @@ mod tests {
 }"#;
         let uri = Url::parse("file:///test.ko").unwrap();
         // Position in meta block — "purpose" is not an identifier tracked by the type checker
-        let refs = references_at_position(source, &uri, Position::new(2, 10));
+        let refs = references_at_position(source, &uri, Position::new(2, 10), false);
         assert!(
             refs.is_none(),
             "should return None for identifier not in reference_spans"

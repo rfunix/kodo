@@ -1,0 +1,5 @@
+---
+source: crates/kodo_lsp/src/hover.rs
+expression: hover.unwrap()
+---
+**param count**: Int

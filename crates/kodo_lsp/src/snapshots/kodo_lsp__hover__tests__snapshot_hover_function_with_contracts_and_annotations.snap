@@ -1,0 +1,18 @@
+---
+source: crates/kodo_lsp/src/hover.rs
+expression: hover.unwrap()
+---
+**fn divide**
+
+Parameters:
+- `a: Named("Int")`
+- `b: Named("Int")`
+
+Returns: `Named("Int")`
+
+**Contracts:**
+- `requires { b Gt 0 }`
+- `ensures { result Ge 0 }`
+
+@confidence(0.95)
+@authored_by(agent: "claude")

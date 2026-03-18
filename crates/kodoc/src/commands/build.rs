@@ -360,11 +360,7 @@ pub(crate) fn run_build(
     }
 
     // Code generation
-    let is_recoverable = contract_mode == kodo_contracts::ContractMode::Recoverable;
-    let options = kodo_codegen::CodegenOptions {
-        recoverable_contracts: is_recoverable,
-        ..kodo_codegen::CodegenOptions::default()
-    };
+    let options = kodo_codegen::CodegenOptions::default();
     // Build vtable definitions for dynamic dispatch.
     // For each (concrete_type, trait_name) pair, collect the mangled method names
     // in trait method declaration order.
