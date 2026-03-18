@@ -27,6 +27,7 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         "String_substring",
         "String_replace",
         "String_repeat",
+        "list_join",
         "map_get_sv",
         "map_get_ss",
     ] {
