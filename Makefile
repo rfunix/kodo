@@ -1,4 +1,4 @@
-.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report
+.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report validate-docs
 
 # Default: run all checks
 all: fmt clippy test doc
@@ -22,6 +22,10 @@ doc:
 
 doc-open:
 	cargo doc --workspace --no-deps --open
+
+# Validate documentation examples against the compiler
+validate-docs:
+	./scripts/validate-doc-examples.sh
 
 # All checks (CI-equivalent)
 ci: fmt-check clippy test doc
