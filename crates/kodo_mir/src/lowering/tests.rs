@@ -3218,3 +3218,100 @@ fn lower_empty_while_loop() {
     // Loop: entry -> header -> body -> exit
     assert!(mir.blocks.len() >= 4);
 }
+
+/// Regression test: when both Option__Int and Option__String exist in the
+/// enum registry, constructing Option::Some(42) must resolve to Option__Int
+/// (not Option__String).
+#[test]
+fn lower_enum_variant_disambiguates_by_arg_type() {
+    let mut builder = MirBuilder::new();
+    // Register both monomorphized variants.
+    builder.enum_registry.insert(
+        "Option__Int".to_string(),
+        vec![
+            ("Some".to_string(), vec![Type::Int]),
+            ("None".to_string(), vec![]),
+        ],
+    );
+    builder.enum_registry.insert(
+        "Option__String".to_string(),
+        vec![
+            ("Some".to_string(), vec![Type::String]),
+            ("None".to_string(), vec![]),
+        ],
+    );
+
+    // Construct Option::Some(42) — should resolve to Option__Int.
+    let result = builder
+        .lower_enum_variant("Option", "Some", &[Expr::IntLit(42, span())])
+        .unwrap();
+    if let Value::Local(lid) = result {
+        let ty = builder.local_types.get(&lid).cloned().unwrap();
+        assert_eq!(
+            ty,
+            Type::Enum("Option__Int".to_string()),
+            "Option::Some(42) should resolve to Option__Int, got {ty:?}"
+        );
+    } else {
+        panic!("expected Value::Local from lower_enum_variant");
+    }
+
+    // Construct Option::Some("hello") — should resolve to Option__String.
+    let result = builder
+        .lower_enum_variant(
+            "Option",
+            "Some",
+            &[Expr::StringLit("hello".to_string(), span())],
+        )
+        .unwrap();
+    if let Value::Local(lid) = result {
+        let ty = builder.local_types.get(&lid).cloned().unwrap();
+        assert_eq!(
+            ty,
+            Type::Enum("Option__String".to_string()),
+            "Option::Some(\"hello\") should resolve to Option__String, got {ty:?}"
+        );
+    } else {
+        panic!("expected Value::Local from lower_enum_variant");
+    }
+}
+
+/// Regression test: match arm resolution for generic enums uses the matched
+/// local's type to disambiguate between monomorphized variants.
+#[test]
+fn lower_match_resolves_correct_monomorphized_variant() {
+    let mut builder = MirBuilder::new();
+    // Register both monomorphized variants.
+    builder.enum_registry.insert(
+        "Option__Int".to_string(),
+        vec![
+            ("Some".to_string(), vec![Type::Int]),
+            ("None".to_string(), vec![]),
+        ],
+    );
+    builder.enum_registry.insert(
+        "Option__String".to_string(),
+        vec![
+            ("Some".to_string(), vec![Type::String]),
+            ("None".to_string(), vec![]),
+        ],
+    );
+
+    // Simulate a matched local with type Generic("Option", [String]).
+    let matched_local = builder.alloc_local(
+        Type::Generic("Option".to_string(), vec![Type::String]),
+        false,
+    );
+
+    // resolve_enum_from_matched_type should pick Option__String.
+    let resolved = builder.resolve_enum_from_matched_type(matched_local);
+    assert!(resolved.is_some(), "should resolve monomorphized enum");
+    let variants = resolved.unwrap();
+    // The Some variant's field type should be String, not Int.
+    let some_variant = variants.iter().find(|(n, _)| n == "Some").unwrap();
+    assert_eq!(
+        some_variant.1,
+        vec![Type::String],
+        "should resolve to Option__String's Some variant"
+    );
+}

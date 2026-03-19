@@ -2535,3 +2535,368 @@ fn e2e_generic_function_with_list_length() {
         "should print len=3, got: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Option<String> and Result<String, String> match arm tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_option_string_some_match_println() {
+    let binary = compile_source(
+        r#"module test_option_string_some {
+    meta {
+        purpose: "Test Option<String> Some branch"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let opt: Option<String> = Option::Some("hello world")
+        match opt {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+        return 0
+    }
+}"#,
+        "test_option_string_some",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "Option<String> Some should exit with 0");
+    assert!(
+        stdout.contains("hello world"),
+        "should print 'hello world', got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_option_string_none_match_println() {
+    let binary = compile_source(
+        r#"module test_option_string_none {
+    meta {
+        purpose: "Test Option<String> None branch"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let opt: Option<String> = Option::None
+        match opt {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+        return 0
+    }
+}"#,
+        "test_option_string_none",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "Option<String> None should exit with 0");
+    assert!(
+        stdout.contains("none"),
+        "should print 'none', got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_option_string_from_function_return() {
+    let binary = compile_source(
+        r#"module test_option_string_fn {
+    meta {
+        purpose: "Test Option<String> returned from function"
+        version: "0.1.0"
+    }
+
+    fn find_longer(a: String, min_len: Int) -> Option<String> {
+        if a.length() > min_len {
+            return Option::Some(a)
+        }
+        return Option::None
+    }
+
+    fn main() -> Int {
+        let found: Option<String> = find_longer("hello world", 3)
+        match found {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+        let not_found: Option<String> = find_longer("hi", 3)
+        match not_found {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+        return 0
+    }
+}"#,
+        "test_option_string_fn",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "Option<String> from fn should exit with 0");
+    assert!(
+        stdout.contains("hello world"),
+        "should print 'hello world' for Some, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("none"),
+        "should print 'none' for None, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_result_string_string_ok_match() {
+    let binary = compile_source(
+        r#"module test_result_string_ok {
+    meta {
+        purpose: "Test Result<String, String> Ok branch"
+        version: "0.1.0"
+    }
+
+    fn maybe_fail(flag: Bool) -> Result<String, String> {
+        if flag {
+            return Result::Ok("success")
+        }
+        return Result::Err("failure")
+    }
+
+    fn main() -> Int {
+        let res: Result<String, String> = maybe_fail(true)
+        match res {
+            Result::Ok(val) => { println(val) }
+            Result::Err(err) => { println(err) }
+        }
+        return 0
+    }
+}"#,
+        "test_result_string_ok",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "Result<String, String> Ok should exit with 0");
+    assert!(
+        stdout.contains("success"),
+        "should print 'success', got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_result_string_string_err_match() {
+    let binary = compile_source(
+        r#"module test_result_string_err {
+    meta {
+        purpose: "Test Result<String, String> Err branch"
+        version: "0.1.0"
+    }
+
+    fn maybe_fail(flag: Bool) -> Result<String, String> {
+        if flag {
+            return Result::Ok("success")
+        }
+        return Result::Err("failure")
+    }
+
+    fn main() -> Int {
+        let res: Result<String, String> = maybe_fail(false)
+        match res {
+            Result::Ok(val) => { println(val) }
+            Result::Err(err) => { println(err) }
+        }
+        return 0
+    }
+}"#,
+        "test_result_string_err",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "Result<String, String> Err should exit with 0"
+    );
+    assert!(
+        stdout.contains("failure"),
+        "should print 'failure', got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_option_string_full_reproducer() {
+    let binary = compile_source(
+        r#"module test_option_string_repro {
+    meta {
+        purpose: "Test Option<String> full reproducer"
+        version: "0.1.0"
+    }
+
+    fn find_longer(a: String, b: String, min_len: Int) -> Option<String> {
+        if a.length() > min_len {
+            return Option::Some(a)
+        }
+        return Option::None
+    }
+
+    fn main() -> Int {
+        let found: Option<String> = find_longer("hi", "hello world", 3)
+        match found {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+        return 0
+    }
+}"#,
+        "test_option_string_repro",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "reproducer should exit with 0");
+    assert!(
+        stdout.contains("none"),
+        "should print 'none' since 'hi' length is 2, not > 3, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mixed generic enum types in the same module (regression tests for
+// monomorphization dispatch bug where multiple instantiations of the same
+// generic enum caused a segfault).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_option_int_and_string_in_same_module() {
+    let binary = compile_source(
+        r#"module test_option_mixed {
+    meta {
+        purpose: "Mix Option<Int> and Option<String> in same module"
+        version: "0.1.0"
+    }
+
+    fn find_positive(a: Int) -> Option<Int> {
+        if a > 0 { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn find_longer(a: String, min_len: Int) -> Option<String> {
+        if a.length() > min_len { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn main() {
+        let r1: Option<Int> = find_positive(42)
+        match r1 {
+            Option::Some(v) => { print_int(v) }
+            Option::None => { println("none") }
+        }
+        let r2: Option<String> = find_longer("hello world", 3)
+        match r2 {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+    }
+}"#,
+        "test_option_mixed",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "mixed Option<Int> and Option<String> should exit with 0, stderr: {_stderr}"
+    );
+    assert!(
+        stdout.contains("42"),
+        "should print 42 from Option<Int>, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("hello world"),
+        "should print 'hello world' from Option<String>, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_result_int_and_string_in_same_module() {
+    let binary = compile_source(
+        r#"module test_result_mixed {
+    meta {
+        purpose: "Mix Result<Int, String> and Result<String, String> in same module"
+        version: "0.1.0"
+    }
+
+    fn parse_number(s: String) -> Result<Int, String> {
+        if s == "42" { return Result::Ok(42) }
+        return Result::Err("not a number")
+    }
+
+    fn validate_name(s: String) -> Result<String, String> {
+        if s.length() > 0 { return Result::Ok(s) }
+        return Result::Err("empty name")
+    }
+
+    fn main() {
+        let r1: Result<Int, String> = parse_number("42")
+        match r1 {
+            Result::Ok(n) => { print_int(n) }
+            Result::Err(e) => { println(e) }
+        }
+        let r2: Result<String, String> = validate_name("Alice")
+        match r2 {
+            Result::Ok(name) => { println(name) }
+            Result::Err(e) => { println(e) }
+        }
+    }
+}"#,
+        "test_result_mixed",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "mixed Result types should exit with 0, stderr: {_stderr}"
+    );
+    assert!(
+        stdout.contains("42"),
+        "should print 42 from Result<Int, String>, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Alice"),
+        "should print 'Alice' from Result<String, String>, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_option_mixed_none_branches() {
+    let binary = compile_source(
+        r#"module test_option_mixed_none {
+    meta {
+        purpose: "Mix Option<Int> and Option<String> with None branches"
+        version: "0.1.0"
+    }
+
+    fn find_positive(a: Int) -> Option<Int> {
+        if a > 0 { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn find_longer(a: String, min_len: Int) -> Option<String> {
+        if a.length() > min_len { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn main() {
+        let r1: Option<Int> = find_positive(-5)
+        match r1 {
+            Option::Some(v) => { print_int(v) }
+            Option::None => { println("int_none") }
+        }
+        let r2: Option<String> = find_longer("hi", 10)
+        match r2 {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("str_none") }
+        }
+    }
+}"#,
+        "test_option_mixed_none",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(
+        exit_code, 0,
+        "mixed Option None branches should exit with 0, stderr: {_stderr}"
+    );
+    assert!(
+        stdout.contains("int_none"),
+        "should print 'int_none' for negative input, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("str_none"),
+        "should print 'str_none' for short string, got: {stdout}"
+    );
+}

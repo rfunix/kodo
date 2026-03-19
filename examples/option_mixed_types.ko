@@ -1,0 +1,26 @@
+module option_mixed_types {
+    meta { purpose: "Mix Option<Int> and Option<String> in same module" version: "0.1.0" }
+
+    fn find_positive(a: Int) -> Option<Int> {
+        if a > 0 { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn find_longer(a: String, min_len: Int) -> Option<String> {
+        if a.length() > min_len { return Option::Some(a) }
+        return Option::None
+    }
+
+    fn main() {
+        let r1: Option<Int> = find_positive(42)
+        match r1 {
+            Option::Some(v) => { print_int(v) }
+            Option::None => { println("none") }
+        }
+        let r2: Option<String> = find_longer("hello world", 3)
+        match r2 {
+            Option::Some(s) => { println(s) }
+            Option::None => { println("none") }
+        }
+    }
+}

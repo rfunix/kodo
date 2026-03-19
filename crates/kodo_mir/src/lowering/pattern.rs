@@ -96,16 +96,28 @@ impl MirBuilder {
         variant: &str,
         args: &[Expr],
     ) -> Result<Value> {
+        // Lower arguments first so we can use their types for monomorphization
+        // dispatch when multiple generic instantiations exist (e.g. Option__Int
+        // and Option__String).
+        let mut arg_values = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_values.push(self.lower_expr(arg)?);
+        }
+
         // Resolve the actual enum name — for generic enums, look up a
         // monomorphized instance (e.g. "Option" to "Option__Int").
         let resolved_name = if self.enum_registry.contains_key(enum_name) {
             enum_name.to_string()
         } else {
             // Find a monomorphized instance with matching prefix and variant.
+            // When multiple monomorphized variants exist (e.g. Option__Int and
+            // Option__String), pick the one whose field types match the inferred
+            // argument types.
             let prefix = format!("{enum_name}__");
-            self.enum_registry
+            let candidates: Vec<String> = self
+                .enum_registry
                 .keys()
-                .find(|k| {
+                .filter(|k| {
                     k.starts_with(&prefix)
                         && self
                             .enum_registry
@@ -113,7 +125,30 @@ impl MirBuilder {
                             .is_some_and(|vs| vs.iter().any(|(n, _)| n == variant))
                 })
                 .cloned()
-                .unwrap_or_else(|| enum_name.to_string())
+                .collect();
+            if candidates.len() <= 1 {
+                candidates
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| enum_name.to_string())
+            } else {
+                // Multiple monomorphized variants: match argument types against
+                // the variant's field types to pick the correct one.
+                let inferred_arg_tys: Vec<Type> = arg_values
+                    .iter()
+                    .map(|v| self.infer_value_type(v))
+                    .collect();
+                candidates
+                    .iter()
+                    .find(|cand| self.enum_variant_fields_match(cand, variant, &inferred_arg_tys))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        candidates
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| enum_name.to_string())
+                    })
+            }
         };
 
         // Find discriminant index for this variant.
@@ -123,10 +158,6 @@ impl MirBuilder {
             .cloned()
             .unwrap_or_default();
         let discriminant = variants.iter().position(|(n, _)| n == variant).unwrap_or(0);
-        let mut arg_values = Vec::with_capacity(args.len());
-        for arg in args {
-            arg_values.push(self.lower_expr(arg)?);
-        }
         let local_id = self.alloc_local(Type::Enum(resolved_name.clone()), false);
         #[allow(clippy::cast_possible_truncation)]
         let disc_u8 = discriminant as u8;
@@ -140,6 +171,48 @@ impl MirBuilder {
             },
         ));
         Ok(Value::Local(local_id))
+    }
+
+    /// Resolves the enum registry entry from the matched local's type.
+    ///
+    /// When the matched local has type `Generic("Option", [Int])`, this
+    /// constructs the monomorphized name `Option__Int` and looks it up in
+    /// the enum registry. Falls back to `Enum(name)` for non-generic types.
+    pub(super) fn resolve_enum_from_matched_type(
+        &self,
+        matched_local: LocalId,
+    ) -> Option<&Vec<(String, Vec<Type>)>> {
+        match self.local_types.get(&matched_local) {
+            Some(Type::Generic(base, args)) => {
+                let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                let mono_name = format!("{base}__{}", arg_strs.join("_"));
+                self.enum_registry.get(&mono_name)
+            }
+            Some(Type::Enum(en)) => self.enum_registry.get(en),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if the given variant's field types in the enum registry
+    /// match the inferred argument types.
+    ///
+    /// Used to disambiguate between multiple monomorphized enum variants when
+    /// constructing generic enums like `Option::Some(x)` where both
+    /// `Option__Int` and `Option__String` exist.
+    fn enum_variant_fields_match(&self, enum_key: &str, variant: &str, arg_tys: &[Type]) -> bool {
+        let Some(variants) = self.enum_registry.get(enum_key) else {
+            return false;
+        };
+        let Some((_, field_tys)) = variants.iter().find(|(n, _)| n == variant) else {
+            return false;
+        };
+        if field_tys.len() != arg_tys.len() {
+            return false;
+        }
+        field_tys.iter().zip(arg_tys).all(|(ft, at)| {
+            // Unknown fields (from unresolved generics) match anything.
+            matches!(ft, Type::Unknown) || ft == at
+        })
     }
 
     /// Lowers a single `Variant` pattern arm inside a match expression.
@@ -161,19 +234,38 @@ impl MirBuilder {
             let enum_name_resolved = enum_name
                 .and_then(|en| {
                     self.enum_registry.get(en).or_else(|| {
-                        // Try monomorphized prefix match.
+                        // Try monomorphized prefix match. Use the matched
+                        // local's type to disambiguate when multiple
+                        // monomorphized variants exist (e.g. Option__Int and
+                        // Option__String).
                         let prefix = format!("{en}__");
-                        self.enum_registry
+                        let candidates: Vec<&String> = self
+                            .enum_registry
                             .keys()
-                            .find(|k| k.starts_with(&prefix))
-                            .and_then(|k| self.enum_registry.get(k))
+                            .filter(|k| k.starts_with(&prefix))
+                            .collect();
+                        if candidates.len() <= 1 {
+                            candidates
+                                .into_iter()
+                                .next()
+                                .and_then(|k| self.enum_registry.get(k))
+                        } else {
+                            // Use the matched local's type to find the right variant.
+                            self.resolve_enum_from_matched_type(ctx.matched_local)
+                                .or_else(|| {
+                                    candidates
+                                        .into_iter()
+                                        .next()
+                                        .and_then(|k| self.enum_registry.get(k))
+                                })
+                        }
                     })
                 })
                 .or_else(|| {
                     if let Some(Type::Enum(en)) = self.local_types.get(&ctx.matched_local) {
                         self.enum_registry.get(en)
                     } else {
-                        None
+                        self.resolve_enum_from_matched_type(ctx.matched_local)
                     }
                 });
             let di = enum_name_resolved
