@@ -151,6 +151,7 @@ impl Type {
                 | Self::Bool
                 | Self::Byte
                 | Self::Unit
+                | Self::Function(..)
                 | Self::Generic(..)
         )
     }

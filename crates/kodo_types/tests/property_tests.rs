@@ -145,13 +145,13 @@ proptest! {
         prop_assert!(ty.is_copy());
     }
 
-    /// String, Struct, Enum, Function, Tuple are NOT copy.
+    /// String, Struct, Enum, Tuple are NOT copy.
+    /// Function types ARE copy (they are just function pointers).
     #[test]
     fn compound_types_are_not_copy(ty in prop_oneof![
         Just(Type::String),
         "[a-zA-Z]{1,8}".prop_map(Type::Struct),
         "[a-zA-Z]{1,8}".prop_map(Type::Enum),
-        Just(Type::Function(vec![Type::Int], Box::new(Type::Bool))),
         Just(Type::Tuple(vec![Type::Int, Type::String])),
     ]) {
         prop_assert!(!ty.is_copy(), "type {:?} should not be copy", ty);
