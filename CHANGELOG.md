@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] — 2026-03-19
+
+### Fixed
+
+- **Generic function dispatch**: `identity<T>` called with multiple types (Int, String, Bool) now correctly resolves each monomorphized variant instead of picking the first one randomly from the HashMap
+- **Generic List/Map parameters**: `fn first<T>(items: List<T>) -> T` now correctly unifies `List<T>` with `List<Int>` — type parameter inference recurses into generic type arguments
+- **Enum monomorphization dispatch**: `Option<Int>` + `Option<String>` in the same module no longer causes segfault — enum variant dispatch now uses type-specific mangled names
+- **Function types are Copy**: Closures and function references (`(Int) -> Int`) can now be passed to multiple functions without use-after-move errors — function types are treated as Copy (they are function pointers)
+- **f-string Bool interpolation**: `f"{is_positive(42)}"` no longer crashes — Bool (i8) is widened to i64 before calling `kodo_bool_to_string`
+
+### Changed
+
+- Test count: 2228 → 2249
+
 ## [0.4.2] — 2026-03-18
 
 ### Fixed

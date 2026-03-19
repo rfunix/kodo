@@ -171,9 +171,27 @@ fn main() {
 
 **Fix:** Clone the value so each closure gets its own copy.
 
+### Function Types Are Copy
+
+As of v0.5.0, function types (`(Int) -> Int`, `(String) -> Bool`, etc.) are also Copy. Closures and function references can be passed to multiple functions without triggering use-after-move errors:
+
+```rust
+fn apply(f: (Int) -> Int, x: Int) -> Int {
+    return f(x)
+}
+
+fn main() {
+    let double = |x: Int| -> Int { return x * 2 }
+    let a: Int = apply(double, 5)   // OK
+    let b: Int = apply(double, 10)  // OK — function types are Copy
+    print_int(a)  // 10
+    print_int(b)  // 20
+}
+```
+
 ### Copy Types Are Fine
 
-Primitive types (`Int`, `Bool`, `Float64`, `Byte`) are implicitly Copy and can be captured by any number of closures without restriction:
+Primitive types (`Int`, `Bool`, `Float64`, `Byte`) and function types (`(T) -> U`) are implicitly Copy and can be captured by any number of closures without restriction:
 
 ```rust
 fn main() {

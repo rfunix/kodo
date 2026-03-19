@@ -1,4 +1,4 @@
-# Known Limitations — Kōdo v0.4.0
+# Known Limitations — Kōdo v0.5.0
 
 This document lists the known limitations of the current alpha release. These are deliberate trade-offs or features not yet fully implemented.
 
