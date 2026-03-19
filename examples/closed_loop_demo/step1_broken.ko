@@ -1,0 +1,22 @@
+module closed_loop_demo {
+    meta {
+        purpose: "Demonstrate the closed-loop error repair cycle",
+        version: "0.1.0",
+        author: "Demo"
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+        ensures { result * b <= a }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let x: String = 42
+        let result: Int = safe_divide(10, 0)
+        print_int(result)
+    }
+}
