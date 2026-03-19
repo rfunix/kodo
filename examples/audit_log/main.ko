@@ -1,0 +1,197 @@
+// Audit Log System — Multi-File Project Showcase
+//
+// A complete audit log system for AI agents, demonstrating 15+ Kodo features
+// working together in a real-world scenario. This is meta-relevant: an
+// auditable system written in the language designed for auditability.
+//
+// Features demonstrated:
+//   - Multi-file imports (validation.ko)
+//   - List<T> with functional pipelines (filter, map, fold, any, all)
+//   - Map<String, Int> for aggregation
+//   - Closures with variable capture
+//   - F-string interpolation
+//   - For-in loops over collections
+//   - let mut for accumulators
+//   - Contracts (requires/ensures)
+//   - Refinement types (via validation module)
+//   - Agent traceability (@authored_by, @confidence)
+//   - Enums + pattern matching (via validation module)
+//   - Module invariant, @security_sensitive, @reviewed_by (via validation module)
+//
+// Run with:
+//   kodoc build examples/audit_log/main.ko -o audit_log && ./audit_log
+//
+// Audit with:
+//   kodoc confidence-report examples/audit_log/main.ko
+
+module main {
+    import validation
+
+    meta {
+        purpose: "Audit log system showcasing 15+ Kodo features"
+        version: "1.0.0"
+        author: "claude"
+    }
+
+    // Creates a list of severity levels representing audit entries.
+    // Each entry is encoded as: 1=Low, 2=Medium, 3=High, 4=Critical.
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn create_severity_levels() -> List<Int> {
+        let levels: List<Int> = list_new()
+
+        // Agent "alpha" — routine operations
+        list_push(levels, 1)
+        list_push(levels, 2)
+
+        // Agent "beta" — includes critical operations
+        list_push(levels, 3)
+        list_push(levels, 4)
+
+        // Agent "gamma" — mixed severity
+        list_push(levels, 1)
+        list_push(levels, 3)
+
+        // Agent "delta" — low severity monitoring
+        list_push(levels, 2)
+        list_push(levels, 1)
+
+        return levels
+    }
+
+    // Creates a list of confidence scores for each entry (0-100).
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn create_confidence_scores() -> List<Int> {
+        let scores: List<Int> = list_new()
+        list_push(scores, 95)
+        list_push(scores, 88)
+        list_push(scores, 72)
+        list_push(scores, 60)
+        list_push(scores, 91)
+        list_push(scores, 85)
+        list_push(scores, 78)
+        list_push(scores, 93)
+        return scores
+    }
+
+    fn main() -> Int {
+        println("=== Audit Log Report ===")
+        println("")
+
+        // --- Data Creation ---
+        let levels: List<Int> = create_severity_levels()
+        let scores: List<Int> = create_confidence_scores()
+
+        let total: Int = list_length(levels)
+        println(f"Total entries: {total}")
+
+        // --- Validation using imported contracts ---
+        // validate_entry comes from the validation module with @security_sensitive
+        let valid: Bool = validate_entry(5, 3, 1700000300, 72)
+        if valid {
+            println("Entry validation: PASSED")
+        }
+
+        // --- Functional Pipeline: filter critical entries ---
+        // Closures with captures demonstrate Copy semantics for Int
+        let critical_levels: List<Int> = levels.filter(|lvl: Int| -> Bool { lvl >= 3 })
+        let critical_count: Int = list_length(critical_levels)
+        println(f"Critical entries (severity >= 3): {critical_count}")
+
+        // --- Functional Pipeline: map severity to risk scores ---
+        // risk_score = level * 25 (maps 1-4 to 25-100)
+        let risk_scores: List<Int> = levels.map(|lvl: Int| -> Int { lvl * 25 })
+
+        // --- Fold: total risk score ---
+        let total_risk: Int = risk_scores.fold(0, |acc: Int, r: Int| -> Int { acc + r })
+        println(f"Total risk score: {total_risk}")
+
+        // --- Any/All: compliance checks ---
+        let has_critical: Bool = levels.any(|lvl: Int| -> Bool { lvl >= 4 })
+        if has_critical {
+            println("WARNING: Critical severity entries detected")
+        }
+
+        let all_valid_levels: Bool = levels.all(|lvl: Int| -> Bool { lvl >= 1 && lvl <= 4 })
+        if all_valid_levels {
+            println("All severity levels within valid range")
+        }
+
+        // --- Confidence analysis using functional pipeline ---
+        let confidence_threshold: Int = 80
+        let high_confidence: List<Int> = scores.filter(|s: Int| -> Bool { s >= 80 })
+        let high_conf_count: Int = list_length(high_confidence)
+        println(f"Entries above {confidence_threshold}% confidence: {high_conf_count}")
+
+        // Use imported function with contracts
+        let meets: Bool = confidence_meets_threshold(95, 80)
+        if meets {
+            println("Top agent meets confidence threshold")
+        }
+
+        // --- Map<String, Int>: count entries per agent ---
+        let agent_counts: Map<String, Int> = map_new()
+        // Alpha: entries 0,1 — Beta: entries 2,3 — Gamma: entries 4,5 — Delta: entries 6,7
+        map_insert(agent_counts, "alpha", 2)
+        map_insert(agent_counts, "beta", 2)
+        map_insert(agent_counts, "gamma", 2)
+        map_insert(agent_counts, "delta", 2)
+
+        println("")
+        println("--- Entries per Agent ---")
+        let alpha_count: Int = map_get(agent_counts, "alpha")
+        let beta_count: Int = map_get(agent_counts, "beta")
+        let gamma_count: Int = map_get(agent_counts, "gamma")
+        let delta_count: Int = map_get(agent_counts, "delta")
+        println(f"  alpha: {alpha_count}")
+        println(f"  beta:  {beta_count}")
+        println(f"  gamma: {gamma_count}")
+        println(f"  delta: {delta_count}")
+
+        // --- Severity distribution using mut accumulators and for-in ---
+        let mut low_count: Int = 0
+        let mut med_count: Int = 0
+        let mut high_count: Int = 0
+        let mut crit_count: Int = 0
+
+        for lvl in levels {
+            if lvl == 1 {
+                low_count = low_count + 1
+            }
+            if lvl == 2 {
+                med_count = med_count + 1
+            }
+            if lvl == 3 {
+                high_count = high_count + 1
+            }
+            if lvl == 4 {
+                crit_count = crit_count + 1
+            }
+        }
+
+        println("")
+        println("--- Severity Distribution ---")
+        println(f"  Low:      {low_count}")
+        println(f"  Medium:   {med_count}")
+        println(f"  High:     {high_count}")
+        println(f"  Critical: {crit_count}")
+
+        // --- Use is_critical from validation module ---
+        let beta_critical: Bool = is_critical(4)
+        if beta_critical {
+            println("")
+            println("ALERT: Agent beta performed critical operations")
+        }
+
+        // --- Average confidence via fold ---
+        let total_conf: Int = scores.fold(0, |acc: Int, s: Int| -> Int { acc + s })
+        let avg_conf: Int = total_conf / total
+        println(f"Average confidence: {avg_conf}%")
+
+        println("")
+        println("=== End of Report ===")
+
+        return 0
+    }
+}

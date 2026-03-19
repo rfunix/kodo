@@ -437,6 +437,7 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 | [`health_checker.ko`](examples/health_checker.ko) | Health checker with `file_exists`, `fold` aggregation, `--json-errors` for agent consumption |
 | [`url_shortener.ko`](examples/url_shortener.ko) | URL shortener with `@security_sensitive`, contracts, `Map<Int,Int>` lookup |
 | [`word_counter.ko`](examples/word_counter.ko) | Word counter demonstrating `ref` borrowing (E0240 prevention), `for-in` over `.split()` |
+| [`audit_log/`](examples/audit_log/) | Multi-file audit log: 15+ features (contracts, refinement types, agent traceability, functional pipelines, enums, pattern matching, multi-file imports) |
 
 ### Concurrency & Multi-File
 

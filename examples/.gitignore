@@ -5,3 +5,5 @@
 !.gitignore
 !multi_file/
 !multi_file/**
+!audit_log/
+!audit_log/**

@@ -1,0 +1,127 @@
+// Audit Log Test Suite
+//
+// Native Kodo tests using `kodoc test` for the audit log system.
+// Demonstrates the built-in testing framework with assert_eq,
+// assert_true, and assert_false.
+//
+// Run with: kodoc test examples/audit_log/audit_log_test.ko
+
+module audit_log_test {
+    meta {
+        purpose: "Test suite for audit log validation functions"
+        version: "1.0.0"
+        author: "claude"
+    }
+
+    enum Severity {
+        Low,
+        Medium,
+        High,
+        Critical
+    }
+
+    fn severity_to_level(s: Severity) -> Int {
+        let result: Int = match s {
+            Severity::Low => 1,
+            Severity::Medium => 2,
+            Severity::High => 3,
+            Severity::Critical => 4
+        }
+        return result
+    }
+
+    fn is_critical(level: Int) -> Bool {
+        if level >= 3 {
+            return true
+        }
+        return false
+    }
+
+    fn confidence_meets_threshold(score: Int, threshold: Int) -> Bool {
+        if score >= threshold {
+            return true
+        }
+        return false
+    }
+
+    test "severity_to_level maps Low to 1" {
+        assert_eq(severity_to_level(Severity::Low), 1)
+    }
+
+    test "severity_to_level maps Medium to 2" {
+        assert_eq(severity_to_level(Severity::Medium), 2)
+    }
+
+    test "severity_to_level maps High to 3" {
+        assert_eq(severity_to_level(Severity::High), 3)
+    }
+
+    test "severity_to_level maps Critical to 4" {
+        assert_eq(severity_to_level(Severity::Critical), 4)
+    }
+
+    test "is_critical identifies high severity" {
+        assert_true(is_critical(3))
+        assert_true(is_critical(4))
+    }
+
+    test "is_critical rejects low severity" {
+        assert_false(is_critical(1))
+        assert_false(is_critical(2))
+    }
+
+    test "confidence threshold enforcement" {
+        assert_true(confidence_meets_threshold(95, 80))
+        assert_true(confidence_meets_threshold(80, 80))
+        assert_false(confidence_meets_threshold(79, 80))
+    }
+
+    test "risk score calculation" {
+        let levels: List<Int> = list_new()
+        list_push(levels, 1)
+        list_push(levels, 2)
+        list_push(levels, 3)
+        list_push(levels, 4)
+
+        let risk_scores: List<Int> = levels.map(|lvl: Int| -> Int { lvl * 25 })
+        let total_risk: Int = risk_scores.fold(0, |acc: Int, r: Int| -> Int { acc + r })
+        assert_eq(total_risk, 250)
+    }
+
+    test "filter critical entries" {
+        let levels: List<Int> = list_new()
+        list_push(levels, 1)
+        list_push(levels, 3)
+        list_push(levels, 2)
+        list_push(levels, 4)
+
+        let critical: List<Int> = levels.filter(|lvl: Int| -> Bool { lvl >= 3 })
+        assert_eq(list_length(critical), 2)
+    }
+
+    test "any detects critical entries" {
+        let levels: List<Int> = list_new()
+        list_push(levels, 1)
+        list_push(levels, 2)
+        list_push(levels, 4)
+
+        let has_critical: Bool = levels.any(|lvl: Int| -> Bool { lvl >= 4 })
+        assert_true(has_critical)
+    }
+
+    test "all validates severity range" {
+        let levels: List<Int> = list_new()
+        list_push(levels, 1)
+        list_push(levels, 2)
+        list_push(levels, 3)
+
+        let all_valid: Bool = levels.all(|lvl: Int| -> Bool { lvl >= 1 && lvl <= 4 })
+        assert_true(all_valid)
+    }
+
+    test "empty list produces zero risk" {
+        let empty: List<Int> = list_new()
+        let total: Int = empty.fold(0, |acc: Int, r: Int| -> Int { acc + r })
+        assert_eq(total, 0)
+    }
+}

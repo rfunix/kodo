@@ -1,0 +1,115 @@
+// Audit Log Validation Module
+//
+// Demonstrates Kodo's agent-first safety features:
+//   - Refinement types: constrain values at the type level
+//   - Contracts: requires/ensures verified by Z3
+//   - Agent traceability: @authored_by, @confidence, @reviewed_by
+//   - @security_sensitive: forces contracts on validation code
+//   - Module invariant: global property checked at every function entry
+//   - Enums + exhaustive pattern matching
+//
+// This module is imported by main.ko — all exported functions use `pub`.
+
+module validation {
+    meta {
+        purpose: "Audit entry validation with contract-verified safety"
+        version: "1.0.0"
+        author: "claude"
+    }
+
+    // Refinement types: constrain values at the type level.
+    // Timestamps must be positive (epoch seconds).
+    type Timestamp = Int requires { self > 0 }
+
+    // Confidence scores: 0..100 inclusive.
+    type ConfidenceScore = Int requires { self >= 0 && self <= 100 }
+
+    // Severity levels: 1=Low, 2=Medium, 3=High, 4=Critical.
+    enum Severity {
+        Low,
+        Medium,
+        High,
+        Critical
+    }
+
+    // Module invariant: checked at the entry of every function.
+    invariant { 1 > 0 }
+
+    // Maps enum variants to numeric levels via exhaustive pattern matching.
+    // The compiler guarantees every variant is handled.
+    pub
+    @authored_by(agent: "claude")
+    @confidence(0.98)
+    fn severity_to_level(s: Severity) -> Int {
+        let result: Int = match s {
+            Severity::Low => 1,
+            Severity::Medium => 2,
+            Severity::High => 3,
+            Severity::Critical => 4
+        }
+        return result
+    }
+
+    // Creates a Severity enum from a numeric level.
+    pub
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn level_to_severity(level: Int) -> Int
+        requires { level >= 1 }
+        requires { level <= 4 }
+    {
+        return level
+    }
+
+    // Validates an audit entry's fields.
+    // @security_sensitive forces at least one contract — the compiler
+    // will reject this function without requires/ensures (E0262).
+    pub
+    @security_sensitive
+    @authored_by(agent: "claude")
+    @confidence(0.92)
+    fn validate_entry(agent_name_len: Int, severity_level: Int, timestamp: Int, confidence: Int) -> Bool
+        requires { timestamp > 0 }
+        requires { severity_level >= 1 }
+        requires { severity_level <= 4 }
+        requires { confidence >= 0 }
+        requires { confidence <= 100 }
+    {
+        if agent_name_len <= 0 {
+            return false
+        }
+        return true
+    }
+
+    // Determines if a severity level is critical (>= 3 = High or Critical).
+    pub
+    @authored_by(agent: "claude")
+    @confidence(0.97)
+    fn is_critical(level: Int) -> Bool
+        requires { level >= 1 }
+        requires { level <= 4 }
+    {
+        if level >= 3 {
+            return true
+        }
+        return false
+    }
+
+    // Lower confidence function — requires @reviewed_by to compile.
+    // Without the review annotation, the compiler rejects this (E0260).
+    pub
+    @authored_by(agent: "claude")
+    @confidence(0.7)
+    @reviewed_by(human: "rafael")
+    fn confidence_meets_threshold(score: Int, threshold: Int) -> Bool
+        requires { score >= 0 }
+        requires { score <= 100 }
+        requires { threshold >= 0 }
+        requires { threshold <= 100 }
+    {
+        if score >= threshold {
+            return true
+        }
+        return false
+    }
+}

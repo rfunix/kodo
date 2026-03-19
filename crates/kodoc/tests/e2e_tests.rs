@@ -2900,3 +2900,43 @@ fn e2e_option_mixed_none_branches() {
         "should print 'str_none' for short string, got: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Multi-file example: audit_log
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_audit_log_example() {
+    let root = workspace_root();
+    let binary = compile_ko(&root.join("examples/audit_log/main.ko"), "test_audit_log");
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "audit_log example should exit with 0, stderr: {_stderr}"
+    );
+    assert!(
+        stdout.contains("=== Audit Log Report ==="),
+        "should contain report header, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Total entries: 8"),
+        "should report 8 total entries, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Critical entries (severity >= 3): 3"),
+        "should find 3 critical entries, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Total risk score: 425"),
+        "should compute total risk of 425, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Entry validation: PASSED"),
+        "entry validation should pass, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("=== End of Report ==="),
+        "should contain report footer, got: {stdout}"
+    );
+}

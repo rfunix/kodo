@@ -209,3 +209,44 @@ kodoc check examples/health_checker.ko --json-errors
 ```
 
 Source: [`examples/health_checker.ko`](../../examples/health_checker.ko)
+
+---
+
+## Audit Log — Multi-File Showcase (15+ Features)
+
+A complete audit log system for AI agents — meta-relevant: an auditable system written in the language designed for auditability. This is the most comprehensive example, combining 15+ Kōdo features across multiple files.
+
+**Kōdo-unique features:** multi-file imports, refinement types (`Timestamp`, `ConfidenceScore`), `@security_sensitive`, `@reviewed_by` (forced by low confidence), contracts, module `invariant`, enums with pattern matching, `List<T>` pipelines (`filter`/`map`/`fold`/`any`/`all`), `Map<String, Int>`, closures, f-strings, `for-in`, `let mut`
+
+```rust
+// validation.ko — refinement types constrain values at the type level
+type Timestamp = Int requires { self > 0 }
+type ConfidenceScore = Int requires { self >= 0 && self <= 100 }
+
+// @security_sensitive forces contracts — no contract = no compilation (E0262)
+pub
+@security_sensitive
+@authored_by(agent: "claude")
+@confidence(0.92)
+fn validate_entry(agent_name_len: Int, severity_level: Int, timestamp: Int, confidence: Int) -> Bool
+    requires { timestamp > 0 }
+    requires { severity_level >= 1 }
+    requires { severity_level <= 4 }
+{ ... }
+
+// main.ko — functional pipelines on audit data
+import validation
+
+let critical_levels: List<Int> = levels.filter(|lvl: Int| -> Bool { lvl >= 3 })
+let risk_scores: List<Int> = levels.map(|lvl: Int| -> Int { lvl * 25 })
+let total_risk: Int = risk_scores.fold(0, |acc: Int, r: Int| -> Int { acc + r })
+let has_critical: Bool = levels.any(|lvl: Int| -> Bool { lvl >= 4 })
+```
+
+```bash
+kodoc build examples/audit_log/main.ko -o audit_log && ./audit_log
+kodoc test examples/audit_log/audit_log_test.ko
+kodoc confidence-report examples/audit_log/main.ko
+```
+
+Source: [`examples/audit_log/`](../../examples/audit_log/)
