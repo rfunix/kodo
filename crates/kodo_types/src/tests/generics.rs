@@ -1400,3 +1400,49 @@ fn for_in_loop_variable_scoped() {
     let result = checker.check_module(&module);
     assert!(result.is_err(), "x should be out of scope after for-in");
 }
+
+#[test]
+fn infer_type_param_from_generic_list() {
+    // When a generic function has a parameter List<T> and is called with
+    // Type::Generic("List", [Int]), T should be inferred as Int.
+    let params = vec!["T".to_string()];
+    let type_expr = kodo_ast::TypeExpr::Generic(
+        "List".to_string(),
+        vec![kodo_ast::TypeExpr::Named("T".to_string())],
+    );
+    let actual = Type::Generic("List".to_string(), vec![Type::Int]);
+    let mut inferred = std::collections::HashMap::new();
+    TypeChecker::infer_type_param(&type_expr, &actual, &params, &mut inferred);
+    assert_eq!(
+        inferred.get("T"),
+        Some(&Type::Int),
+        "T should be inferred as Int from List<Int>"
+    );
+}
+
+#[test]
+fn infer_type_param_from_generic_map() {
+    // When a generic function has a parameter Map<K, V> and is called with
+    // Type::Generic("Map", [String, Int]), K and V should be inferred.
+    let params = vec!["K".to_string(), "V".to_string()];
+    let type_expr = kodo_ast::TypeExpr::Generic(
+        "Map".to_string(),
+        vec![
+            kodo_ast::TypeExpr::Named("K".to_string()),
+            kodo_ast::TypeExpr::Named("V".to_string()),
+        ],
+    );
+    let actual = Type::Generic("Map".to_string(), vec![Type::String, Type::Int]);
+    let mut inferred = std::collections::HashMap::new();
+    TypeChecker::infer_type_param(&type_expr, &actual, &params, &mut inferred);
+    assert_eq!(
+        inferred.get("K"),
+        Some(&Type::String),
+        "K should be inferred as String from Map<String, Int>"
+    );
+    assert_eq!(
+        inferred.get("V"),
+        Some(&Type::Int),
+        "V should be inferred as Int from Map<String, Int>"
+    );
+}

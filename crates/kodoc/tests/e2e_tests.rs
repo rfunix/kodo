@@ -2264,3 +2264,274 @@ module output_format {
         "warning should contain the function name, got: {stderr}"
     );
 }
+
+/// Regression test: generic functions returning composite types (String)
+/// must use sret calling convention. Previously, `identity__String` was
+/// called without an sret pointer, causing a Cranelift verifier error.
+#[test]
+fn e2e_generic_function_returning_string() {
+    let binary = compile_source(
+        r#"module test_generic_string_return {
+    meta {
+        purpose: "Test generic fn returning String"
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let a: Int = identity(42)
+        let b: String = identity("hello")
+        print_int(a)
+        println(b)
+        return 0
+    }
+}"#,
+        "test_generic_string_return",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic string return should exit with 0");
+    assert!(stdout.contains("42"), "should print 42, got: {stdout}");
+    assert!(
+        stdout.contains("hello"),
+        "should print hello, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_with_bool() {
+    let binary = compile_source(
+        r#"module test_generic_bool {
+    meta {
+        purpose: "Test generic fn with Bool"
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let a: Bool = identity(true)
+        let b: Bool = identity(false)
+        println(f"{a}")
+        println(f"{b}")
+        return 0
+    }
+}"#,
+        "test_generic_bool",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic bool should exit with 0");
+    assert!(stdout.contains("true"), "should print true, got: {stdout}");
+    assert!(
+        stdout.contains("false"),
+        "should print false, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_all_primitive_types() {
+    let binary = compile_source(
+        r#"module test_generic_all_types {
+    meta {
+        purpose: "Test generic fn with all primitive types"
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let i: Int = identity(42)
+        let s: String = identity("world")
+        let b: Bool = identity(true)
+        println(f"int={i}")
+        println(f"str={s}")
+        println(f"bool={b}")
+        return 0
+    }
+}"#,
+        "test_generic_all_types",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0);
+    assert!(
+        stdout.contains("int=42"),
+        "should print int=42, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("str=world"),
+        "should print str=world, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("bool=true"),
+        "should print bool=true, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_with_struct() {
+    let binary = compile_source(
+        r#"module test_generic_struct {
+    meta {
+        purpose: "Test generic fn with struct types"
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let p: Point = identity(Point { x: 10, y: 20 })
+        println(f"x={p.x}")
+        println(f"y={p.y}")
+        return 0
+    }
+}"#,
+        "test_generic_struct",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic struct should exit with 0");
+    assert!(stdout.contains("x=10"), "should print x=10, got: {stdout}");
+    assert!(stdout.contains("y=20"), "should print y=20, got: {stdout}");
+}
+
+#[test]
+fn e2e_generic_pair_struct() {
+    let binary = compile_source(
+        r#"module test_generic_pair {
+    meta {
+        purpose: "Test generic struct Pair<T, U>"
+        version: "0.1.0"
+    }
+
+    struct Pair<T, U> {
+        first: T,
+        second: U
+    }
+
+    fn main() -> Int {
+        let p: Pair<Int, String> = Pair { first: 42, second: "hello" }
+        println(f"first={p.first}")
+        println(f"second={p.second}")
+        return 0
+    }
+}"#,
+        "test_generic_pair",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic pair should exit with 0");
+    assert!(
+        stdout.contains("first=42"),
+        "should print first=42, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("second=hello"),
+        "should print second=hello, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_with_list_param() {
+    let binary = compile_source(
+        r#"module test_generic_list_param {
+    meta {
+        purpose: "Test generic fn with List<T> parameter"
+        version: "0.1.0"
+    }
+
+    fn first_element<T>(items: List<T>) -> T {
+        return list_get(items, 0)
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 99)
+        let val: Int = first_element(nums)
+        println(f"first={val}")
+        return 0
+    }
+}"#,
+        "test_generic_list_param",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic list param should exit with 0");
+    assert!(
+        stdout.contains("first=99"),
+        "should print first=99, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_with_map_param() {
+    let binary = compile_source(
+        r#"module test_generic_map_param {
+    meta {
+        purpose: "Test generic fn with Map<K, V> parameter"
+        version: "0.1.0"
+    }
+
+    fn map_has_key<K, V>(m: Map<K, V>, key: K) -> Bool {
+        return map_contains_key(m, key)
+    }
+
+    fn main() -> Int {
+        let m: Map<String, Int> = map_new()
+        map_insert(m, "hello", 42)
+        let found: Bool = map_has_key(m, "hello")
+        println(f"found={found}")
+        return 0
+    }
+}"#,
+        "test_generic_map_param",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic map param should exit with 0");
+    assert!(
+        stdout.contains("found=true"),
+        "should print found=true, got: {stdout}"
+    );
+}
+
+#[test]
+fn e2e_generic_function_with_list_length() {
+    let binary = compile_source(
+        r#"module test_generic_list_length {
+    meta {
+        purpose: "Test generic fn returning list length"
+        version: "0.1.0"
+    }
+
+    fn get_length<T>(items: List<T>) -> Int {
+        return list_length(items)
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        let len: Int = get_length(nums)
+        println(f"len={len}")
+        return 0
+    }
+}"#,
+        "test_generic_list_length",
+    );
+    let (exit_code, stdout, _stderr) = run_binary(&binary);
+    assert_eq!(exit_code, 0, "generic list length should exit with 0");
+    assert!(
+        stdout.contains("len=3"),
+        "should print len=3, got: {stdout}"
+    );
+}

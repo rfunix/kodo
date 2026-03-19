@@ -356,16 +356,47 @@ impl MirBuilder {
         let callee_name = self.monomorphize_map_callee(callee_name, &arg_values);
 
         // Resolve generic function calls: if callee_name is not in
-        // fn_return_types, try to find a monomorphized version.
+        // fn_return_types, try to find the monomorphized version whose
+        // parameter types match the inferred argument types.
         let resolved_callee = if self.fn_return_types.contains_key(&callee_name) {
             callee_name
         } else {
             let prefix = format!("{callee_name}__");
-            self.fn_return_types
+            let candidates: Vec<String> = self
+                .fn_return_types
                 .keys()
-                .find(|k| k.starts_with(&prefix))
+                .filter(|k| k.starts_with(&prefix))
                 .cloned()
-                .unwrap_or(callee_name)
+                .collect();
+            if candidates.len() <= 1 {
+                // Zero or one candidate: use the first (or fall back to the
+                // original name if none exists).
+                candidates.into_iter().next().unwrap_or(callee_name)
+            } else {
+                // Multiple monomorphized variants exist (e.g. identity__Int
+                // and identity__String). Pick the one whose declared parameter
+                // types match the inferred types of the call arguments.
+                let inferred_arg_tys: Vec<kodo_types::Type> = arg_values
+                    .iter()
+                    .map(|v| self.infer_value_type(v))
+                    .collect();
+                candidates
+                    .iter()
+                    .find(|cand| {
+                        if let Some(param_tys) = self.fn_param_types.get(*cand) {
+                            param_tys.len() == inferred_arg_tys.len()
+                                && param_tys.iter().zip(&inferred_arg_tys).all(|(p, a)| p == a)
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // Fallback: return the first candidate if no exact
+                        // parameter match is found.
+                        candidates.into_iter().next().unwrap_or(callee_name)
+                    })
+            }
         };
         // Wrap concrete-type arguments in MakeDynTrait when the callee
         // expects a `dyn Trait` parameter.  This inserts the fat-pointer

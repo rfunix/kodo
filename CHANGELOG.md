@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.2] — 2026-03-18
+
+### Fixed
+
+- **Generic function dispatch**: `identity<T>` called with multiple types (Int, String, Bool) now correctly resolves each monomorphized variant instead of picking the first one randomly from the HashMap
+- **Generic List/Map parameters**: `fn first<T>(items: List<T>) -> T` now correctly unifies `List<T>` with `List<Int>` — type parameter inference recurses into generic type arguments
+- **f-string Bool interpolation**: `f"{is_positive(42)}"` no longer crashes — Bool (i8) is widened to i64 before calling `kodo_bool_to_string`
+
+### Added
+
+- 10 new e2e tests for generics: Bool, all primitives, struct, Pair<T,U>, List<T>, Map<K,V>
+
 ## [0.4.1] — 2026-03-18
 
 ### Fixed

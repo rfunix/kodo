@@ -1780,7 +1780,7 @@ impl TypeChecker {
     }
 
     /// Infers type parameter bindings from a type expression and an actual type.
-    fn infer_type_param(
+    pub(crate) fn infer_type_param(
         type_expr: &kodo_ast::TypeExpr,
         actual: &Type,
         params: &[String],
@@ -1793,6 +1793,15 @@ impl TypeChecker {
                     .or_insert_with(|| actual.clone());
             }
             kodo_ast::TypeExpr::Generic(_name, args) => {
+                // Handle Type::Generic (e.g., List<Int>, Map<String, Int>):
+                // recursively infer type params from inner type arguments.
+                if let Type::Generic(_actual_name, actual_args) = actual {
+                    for (arg_expr, actual_arg) in args.iter().zip(actual_args) {
+                        Self::infer_type_param(arg_expr, actual_arg, params, inferred);
+                    }
+                }
+                // Handle monomorphized enum/struct types (e.g., Option__Int):
+                // extract type params from the mangled name suffix.
                 if let Type::Enum(mono_name) | Type::Struct(mono_name) = actual {
                     if let Some(suffix) = mono_name.split("__").nth(1) {
                         let actual_args: Vec<&str> = suffix.split('_').collect();

@@ -1,0 +1,18 @@
+module generic_string_return {
+    meta {
+        purpose: "Test generic functions returning composite types (String)"
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let a: Int = identity(42)
+        let b: String = identity("hello")
+        print_int(a)
+        println(b)
+        return 0
+    }
+}
