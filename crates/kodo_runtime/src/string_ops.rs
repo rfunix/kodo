@@ -1384,6 +1384,235 @@ mod tests {
         assert_eq!(out_len, 0);
     }
 
+    // -----------------------------------------------------------------------
+    // kodo_string_replace — additional edge case tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn string_replace_no_match() {
+        let hay = "hello world";
+        let pattern = "xyz";
+        let replacement = "replaced";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn string_replace_empty_pattern() {
+        let hay = "hello";
+        let pattern = "";
+        let replacement = "X";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        // Empty pattern returns a copy of the original string.
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello");
+    }
+
+    #[test]
+    fn string_replace_multiple_occurrences() {
+        let hay = "aaa";
+        let pattern = "a";
+        let replacement = "bb";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "bbbbbb");
+    }
+
+    #[test]
+    fn string_replace_with_empty_replacement() {
+        let hay = "hello world";
+        let pattern = " ";
+        let replacement = "";
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe {
+            kodo_string_replace(
+                hay.as_ptr(),
+                hay.len(),
+                pattern.as_ptr(),
+                pattern.len(),
+                replacement.as_ptr(),
+                replacement.len(),
+                &mut out_ptr,
+                &mut out_len,
+            );
+        }
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "helloworld");
+    }
+
+    // -----------------------------------------------------------------------
+    // kodo_string_split tests
+    // -----------------------------------------------------------------------
+
+    /// Helper to extract the string content from a split/lines list element.
+    ///
+    /// Each element in the list is a pointer to a `[i64; 2]` pair (ptr, len).
+    unsafe fn extract_list_string(list: i64, index: i64) -> String {
+        let mut value: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe {
+            crate::collections::kodo_list_get(list, index, &mut value, &mut is_some);
+        }
+        assert_eq!(is_some, 1, "list element at index {index} not found");
+        // value is a pointer to [i64; 2] = [ptr, len]
+        let pair = unsafe { &*(value as *const [i64; 2]) };
+        let str_ptr = pair[0] as *const u8;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let str_len = pair[1] as usize;
+        let bytes = unsafe { std::slice::from_raw_parts(str_ptr, str_len) };
+        std::str::from_utf8(bytes).unwrap().to_string()
+    }
+
+    #[test]
+    fn string_split_basic() {
+        let hay = "a,b,c";
+        let sep = ",";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "a");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "b");
+        assert_eq!(unsafe { extract_list_string(list, 2) }, "c");
+    }
+
+    #[test]
+    fn string_split_no_delimiter_found() {
+        let hay = "hello";
+        let sep = ",";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "hello");
+    }
+
+    #[test]
+    fn string_split_empty_string() {
+        let hay = "";
+        let sep = ",";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "");
+    }
+
+    #[test]
+    fn string_split_empty_separator() {
+        let hay = "hello";
+        let sep = "";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        // Empty separator returns the whole string as one element.
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "hello");
+    }
+
+    #[test]
+    fn string_split_multi_char_separator() {
+        let hay = "a::b::c";
+        let sep = "::";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "a");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "b");
+        assert_eq!(unsafe { extract_list_string(list, 2) }, "c");
+    }
+
+    #[test]
+    fn string_split_trailing_separator() {
+        let hay = "a,b,";
+        let sep = ",";
+        let list = unsafe { kodo_string_split(hay.as_ptr(), hay.len(), sep.as_ptr(), sep.len()) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "a");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "b");
+        assert_eq!(unsafe { extract_list_string(list, 2) }, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // kodo_string_lines — additional edge case tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn string_lines_content_verification() {
+        let s = "hello\nworld\nfoo";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "hello");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "world");
+        assert_eq!(unsafe { extract_list_string(list, 2) }, "foo");
+    }
+
+    #[test]
+    fn string_lines_crlf() {
+        // CRLF: the \r is preserved as part of the line content since
+        // kodo_string_lines only splits on \n.
+        let s = "a\r\nb\r\n";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 3);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "a\r");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "b\r");
+        assert_eq!(unsafe { extract_list_string(list, 2) }, "");
+    }
+
+    #[test]
+    fn string_lines_single_newline() {
+        let s = "\n";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        // "\n" splits into ["", ""]
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 2);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "");
+        assert_eq!(unsafe { extract_list_string(list, 1) }, "");
+    }
+
+    #[test]
+    fn string_lines_no_newline() {
+        let s = "single line";
+        #[allow(clippy::cast_possible_wrap)]
+        let list = unsafe { kodo_string_lines(s.as_ptr(), s.len() as i64) };
+        assert_eq!(unsafe { crate::collections::kodo_list_length(list) }, 1);
+        assert_eq!(unsafe { extract_list_string(list, 0) }, "single line");
+    }
+
     #[test]
     fn contract_fail_recoverable_does_not_abort() {
         let msg = "test contract violation";

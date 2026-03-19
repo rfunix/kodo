@@ -171,6 +171,115 @@ fn result_methods_typecheck() {
     );
 }
 
+/// Result.unwrap is registered in method_lookup.
+#[test]
+fn result_unwrap_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Result".to_string(), "unwrap".to_string()));
+    assert!(entry.is_some());
+    let (mangled, params, _ret) = entry.unwrap();
+    assert_eq!(mangled, "Result_unwrap");
+    assert_eq!(params.len(), 1); // self only, no extra args
+}
+
+/// Result.unwrap_err is registered in method_lookup.
+#[test]
+fn result_unwrap_err_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Result".to_string(), "unwrap_err".to_string()));
+    assert!(entry.is_some());
+    let (mangled, params, _ret) = entry.unwrap();
+    assert_eq!(mangled, "Result_unwrap_err");
+    assert_eq!(params.len(), 1); // self only
+}
+
+/// Option.unwrap is registered in method_lookup.
+#[test]
+fn option_unwrap_registered() {
+    let checker = TypeChecker::new();
+    let entry = checker
+        .method_lookup
+        .get(&("Option".to_string(), "unwrap".to_string()));
+    assert!(entry.is_some());
+    let (mangled, params, _ret) = entry.unwrap();
+    assert_eq!(mangled, "Option_unwrap");
+    assert_eq!(params.len(), 1); // self only
+}
+
+/// Result.unwrap() returns the correct polymorphic type (String from Result<String, String>).
+#[test]
+fn result_unwrap_polymorphic_string() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let r: Result<String, String> = file_read("test.txt")
+            if r.is_ok() {
+                let content: String = r.unwrap()
+            }
+            return 0
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Result.unwrap() should return String for Result<String, String>: {result:?}"
+    );
+}
+
+/// Result.unwrap_err() returns the correct polymorphic type.
+#[test]
+fn result_unwrap_err_polymorphic_string() {
+    let source = r#"module test {
+        meta { purpose: "test" version: "0.1.0" }
+        fn main() -> Int {
+            let r: Result<String, String> = file_read("test.txt")
+            if r.is_err() {
+                let msg: String = r.unwrap_err()
+            }
+            return 0
+        }
+    }"#;
+    let module = kodo_parser::parse(source).unwrap();
+    let mut checker = TypeChecker::new();
+    let option_src = r#"module option {
+            meta { purpose: "Optional value type" version: "0.1.0" }
+            enum Option<T> { Some(T), None }
+        }"#;
+    let result_src = r#"module result {
+            meta { purpose: "Error handling type" version: "0.1.0" }
+            enum Result<T, E> { Ok(T), Err(E) }
+        }"#;
+    for src in [option_src, result_src] {
+        if let Ok(prelude_mod) = kodo_parser::parse(src) {
+            let _ = checker.check_module(&prelude_mod);
+        }
+    }
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "Result.unwrap_err() should return String for Result<String, String>: {result:?}"
+    );
+}
+
 /// Method on struct with closure parameter type-checks.
 #[test]
 fn method_with_closure_param_typechecks() {

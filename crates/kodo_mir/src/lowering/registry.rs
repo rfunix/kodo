@@ -167,6 +167,7 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
 }
 
 /// Registers return types for Sprint 5 builtins (CLI, JSON, HTTP server, math).
+#[allow(clippy::too_many_lines)]
 fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
     // CLI builtins.
     fn_return_types
@@ -284,6 +285,20 @@ fn register_sprint5_return_types(fn_return_types: &mut HashMap<String, Type>) {
             .entry((*name).to_string())
             .or_insert(Type::Bool);
     }
+
+    // Result/Option unwrap methods — return types are polymorphic and resolved
+    // per-callsite during MIR lowering based on the actual generic parameters.
+    // These defaults cover the common case; the lowering pass overrides them
+    // when it sees the concrete types.
+    fn_return_types
+        .entry("Result_unwrap".to_string())
+        .or_insert(Type::String);
+    fn_return_types
+        .entry("Result_unwrap_err".to_string())
+        .or_insert(Type::String);
+    fn_return_types
+        .entry("Option_unwrap".to_string())
+        .or_insert(Type::Int);
 }
 
 /// Registers return types for test framework builtins (assertions and lifecycle).

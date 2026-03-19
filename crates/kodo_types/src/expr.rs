@@ -1311,6 +1311,41 @@ impl TypeChecker {
         self.check_direct_call(callee, args, span)
     }
 
+    /// Resolves the return type of `unwrap`/`unwrap_err` from a monomorphized
+    /// enum name like `"Result__String_String"` or `"Option__Int"`.
+    fn resolve_unwrap_from_monomorphized(name: &str, method: &str) -> Option<Type> {
+        if let Some(rest) = name.strip_prefix("Result__") {
+            // "Result__String_String" → parts = ["String", "String"]
+            // "Result__Int_String"    → parts = ["Int", "String"]
+            let parts: Vec<&str> = rest.splitn(2, '_').collect();
+            match method {
+                "unwrap" => parts.first().map(|s| Self::parse_mono_type(s)),
+                "unwrap_err" => parts.get(1).map(|s| Self::parse_mono_type(s)),
+                _ => None,
+            }
+        } else if let Some(rest) = name.strip_prefix("Option__") {
+            if method == "unwrap" {
+                Some(Self::parse_mono_type(rest))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Parses a monomorphized type name segment back into a `Type`.
+    fn parse_mono_type(s: &str) -> Type {
+        match s {
+            "Int" => Type::Int,
+            "String" => Type::String,
+            "Bool" => Type::Bool,
+            "Float64" => Type::Float64,
+            "Unit" => Type::Unit,
+            _ => Type::Enum(s.to_string()),
+        }
+    }
+
     /// Tries to resolve a method call. Returns `Some(type)` if successful,
     /// `None` if the object type has no methods.
     #[allow(clippy::too_many_lines)]
@@ -1371,6 +1406,39 @@ impl TypeChecker {
                         self.method_resolutions.insert(span.start, mangled_name);
                         return Ok(Some(poly_ret));
                     }
+                }
+            }
+
+            // Polymorphic resolution for Option/Result unwrap methods.
+            // unwrap() on Option<T> returns T; unwrap()/unwrap_err() on Result<T,E>
+            // returns T or E respectively.  The base registration uses a placeholder
+            // return type; here we resolve the real type from the generic parameters.
+            if matches!(method, "unwrap" | "unwrap_err") {
+                let poly_ret = match &obj_ty {
+                    Type::Generic(base, type_params) => match (base.as_str(), method) {
+                        ("Option" | "Result", "unwrap") if !type_params.is_empty() => {
+                            Some(type_params[0].clone())
+                        }
+                        ("Result", "unwrap_err") if type_params.len() >= 2 => {
+                            Some(type_params[1].clone())
+                        }
+                        _ => None,
+                    },
+                    // Handle monomorphized enum names like "Result__String_String"
+                    // or "Option__Int".
+                    Type::Enum(name) => Self::resolve_unwrap_from_monomorphized(name, method),
+                    _ => None,
+                };
+                if let Some(resolved_ret) = poly_ret {
+                    if !args.is_empty() {
+                        return Err(TypeError::ArityMismatch {
+                            expected: 0,
+                            found: args.len(),
+                            span,
+                        });
+                    }
+                    self.method_resolutions.insert(span.start, mangled_name);
+                    return Ok(Some(resolved_ret));
                 }
             }
 

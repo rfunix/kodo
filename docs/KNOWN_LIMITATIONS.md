@@ -1,4 +1,4 @@
-# Known Limitations — Kōdo v0.5.0
+# Known Limitations — Kōdo v0.5.1
 
 This document lists the known limitations of the current alpha release. These are deliberate trade-offs or features not yet fully implemented.
 
@@ -30,6 +30,15 @@ This document lists the known limitations of the current alpha release. These ar
 
 - **Impact**: Error handling works, but you cannot define domain-specific error types.
 - **Recommendation**: Use `Result<T, String>` with descriptive error messages.
+
+**Result\<T, E\> unwrap methods**: `unwrap()` and `unwrap_err()` are available and return the correct polymorphic type (e.g., `String` from `Result<String, String>`). On the wrong variant, the program traps (abnormal termination) without a descriptive error message.
+
+- **Impact**: Useful for prototyping, but production code should use `is_ok()`/`is_err()` checks.
+- **Recommendation**: Guard `unwrap()` calls with an `is_ok()` check, or use `unwrap_or()` for safe defaults.
+
+**Result pattern matching**: `match` on `Result` with `Ok(value)` / `Err(msg)` destructuring patterns is not yet supported. Use `is_ok()`/`is_err()` + `unwrap()`/`unwrap_err()` instead.
+
+- **Plan**: Full pattern matching on enum variants in a future release.
 
 ## Strings
 

@@ -1,0 +1,33 @@
+module result_unwrap {
+    meta {
+        purpose: "Demonstrate Result.unwrap() and Result.unwrap_err() methods"
+        version: "0.1.0"
+        description: "Shows safe usage of unwrap with is_ok/is_err guards"
+    }
+
+    fn main() -> Int {
+        // Read an existing file — should succeed
+        let result: Result<String, String> = file_read("Cargo.toml")
+        if result.is_ok() {
+            let content: String = result.unwrap()
+            println("Successfully read Cargo.toml")
+        }
+
+        // Read a non-existent file — should fail
+        let result2: Result<String, String> = file_read("does_not_exist.txt")
+        if result2.is_err() {
+            let err_msg: String = result2.unwrap_err()
+            println(f"Expected error: {err_msg}")
+        }
+
+        // Using is_ok/is_err for safe branching
+        let result3: Result<String, String> = file_read("README.md")
+        if result3.is_ok() {
+            println("README.md exists")
+        } else {
+            println("README.md not found")
+        }
+
+        return 0
+    }
+}

@@ -99,6 +99,9 @@ bench-parser:
 bench-types:
 	cargo bench -p kodo_types
 
+bench-codegen:
+	cargo bench -p kodo_codegen
+
 # === Fuzzing ===
 
 fuzz-lexer:

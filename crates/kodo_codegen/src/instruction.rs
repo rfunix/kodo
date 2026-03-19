@@ -1058,6 +1058,65 @@ fn translate_call(
         }
     }
 
+    // Result/Option unwrap methods — inline payload extraction with trap on wrong variant.
+    // Layout: [discriminant i64 @ offset 0][payload i64 @ offset 8].
+    // unwrap() traps if Err/None; unwrap_err() traps if Ok.
+    if matches!(
+        callee,
+        "Result_unwrap" | "Result_unwrap_err" | "Option_unwrap"
+    ) {
+        if let Some(arg) = args.first() {
+            let addr = resolve_enum_addr(
+                arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            let disc = builder.ins().load(types::I64, MemFlags::new(), addr, 0);
+
+            // Trap if the enum holds the wrong variant.
+            match callee {
+                "Result_unwrap" | "Option_unwrap" => {
+                    // Err/None has discriminant != 0 → trap.
+                    builder
+                        .ins()
+                        .trapnz(disc, cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                }
+                _ => {
+                    // unwrap_err: Ok has discriminant == 0 → trap.
+                    builder
+                        .ins()
+                        .trapz(disc, cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                }
+            }
+
+            // Extract payload from offset 8.
+            let payload = builder.ins().load(types::I64, MemFlags::new(), addr, 8);
+
+            // For String destinations, payload is a pointer to a (ptr, len) pair.
+            // Copy it into the dest's _String stack slot.
+            if let Some((dest_slot, ref slot_name)) = var_map.stack_slots.get(&dest) {
+                if slot_name == "_String" {
+                    let ptr = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
+                    let len = builder.ins().load(types::I64, MemFlags::new(), payload, 8);
+                    let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+                    builder.ins().store(MemFlags::new(), ptr, dest_addr, 0);
+                    builder.ins().store(MemFlags::new(), len, dest_addr, 8);
+                    let var = var_map.get(dest)?;
+                    builder.def_var(var, dest_addr);
+                    return Ok(());
+                }
+            }
+
+            // For non-String destinations (Int, Bool, etc.), use the raw value.
+            var_map.def_var_with_cast(dest, payload, builder)?;
+            return Ok(());
+        }
+    }
+
     // Check if this is a builtin that needs special arg/return handling.
     if is_special_builtin(callee) {
         let handled = emit_string_builtin_call(

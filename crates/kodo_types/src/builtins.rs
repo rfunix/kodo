@@ -424,7 +424,7 @@ impl TypeChecker {
 
     /// Registers builtin methods for `Option<T>`.
     ///
-    /// Methods: `is_some`, `is_none`, `unwrap_or`.
+    /// Methods: `is_some`, `is_none`, `unwrap`, `unwrap_or`.
     /// These are implemented in the runtime and work on the enum tag.
     fn register_option_methods(&mut self) {
         let option_ty = Type::Enum("Option".to_string());
@@ -457,6 +457,21 @@ impl TypeChecker {
             Type::Function(vec![option_ty.clone()], Box::new(Type::Bool)),
         );
 
+        // Option.unwrap() -> T (resolved polymorphically in try_check_method_call)
+        // Registered with Int as placeholder; actual return type comes from Generic params.
+        self.method_lookup.insert(
+            ("Option".to_string(), "unwrap".to_string()),
+            (
+                "Option_unwrap".to_string(),
+                vec![option_ty.clone()],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "Option_unwrap".to_string(),
+            Type::Function(vec![option_ty.clone()], Box::new(Type::Int)),
+        );
+
         // Option.unwrap_or(default: Int) -> Int
         self.method_lookup.insert(
             ("Option".to_string(), "unwrap_or".to_string()),
@@ -474,7 +489,7 @@ impl TypeChecker {
 
     /// Registers builtin methods for `Result<T, E>`.
     ///
-    /// Methods: `is_ok`, `is_err`, `unwrap_or`.
+    /// Methods: `is_ok`, `is_err`, `unwrap`, `unwrap_err`, `unwrap_or`.
     /// These are implemented in the runtime and work on the enum tag.
     fn register_result_methods(&mut self) {
         let result_ty = Type::Enum("Result".to_string());
@@ -505,6 +520,36 @@ impl TypeChecker {
         self.env.insert(
             "Result_is_err".to_string(),
             Type::Function(vec![result_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Result.unwrap() -> T (resolved polymorphically in try_check_method_call)
+        // Registered with Int as placeholder; actual return type comes from Generic params.
+        self.method_lookup.insert(
+            ("Result".to_string(), "unwrap".to_string()),
+            (
+                "Result_unwrap".to_string(),
+                vec![result_ty.clone()],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "Result_unwrap".to_string(),
+            Type::Function(vec![result_ty.clone()], Box::new(Type::Int)),
+        );
+
+        // Result.unwrap_err() -> E (resolved polymorphically in try_check_method_call)
+        // Registered with String as placeholder; actual return type comes from Generic params.
+        self.method_lookup.insert(
+            ("Result".to_string(), "unwrap_err".to_string()),
+            (
+                "Result_unwrap_err".to_string(),
+                vec![result_ty.clone()],
+                Type::String,
+            ),
+        );
+        self.env.insert(
+            "Result_unwrap_err".to_string(),
+            Type::Function(vec![result_ty.clone()], Box::new(Type::String)),
         );
 
         // Result.unwrap_or(default: Int) -> Int
