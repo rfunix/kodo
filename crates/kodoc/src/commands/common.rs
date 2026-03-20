@@ -146,10 +146,21 @@ pub(crate) fn link_executable(
     let runtime_path = find_runtime_lib()?;
 
     let mut cmd = std::process::Command::new("cc");
-    cmd.arg(obj_path)
-        .arg(&runtime_path)
-        .arg("-o")
-        .arg(output_path);
+    cmd.arg(obj_path);
+
+    // Force the linker to include ALL symbols from the runtime archive,
+    // not just those referenced by the object file.  This is necessary
+    // because green-thread and future builtins are only referenced by
+    // compiler-generated code — the linker would otherwise dead-strip them.
+    if cfg!(target_os = "macos") {
+        cmd.args(["-Wl,-force_load", runtime_path.to_str().unwrap_or("")]);
+    } else {
+        cmd.args(["-Wl,--whole-archive"]);
+        cmd.arg(&runtime_path);
+        cmd.args(["-Wl,--no-whole-archive"]);
+    }
+
+    cmd.arg("-o").arg(output_path);
 
     // On macOS, Cranelift object files lack LC_BUILD_VERSION metadata,
     // producing harmless linker warnings. Suppress them.

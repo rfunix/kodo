@@ -1270,14 +1270,14 @@ fn lower_spawn_without_captures() {
     .unwrap();
     mir.validate().unwrap();
 
-    // Should generate a __spawn_ function and call kodo_spawn_task.
+    // Should generate a __spawn_ function and call kodo_green_spawn.
     assert!(!closures.is_empty(), "expected a generated spawn function");
     let has_spawn_task_call = mir.blocks.iter().any(|b| {
         b.instructions
             .iter()
-            .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_spawn_task"))
+            .any(|i| matches!(i, Instruction::Call { callee, .. } if callee == "kodo_green_spawn"))
     });
-    assert!(has_spawn_task_call, "expected kodo_spawn_task call");
+    assert!(has_spawn_task_call, "expected kodo_green_spawn call");
 }
 
 #[test]
@@ -1331,7 +1331,7 @@ fn lower_spawn_with_captures() {
         .expect("expected a __spawn_ function");
     assert_eq!(spawn_fn.param_count, 1, "spawn fn should take env pointer");
 
-    // Main should call __env_pack and kodo_spawn_task_with_env.
+    // Main should call __env_pack and kodo_green_spawn_with_env.
     let has_env_pack = mir.blocks.iter().any(|b| {
         b.instructions
             .iter()
@@ -1341,10 +1341,13 @@ fn lower_spawn_with_captures() {
 
     let has_spawn_with_env = mir.blocks.iter().any(|b| {
         b.instructions.iter().any(|i| {
-            matches!(i, Instruction::Call { callee, .. } if callee == "kodo_spawn_task_with_env")
+            matches!(i, Instruction::Call { callee, .. } if callee == "kodo_green_spawn_with_env")
         })
     });
-    assert!(has_spawn_with_env, "expected kodo_spawn_task_with_env call");
+    assert!(
+        has_spawn_with_env,
+        "expected kodo_green_spawn_with_env call"
+    );
 
     // The spawn function should contain an __env_load call.
     let has_env_load = spawn_fn.blocks.iter().any(|b| {

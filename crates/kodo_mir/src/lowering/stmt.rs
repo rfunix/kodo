@@ -465,11 +465,11 @@ impl MirBuilder {
         self.fn_return_types
             .insert(spawn_name.to_string(), Type::Unit);
 
-        // Emit: kodo_spawn_task(FuncRef(spawn_name))
+        // Emit: kodo_green_spawn(FuncRef(spawn_name))
         let dest = self.alloc_local(Type::Unit, false);
         self.emit(Instruction::Call {
             dest,
-            callee: "kodo_spawn_task".to_string(),
+            callee: "kodo_green_spawn".to_string(),
             args: vec![Value::FuncRef(spawn_name.to_string())],
         });
 
@@ -551,13 +551,13 @@ impl MirBuilder {
             args: pack_args,
         });
 
-        // Emit: kodo_spawn_task_with_env(FuncRef, env_ptr, env_size)
+        // Emit: kodo_green_spawn_with_env(FuncRef, env_ptr, env_size)
         #[allow(clippy::cast_possible_wrap)]
         let env_size = (captures.len() as i64) * 8;
         let dest = self.alloc_local(Type::Unit, false);
         self.emit(Instruction::Call {
             dest,
-            callee: "kodo_spawn_task_with_env".to_string(),
+            callee: "kodo_green_spawn_with_env".to_string(),
             args: vec![
                 Value::FuncRef(spawn_name.to_string()),
                 Value::Local(env_local),

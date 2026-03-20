@@ -149,7 +149,13 @@ impl MirBuilder {
                 ));
                 Ok(Value::Local(local_id))
             }
-            // `Await` in v1: no real suspension — lower the inner expression.
+            // `Await`: in v1 async functions execute synchronously and return
+            // their result directly (not a future handle), so we lower the
+            // inner expression as-is.  When async functions are wired to
+            // return real future handles (via `kodo_future_new` /
+            // `kodo_future_complete`), this should call `kodo_future_await`.
+            // The runtime builtin `kodo_future_await` is already declared in
+            // codegen and implemented in `kodo_runtime::green`.
             Expr::Await { operand, .. } => self.lower_expr(operand),
 
             // StringInterp is lowered here (not in desugar) because we need

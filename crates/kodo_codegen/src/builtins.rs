@@ -170,6 +170,29 @@ fn declare_concurrency_builtins(
         types::I64,
         types::I64
     );
+    // Green thread spawn builtins.
+    decl_void!("kodo_green_spawn", "kodo_green_spawn", types::I64);
+    decl_void!(
+        "kodo_green_spawn_with_env",
+        "kodo_green_spawn_with_env",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // Future builtins for async/await.
+    decl_ret!("kodo_future_new", "kodo_future_new", [], types::I64);
+    decl_void!(
+        "kodo_future_complete",
+        "kodo_future_complete",
+        types::I64,
+        types::I64
+    );
+    decl_ret!(
+        "kodo_future_await",
+        "kodo_future_await",
+        [types::I64],
+        types::I64
+    );
     decl_ret!("kodo_parallel_begin", "kodo_parallel_begin", [], types::I64);
     decl_void!(
         "kodo_parallel_spawn",
