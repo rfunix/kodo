@@ -4,8 +4,26 @@
 //! test binaries call at runtime. Assertion failures set a global flag
 //! instead of aborting, allowing the test harness to report all failures
 //! in a test before moving to the next one.
+//!
+//! ## Timeout support
+//!
+//! [`kodo_test_set_timeout`] spawns a timer thread that terminates the process
+//! if the current test does not call [`kodo_test_clear_timeout`] within the
+//! allotted time. This prevents runaway tests from blocking the test suite.
+//!
+//! ## Isolation stubs
+//!
+//! [`kodo_test_isolate_start`] and [`kodo_test_isolate_end`] are currently
+//! no-ops reserved for future state-snapshotting support.
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+
+/// Atomic flag indicating whether a timeout is currently active for the
+/// running test. Shared between the test thread and the timer thread.
+static TIMEOUT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Global flag indicating whether the current test has any assertion failure.
 ///
@@ -346,6 +364,73 @@ pub extern "C" fn kodo_test_summary(total: i64, passed: i64, failed: i64) {
     );
 }
 
+/// Sets a timeout for the current test in milliseconds.
+///
+/// Spawns a background timer thread. If [`kodo_test_clear_timeout`] is not
+/// called before the duration elapses, the process exits with code 1 and
+/// prints a diagnostic to stderr.
+///
+/// Calling this function while a previous timeout is still active replaces
+/// it: the old timer thread will find `TIMEOUT_ACTIVE` still `true`, but only
+/// the first one to observe the flag set will ever fire (both see `true`).
+/// For deterministic behavior, always call [`kodo_test_clear_timeout`] before
+/// setting a new timeout.
+///
+/// # Safety
+///
+/// May be called from any thread. Uses `AtomicBool` for synchronization.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_test_set_timeout(ms: i64) {
+    TIMEOUT_ACTIVE.store(true, Ordering::SeqCst);
+    #[allow(clippy::cast_sign_loss)]
+    let duration = Duration::from_millis(ms as u64);
+    thread::spawn(move || {
+        thread::sleep(duration);
+        if TIMEOUT_ACTIVE.load(Ordering::SeqCst) {
+            let _ = writeln!(std::io::stderr(), "test timeout: exceeded {ms}ms");
+            std::process::exit(1);
+        }
+    });
+}
+
+/// Clears the current test timeout, preventing the timer thread from firing.
+///
+/// Call this at the end of any test that used [`kodo_test_set_timeout`].
+///
+/// # Safety
+///
+/// May be called from any thread. Uses `AtomicBool` for synchronization.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_test_clear_timeout() {
+    TIMEOUT_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+/// Marks the start of test isolation.
+///
+/// Currently a no-op. Future versions will snapshot global state so that
+/// mutations made during a test can be rolled back by [`kodo_test_isolate_end`].
+///
+/// # Safety
+///
+/// May only be called from single-threaded compiled Kōdo test code.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_test_isolate_start() {
+    // Placeholder: state snapshotting will be implemented here.
+}
+
+/// Marks the end of test isolation.
+///
+/// Currently a no-op. Future versions will restore the global state that was
+/// snapshotted by [`kodo_test_isolate_start`].
+///
+/// # Safety
+///
+/// May only be called from single-threaded compiled Kōdo test code.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_test_isolate_end() {
+    // Placeholder: state restoration will be implemented here.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,6 +730,61 @@ mod tests {
             kodo_assert(0); // triggers failure
             assert!(TEST_FAILED);
             reset_test_failed(); // clean up
+        }
+    }
+
+    // -- kodo_test_set_timeout / kodo_test_clear_timeout --
+    //
+    // These tests mutate the global TIMEOUT_ACTIVE flag, so they must not run
+    // concurrently with each other.  We use a process-wide Mutex as a
+    // serialisation token — holding the lock for the entire test body ensures
+    // that two timeout tests can never interleave.
+
+    use std::sync::Mutex;
+
+    /// Mutex used to serialise timeout tests that share the global
+    /// `TIMEOUT_ACTIVE` flag.  The `bool` payload is unused; only the lock
+    /// matters.
+    static TIMEOUT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn timeout_can_be_set_and_cleared() {
+        // 5 000 ms — far enough in the future that it will never fire during
+        // a normal test run, but short enough to avoid hanging CI forever.
+        let _guard = TIMEOUT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            kodo_test_set_timeout(5_000);
+            kodo_test_clear_timeout();
+            // Reaching this point means the flag was cleared successfully.
+            assert!(
+                !TIMEOUT_ACTIVE.load(Ordering::SeqCst),
+                "TIMEOUT_ACTIVE should be false after clear"
+            );
+        }
+    }
+
+    #[test]
+    fn timeout_active_flag_is_true_after_set() {
+        let _guard = TIMEOUT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            kodo_test_set_timeout(5_000);
+            assert!(
+                TIMEOUT_ACTIVE.load(Ordering::SeqCst),
+                "TIMEOUT_ACTIVE should be true immediately after set"
+            );
+            // Always clear to avoid interfering with other tests.
+            kodo_test_clear_timeout();
+        }
+    }
+
+    // -- kodo_test_isolate_start / kodo_test_isolate_end --
+
+    #[test]
+    fn isolation_stubs_do_not_panic() {
+        // These are currently no-ops; we just verify they can be called safely.
+        unsafe {
+            kodo_test_isolate_start();
+            kodo_test_isolate_end();
         }
     }
 }
