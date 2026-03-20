@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] — 2026-03-20
+
+### Added
+
+- **Async String return** — `async fn` now supports returning `String` and composite types, not just `Int`. `FutureEntry` stores `Vec<u8>` buffer instead of `i64`. New runtime functions `kodo_future_complete_bytes` / `kodo_future_await_bytes` for composite types
+- **Async String env passing** — String arguments to async functions are correctly materialized and packed into the green thread environment
+- New examples: `async_string.ko`, `async_string_dual.ko`
+
+### Changed
+
+- `FutureEntry.result` changed from `Option<i64>` to `Option<Vec<u8>>` for arbitrary-size results
+- MIR lowering detects return type and selects `future_complete` vs `future_complete_bytes` accordingly
+
 ## [0.8.0] — 2026-03-20
 
 ### Added
