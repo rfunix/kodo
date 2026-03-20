@@ -11,6 +11,7 @@ fn make_test_module(functions: Vec<Function>) -> Module {
     let mut id_gen = NodeIdGen::new();
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: id_gen.next_id(),
         span: Span::new(0, 100),
         name: "test".to_string(),

@@ -55,8 +55,8 @@ impl MirBuilder {
             Stmt::LetPattern { pattern, value, .. } => self.lower_let_pattern(pattern, value),
             Stmt::Break { .. } => self.lower_break_stmt(),
             Stmt::Continue { .. } => self.lower_continue_stmt(),
-            // ForIn and IfLet are desugared before MIR lowering.
-            Stmt::ForIn { .. } | Stmt::IfLet { .. } => Ok(Value::Unit),
+            // ForIn, IfLet, and ForAll are desugared or handled before MIR lowering.
+            Stmt::ForIn { .. } | Stmt::IfLet { .. } | Stmt::ForAll { .. } => Ok(Value::Unit),
             Stmt::Spawn { body, .. } => self.lower_spawn_stmt(body),
             Stmt::Parallel { body, .. } => self.lower_parallel_stmt(body),
         }

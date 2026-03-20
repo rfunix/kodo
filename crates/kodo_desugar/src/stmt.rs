@@ -9,6 +9,7 @@ use crate::expr::desugar_expr;
 use crate::for_loop::{desugar_for_in_stmt, desugar_for_stmt};
 
 /// Desugars all statements in a block.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn desugar_block(block: &mut Block) {
     let mut new_stmts = Vec::new();
     for stmt in std::mem::take(&mut block.stmts) {
@@ -102,6 +103,18 @@ pub(crate) fn desugar_block(block: &mut Block) {
             }
             Stmt::Continue { span } => {
                 new_stmts.push(Stmt::Continue { span });
+            }
+            Stmt::ForAll {
+                span,
+                bindings,
+                mut body,
+            } => {
+                desugar_block(&mut body);
+                new_stmts.push(Stmt::ForAll {
+                    span,
+                    bindings,
+                    body,
+                });
             }
         }
     }

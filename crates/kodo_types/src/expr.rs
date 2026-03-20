@@ -203,6 +203,13 @@ fn collect_free_vars_block(
                 }
             }
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
+            Stmt::ForAll { bindings, body, .. } => {
+                let mut for_all_bound = local_bound.clone();
+                for (name, _) in bindings {
+                    for_all_bound.insert(name.clone());
+                }
+                collect_free_vars_block(body, &for_all_bound, free, seen);
+            }
         }
     }
 }
@@ -991,6 +998,11 @@ impl TypeChecker {
                 }
                 // Break and Continue produce Unit type.
                 Stmt::Break { .. } | Stmt::Continue { .. } => {
+                    last_ty = Type::Unit;
+                }
+                // ForAll is handled by the property-test runtime.
+                Stmt::ForAll { .. } => {
+                    self.check_stmt(stmt)?;
                     last_ty = Type::Unit;
                 }
             }

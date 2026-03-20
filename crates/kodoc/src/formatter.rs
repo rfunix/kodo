@@ -425,6 +425,17 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str("continue\n");
         }
+        Stmt::ForAll { bindings, body, .. } => {
+            indent(out, level);
+            let binding_strs: Vec<String> = bindings
+                .iter()
+                .map(|(name, ty)| format!("{name}: {}", format_type_expr(ty)))
+                .collect();
+            out.push_str(&format!("forall {} {{\n", binding_strs.join(", ")));
+            format_block_inner(out, body, level + 1);
+            indent(out, level);
+            out.push_str("}\n");
+        }
     }
 }
 

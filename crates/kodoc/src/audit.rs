@@ -620,6 +620,7 @@ mod tests {
         use kodo_ast::{Ownership, *};
         Module {
             test_decls: vec![],
+            describe_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -662,6 +663,7 @@ mod tests {
         use kodo_ast::{Ownership, *};
         Module {
             test_decls: vec![],
+            describe_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),
@@ -711,6 +713,7 @@ mod tests {
         use kodo_ast::{Ownership, *};
         Module {
             test_decls: vec![],
+            describe_decls: vec![],
             id: NodeId(0),
             span: Span::new(0, 100),
             name: "test".to_string(),

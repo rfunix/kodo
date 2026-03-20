@@ -405,6 +405,7 @@ fn trait_bound_generic_param_struct() {
 fn missing_associated_type_error() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -511,6 +512,7 @@ fn missing_associated_type_error() {
 fn unexpected_associated_type_error() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -646,6 +648,7 @@ fn default_method_not_required_in_impl() {
 fn associated_type_provided_passes() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -775,6 +778,7 @@ fn unexpected_associated_type_error_code() {
 fn default_method_collecting_not_required() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -857,6 +861,7 @@ fn default_method_collecting_not_required() {
 fn missing_associated_type_collecting() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),

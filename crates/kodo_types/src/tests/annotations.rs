@@ -313,6 +313,7 @@ fn confidence_threshold_violation() {
     };
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),

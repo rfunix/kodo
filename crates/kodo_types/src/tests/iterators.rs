@@ -88,6 +88,7 @@ fn for_in_type_checks_list() {
     let span = Span::new(0, 100);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "for_in_test".to_string(),
@@ -186,6 +187,7 @@ fn for_in_rejects_non_list() {
     let span = Span::new(0, 100);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "for_in_err_test".to_string(),

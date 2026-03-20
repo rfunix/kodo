@@ -26,6 +26,7 @@ fn private_function_call_from_another_module_errors() {
     };
     let module_a = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "module_a".to_string(),
@@ -113,6 +114,7 @@ fn public_function_call_from_another_module_succeeds() {
     };
     let module_a = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "module_a".to_string(),

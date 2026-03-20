@@ -207,6 +207,7 @@ fn lower_function_call() {
 fn lower_module_multiple_functions() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test_module".to_string(),
@@ -551,6 +552,7 @@ fn lower_function_with_ensures_result_reference() {
 fn validator_generated_for_function_with_requires() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test_mod".to_string(),
@@ -607,6 +609,7 @@ fn validator_generated_for_function_with_requires() {
 fn validator_not_generated_without_requires() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test_mod".to_string(),
@@ -638,6 +641,7 @@ fn validator_not_generated_without_requires() {
 fn validator_has_same_params() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test_mod".to_string(),
@@ -700,6 +704,7 @@ fn validator_has_same_params() {
 fn validator_returns_bool() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test_mod".to_string(),
@@ -1131,6 +1136,7 @@ fn test_builtin_return_types_registered() {
 fn test_field_access_type_resolution() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         name: "test".to_string(),
         span: span(),
@@ -1353,6 +1359,7 @@ fn lower_spawn_with_captures() {
 fn make_actor_module(main_body: Block) -> Module {
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "test".to_string(),
@@ -1629,6 +1636,7 @@ fn refinement_check_emitted_for_refined_alias() {
     };
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -1707,6 +1715,7 @@ fn refinement_check_emitted_for_refined_alias() {
 fn no_refinement_check_for_unconstrained_alias() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -1831,6 +1840,7 @@ fn refinement_check_with_compound_constraint() {
     };
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -2632,6 +2642,7 @@ fn lower_struct_literal_module() {
     // Module with struct type and a function that creates it
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "struct_test".to_string(),
@@ -2709,6 +2720,7 @@ fn lower_struct_literal_module() {
 fn lower_struct_field_access_module() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "field_test".to_string(),
@@ -2797,6 +2809,7 @@ fn lower_struct_field_access_module() {
 fn lower_enum_variant_and_match_module() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "enum_test".to_string(),
@@ -2867,6 +2880,7 @@ fn lower_enum_variant_and_match_module() {
 fn lower_match_with_wildcard() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "match_test".to_string(),
@@ -2956,6 +2970,7 @@ fn lower_match_with_wildcard() {
 fn lower_actor_with_handler_module() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "actor_test".to_string(),
@@ -3090,6 +3105,7 @@ fn lower_module_with_struct_type_registers_fields() {
     // Module with struct -> function that creates and accesses the struct
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: span(),
         name: "reg_test".to_string(),

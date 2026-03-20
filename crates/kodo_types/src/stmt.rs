@@ -110,6 +110,18 @@ impl TypeChecker {
                 }
                 Ok(())
             }
+            Stmt::ForAll { bindings, body, .. } => {
+                // Stub: introduce each binding with its declared type and check body.
+                // Full property-test semantics are implemented in the runtime layer.
+                let scope = self.env.scope_level();
+                for (name, ty_expr) in bindings {
+                    let ty = self.resolve_type_mono(ty_expr, kodo_ast::Span::new(0, 0))?;
+                    self.env.insert(name.clone(), ty);
+                }
+                self.check_block(body)?;
+                self.env.truncate(scope);
+                Ok(())
+            }
         }
     }
 

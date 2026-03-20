@@ -543,6 +543,7 @@ fn generic_struct_literal_without_annotation_infers_type_args() {
 fn static_method_call_on_struct() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 500),
         name: "test".to_string(),

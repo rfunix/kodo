@@ -113,4 +113,5 @@ Module {
         },
     ],
     test_decls: [],
+    describe_decls: [],
 }

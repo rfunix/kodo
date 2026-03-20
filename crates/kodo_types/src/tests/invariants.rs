@@ -7,6 +7,7 @@ fn invariant_bool_condition_passes() {
     let span = Span::new(0, 10);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -52,6 +53,7 @@ fn invariant_non_bool_condition_fails() {
     let span = Span::new(0, 10);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -99,6 +101,7 @@ fn invariant_comparison_expr_passes() {
     let span = Span::new(0, 10);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -152,6 +155,7 @@ fn invariant_collecting_reports_error() {
     let span = Span::new(0, 10);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),
@@ -200,6 +204,7 @@ fn invariant_multiple_conditions() {
     let span = Span::new(0, 10);
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span,
         name: "test".to_string(),

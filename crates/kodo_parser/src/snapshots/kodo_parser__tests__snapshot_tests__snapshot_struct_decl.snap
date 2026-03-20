@@ -58,4 +58,5 @@ Module {
     invariants: [],
     functions: [],
     test_decls: [],
+    describe_decls: [],
 }

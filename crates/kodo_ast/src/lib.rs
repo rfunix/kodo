@@ -159,6 +159,31 @@ pub struct TestDecl {
     pub body: Block,
 }
 
+/// A `describe` block groups related tests with optional setup/teardown.
+///
+/// Describe blocks can be nested. Setup runs before each test,
+/// teardown runs after each test. Variables from setup are visible
+/// in the describe's tests.
+#[derive(Debug, Clone)]
+pub struct DescribeDecl {
+    /// Unique node identifier.
+    pub id: NodeId,
+    /// Source span of the entire describe block.
+    pub span: Span,
+    /// Name of the test group (from string literal).
+    pub name: String,
+    /// Annotations on the describe block.
+    pub annotations: Vec<Annotation>,
+    /// Setup block executed before each test.
+    pub setup: Option<Block>,
+    /// Teardown block executed after each test.
+    pub teardown: Option<Block>,
+    /// Test declarations within this describe block.
+    pub tests: Vec<TestDecl>,
+    /// Nested describe blocks.
+    pub describes: Vec<DescribeDecl>,
+}
+
 /// The top-level compilation unit representing a `.ko` file.
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -192,6 +217,8 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// Test declarations.
     pub test_decls: Vec<TestDecl>,
+    /// Describe blocks grouping related tests.
+    pub describe_decls: Vec<DescribeDecl>,
 }
 
 /// A module invariant declaration: `invariant { condition_expr }`
@@ -745,6 +772,18 @@ pub enum Stmt {
         span: Span,
         /// The body containing spawn statements.
         body: Vec<Stmt>,
+    },
+    /// A `forall` statement in property-based tests.
+    ///
+    /// Introduces universally quantified variables with random generation.
+    /// Used inside `@property` test blocks.
+    ForAll {
+        /// Source span.
+        span: Span,
+        /// Variable bindings with their types: `(name, type_expr)`.
+        bindings: Vec<(String, TypeExpr)>,
+        /// Body to execute for each generated input.
+        body: Block,
     },
 }
 

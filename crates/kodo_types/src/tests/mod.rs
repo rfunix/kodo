@@ -77,6 +77,7 @@ fn resolve_primitive_types() {
 pub(super) fn make_module(functions: Vec<Function>) -> Module {
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -153,6 +154,7 @@ pub(super) fn make_module_with_policy(functions: Vec<Function>, policy: Option<&
     }
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -203,6 +205,7 @@ pub(super) fn make_module_with_decls(
 ) -> Module {
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -232,6 +235,7 @@ pub(super) fn make_module_with_decls(
 pub(super) fn make_module_with_body(stmts: Vec<Stmt>) -> Module {
     Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),

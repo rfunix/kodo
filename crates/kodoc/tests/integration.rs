@@ -198,6 +198,10 @@ fn rewrite_method_calls_in_block(
             }
             // Break and Continue have no expressions to rewrite.
             kodo_ast::Stmt::Break { .. } | kodo_ast::Stmt::Continue { .. } => {}
+            // ForAll body is recursively rewritten.
+            kodo_ast::Stmt::ForAll { body, .. } => {
+                rewrite_method_calls_in_block(body, resolutions, static_calls);
+            }
         }
     }
 }

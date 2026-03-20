@@ -549,6 +549,7 @@ fn closure_param_missing_type_annotation() {
 fn check_trait_and_impl_basic() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -691,6 +692,7 @@ fn check_trait_and_impl_basic() {
 fn check_unknown_trait_error() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -732,6 +734,7 @@ fn check_unknown_trait_error() {
 fn check_missing_trait_method_error() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 100),
         name: "test".to_string(),
@@ -802,6 +805,7 @@ fn check_missing_trait_method_error() {
 fn check_inherent_impl_registers_methods() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 250),
         name: "test".to_string(),
@@ -932,6 +936,7 @@ fn check_inherent_impl_no_trait_required() {
     // Inherent impl should not require a trait to be defined.
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 200),
         name: "test".to_string(),
@@ -1038,6 +1043,7 @@ fn check_inherent_impl_no_trait_required() {
 fn check_inherent_and_trait_impl_same_type() {
     let module = Module {
         test_decls: vec![],
+        describe_decls: vec![],
         id: NodeId(0),
         span: Span::new(0, 300),
         name: "test".to_string(),

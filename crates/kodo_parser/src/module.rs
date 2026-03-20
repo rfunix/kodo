@@ -157,6 +157,7 @@ impl Parser {
             invariants,
             functions,
             test_decls,
+            describe_decls: vec![],
         })
     }
 
@@ -275,6 +276,7 @@ impl Parser {
             invariants: vec![],
             functions: vec![],
             test_decls: vec![],
+            describe_decls: vec![],
         }
     }
 
@@ -337,6 +339,7 @@ impl Parser {
                 invariants: module_body.invariants,
                 functions: module_body.functions,
                 test_decls: module_body.test_decls,
+                describe_decls: vec![],
             },
             errors,
         }
@@ -685,6 +688,7 @@ pub fn parse_with_recovery(source: &str) -> ParseOutput {
                     invariants: vec![],
                     functions: vec![],
                     test_decls: vec![],
+                    describe_decls: vec![],
                 },
                 errors: vec![ParseError::from(e)],
             };

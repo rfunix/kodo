@@ -174,8 +174,8 @@ impl MirBuilder {
                     }
                 }
             }
-            // Spawn is desugared before MIR lowering.
-            Stmt::Spawn { body, .. } => {
+            // Spawn and ForAll: recurse into their bodies to collect captures.
+            Stmt::Spawn { body, .. } | Stmt::ForAll { body, .. } => {
                 for s in &body.stmts {
                     Self::collect_free_vars_in_stmt(s, params, free, seen);
                 }
