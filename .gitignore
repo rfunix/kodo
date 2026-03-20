@@ -75,3 +75,4 @@ concurrency_dem
 
 # Proptest regressions
 *.proptest-regressions
+.claude/worktrees/
