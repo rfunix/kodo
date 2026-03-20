@@ -161,6 +161,13 @@ struct ChannelEntry {
     /// The receiving half (wrapped in `Arc<Mutex<…>>` so we can access it
     /// without holding the registry lock, preventing deadlocks on recv).
     receiver_arc: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ChannelValue>>>,
+    /// Buffer for a value peeked by `channel_select_*`.
+    ///
+    /// When a select operation discovers data on a channel via `try_recv`, it
+    /// stores the consumed value here. The next `channel_recv` call checks
+    /// this buffer first, returning the peeked value without touching the
+    /// underlying `mpsc` receiver.
+    peeked: std::sync::Arc<std::sync::Mutex<Option<ChannelValue>>>,
 }
 
 /// Global registry of live channels, keyed by handle.
@@ -181,6 +188,7 @@ pub extern "C" fn kodo_channel_new() -> i64 {
     let entry = ChannelEntry {
         sender: std::sync::Arc::new(std::sync::Mutex::new(tx)),
         receiver_arc: std::sync::Arc::new(std::sync::Mutex::new(rx)),
+        peeked: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     if let Ok(mut registry) = CHANNEL_REGISTRY.lock() {
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -223,6 +231,56 @@ fn channel_get_receiver(
         .map(|entry| std::sync::Arc::clone(&entry.receiver_arc))
 }
 
+/// Clones the peeked-value `Arc` for a given channel handle.
+///
+/// Returns `None` if the handle is invalid or the registry lock is poisoned.
+fn channel_get_peeked(
+    handle: i64,
+) -> Option<std::sync::Arc<std::sync::Mutex<Option<ChannelValue>>>> {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let idx = handle as usize;
+    let registry = CHANNEL_REGISTRY.lock().ok()?;
+    registry
+        .get(idx)
+        .and_then(Option::as_ref)
+        .map(|entry| std::sync::Arc::clone(&entry.peeked))
+}
+
+/// Attempts a non-blocking receive on the channel. If data is available,
+/// stores it in the channel's `peeked` buffer and returns `true`.
+fn try_peek_channel(handle: i64) -> bool {
+    let Some(rx_arc) = channel_get_receiver(handle) else {
+        return false;
+    };
+    let Some(peeked_arc) = channel_get_peeked(handle) else {
+        return false;
+    };
+    // If there is already a peeked value, this channel has data ready.
+    if let Ok(peeked) = peeked_arc.lock() {
+        if peeked.is_some() {
+            return true;
+        }
+    }
+    // Try a non-blocking recv. We bind the guard explicitly so the
+    // temporary lives long enough (avoiding E0597).
+    let received = {
+        let guard = rx_arc.lock();
+        if let Ok(rx) = guard {
+            rx.try_recv().ok()
+        } else {
+            None
+        }
+    };
+    if let Some(val) = received {
+        if let Ok(mut peeked) = peeked_arc.lock() {
+            *peeked = Some(val);
+        }
+        true
+    } else {
+        false
+    }
+}
+
 /// Sends an integer `value` through the channel identified by `handle`.
 ///
 /// If the handle is invalid or the receiver has been dropped the call is a
@@ -240,10 +298,27 @@ pub extern "C" fn kodo_channel_send(handle: i64, value: i64) {
 
 /// Receives an integer value from the channel identified by `handle` (blocking).
 ///
+/// If a value was buffered by a prior `channel_select_*` call, it is returned
+/// immediately without touching the underlying `mpsc` receiver. Otherwise
+/// blocks until a value arrives.
+///
 /// Returns the received `i64` value. If the channel is closed, the handle
 /// is invalid, or the received value is not an integer, returns `0`.
 #[no_mangle]
 pub extern "C" fn kodo_channel_recv(handle: i64) -> i64 {
+    // Check for a peeked value first (deposited by channel_select_*).
+    if let Some(peeked_arc) = channel_get_peeked(handle) {
+        if let Ok(mut peeked) = peeked_arc.lock() {
+            if let Some(val) = peeked.take() {
+                return match val {
+                    ChannelValue::Int(v) => v,
+                    ChannelValue::Bool(b) => i64::from(b),
+                    ChannelValue::StringVal(_) => 0,
+                };
+            }
+        }
+    }
+
     let Some(rx_arc) = channel_get_receiver(handle) else {
         return 0;
     };
@@ -273,9 +348,25 @@ pub extern "C" fn kodo_channel_send_bool(handle: i64, value: i64) {
 
 /// Receives a boolean value from the channel identified by `handle` (blocking).
 ///
+/// If a value was buffered by a prior `channel_select_*` call, it is returned
+/// immediately. Otherwise blocks until a value arrives.
+///
 /// Returns `1` for `true`, `0` for `false`.
 #[no_mangle]
 pub extern "C" fn kodo_channel_recv_bool(handle: i64) -> i64 {
+    // Check for a peeked value first (deposited by channel_select_*).
+    if let Some(peeked_arc) = channel_get_peeked(handle) {
+        if let Ok(mut peeked) = peeked_arc.lock() {
+            if let Some(val) = peeked.take() {
+                return match val {
+                    ChannelValue::Bool(b) => i64::from(b),
+                    ChannelValue::Int(v) => i64::from(v != 0),
+                    ChannelValue::StringVal(_) => 0,
+                };
+            }
+        }
+    }
+
     let Some(rx_arc) = channel_get_receiver(handle) else {
         return 0;
     };
@@ -315,6 +406,9 @@ pub unsafe extern "C" fn kodo_channel_send_string(handle: i64, ptr: *const u8, l
 
 /// Receives a string from the channel identified by `handle` (blocking).
 ///
+/// If a value was buffered by a prior `channel_select_*` call, it is returned
+/// immediately. Otherwise blocks until a value arrives.
+///
 /// # Safety
 ///
 /// `out_ptr` and `out_len` must point to valid writable locations.
@@ -331,6 +425,27 @@ pub unsafe extern "C" fn kodo_channel_recv_string(
             *out_len = 0;
         }
     };
+
+    // Check for a peeked value first (deposited by channel_select_*).
+    if let Some(peeked_arc) = channel_get_peeked(handle) {
+        if let Ok(mut peeked) = peeked_arc.lock() {
+            if let Some(val) = peeked.take() {
+                if let ChannelValue::StringVal(bytes) = val {
+                    let len = bytes.len();
+                    let boxed = bytes.into_boxed_slice();
+                    let raw = Box::into_raw(boxed).cast::<u8>();
+                    // SAFETY: caller guarantees out_ptr/out_len are writable.
+                    unsafe {
+                        *out_ptr = raw;
+                        *out_len = len;
+                    }
+                    return;
+                }
+                write_empty();
+                return;
+            }
+        }
+    }
 
     let Some(rx_arc) = channel_get_receiver(handle) else {
         write_empty();
@@ -355,6 +470,73 @@ pub unsafe extern "C" fn kodo_channel_recv_string(
         _ => {
             write_empty();
         }
+    }
+}
+
+/// Waits on two channels and returns the index (0 or 1) of the first channel
+/// that has data available.
+///
+/// Polls both channels in a loop using non-blocking `try_recv`. When data is
+/// found, it is stored in the channel's `peeked` buffer so the subsequent
+/// `channel_recv` call retrieves it without blocking.
+///
+/// Calls `kodo_green_maybe_yield` between attempts to cooperate with the
+/// green-thread scheduler.
+///
+/// # Safety
+///
+/// Both `ch1` and `ch2` must be valid channel handles obtained from
+/// `kodo_channel_new`.
+#[no_mangle]
+pub extern "C" fn kodo_channel_select_2(ch1: i64, ch2: i64) -> i64 {
+    loop {
+        if try_peek_channel(ch1) {
+            return 0;
+        }
+        if try_peek_channel(ch2) {
+            return 1;
+        }
+        // Yield to the green-thread scheduler before retrying.
+        // SAFETY: kodo_green_maybe_yield is always safe to call.
+        unsafe {
+            crate::green::kodo_green_maybe_yield();
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// Waits on three channels and returns the index (0, 1, or 2) of the first
+/// channel that has data available.
+///
+/// Polls all three channels in a loop using non-blocking `try_recv`. When data
+/// is found, it is stored in the channel's `peeked` buffer so the subsequent
+/// `channel_recv` call retrieves it without blocking.
+///
+/// Calls `kodo_green_maybe_yield` between attempts to cooperate with the
+/// green-thread scheduler.
+///
+/// # Safety
+///
+/// All three handles must be valid channel handles obtained from
+/// `kodo_channel_new`.
+#[no_mangle]
+pub extern "C" fn kodo_channel_select_3(ch1: i64, ch2: i64, ch3: i64) -> i64 {
+    loop {
+        if try_peek_channel(ch1) {
+            return 0;
+        }
+        if try_peek_channel(ch2) {
+            return 1;
+        }
+        if try_peek_channel(ch3) {
+            return 2;
+        }
+        // Yield to the green-thread scheduler before retrying.
+        // SAFETY: kodo_green_maybe_yield is always safe to call.
+        unsafe {
+            crate::green::kodo_green_maybe_yield();
+        }
+        std::thread::yield_now();
     }
 }
 
@@ -713,5 +895,50 @@ mod tests {
     fn await_invalid_handle_returns_zero() {
         let result = kodo_await(999_999);
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn channel_select_2_returns_ready_channel() {
+        let ch1 = kodo_channel_new();
+        let ch2 = kodo_channel_new();
+        // Send data to ch2 only — select should return 1.
+        kodo_channel_send(ch2, 99);
+        let idx = kodo_channel_select_2(ch1, ch2);
+        assert_eq!(idx, 1);
+        // The peeked value should be retrievable via recv.
+        let val = kodo_channel_recv(ch2);
+        assert_eq!(val, 99);
+        kodo_channel_free(ch1);
+        kodo_channel_free(ch2);
+    }
+
+    #[test]
+    fn channel_select_2_returns_first_ready() {
+        let ch1 = kodo_channel_new();
+        let ch2 = kodo_channel_new();
+        // Send data to ch1 — select should return 0.
+        kodo_channel_send(ch1, 42);
+        let idx = kodo_channel_select_2(ch1, ch2);
+        assert_eq!(idx, 0);
+        let val = kodo_channel_recv(ch1);
+        assert_eq!(val, 42);
+        kodo_channel_free(ch1);
+        kodo_channel_free(ch2);
+    }
+
+    #[test]
+    fn channel_select_3_returns_ready_channel() {
+        let ch1 = kodo_channel_new();
+        let ch2 = kodo_channel_new();
+        let ch3 = kodo_channel_new();
+        // Send data to ch3 only — select should return 2.
+        kodo_channel_send(ch3, 77);
+        let idx = kodo_channel_select_3(ch1, ch2, ch3);
+        assert_eq!(idx, 2);
+        let val = kodo_channel_recv(ch3);
+        assert_eq!(val, 77);
+        kodo_channel_free(ch1);
+        kodo_channel_free(ch2);
+        kodo_channel_free(ch3);
     }
 }

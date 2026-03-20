@@ -184,6 +184,14 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("kodo_green_maybe_yield".to_string())
         .or_insert(Type::Unit);
 
+    // Channel select builtins — return Int (index of the ready channel).
+    fn_return_types
+        .entry("channel_select_2".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("channel_select_3".to_string())
+        .or_insert(Type::Int);
+
     // Generic channel builtins.
     fn_return_types
         .entry("channel_generic_new".to_string())

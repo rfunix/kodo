@@ -1,0 +1,23 @@
+module channel_select {
+    meta {
+        purpose: "Demonstrates channel_select_2 for multiplexing channels"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch1: Channel<Int> = channel_new()
+        let ch2: Channel<Int> = channel_new()
+
+        spawn { channel_send(ch2, 99) }
+
+        let idx: Int = channel_select_2(ch1, ch2)
+        if idx == 0 {
+            let v: Int = channel_recv(ch1)
+            print_int(v)
+        } else {
+            let v: Int = channel_recv(ch2)
+            print_int(v)
+        }
+        return 0
+    }
+}
