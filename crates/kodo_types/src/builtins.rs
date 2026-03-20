@@ -129,6 +129,16 @@ impl TypeChecker {
             "kodo_future_await".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Int)),
         );
+        // kodo_future_complete_bytes(handle: Int, data_ptr: Int, data_size: Int) -> ()
+        self.env.insert(
+            "kodo_future_complete_bytes".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        // kodo_future_await_bytes(handle: Int, out_ptr: Int, data_size: Int) -> ()
+        self.env.insert(
+            "kodo_future_await_bytes".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
     }
 
     /// Registers test assertion, harness, property, timeout, and isolation builtins.

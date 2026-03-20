@@ -202,6 +202,21 @@ fn declare_concurrency_builtins(
         [types::I64],
         types::I64
     );
+    // Byte-buffer variants for composite return types (e.g., String).
+    decl_void!(
+        "kodo_future_complete_bytes",
+        "kodo_future_complete_bytes",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_future_await_bytes",
+        "kodo_future_await_bytes",
+        types::I64,
+        types::I64,
+        types::I64
+    );
     decl_ret!("kodo_parallel_begin", "kodo_parallel_begin", [], types::I64);
     decl_void!(
         "kodo_parallel_spawn",

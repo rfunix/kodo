@@ -1,0 +1,16 @@
+module async_string {
+    meta {
+        purpose: "Async function returning String"
+        version: "0.1.0"
+    }
+
+    async fn greet(name: String) -> String {
+        return "Hello, " + name + "!"
+    }
+
+    async fn main() -> Int {
+        let msg: String = greet("Kodo").await
+        print(msg)
+        return 0
+    }
+}

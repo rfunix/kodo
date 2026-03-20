@@ -788,14 +788,21 @@ fn try_steal_from(
 
 /// Entry in the global future table.
 ///
-/// Each future has a completion flag, an optional result value, and a list of
+/// Each future has a completion flag, an optional result buffer, and a list of
 /// green threads waiting for it. When the future is completed, all waiters are
 /// moved from Blocked to Ready and pushed to the global run queue.
+///
+/// The result is stored as a `Vec<u8>` byte buffer, allowing futures to carry
+/// composite return types (e.g., String = `(ptr, len)` = 16 bytes) in addition
+/// to simple `i64` values (8 bytes).
 struct FutureEntry {
     /// Whether the future has been completed.
     completed: AtomicBool,
-    /// The result value, set once when the future is completed.
-    result: Mutex<Option<i64>>,
+    /// The result bytes, set once when the future is completed.
+    ///
+    /// For simple `i64` results, this holds 8 bytes (little-endian).
+    /// For composite types like String `(ptr, len)`, this holds 16 bytes.
+    result: Mutex<Option<Vec<u8>>>,
     /// Green thread IDs blocked waiting for this future.
     waiters: Mutex<Vec<GreenThreadId>>,
 }
@@ -837,8 +844,9 @@ pub unsafe extern "C" fn kodo_future_new() -> i64 {
     }
 }
 
-/// Completes a future with the given result value.
+/// Completes a future with the given `i64` result value.
 ///
+/// Stores the result as 8 bytes (little-endian) in the future's byte buffer.
 /// All green threads waiting on this future are moved from
 /// [`ThreadStatus::Blocked`] to [`ThreadStatus::Ready`] and pushed
 /// into the global run queue so workers can pick them up.
@@ -849,6 +857,39 @@ pub unsafe extern "C" fn kodo_future_new() -> i64 {
 /// Must only be called once per future; subsequent calls are no-ops.
 #[no_mangle]
 pub unsafe extern "C" fn kodo_future_complete(handle: i64, result: i64) {
+    let bytes = result.to_le_bytes().to_vec();
+    future_complete_inner(handle, bytes);
+}
+
+/// Completes a future with an arbitrary byte buffer.
+///
+/// Copies `data_size` bytes from the memory pointed to by `data_ptr` into
+/// the future's result buffer. This supports composite return types such as
+/// String `(ptr: i64, len: i64)` which require 16 bytes.
+///
+/// # Safety
+///
+/// - `handle` must be a valid future handle returned by [`kodo_future_new`].
+/// - `data_ptr` must point to a readable buffer of at least `data_size` bytes.
+/// - Must only be called once per future; subsequent calls are no-ops.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_future_complete_bytes(handle: i64, data_ptr: i64, data_size: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = data_size as usize;
+    let mut bytes = vec![0u8; size];
+    if size > 0 {
+        // SAFETY: caller guarantees data_ptr points to data_size readable bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data_ptr as *const u8, bytes.as_mut_ptr(), size);
+        }
+    }
+    future_complete_inner(handle, bytes);
+}
+
+/// Shared implementation for completing a future with a byte buffer.
+///
+/// Stores the bytes, marks the future as completed, and wakes all waiters.
+fn future_complete_inner(handle: i64, bytes: Vec<u8>) {
     #[allow(clippy::cast_sign_loss)]
     let id = handle as u64;
     let table = get_future_table();
@@ -857,7 +898,7 @@ pub unsafe extern "C" fn kodo_future_complete(handle: i64, result: i64) {
 
     // Store the result and mark completed.
     if let Ok(mut r) = entry.result.lock() {
-        *r = Some(result);
+        *r = Some(bytes);
     }
     entry.completed.store(true, Ordering::Release);
 
@@ -889,10 +930,11 @@ pub unsafe extern "C" fn kodo_future_complete(handle: i64, result: i64) {
 
 /// Awaits a future, blocking the current green thread if not yet complete.
 ///
-/// If the future is already completed, returns the result immediately.
-/// Otherwise, adds the current green thread to the future's waiter list,
-/// marks it as [`ThreadStatus::Blocked`], and switches back to the scheduler.
-/// When the future is completed, the thread is woken and returns the result.
+/// If the future is already completed, returns the `i64` result immediately
+/// (reading 8 bytes from the stored byte buffer). Otherwise, adds the current
+/// green thread to the future's waiter list, marks it as
+/// [`ThreadStatus::Blocked`], and switches back to the scheduler. When the
+/// future is completed, the thread is woken and returns the result.
 ///
 /// # Safety
 ///
@@ -909,9 +951,9 @@ pub unsafe extern "C" fn kodo_future_await(handle: i64) -> i64 {
         if let Ok(t) = table.lock() {
             if let Some(entry) = t.get(&id) {
                 if entry.completed.load(Ordering::Acquire) {
-                    // Future is done — return the result.
+                    // Future is done — extract i64 from byte buffer.
                     if let Ok(r) = entry.result.lock() {
-                        return r.unwrap_or(0);
+                        return extract_i64_from_result(r.as_deref());
                     }
                     return 0;
                 }
@@ -940,42 +982,135 @@ pub unsafe extern "C" fn kodo_future_await(handle: i64) -> i64 {
             return 0;
         }
 
-        // Block the current green thread.
-        let current_id = CURRENT_THREAD.get();
-        let Some(tid) = current_id else { return 0 };
-        let sched = get_scheduler();
-
-        // Mark ourselves as Blocked.
-        if let Ok(mut threads) = sched.threads.lock() {
-            if let Some(thread) = threads.get_mut(&tid) {
-                thread.status = ThreadStatus::Blocked;
-            }
+        // Block the current green thread — shared with kodo_future_await_bytes.
+        if !future_await_block_current() {
+            return 0;
         }
-
-        // Get our context pointer and switch back to the scheduler.
-        let ctx_ptr: *mut crate::context::Context = {
-            let Ok(mut threads) = sched.threads.lock() else {
-                return 0;
-            };
-            let Some(t) = threads.get_mut(&tid) else {
-                return 0;
-            };
-            &raw mut t.context
-        };
-
-        SCHEDULER_CONTEXT.with(|sched_ctx| {
-            // SAFETY: Both contexts are valid. The green thread's context lives
-            // in the HashMap (stable address). The scheduler context is on
-            // thread-local storage. Cooperative scheduling ensures single access.
-            unsafe {
-                switch_context(ctx_ptr, sched_ctx.get());
-            }
-        });
-
-        // We've been woken up — reset yield flag and check result.
-        SHOULD_YIELD.set(true);
         // Loop back to check if the future is now completed.
     }
+}
+
+/// Awaits a future and copies the result bytes to caller-provided buffer.
+///
+/// This variant is used for composite return types (e.g., String) where
+/// the result is larger than a single `i64`. Copies `data_size` bytes from
+/// the future's result buffer into memory at `out_ptr`.
+///
+/// # Safety
+///
+/// - Must be called from within a green thread context.
+/// - `handle` must be a valid future handle.
+/// - `out_ptr` must point to a writable buffer of at least `data_size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_future_await_bytes(handle: i64, out_ptr: i64, data_size: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = data_size as usize;
+    #[allow(clippy::cast_sign_loss)]
+    let id = handle as u64;
+
+    loop {
+        let table = get_future_table();
+        if let Ok(t) = table.lock() {
+            if let Some(entry) = t.get(&id) {
+                if entry.completed.load(Ordering::Acquire) {
+                    // Future is done — copy bytes to output buffer.
+                    if let Ok(r) = entry.result.lock() {
+                        if let Some(bytes) = r.as_ref() {
+                            let copy_len = bytes.len().min(size);
+                            if copy_len > 0 {
+                                // SAFETY: caller guarantees out_ptr is writable
+                                // for data_size bytes. copy_len <= size.
+                                unsafe {
+                                    std::ptr::copy_nonoverlapping(
+                                        bytes.as_ptr(),
+                                        out_ptr as *mut u8,
+                                        copy_len,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                let current = CURRENT_THREAD.get();
+                if let Some(tid) = current {
+                    if let Ok(mut w) = entry.waiters.lock() {
+                        w.push(tid);
+                    }
+                } else {
+                    drop(t);
+                    // SAFETY: kodo_green_run is safe after kodo_green_init.
+                    unsafe {
+                        kodo_green_run();
+                    }
+                    continue;
+                }
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+
+        if !future_await_block_current() {
+            return;
+        }
+    }
+}
+
+/// Extracts an `i64` from the first 8 bytes of a result buffer.
+///
+/// Returns 0 if the buffer is `None` or shorter than 8 bytes.
+fn extract_i64_from_result(bytes: Option<&[u8]>) -> i64 {
+    match bytes {
+        Some(b) if b.len() >= 8 => {
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&b[..8]);
+            i64::from_le_bytes(arr)
+        }
+        _ => 0,
+    }
+}
+
+/// Blocks the current green thread and switches back to the scheduler.
+///
+/// Returns `true` if the thread was successfully blocked and resumed,
+/// `false` if there was an error (no current thread, lock failure).
+fn future_await_block_current() -> bool {
+    let current_id = CURRENT_THREAD.get();
+    let Some(tid) = current_id else { return false };
+    let sched = get_scheduler();
+
+    // Mark ourselves as Blocked.
+    if let Ok(mut threads) = sched.threads.lock() {
+        if let Some(thread) = threads.get_mut(&tid) {
+            thread.status = ThreadStatus::Blocked;
+        }
+    }
+
+    // Get our context pointer and switch back to the scheduler.
+    let ctx_ptr: *mut crate::context::Context = {
+        let Ok(mut threads) = sched.threads.lock() else {
+            return false;
+        };
+        let Some(t) = threads.get_mut(&tid) else {
+            return false;
+        };
+        &raw mut t.context
+    };
+
+    SCHEDULER_CONTEXT.with(|sched_ctx| {
+        // SAFETY: Both contexts are valid. The green thread's context lives
+        // in the HashMap (stable address). The scheduler context is on
+        // thread-local storage. Cooperative scheduling ensures single access.
+        unsafe {
+            switch_context(ctx_ptr, sched_ctx.get());
+        }
+    });
+
+    // We've been woken up — reset yield flag and check result.
+    SHOULD_YIELD.set(true);
+    true
 }
 
 // ===========================================================================
@@ -1243,6 +1378,52 @@ mod tests {
         unsafe {
             let result = kodo_future_await(999_999);
             assert_eq!(result, 0, "unknown future should return 0");
+        }
+    }
+
+    #[test]
+    fn future_complete_bytes_then_await_bytes_roundtrip() {
+        // Complete a future with 16 bytes (simulating a String ptr+len pair)
+        // and read them back via kodo_future_await_bytes.
+        // SAFETY: calling the extern "C" API from a test context.
+        unsafe {
+            let handle = kodo_future_new();
+
+            // Simulate a String value: ptr=0x1234, len=5
+            let data: [i64; 2] = [0x1234, 5];
+            kodo_future_complete_bytes(
+                handle,
+                data.as_ptr() as i64,
+                std::mem::size_of_val(&data) as i64,
+            );
+
+            let mut out: [i64; 2] = [0, 0];
+            kodo_future_await_bytes(
+                handle,
+                out.as_mut_ptr() as i64,
+                std::mem::size_of_val(&out) as i64,
+            );
+
+            assert_eq!(out[0], 0x1234, "ptr component should match");
+            assert_eq!(out[1], 5, "len component should match");
+        }
+    }
+
+    #[test]
+    fn future_complete_bytes_then_await_i64_reads_first_8_bytes() {
+        // Complete a future with bytes but await with kodo_future_await —
+        // should read the first 8 bytes as an i64.
+        // SAFETY: calling the extern "C" API from a test context.
+        unsafe {
+            let handle = kodo_future_new();
+            let value: i64 = 99;
+            kodo_future_complete_bytes(
+                handle,
+                &value as *const i64 as i64,
+                std::mem::size_of::<i64>() as i64,
+            );
+            let result = kodo_future_await(handle);
+            assert_eq!(result, 99, "i64 await should extract value from bytes");
         }
     }
 }

@@ -147,6 +147,15 @@ impl MirBuilder {
         let local_id = self.alloc_local(resolved_ty.clone(), mutable);
         self.name_map.insert(name.to_string(), local_id);
         let val = self.lower_expr(value)?;
+        // Propagate future inner type: if the value is a local from an async
+        // call that carries a composite return type, record the variable name
+        // so that `resolve_future_inner_type` can find it at Await sites.
+        if let Value::Local(src_id) = &val {
+            let key = format!("__local_{}", src_id.0);
+            if let Some(inner_ty) = self.future_inner_types.get(&key).cloned() {
+                self.future_inner_types.insert(name.to_string(), inner_ty);
+            }
+        }
         // When the let binding has no type annotation (resolved_ty == Unknown),
         // infer the type from the lowered value and update the local's type
         // so that downstream passes (e.g. monomorphize_assert_callee) can

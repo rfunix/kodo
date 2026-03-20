@@ -1032,6 +1032,135 @@ fn translate_call(
         }
     }
 
+    // Synthetic __env_load_string: load a String (ptr+len) from an env pointer.
+    // The env stores a pointer to a _String slot (8 bytes). We load that
+    // pointer, then copy the 16 bytes (ptr, len) from it into the dest's
+    // _String stack slot.
+    if callee == "__env_load_string" {
+        if let (Some(ptr_arg), Some(Value::IntConst(offset))) = (args.first(), args.get(1)) {
+            let ptr_val = translate_value(
+                ptr_arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            #[allow(clippy::cast_possible_truncation)]
+            let off = *offset as i32;
+            // Load the pointer to the source _String slot.
+            let src_addr = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), ptr_val, off);
+            // Load ptr and len from the source slot.
+            let str_ptr =
+                builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_addr, STRING_PTR_OFFSET);
+            let str_len =
+                builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_addr, STRING_LEN_OFFSET);
+            // Store into the dest's _String stack slot.
+            if let Some((slot, ref slot_name)) = var_map.stack_slots.get(&dest) {
+                if slot_name == "_String" {
+                    let dest_ptr_addr =
+                        builder
+                            .ins()
+                            .stack_addr(types::I64, *slot, STRING_PTR_OFFSET);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), str_ptr, dest_ptr_addr, 0);
+                    let dest_len_addr =
+                        builder
+                            .ins()
+                            .stack_addr(types::I64, *slot, STRING_LEN_OFFSET);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), str_len, dest_len_addr, 0);
+                    let var = var_map.get(dest)?;
+                    let addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                    builder.def_var(var, addr);
+                    return Ok(());
+                }
+            }
+            // Fallback: just store the pointer.
+            var_map.def_var_with_cast(dest, src_addr, builder)?;
+            return Ok(());
+        }
+    }
+
+    // Synthetic __future_await_string: await a future carrying a composite
+    // String result (ptr + len = 16 bytes) and copy it into the dest's
+    // _String stack slot.
+    if callee == "__future_await_string" {
+        if let Some(handle_arg) = args.first() {
+            let handle_val = translate_value(
+                handle_arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            if let Some((slot, ref slot_name)) = var_map.stack_slots.get(&dest) {
+                if slot_name == "_String" {
+                    let slot_addr = builder.ins().stack_addr(types::I64, *slot, 0);
+                    let data_size = builder.ins().iconst(types::I64, 16);
+                    // Call kodo_future_await_bytes(handle, out_ptr, data_size)
+                    if let Some(bi) = builtins.get("kodo_future_await_bytes") {
+                        let func_ref = module.declare_func_in_func(bi.func_id, builder.func);
+                        builder
+                            .ins()
+                            .call(func_ref, &[handle_val, slot_addr, data_size]);
+                    }
+                    // Point the variable at the stack slot.
+                    let var = var_map.get(dest)?;
+                    builder.def_var(var, slot_addr);
+                    // Mark as heap-allocated for cleanup.
+                    var_map.heap_locals.insert(dest, HeapKind::String);
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // Synthetic __future_complete_string: complete a future with a String
+    // value (ptr + len = 16 bytes) from a _String stack slot.
+    if callee == "__future_complete_string" {
+        if let (Some(handle_arg), Some(str_arg)) = (args.first(), args.get(1)) {
+            let handle_val = translate_value(
+                handle_arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            let str_val = translate_value(
+                str_arg,
+                builder,
+                module,
+                func_ids,
+                builtins,
+                var_map,
+                struct_layouts,
+            )?;
+            let data_size = builder.ins().iconst(types::I64, 16);
+            // Call kodo_future_complete_bytes(handle, data_ptr, data_size)
+            if let Some(bi) = builtins.get("kodo_future_complete_bytes") {
+                let func_ref = module.declare_func_in_func(bi.func_id, builder.func);
+                builder
+                    .ins()
+                    .call(func_ref, &[handle_val, str_val, data_size]);
+            }
+            return Ok(());
+        }
+    }
+
     // Enum discriminant check methods — inline, no FFI needed.
     // Layout: [discriminant i64 @ offset 0][payload @ offset 8+].
     // is_ok/is_some = discriminant == 0; is_err/is_none = discriminant != 0.

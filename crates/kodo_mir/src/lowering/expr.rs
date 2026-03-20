@@ -153,14 +153,35 @@ impl MirBuilder {
             // completes, then return the result value.  The operand must
             // evaluate to a future handle (i64) returned by an async fn call.
             Expr::Await { operand, .. } => {
+                // Determine if this future carries a composite type by checking
+                // the operand: if it's a direct async call, look up the callee's
+                // return type; if it's an ident, check the future_inner_types map.
+                let inner_type = self.resolve_future_inner_type(operand);
+                let is_composite = matches!(inner_type, Some(Type::String));
+
                 let future_val = self.lower_expr(operand)?;
-                let result_local = self.alloc_local(Type::Int, false);
-                self.emit(Instruction::Call {
-                    dest: result_local,
-                    callee: "kodo_future_await".to_string(),
-                    args: vec![future_val],
-                });
-                Ok(Value::Local(result_local))
+
+                if is_composite {
+                    // Composite return: allocate a String-typed local and use
+                    // the synthetic `__future_await_string` call that the
+                    // codegen handles specially — it passes the address of the
+                    // dest's _String stack slot to the runtime.
+                    let result_local = self.alloc_local(Type::String, false);
+                    self.emit(Instruction::Call {
+                        dest: result_local,
+                        callee: "__future_await_string".to_string(),
+                        args: vec![future_val],
+                    });
+                    Ok(Value::Local(result_local))
+                } else {
+                    let result_local = self.alloc_local(Type::Int, false);
+                    self.emit(Instruction::Call {
+                        dest: result_local,
+                        callee: "kodo_future_await".to_string(),
+                        args: vec![future_val],
+                    });
+                    Ok(Value::Local(result_local))
+                }
             }
 
             // StringInterp is lowered here (not in desugar) because we need
@@ -806,20 +827,65 @@ impl MirBuilder {
         Ok(Value::Local(dest))
     }
 
+    /// Resolves the inner return type of a future from the `Await` operand.
+    ///
+    /// Inspects the operand expression to determine if the future carries a
+    /// composite type (e.g., `String`). Returns `Some(Type)` for composite
+    /// types, `None` for simple `i64` types.
+    ///
+    /// Handles two patterns:
+    /// - Direct call: `greet("Kodo").await` — checks async fn return type.
+    /// - Variable: `let f = greet("Kodo"); f.await` — checks `future_inner_types` map.
+    fn resolve_future_inner_type(&self, operand: &Expr) -> Option<Type> {
+        match operand {
+            // Direct async call: look up the callee's return type.
+            Expr::Call { callee, .. } => {
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if self.async_fn_names.contains(name) {
+                        let ret_ty = self.fn_return_types.get(name)?;
+                        if matches!(ret_ty, Type::String) {
+                            return Some(ret_ty.clone());
+                        }
+                    }
+                }
+                None
+            }
+            // Variable holding a future handle: check the tracking map.
+            Expr::Ident(name, _) => {
+                // Check by variable name first.
+                if let Some(ty) = self.future_inner_types.get(name) {
+                    return Some(ty.clone());
+                }
+                // Check by local ID: look up the variable's local ID and
+                // check if it was recorded during async call lowering.
+                if let Some(local_id) = self.name_map.get(name) {
+                    let key = format!("__local_{}", local_id.0);
+                    if let Some(ty) = self.future_inner_types.get(&key) {
+                        return Some(ty.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// Lowers an async function call by creating a future, spawning a green
     /// thread that executes the function body and completes the future, and
     /// returning the future handle to the caller.
     ///
-    /// The pattern is:
-    /// 1. `future_handle = kodo_future_new()`
-    /// 2. Lambda-lift a wrapper: `__async_wrapper_N(env_ptr)` that unpacks
-    ///    `(future_handle, arg1, arg2, ...)` from env, calls the original
-    ///    function, and calls `kodo_future_complete(future_handle, result)`.
-    /// 3. Pack env: `(future_handle, arg1, arg2, ...)`
-    /// 4. `kodo_green_spawn_with_env(wrapper, env_ptr, env_size)`
-    /// 5. Return `future_handle`
+    /// For composite return types (e.g., `String`), the wrapper uses
+    /// `kodo_future_complete_bytes` to store the full value in the future.
     #[allow(clippy::too_many_lines)]
     fn lower_async_call(&mut self, callee_name: &str, args: &[Expr]) -> Result<Value> {
+        // Determine if the async function returns a composite type (String).
+        let ret_type = self
+            .fn_return_types
+            .get(callee_name)
+            .cloned()
+            .unwrap_or(Type::Int);
+        let is_composite = matches!(ret_type, Type::String);
+
         // Step 1: create the future handle.
         let future_handle = self.alloc_local(Type::Int, false);
         self.emit(Instruction::Call {
@@ -828,10 +894,26 @@ impl MirBuilder {
             args: vec![],
         });
 
-        // Evaluate arguments in the caller's scope.
+        // Evaluate arguments in the caller's scope. For String arguments,
+        // ensure they are materialized in a _String local so the env packing
+        // stores a pointer to a (ptr, len) slot rather than a raw data pointer.
+        let param_types_for_pack = self.fn_param_types.get(callee_name).cloned();
         let mut arg_values = Vec::with_capacity(args.len());
-        for arg in args {
-            arg_values.push(self.lower_expr(arg)?);
+        for (idx, arg) in args.iter().enumerate() {
+            let val = self.lower_expr(arg)?;
+            let is_string_param = param_types_for_pack
+                .as_ref()
+                .and_then(|tys| tys.get(idx))
+                .is_some_and(|ty| matches!(ty, Type::String));
+            if is_string_param && matches!(val, Value::StringConst(_)) {
+                // Materialize the string literal into a _String local so
+                // that env_pack stores a pointer to the (ptr, len) slot.
+                let str_local = self.alloc_local(Type::String, false);
+                self.emit(Instruction::Assign(str_local, val));
+                arg_values.push(Value::Local(str_local));
+            } else {
+                arg_values.push(val);
+            }
         }
 
         // Step 2: lambda-lift the async wrapper function.
@@ -861,15 +943,32 @@ impl MirBuilder {
             args: vec![Value::Local(env_param), Value::IntConst(0)],
         });
 
-        // Unpack each argument from subsequent env slots.
+        // Unpack each argument from subsequent env slots. For String
+        // arguments, use __env_load_string which dereferences the stored
+        // pointer and populates a _String stack slot.
+        let param_types = self.fn_param_types.get(callee_name).cloned();
         let mut forward_args = Vec::with_capacity(args.len());
         for (idx, _) in args.iter().enumerate() {
-            let arg_local = wrapper_builder.alloc_local(Type::Int, false);
+            let is_string_arg = param_types
+                .as_ref()
+                .and_then(|tys| tys.get(idx))
+                .is_some_and(|ty| matches!(ty, Type::String));
+            let arg_ty = if is_string_arg {
+                Type::String
+            } else {
+                Type::Int
+            };
+            let arg_local = wrapper_builder.alloc_local(arg_ty, false);
             #[allow(clippy::cast_possible_wrap)]
             let offset = ((idx + 1) as i64) * 8;
+            let load_callee = if is_string_arg {
+                "__env_load_string"
+            } else {
+                "__env_load"
+            };
             wrapper_builder.emit(Instruction::Call {
                 dest: arg_local,
-                callee: "__env_load".to_string(),
+                callee: load_callee.to_string(),
                 args: vec![Value::Local(env_param), Value::IntConst(offset)],
             });
             forward_args.push(Value::Local(arg_local));
@@ -877,7 +976,12 @@ impl MirBuilder {
 
         // Call the original async function (which is lowered as a normal
         // function in MIR — the async wrapper is what makes it concurrent).
-        let call_result = wrapper_builder.alloc_local(Type::Int, false);
+        let call_result_ty = if is_composite {
+            ret_type.clone()
+        } else {
+            Type::Int
+        };
+        let call_result = wrapper_builder.alloc_local(call_result_ty, false);
         wrapper_builder.emit(Instruction::Call {
             dest: call_result,
             callee: callee_name.to_string(),
@@ -886,11 +990,23 @@ impl MirBuilder {
 
         // Complete the future with the result.
         let void_dest = wrapper_builder.alloc_local(Type::Unit, false);
-        wrapper_builder.emit(Instruction::Call {
-            dest: void_dest,
-            callee: "kodo_future_complete".to_string(),
-            args: vec![Value::Local(w_future), Value::Local(call_result)],
-        });
+        if is_composite {
+            // For composite types (String = 16 bytes), use the synthetic
+            // `__future_complete_string` call that the codegen handles
+            // specially — it passes the address of the source _String stack
+            // slot and the data size to the runtime.
+            wrapper_builder.emit(Instruction::Call {
+                dest: void_dest,
+                callee: "__future_complete_string".to_string(),
+                args: vec![Value::Local(w_future), Value::Local(call_result)],
+            });
+        } else {
+            wrapper_builder.emit(Instruction::Call {
+                dest: void_dest,
+                callee: "kodo_future_complete".to_string(),
+                args: vec![Value::Local(w_future), Value::Local(call_result)],
+            });
+        }
 
         wrapper_builder.seal_block_final(crate::Terminator::Return(Value::Unit));
 
@@ -908,6 +1024,13 @@ impl MirBuilder {
         self.generated_closures.push(mir_func);
         self.fn_return_types
             .insert(wrapper_name.clone(), Type::Unit);
+
+        // Record the inner return type for this future handle so that
+        // the Await expression can select the correct await variant.
+        if is_composite {
+            self.future_inner_types
+                .insert(format!("__local_{}", future_handle.0), ret_type);
+        }
 
         // Step 3: pack env = (future_handle, arg1, arg2, ...) in the caller.
         let env_local = self.alloc_local(Type::Int, false);

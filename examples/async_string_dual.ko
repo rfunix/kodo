@@ -1,0 +1,24 @@
+module async_string_dual {
+    meta {
+        purpose: "Two concurrent async functions returning String"
+        version: "0.1.0"
+    }
+
+    async fn make_greeting(name: String) -> String {
+        return "Hi, " + name + "!"
+    }
+
+    async fn make_farewell(name: String) -> String {
+        return "Bye, " + name + "!"
+    }
+
+    async fn main() -> Int {
+        let f1: Future<String> = make_greeting("Alice")
+        let f2: Future<String> = make_farewell("Bob")
+        let a: String = f1.await
+        let b: String = f2.await
+        print(a)
+        print(b)
+        return 0
+    }
+}

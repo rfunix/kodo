@@ -118,6 +118,14 @@ pub struct MirBuilder {
     /// Names of async functions — used during call lowering to emit
     /// future-based spawning instead of synchronous calls.
     async_fn_names: HashSet<String>,
+    /// Maps variable names holding future handles to the inner return type
+    /// of the async function that produced them.
+    ///
+    /// Populated during async call lowering when the result is bound to a
+    /// variable. Used at `Await` sites to determine whether to use
+    /// `kodo_future_await` (for `Int`) or `kodo_future_await_bytes` (for
+    /// composite types like `String`).
+    future_inner_types: HashMap<String, kodo_types::Type>,
 }
 
 impl MirBuilder {
@@ -147,6 +155,7 @@ impl MirBuilder {
             trait_registry: HashMap::new(),
             fn_param_types: HashMap::new(),
             async_fn_names: HashSet::new(),
+            future_inner_types: HashMap::new(),
         }
     }
 
