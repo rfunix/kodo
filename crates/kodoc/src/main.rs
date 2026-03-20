@@ -60,6 +60,18 @@ enum Command {
         /// Disable green thread yield point insertion and use legacy scheduler.
         #[arg(long, default_value_t = false)]
         no_green_threads: bool,
+
+        /// Code generation backend: cranelift (default) or llvm.
+        #[arg(long, default_value = "cranelift")]
+        backend: String,
+
+        /// Emit LLVM IR (.ll) file without compiling to native code (LLVM backend only).
+        #[arg(long, default_value_t = false)]
+        emit_llvm: bool,
+
+        /// Build in release mode (alias for --backend=llvm).
+        #[arg(long, default_value_t = false)]
+        release: bool,
     },
     /// Lower a source file to MIR and print it without generating code.
     Mir {
@@ -294,11 +306,16 @@ fn main() {
             emit_mir,
             threads,
             no_green_threads,
+            backend,
+            emit_llvm,
+            release,
         } => {
             // Set KODO_THREADS so the runtime picks up the requested thread count.
             if threads > 0 {
                 std::env::set_var("KODO_THREADS", threads.to_string());
             }
+            // --release is an alias for --backend=llvm.
+            let effective_backend = if release { "llvm" } else { &backend };
             commands::build::run_build(
                 &file,
                 output.as_deref(),
@@ -306,6 +323,8 @@ fn main() {
                 &contracts,
                 emit_mir,
                 !no_green_threads,
+                effective_backend,
+                emit_llvm,
             )
         }
         Command::Mir { file, contracts } => commands::misc::run_mir(&file, &contracts),

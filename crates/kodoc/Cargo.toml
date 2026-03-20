@@ -19,6 +19,7 @@ kodo_contracts = { workspace = true, features = ["smt"] }
 kodo_resolver.workspace = true
 kodo_mir.workspace = true
 kodo_codegen.workspace = true
+kodo_codegen_llvm.workspace = true
 kodo_std.workspace = true
 kodo_desugar.workspace = true
 kodo_lsp.workspace = true

@@ -24,7 +24,7 @@ use crate::{certificate, diagnostics};
 /// When `file` is a directory, discovers all `.ko` files, finds the entry point
 /// containing `fn main()`, builds a dependency graph, and compiles in
 /// topological order.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub(crate) fn run_build(
     file: &PathBuf,
     output: Option<&std::path::Path>,
@@ -32,6 +32,8 @@ pub(crate) fn run_build(
     contracts_mode_str: &str,
     emit_mir: bool,
     green_threads: bool,
+    backend: &str,
+    emit_llvm: bool,
 ) -> i32 {
     // If the argument is a directory, delegate to directory compilation.
     if file.is_dir() {
@@ -42,6 +44,8 @@ pub(crate) fn run_build(
             contracts_mode_str,
             emit_mir,
             green_threads,
+            backend,
+            emit_llvm,
         );
     }
 
@@ -390,45 +394,107 @@ pub(crate) fn run_build(
         kodo_mir::apply_recoverable_contracts(&mut all_mir_functions);
     }
 
-    // Code generation
-    let options = kodo_codegen::CodegenOptions::default();
-    // Build vtable definitions for dynamic dispatch.
-    // For each (concrete_type, trait_name) pair, collect the mangled method names
-    // in trait method declaration order.
+    // Code generation — dispatch based on backend.
     let vtable_defs = build_vtable_defs(&checker);
-
-    let object_bytes = match kodo_codegen::compile_module_with_vtables(
-        &all_mir_functions,
-        &struct_defs,
-        &enum_defs,
-        &vtable_defs,
-        &options,
-        Some(&metadata_json),
-    ) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("codegen error: {e}");
-            return 1;
-        }
-    };
 
     // Determine output path
     let output_path = output
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| file.with_extension(""));
 
-    // Write object file to a temporary location
-    let obj_path = output_path.with_extension("o");
-    if let Err(e) = std::fs::write(&obj_path, &object_bytes) {
-        eprintln!("error: could not write object file: {e}");
-        return 1;
-    }
+    let link_result = if backend == "llvm" {
+        // LLVM backend: generate textual IR, optionally compile with llc.
+        let llvm_opts = kodo_codegen_llvm::LLVMCodegenOptions::default();
+        let llvm_vtable_defs: std::collections::HashMap<(String, String), Vec<String>> =
+            vtable_defs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+        let ir = match kodo_codegen_llvm::compile_module_to_llvm_ir(
+            &all_mir_functions,
+            &struct_defs,
+            &enum_defs,
+            &llvm_vtable_defs,
+            &llvm_opts,
+        ) {
+            Ok(ir) => ir,
+            Err(e) => {
+                eprintln!("codegen-llvm error: {e}");
+                return 1;
+            }
+        };
 
-    // Link with the runtime
-    let link_result = link_executable(&obj_path, &output_path);
+        let ll_path = output_path.with_extension("ll");
+        if let Err(e) = std::fs::write(&ll_path, &ir) {
+            eprintln!("error: could not write LLVM IR file: {e}");
+            return 1;
+        }
 
-    // Clean up the .o file
-    let _ = std::fs::remove_file(&obj_path);
+        if emit_llvm {
+            println!("Emitted LLVM IR → {}", ll_path.display());
+            return 0;
+        }
+
+        // Compile .ll → .o using llc, then link.
+        let obj_path = output_path.with_extension("o");
+        let llc_status = std::process::Command::new("llc")
+            .args([
+                "-filetype=obj",
+                "-O2",
+                ll_path.to_str().unwrap_or("output.ll"),
+                "-o",
+                obj_path.to_str().unwrap_or("output.o"),
+            ])
+            .status();
+
+        // Clean up the .ll file after compilation.
+        let _ = std::fs::remove_file(&ll_path);
+
+        match llc_status {
+            Ok(status) if status.success() => {
+                let result = link_executable(&obj_path, &output_path);
+                let _ = std::fs::remove_file(&obj_path);
+                result
+            }
+            Ok(status) => {
+                let _ = std::fs::remove_file(&obj_path);
+                Err(format!("llc exited with status {status}"))
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&obj_path);
+                Err(format!(
+                    "LLVM backend requires `llc` in PATH. Install LLVM or use default Cranelift backend. ({e})"
+                ))
+            }
+        }
+    } else {
+        // Cranelift backend (default).
+        let options = kodo_codegen::CodegenOptions::default();
+        let object_bytes = match kodo_codegen::compile_module_with_vtables(
+            &all_mir_functions,
+            &struct_defs,
+            &enum_defs,
+            &vtable_defs,
+            &options,
+            Some(&metadata_json),
+        ) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("codegen error: {e}");
+                return 1;
+            }
+        };
+
+        let obj_path = output_path.with_extension("o");
+        if let Err(e) = std::fs::write(&obj_path, &object_bytes) {
+            eprintln!("error: could not write object file: {e}");
+            return 1;
+        }
+
+        let result = link_executable(&obj_path, &output_path);
+        let _ = std::fs::remove_file(&obj_path);
+        result
+    };
 
     match link_result {
         Ok(()) => {
@@ -573,6 +639,7 @@ fn resolve_import_with_deps(
 /// 2. Finds the entry point (the file with `fn main()`).
 /// 3. Builds the dependency graph via imports.
 /// 4. Compiles the entry point, with all other project files available as imports.
+#[allow(clippy::too_many_arguments)]
 fn run_build_dir(
     dir: &std::path::Path,
     output: Option<&std::path::Path>,
@@ -580,6 +647,8 @@ fn run_build_dir(
     contracts_mode_str: &str,
     emit_mir: bool,
     green_threads: bool,
+    backend: &str,
+    emit_llvm: bool,
 ) -> i32 {
     let all_files = match find_ko_files(dir) {
         Ok(files) => files,
@@ -629,5 +698,7 @@ fn run_build_dir(
         contracts_mode_str,
         emit_mir,
         green_threads,
+        backend,
+        emit_llvm,
     )
 }
