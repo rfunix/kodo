@@ -1,148 +1,153 @@
 # Concurrency
 
-Kodo uses a cooperative scheduler to run spawned tasks. You express concurrency with `spawn` blocks, and the runtime executes them after `main` returns.
+Kōdo uses green threads for lightweight concurrency. You express concurrency with `spawn` blocks and `async`/`await`, and the runtime schedules them across multiple OS threads using work-stealing.
 
-## The Cooperative Scheduler
+## Green Threads
 
-Kodo's concurrency model is based on a task queue. When you use `spawn`, the block is not executed immediately. Instead, it is enqueued as a task. After `main` finishes, the runtime calls `kodo_run_scheduler`, which drains the queue and runs each task in order.
+Kōdo's concurrency model is based on **green threads** — lightweight threads managed by the runtime, not the OS. Each green thread has a 64KB stack and is multiplexed onto a pool of OS worker threads (M:N scheduling).
 
-Tasks may spawn additional tasks. The scheduler loops until the queue is empty, so nested spawns are fully supported.
+Key properties:
+- **Lightweight**: thousands of green threads can run on a few OS threads
+- **Cooperative scheduling**: green threads yield at loop iterations and function calls
+- **Work-stealing**: idle workers steal tasks from busy workers for load balancing
 
 ## Basic Spawn
 
-A `spawn` block runs a piece of code as a deferred task:
+A `spawn` block creates a new green thread:
 
 ```rust
 fn main() -> Int {
     spawn {
-        println("hello from a task")
+        println("hello from green thread 1")
     }
 
-    println("main finishing")
+    spawn {
+        println("hello from green thread 2")
+    }
+
+    println("main thread")
     return 0
 }
 ```
 
-Output:
-
-```rust
-main finishing
-hello from a task
+Output order may vary — green threads run concurrently:
 ```
-
-The spawned task runs after `main` returns, which is why "main finishing" appears first.
+main thread
+hello from green thread 1
+hello from green thread 2
+```
 
 ## Spawn with Captures
 
-Spawned blocks can reference variables from the enclosing scope. The compiler performs capture analysis and packs the captured values into an environment buffer that is passed to the task function at execution time.
+Spawned blocks can capture variables from the enclosing scope (by value):
 
 ```rust
 fn main() -> Int {
-    let greeting: Int = 42
+    let greeting: String = "hello"
+    let count: Int = 42
+
     spawn {
-        print_int(greeting)
+        print(greeting)
+        print_int(count)
     }
 
-    let a: Int = 10
-    let b: Int = 32
-    spawn {
-        print_int(a + b)
-    }
-
-    println("all tasks queued")
     return 0
 }
 ```
 
-Output:
+Captures are copied at the time of `spawn` — changes to the original variable after spawn do not affect the spawned thread.
+
+## Async/Await
+
+Use `async fn` for concurrent computations that return a value:
 
 ```rust
-all tasks queued
-42
-42
-```
+async fn compute(x: Int) -> Int {
+    return x * x
+}
 
-### How Captures Work
-
-Internally, the compiler transforms a `spawn` block into a top-level function via lambda lifting. Captured variables are serialized into an environment buffer (env packing):
-
-1. The compiler identifies free variables in the spawn body.
-2. Each captured value is written to a contiguous byte buffer at a known offset.
-3. The task function receives a pointer to this buffer and reads the values back.
-
-This means captures are by value -- the task receives a copy of each variable at the time of the `spawn`, not a reference to the original.
-
-## Multiple Tasks
-
-You can spawn as many tasks as you need. They execute in the order they were enqueued:
-
-```rust
 fn main() -> Int {
-    spawn {
-        println("[Task 1] no captures")
-    }
-
-    let x: Int = 10
-    spawn {
-        print_int(x)
-    }
-
-    let a: Int = 10
-    let b: Int = 32
-    spawn {
-        print_int(a + b)
-    }
-
-    println("[main] all tasks queued, finishing main")
+    let result: Int = compute(5).await
+    print_int(result)  // 25
     return 0
 }
 ```
 
-## Complete Example
+- `async fn` runs its body on a green thread and returns a `Future<T>`
+- `.await` suspends the calling green thread until the result is available
+- While waiting, the worker thread runs other green threads
+
+## Parallel Blocks
+
+For structured parallelism with real OS threads, use `parallel`:
 
 ```rust
-module async_tasks {
-    meta {
-        purpose: "Demonstrate spawn with captured variables",
-        version: "1.0.0",
-        author: "Kodo Team"
+fn main() -> Int {
+    parallel {
+        spawn { heavy_computation_a() }
+        spawn { heavy_computation_b() }
     }
-
-    fn main() -> Int {
-        spawn {
-            println("[Task 1] no captures")
-        }
-
-        let greeting: Int = 42
-        spawn {
-            print_int(greeting)
-        }
-
-        let a: Int = 10
-        let b: Int = 32
-        spawn {
-            print_int(a + b)
-        }
-
-        println("[main] all tasks queued, finishing main")
-        return 0
-    }
+    // Both tasks guaranteed complete here
+    return 0
 }
 ```
 
-Compile and run:
+`parallel` uses `std::thread::scope` — real OS threads with structured concurrency guarantees.
+
+## Channels
+
+Channels enable communication between green threads. They support any type:
+
+```rust
+fn main() -> Int {
+    let ch: Channel<Int> = channel_new()
+
+    spawn {
+        channel_send(ch, 42)
+    }
+
+    let val: Int = channel_recv(ch)
+    print_int(val)  // 42
+    return 0
+}
+```
+
+`channel_recv` yields the green thread while waiting — it does not block the OS thread.
+
+## Configuration
+
+Control the number of worker threads:
 
 ```bash
-cargo run -p kodoc -- build async_tasks.ko -o async_tasks
-./async_tasks
+# Auto-detect (default: one per CPU core)
+kodoc build myfile.ko
+
+# Specific thread count
+kodoc build myfile.ko --threads 4
+
+# Disable green threads (legacy sequential mode)
+kodoc build myfile.ko --no-green-threads
 ```
 
-## Async Syntax Preview
+## How It Works
 
-Kodo supports `async fn` and `.await` as syntax, but in v1 these compile synchronously. The syntax exists to establish conventions for future versions where true async I/O will be available. For now, use `spawn` for concurrency.
+The compiler inserts **yield points** at:
+- Loop back-edges (start of each `while`/`for` iteration)
+- Function calls (before calling user-defined functions)
+- I/O operations (`http_get`, `file_read`, `channel_recv`)
 
-## Next Steps
+At each yield point, the runtime checks if the current green thread should yield. If yes, it saves the thread's CPU registers, picks another thread from the work-stealing queue, and resumes it. This is transparent to the programmer.
 
-- [Actors](actors.md) -- stateful actors with message passing and the scheduler
-- [HTTP & JSON](http.md) -- making HTTP requests and parsing JSON
-- [Closures](closures.md) -- closures, lambda lifting, and higher-order functions
+## Known Limitations
+
+- **Async execution**: In v1, `async fn` calls execute synchronously and return their result directly. The runtime infrastructure for true futures exists but is not yet wired end-to-end.
+- **No `select`**: Cannot wait on multiple channels simultaneously (planned for v2).
+- **Fixed stack size**: Each green thread gets 64KB. Deep recursion may overflow.
+- **No preemption**: A green thread in a tight loop without yield points (e.g., inline assembly) will not yield. Use `--no-green-threads` if this is a problem.
+
+## Examples
+
+- [`examples/green_threads.ko`](https://github.com/rfunix/kodo/blob/main/examples/green_threads.ko) — basic spawn with green threads
+- [`examples/async_await.ko`](https://github.com/rfunix/kodo/blob/main/examples/async_await.ko) — async/await demonstration
+- [`examples/parallel_demo.ko`](https://github.com/rfunix/kodo/blob/main/examples/parallel_demo.ko) — parallel blocks with OS threads
+- [`examples/channel_demo.ko`](https://github.com/rfunix/kodo/blob/main/examples/channel_demo.ko) — channel communication

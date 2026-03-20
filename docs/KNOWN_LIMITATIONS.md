@@ -1,4 +1,4 @@
-# Known Limitations — Kōdo v0.5.1
+# Known Limitations — Kōdo v0.7.0
 
 This document lists the known limitations of the current alpha release. These are deliberate trade-offs or features not yet fully implemented.
 
@@ -11,18 +11,18 @@ This document lists the known limitations of the current alpha release. These ar
 
 ## Concurrency
 
-**Sequential spawn/async/await**: The `spawn`, `async`, and `await` keywords compile and execute, but spawned tasks run **sequentially** on the main thread, not in parallel. The `parallel {}` blocks use real OS threads.
+**Async execution**: In v1, `async fn` calls execute synchronously and return their result directly. The runtime infrastructure for true futures (create Future, spawn green thread, await later) exists but is not yet wired end-to-end in the MIR lowering.
 
-- **Impact**: `spawn` provides deferred execution semantics but no actual parallelism.
-- **Recommendation**: Use `parallel {}` blocks for real concurrency. Use `spawn` for structuring deferred work.
-- **Plan**: True multi-threaded task scheduling in a future release.
+- **Impact**: `async fn` works but doesn't provide true concurrency yet. `spawn {}` does run on green threads.
+- **Recommendation**: Use `spawn {}` for fire-and-forget concurrency. Use `parallel {}` for structured parallelism.
 
-## Channels
+**No channel select**: Cannot wait on multiple channels simultaneously.
 
-**Limited channel types**: Channels (`Channel<T>`) only support `Int`, `Bool`, and `String` payloads. Sending composite types (structs, enums, `List`, `Map`) through channels is not supported.
+- **Plan**: Go-style `select` statement in a future release.
 
-- **Impact**: Concurrent programs must serialize complex data to `String` or use shared state via actors.
-- **Recommendation**: Use actors for complex message passing between concurrent components.
+**Fixed green thread stack**: Each green thread gets 64KB. Deep recursion may overflow.
+
+- **Plan**: Growable stacks in a future release.
 
 ## Error Handling
 
