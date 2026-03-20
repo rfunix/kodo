@@ -334,6 +334,31 @@ pub(super) fn register_test_return_types(fn_return_types: &mut HashMap<String, T
     fn_return_types
         .entry("kodo_test_summary".to_string())
         .or_insert(Type::Unit);
+
+    // Property testing builtins — lifecycle and generator functions.
+    for name in &[
+        "kodo_prop_start",
+        "kodo_test_set_timeout",
+        "kodo_test_clear_timeout",
+        "kodo_test_isolate_start",
+        "kodo_test_isolate_end",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Unit);
+    }
+    fn_return_types
+        .entry("kodo_prop_gen_int".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("kodo_prop_gen_bool".to_string())
+        .or_insert(Type::Bool);
+    fn_return_types
+        .entry("kodo_prop_gen_float".to_string())
+        .or_insert(Type::Float64);
+    fn_return_types
+        .entry("kodo_prop_gen_string".to_string())
+        .or_insert(Type::String);
 }
 
 /// Builds all type registries needed for lowering a module: struct fields,
