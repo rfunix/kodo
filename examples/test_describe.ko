@@ -1,0 +1,43 @@
+module test_describe {
+    meta {
+        purpose: "Test describe blocks with setup/teardown, @skip, @todo, and @timeout"
+        version: "0.1.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    describe "arithmetic" {
+        setup {
+            let base: Int = 100
+        }
+
+        test "addition" {
+            assert_eq(add(base, 1), 101)
+        }
+
+        test "with zero" {
+            assert_eq(add(base, 0), 100)
+        }
+    }
+
+    @skip("not ready")
+    test "future feature" {
+        assert(false)
+    }
+
+    @todo("implement later")
+    test "planned feature" {
+        assert(false)
+    }
+
+    @timeout(5000)
+    test "with timeout" {
+        assert_eq(1 + 1, 2)
+    }
+
+    test "standalone" {
+        assert_eq(1 + 1, 2)
+    }
+}

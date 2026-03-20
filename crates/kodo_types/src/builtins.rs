@@ -141,8 +141,15 @@ impl TypeChecker {
             Type::Function(vec![], Box::new(Type::Int)),
         );
         self.env.insert(
+            "kodo_test_skip".to_string(),
+            Type::Function(vec![], Box::new(Type::Unit)),
+        );
+        self.env.insert(
             "kodo_test_summary".to_string(),
-            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+            Type::Function(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Unit),
+            ),
         );
 
         self.register_property_testing_builtins();

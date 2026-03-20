@@ -346,21 +346,35 @@ pub unsafe extern "C" fn kodo_test_end() -> i64 {
     i64::from(failed)
 }
 
+/// Marks a test as skipped.
+///
+/// Prints "skipped" on the same line that [`kodo_test_start`] opened,
+/// then resets the failure flag (so the skip is not counted as a failure).
+///
+/// # Safety
+///
+/// `name_slot` is unused but kept for ABI symmetry with [`kodo_test_start`].
+/// May only be called from single-threaded compiled Kōdo test code.
+#[no_mangle]
+pub extern "C" fn kodo_test_skip() {
+    let _ = writeln!(std::io::stdout(), "skipped");
+}
+
 /// Prints a test summary line.
 ///
-/// Outputs a summary like "test result: ok. 5 passed; 0 failed" or
-/// "test result: FAILED. 3 passed; 2 failed".
+/// Outputs a summary like "test result: ok. 5 passed; 0 failed; 0 skipped; 0 todo" or
+/// "test result: FAILED. 3 passed; 2 failed; 1 skipped; 0 todo".
 ///
 /// # Safety
 ///
 /// May only be called from single-threaded compiled Kōdo test code.
 #[no_mangle]
-pub extern "C" fn kodo_test_summary(total: i64, passed: i64, failed: i64) {
+pub extern "C" fn kodo_test_summary(total: i64, passed: i64, failed: i64, skipped: i64, todo: i64) {
     let _ = writeln!(std::io::stdout());
     let status = if failed > 0 { "FAILED" } else { "ok" };
     let _ = writeln!(
         std::io::stdout(),
-        "test result: {status}. {passed} passed; {failed} failed; {total} total"
+        "test result: {status}. {passed} passed; {failed} failed; {skipped} skipped; {todo} todo; {total} total"
     );
 }
 

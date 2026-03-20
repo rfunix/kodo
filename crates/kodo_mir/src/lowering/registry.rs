@@ -332,6 +332,9 @@ pub(super) fn register_test_return_types(fn_return_types: &mut HashMap<String, T
         .entry("kodo_test_end".to_string())
         .or_insert(Type::Int);
     fn_return_types
+        .entry("kodo_test_skip".to_string())
+        .or_insert(Type::Unit);
+    fn_return_types
         .entry("kodo_test_summary".to_string())
         .or_insert(Type::Unit);
 

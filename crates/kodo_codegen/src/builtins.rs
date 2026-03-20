@@ -1509,8 +1509,13 @@ fn declare_test_builtins(
     builtins: &mut HashMap<String, BuiltinInfo>,
 ) -> Result<()> {
     macro_rules! decl_void {
-        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
-            let sig = sig_void(call_conv, &[$($param),*]);
+        ($runtime_name:expr, $key:expr) => {{
+            let sig = sig_void(call_conv, &[]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+        ($runtime_name:expr, $key:expr, $($param:expr),+) => {{
+            let sig = sig_void(call_conv, &[$($param),+]);
             let func_id = declare_builtin(module, $runtime_name, &sig)?;
             builtins.insert($key.to_string(), BuiltinInfo { func_id });
         }};
@@ -1586,12 +1591,20 @@ fn declare_test_builtins(
     // kodo_test_start takes a String (composite → pointer to 16-byte slot).
     decl_void!("kodo_test_start", "kodo_test_start", types::I64);
     decl_ret!("kodo_test_end", "kodo_test_end", [], types::I64);
+    decl_void!("kodo_test_skip", "kodo_test_skip");
     decl_void!(
         "kodo_test_summary",
         "kodo_test_summary",
         types::I64,
         types::I64,
+        types::I64,
+        types::I64,
         types::I64
     );
+    // Timeout and isolation builtins.
+    decl_void!("kodo_test_set_timeout", "kodo_test_set_timeout", types::I64);
+    decl_void!("kodo_test_clear_timeout", "kodo_test_clear_timeout");
+    decl_void!("kodo_test_isolate_start", "kodo_test_isolate_start");
+    decl_void!("kodo_test_isolate_end", "kodo_test_isolate_end");
     Ok(())
 }

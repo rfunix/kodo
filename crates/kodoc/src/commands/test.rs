@@ -3,6 +3,20 @@
 //! Runs tests defined in a Kodo source file by desugaring `test` declarations
 //! into regular functions, generating a synthetic test runner `main`, compiling,
 //! executing, and reporting results.
+//!
+//! ## Describe block flattening
+//!
+//! Nested `describe` blocks are flattened into a linear sequence of tests with
+//! hierarchical names (e.g. `"math > addition"`). Setup/teardown blocks are
+//! merged from parent to child: setup statements are prepended and teardown
+//! statements are appended to each test body.
+//!
+//! ## Annotation processing
+//!
+//! - `@skip("reason")` — test is reported as skipped without executing its body.
+//! - `@todo("reason")` — same as skip but tracked separately in the summary.
+//! - `@timeout(ms)` — wraps the test body with `kodo_test_set_timeout` /
+//!   `kodo_test_clear_timeout` calls.
 
 use std::path::PathBuf;
 
@@ -13,10 +27,153 @@ use super::common::{
 };
 use crate::diagnostics;
 
+/// Classification of a test based on its annotations.
+enum TestKind {
+    /// Normal test that should be compiled and executed.
+    Run,
+    /// Skipped test — not compiled, reported as "skipped".
+    Skip,
+    /// Todo test — not compiled, reported as "todo" (tracked separately).
+    Todo,
+}
+
+/// A processed test entry ready for desugaring into the synthetic main.
+struct ProcessedTest {
+    /// The display name for this test (hierarchical for describe tests).
+    name: String,
+    /// Whether this test should run, be skipped, or is a todo.
+    kind: TestKind,
+    /// The test body (with setup/teardown merged and timeout injected).
+    /// Only meaningful for `TestKind::Run`.
+    body: kodo_ast::Block,
+}
+
+/// Looks up an annotation by name in a slice of annotations.
+fn get_annotation<'a>(
+    annotations: &'a [kodo_ast::Annotation],
+    name: &str,
+) -> Option<&'a kodo_ast::Annotation> {
+    annotations.iter().find(|a| a.name == name)
+}
+
+/// Extracts an integer argument from the first positional argument of an annotation.
+fn get_annotation_int_arg(ann: &kodo_ast::Annotation) -> Option<i64> {
+    ann.args.first().and_then(|arg| match arg {
+        kodo_ast::AnnotationArg::Positional(kodo_ast::Expr::IntLit(n, _)) => Some(*n),
+        _ => None,
+    })
+}
+
+/// Flattens nested describe blocks into a flat list of `(name, annotations, body)` tuples.
+///
+/// Setup/teardown blocks from parent describes are prepended/appended to test bodies.
+/// Annotations from the describe block are merged with each test's own annotations
+/// (describe annotations first, then test annotations, so test-level overrides win).
+fn flatten_describes(
+    describes: &[kodo_ast::DescribeDecl],
+    prefix: &str,
+    parent_setup: &[kodo_ast::Stmt],
+    parent_teardown: &[kodo_ast::Stmt],
+) -> Vec<(String, Vec<kodo_ast::Annotation>, kodo_ast::Block)> {
+    let mut result = Vec::new();
+    for describe in describes {
+        let group_name = if prefix.is_empty() {
+            describe.name.clone()
+        } else {
+            format!("{prefix} > {}", describe.name)
+        };
+
+        // Merge setup: parent setup + this describe's setup.
+        let mut merged_setup = parent_setup.to_vec();
+        if let Some(ref setup) = describe.setup {
+            merged_setup.extend(setup.stmts.iter().cloned());
+        }
+
+        // Merge teardown: this describe's teardown + parent teardown.
+        let mut merged_teardown = Vec::new();
+        if let Some(ref teardown) = describe.teardown {
+            merged_teardown.extend(teardown.stmts.iter().cloned());
+        }
+        merged_teardown.extend(parent_teardown.iter().cloned());
+
+        // Flatten tests in this describe block.
+        for test in &describe.tests {
+            let full_name = format!("{group_name} > {}", test.name);
+            // Merge annotations: describe-level first, then test-level.
+            let mut merged_annotations = describe.annotations.clone();
+            merged_annotations.extend(test.annotations.iter().cloned());
+
+            // Build body: setup + test body + teardown.
+            let mut stmts = merged_setup.clone();
+            stmts.extend(test.body.stmts.iter().cloned());
+            stmts.extend(merged_teardown.clone());
+
+            result.push((
+                full_name,
+                merged_annotations,
+                kodo_ast::Block {
+                    span: test.body.span,
+                    stmts,
+                },
+            ));
+        }
+
+        // Recurse into nested describes.
+        result.extend(flatten_describes(
+            &describe.describes,
+            &group_name,
+            &merged_setup,
+            &merged_teardown,
+        ));
+    }
+    result
+}
+
+/// Classifies a test as run/skip/todo based on its annotations and extracts
+/// the timeout value if present.
+fn classify_test(annotations: &[kodo_ast::Annotation]) -> (TestKind, Option<i64>) {
+    let kind = if get_annotation(annotations, "skip").is_some() {
+        TestKind::Skip
+    } else if get_annotation(annotations, "todo").is_some() {
+        TestKind::Todo
+    } else {
+        TestKind::Run
+    };
+    let timeout_ms = get_annotation(annotations, "timeout").and_then(get_annotation_int_arg);
+    (kind, timeout_ms)
+}
+
+/// Wraps a test body with timeout set/clear calls if a timeout is specified.
+fn apply_timeout(body: &mut kodo_ast::Block, timeout_ms: i64) {
+    let s = kodo_ast::Span::new(0, 0);
+    // Prepend: kodo_test_set_timeout(ms)
+    body.stmts.insert(
+        0,
+        kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+            callee: Box::new(kodo_ast::Expr::Ident(
+                "kodo_test_set_timeout".to_string(),
+                s,
+            )),
+            args: vec![kodo_ast::Expr::IntLit(timeout_ms, s)],
+            span: s,
+        }),
+    );
+    // Append: kodo_test_clear_timeout()
+    body.stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+        callee: Box::new(kodo_ast::Expr::Ident(
+            "kodo_test_clear_timeout".to_string(),
+            s,
+        )),
+        args: vec![],
+        span: s,
+    }));
+}
+
 /// Runs tests in a Kodo source file.
 ///
-/// Desugars `test` declarations into regular functions, generates a synthetic
-/// `main` function as the test runner, compiles, executes, and reports results.
+/// Desugars `test` declarations and `describe` blocks into regular functions,
+/// generates a synthetic `main` function as the test runner, compiles, executes,
+/// and reports results. Handles `@skip`, `@todo`, and `@timeout` annotations.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn run_test(
     file: &PathBuf,
@@ -42,12 +199,44 @@ pub(crate) fn run_test(
         }
     };
 
-    // Filter tests by name substring if --filter provided.
-    if let Some(pattern) = filter {
-        module.test_decls.retain(|t| t.name.contains(pattern));
+    // Flatten describe blocks into additional test entries.
+    let flattened = flatten_describes(&module.describe_decls, "", &[], &[]);
+
+    // Build a unified list of processed tests: regular test_decls + flattened describes.
+    let mut all_tests: Vec<ProcessedTest> = Vec::new();
+
+    for test_decl in &module.test_decls {
+        let (kind, timeout_ms) = classify_test(&test_decl.annotations);
+        let mut body = test_decl.body.clone();
+        if let Some(ms) = timeout_ms {
+            if matches!(kind, TestKind::Run) {
+                apply_timeout(&mut body, ms);
+            }
+        }
+        all_tests.push(ProcessedTest {
+            name: test_decl.name.clone(),
+            kind,
+            body,
+        });
     }
 
-    if module.test_decls.is_empty() {
+    for (name, annotations, block) in flattened {
+        let (kind, timeout_ms) = classify_test(&annotations);
+        let mut body = block;
+        if let Some(ms) = timeout_ms {
+            if matches!(kind, TestKind::Run) {
+                apply_timeout(&mut body, ms);
+            }
+        }
+        all_tests.push(ProcessedTest { name, kind, body });
+    }
+
+    // Apply filter if provided.
+    if let Some(pattern) = filter {
+        all_tests.retain(|t| t.name.contains(pattern));
+    }
+
+    if all_tests.is_empty() {
         if json {
             println!(
                 "{}",
@@ -56,6 +245,8 @@ pub(crate) fn run_test(
                     "total": 0,
                     "passed": 0,
                     "failed": 0,
+                    "skipped": 0,
+                    "todo": 0,
                 })
             );
         } else {
@@ -64,129 +255,188 @@ pub(crate) fn run_test(
         return 0;
     }
 
-    let test_count = module.test_decls.len();
-    let test_names: Vec<String> = module.test_decls.iter().map(|t| t.name.clone()).collect();
+    // Clear the original test_decls and describe_decls — we handle them ourselves.
+    module.test_decls.clear();
+    module.describe_decls.clear();
+
+    let total_count = all_tests.len();
     let s = kodo_ast::Span::new(0, 0);
 
-    // Desugar: convert each TestDecl into a function `__test_N`.
-    for (i, test_decl) in module.test_decls.drain(..).enumerate() {
-        let func = kodo_ast::Function {
-            id: kodo_ast::NodeId(0),
-            span: test_decl.span,
-            name: format!("__test_{i}"),
-            visibility: kodo_ast::Visibility::Private,
-            is_async: false,
-            generic_params: vec![],
-            annotations: test_decl.annotations,
-            params: vec![],
-            return_type: kodo_ast::TypeExpr::Unit,
-            requires: vec![],
-            ensures: vec![],
-            body: test_decl.body,
-        };
-        module.functions.push(func);
+    // Count skip/todo for the summary constants.
+    let skip_count = all_tests
+        .iter()
+        .filter(|t| matches!(t.kind, TestKind::Skip))
+        .count();
+    let todo_count = all_tests
+        .iter()
+        .filter(|t| matches!(t.kind, TestKind::Todo))
+        .count();
+
+    // Desugar: convert each runnable test into a function `__test_N`.
+    // Skip/todo tests don't get a function — they're handled in the synthetic main.
+    let mut runnable_index = 0usize;
+    let mut test_entries: Vec<(String, TestKind, Option<usize>)> = Vec::new();
+
+    for test in all_tests {
+        match test.kind {
+            TestKind::Run => {
+                let func = kodo_ast::Function {
+                    id: kodo_ast::NodeId(0),
+                    span: test.body.span,
+                    name: format!("__test_{runnable_index}"),
+                    visibility: kodo_ast::Visibility::Private,
+                    is_async: false,
+                    generic_params: vec![],
+                    annotations: vec![],
+                    params: vec![],
+                    return_type: kodo_ast::TypeExpr::Unit,
+                    requires: vec![],
+                    ensures: vec![],
+                    body: test.body,
+                };
+                module.functions.push(func);
+                test_entries.push((test.name, TestKind::Run, Some(runnable_index)));
+                runnable_index += 1;
+            }
+            TestKind::Skip => {
+                test_entries.push((test.name, TestKind::Skip, None));
+            }
+            TestKind::Todo => {
+                test_entries.push((test.name, TestKind::Todo, None));
+            }
+        }
     }
 
     // Generate synthetic `main` function as test runner.
-    // main() calls kodo_test_start, __test_N, kodo_test_end for each test,
-    // then kodo_test_summary at the end.
-    let mut main_stmts = Vec::new();
+    let mut main_stmts = vec![
+        // let __total: Int = <total_count>
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: "__total".to_string(),
+            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+            value: kodo_ast::Expr::IntLit(total_count as i64, s),
+        },
+        // let mut __passed: Int = 0
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: "__passed".to_string(),
+            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+            value: kodo_ast::Expr::IntLit(0, s),
+        },
+        // let mut __failed: Int = 0
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: "__failed".to_string(),
+            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+            value: kodo_ast::Expr::IntLit(0, s),
+        },
+        // let __skipped: Int = <skip_count>
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: "__skipped".to_string(),
+            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+            value: kodo_ast::Expr::IntLit(skip_count as i64, s),
+        },
+        // let __todo: Int = <todo_count>
+        kodo_ast::Stmt::Let {
+            span: s,
+            mutable: false,
+            name: "__todo".to_string(),
+            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+            value: kodo_ast::Expr::IntLit(todo_count as i64, s),
+        },
+    ];
 
-    // let total: Int = <test_count>
-    main_stmts.push(kodo_ast::Stmt::Let {
-        span: s,
-        mutable: false,
-        name: "__total".to_string(),
-        ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
-        value: kodo_ast::Expr::IntLit(test_count as i64, s),
-    });
-    // let mut passed: Int = 0
-    main_stmts.push(kodo_ast::Stmt::Let {
-        span: s,
-        mutable: true,
-        name: "__passed".to_string(),
-        ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
-        value: kodo_ast::Expr::IntLit(0, s),
-    });
-    // let mut failed: Int = 0
-    main_stmts.push(kodo_ast::Stmt::Let {
-        span: s,
-        mutable: true,
-        name: "__failed".to_string(),
-        ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
-        value: kodo_ast::Expr::IntLit(0, s),
-    });
-
-    for (i, name) in test_names.iter().enumerate() {
+    for (name, kind, func_idx) in &test_entries {
         // kodo_test_start("test name")
         main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
             callee: Box::new(kodo_ast::Expr::Ident("kodo_test_start".to_string(), s)),
             args: vec![kodo_ast::Expr::StringLit(name.clone(), s)],
             span: s,
         }));
-        // __test_N()
-        main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
-            callee: Box::new(kodo_ast::Expr::Ident(format!("__test_{i}"), s)),
-            args: vec![],
-            span: s,
-        }));
-        // let __result_N: Int = kodo_test_end()
-        main_stmts.push(kodo_ast::Stmt::Let {
-            span: s,
-            mutable: false,
-            name: format!("__result_{i}"),
-            ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
-            value: kodo_ast::Expr::Call {
-                callee: Box::new(kodo_ast::Expr::Ident("kodo_test_end".to_string(), s)),
-                args: vec![],
-                span: s,
-            },
-        });
-        // if __result_N == 0 { __passed = __passed + 1 } else { __failed = __failed + 1 }
-        main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
-            condition: Box::new(kodo_ast::Expr::BinaryOp {
-                left: Box::new(kodo_ast::Expr::Ident(format!("__result_{i}"), s)),
-                op: kodo_ast::BinOp::Eq,
-                right: Box::new(kodo_ast::Expr::IntLit(0, s)),
-                span: s,
-            }),
-            then_branch: kodo_ast::Block {
-                span: s,
-                stmts: vec![kodo_ast::Stmt::Assign {
+
+        match kind {
+            TestKind::Run => {
+                let idx = func_idx.unwrap_or(0);
+                // __test_N()
+                main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::Ident(format!("__test_{idx}"), s)),
+                    args: vec![],
                     span: s,
-                    name: "__passed".to_string(),
-                    value: kodo_ast::Expr::BinaryOp {
-                        left: Box::new(kodo_ast::Expr::Ident("__passed".to_string(), s)),
-                        op: kodo_ast::BinOp::Add,
-                        right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+                }));
+                // let __result_N: Int = kodo_test_end()
+                main_stmts.push(kodo_ast::Stmt::Let {
+                    span: s,
+                    mutable: false,
+                    name: format!("__result_{idx}"),
+                    ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+                    value: kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("kodo_test_end".to_string(), s)),
+                        args: vec![],
                         span: s,
                     },
-                }],
-            },
-            else_branch: Some(kodo_ast::Block {
-                span: s,
-                stmts: vec![kodo_ast::Stmt::Assign {
-                    span: s,
-                    name: "__failed".to_string(),
-                    value: kodo_ast::Expr::BinaryOp {
-                        left: Box::new(kodo_ast::Expr::Ident("__failed".to_string(), s)),
-                        op: kodo_ast::BinOp::Add,
-                        right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+                });
+                // if __result_N == 0 { __passed += 1 } else { __failed += 1 }
+                main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                    condition: Box::new(kodo_ast::Expr::BinaryOp {
+                        left: Box::new(kodo_ast::Expr::Ident(format!("__result_{idx}"), s)),
+                        op: kodo_ast::BinOp::Eq,
+                        right: Box::new(kodo_ast::Expr::IntLit(0, s)),
                         span: s,
+                    }),
+                    then_branch: kodo_ast::Block {
+                        span: s,
+                        stmts: vec![kodo_ast::Stmt::Assign {
+                            span: s,
+                            name: "__passed".to_string(),
+                            value: kodo_ast::Expr::BinaryOp {
+                                left: Box::new(kodo_ast::Expr::Ident("__passed".to_string(), s)),
+                                op: kodo_ast::BinOp::Add,
+                                right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+                                span: s,
+                            },
+                        }],
                     },
-                }],
-            }),
-            span: s,
-        }));
+                    else_branch: Some(kodo_ast::Block {
+                        span: s,
+                        stmts: vec![kodo_ast::Stmt::Assign {
+                            span: s,
+                            name: "__failed".to_string(),
+                            value: kodo_ast::Expr::BinaryOp {
+                                left: Box::new(kodo_ast::Expr::Ident("__failed".to_string(), s)),
+                                op: kodo_ast::BinOp::Add,
+                                right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+                                span: s,
+                            },
+                        }],
+                    }),
+                    span: s,
+                }));
+            }
+            TestKind::Skip | TestKind::Todo => {
+                // kodo_test_skip() — prints "skipped" on the same line.
+                main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
+                    callee: Box::new(kodo_ast::Expr::Ident("kodo_test_skip".to_string(), s)),
+                    args: vec![],
+                    span: s,
+                }));
+            }
+        }
     }
 
-    // kodo_test_summary(__total, __passed, __failed)
+    // kodo_test_summary(__total, __passed, __failed, __skipped, __todo)
     main_stmts.push(kodo_ast::Stmt::Expr(kodo_ast::Expr::Call {
         callee: Box::new(kodo_ast::Expr::Ident("kodo_test_summary".to_string(), s)),
         args: vec![
             kodo_ast::Expr::Ident("__total".to_string(), s),
             kodo_ast::Expr::Ident("__passed".to_string(), s),
             kodo_ast::Expr::Ident("__failed".to_string(), s),
+            kodo_ast::Expr::Ident("__skipped".to_string(), s),
+            kodo_ast::Expr::Ident("__todo".to_string(), s),
         ],
         span: s,
     }));
