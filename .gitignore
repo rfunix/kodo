@@ -72,6 +72,7 @@ examples/copy_semantics
 examples/confidence_demo
 concurrency_dem
 *.ko.cert.json
+examples/self_hosted_lexer/main
 
 # Proptest regressions
 *.proptest-regressions

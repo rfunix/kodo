@@ -7,3 +7,5 @@
 !multi_file/**
 !audit_log/
 !audit_log/**
+!self_hosted_lexer/
+!self_hosted_lexer/**

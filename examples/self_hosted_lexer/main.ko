@@ -1,0 +1,554 @@
+// Self-Hosted Lexer — A Kodo lexer written in Kodo.
+//
+// This example demonstrates that Kodo is expressive enough for real
+// compiler work by implementing a lexer that tokenizes Kodo source code.
+// It recognizes keywords, identifiers, integer literals, string literals,
+// single and multi-character operators, and punctuation.
+//
+// Compile and run:
+//   kodoc build examples/self_hosted_lexer/main.ko -o self_hosted_lexer
+//   ./self_hosted_lexer
+//
+// This is Milestone 9 of the Kodo roadmap: proving self-hosting viability.
+
+module self_hosted_lexer {
+    meta {
+        purpose: "Self-hosted lexer: tokenize Kodo source code in Kodo itself"
+        version: "1.0.0"
+        author: "claude"
+    }
+
+    // ── Token Kind Constants ──────────────────────────────────────────
+    // Using Int constants because they are simple and printable.
+    //
+    // Keywords (1-19)
+    //   fn=1  let=2  return=3  if=4  else=5  while=6  for=7
+    //   true=8  false=9  struct=10  enum=11  match=12  import=13
+    //   test=14  spawn=15  module=16  meta=17  requires=18  ensures=19
+    //
+    // Literals (20-21)
+    //   IntLit=20  StringLit=21
+    //
+    // Identifier (30)
+    //   Ident=30
+    //
+    // Punctuation (40-52)
+    //   LParen=40  RParen=41  LBrace=42  RBrace=43  LBracket=44
+    //   RBracket=45  Comma=46  Colon=47  ColonColon=48  Semicolon=49
+    //   Dot=50  Arrow=51  At=52
+    //
+    // Operators (60-75)
+    //   Plus=60  Minus=61  Star=62  Slash=63  Percent=64
+    //   Eq=65  EqEq=66  BangEq=67  Lt=68  Gt=69  LtEq=70  GtEq=71
+    //   And=72  Or=73  Not=74  Pipe=75
+    //
+    // Special (90-91)
+    //   EOF=90  Error=91
+
+    // ── Token Struct ──────────────────────────────────────────────────
+
+    struct Token {
+        kind: Int,
+        int_val: Int,
+        start: Int,
+        end: Int,
+        new_pos: Int
+    }
+
+    // ── Character Classification ──────────────────────────────────────
+
+    fn is_whitespace(ch: Int) -> Bool {
+        return ch == 32 || ch == 9 || ch == 10 || ch == 13
+    }
+
+    fn is_digit(ch: Int) -> Bool {
+        return ch >= 48 && ch <= 57
+    }
+
+    fn is_alpha(ch: Int) -> Bool {
+        return (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95
+    }
+
+    fn is_alnum(ch: Int) -> Bool {
+        return is_alpha(ch) || is_digit(ch)
+    }
+
+    // ── Whitespace and Comment Skipping ───────────────────────────────
+
+    fn skip_whitespace_and_comments(ref source: String, pos: Int, len: Int) -> Int {
+        let mut p: Int = pos
+        let mut cont: Bool = true
+        while cont {
+            if p >= len {
+                cont = false
+            } else {
+                let ch: Int = source.char_at(p)
+                if is_whitespace(ch) {
+                    p = p + 1
+                } else {
+                    if ch == 47 && p + 1 < len {
+                        let next_ch: Int = source.char_at(p + 1)
+                        if next_ch == 47 {
+                            p = p + 2
+                            let mut in_comment: Bool = true
+                            while in_comment {
+                                if p >= len {
+                                    in_comment = false
+                                } else {
+                                    let cc: Int = source.char_at(p)
+                                    if cc == 10 {
+                                        p = p + 1
+                                        in_comment = false
+                                    } else {
+                                        p = p + 1
+                                    }
+                                }
+                            }
+                        } else {
+                            cont = false
+                        }
+                    } else {
+                        cont = false
+                    }
+                }
+            }
+        }
+        return p
+    }
+
+    // ── Number Reading ────────────────────────────────────────────────
+
+    fn read_number(ref source: String, pos: Int, len: Int) -> Token {
+        let mut end_pos: Int = pos
+        let mut reading: Bool = true
+        while reading {
+            if end_pos >= len {
+                reading = false
+            } else {
+                let ch: Int = source.char_at(end_pos)
+                if is_digit(ch) {
+                    end_pos = end_pos + 1
+                } else {
+                    reading = false
+                }
+            }
+        }
+        let num_str: String = source.substring(pos, end_pos)
+        let val: Int = num_str.parse_int()
+        return Token { kind: 20, int_val: val, start: pos, end: end_pos, new_pos: end_pos }
+    }
+
+    // ── Word Reading (Identifiers and Keywords) ───────────────────────
+
+    fn keyword_or_ident(ref word: String) -> Int {
+        if word == "fn" { return 1 }
+        if word == "let" { return 2 }
+        if word == "return" { return 3 }
+        if word == "if" { return 4 }
+        if word == "else" { return 5 }
+        if word == "while" { return 6 }
+        if word == "for" { return 7 }
+        if word == "true" { return 8 }
+        if word == "false" { return 9 }
+        if word == "struct" { return 10 }
+        if word == "enum" { return 11 }
+        if word == "match" { return 12 }
+        if word == "import" { return 13 }
+        if word == "test" { return 14 }
+        if word == "spawn" { return 15 }
+        if word == "module" { return 16 }
+        if word == "meta" { return 17 }
+        if word == "requires" { return 18 }
+        if word == "ensures" { return 19 }
+        return 30
+    }
+
+    fn read_word(ref source: String, pos: Int, len: Int) -> Token {
+        let mut end_pos: Int = pos
+        let mut reading: Bool = true
+        while reading {
+            if end_pos >= len {
+                reading = false
+            } else {
+                let ch: Int = source.char_at(end_pos)
+                if is_alnum(ch) {
+                    end_pos = end_pos + 1
+                } else {
+                    reading = false
+                }
+            }
+        }
+        let word: String = source.substring(pos, end_pos)
+        let kind: Int = keyword_or_ident(word)
+        return Token { kind: kind, int_val: 0, start: pos, end: end_pos, new_pos: end_pos }
+    }
+
+    // ── String Literal Reading ────────────────────────────────────────
+
+    fn read_string(ref source: String, pos: Int, len: Int) -> Token {
+        let mut end_pos: Int = pos + 1
+        let mut found_close: Bool = false
+        while end_pos < len && !found_close {
+            let ch: Int = source.char_at(end_pos)
+            if ch == 34 {
+                found_close = true
+            } else {
+                end_pos = end_pos + 1
+            }
+        }
+        if found_close {
+            return Token { kind: 21, int_val: 0, start: pos, end: end_pos + 1, new_pos: end_pos + 1 }
+        } else {
+            return Token { kind: 91, int_val: 0, start: pos, end: len, new_pos: len }
+        }
+    }
+
+    // ── Main Token Dispatch ───────────────────────────────────────────
+
+    fn next_token(ref source: String, pos: Int, len: Int) -> Token {
+        let p: Int = skip_whitespace_and_comments(source, pos, len)
+
+        if p >= len {
+            return Token { kind: 90, int_val: 0, start: p, end: p, new_pos: p }
+        }
+
+        let ch: Int = source.char_at(p)
+
+        // Digits
+        if is_digit(ch) {
+            return read_number(source, p, len)
+        }
+
+        // Alpha/underscore
+        if is_alpha(ch) {
+            return read_word(source, p, len)
+        }
+
+        // String literal: '"' = 34
+        if ch == 34 {
+            return read_string(source, p, len)
+        }
+
+        // '(' = 40
+        if ch == 40 {
+            return Token { kind: 40, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // ')' = 41
+        if ch == 41 {
+            return Token { kind: 41, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '{' = 123
+        if ch == 123 {
+            return Token { kind: 42, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '}' = 125
+        if ch == 125 {
+            return Token { kind: 43, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '[' = 91
+        if ch == 91 {
+            return Token { kind: 44, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // ']' = 93
+        if ch == 93 {
+            return Token { kind: 45, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // ',' = 44
+        if ch == 44 {
+            return Token { kind: 46, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // ':' = 58
+        if ch == 58 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 58 {
+                    return Token { kind: 48, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 47, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // ';' = 59
+        if ch == 59 {
+            return Token { kind: 49, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '.' = 46
+        if ch == 46 {
+            return Token { kind: 50, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '@' = 64
+        if ch == 64 {
+            return Token { kind: 52, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '+' = 43
+        if ch == 43 {
+            return Token { kind: 60, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '-' = 45 — could be '-' or '->'
+        if ch == 45 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 62 {
+                    return Token { kind: 51, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 61, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '*' = 42
+        if ch == 42 {
+            return Token { kind: 62, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '/' = 47 (single-line comments already handled in skip)
+        if ch == 47 {
+            return Token { kind: 63, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '%' = 37
+        if ch == 37 {
+            return Token { kind: 64, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '=' = 61 — could be '=' or '=='
+        if ch == 61 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 61 {
+                    return Token { kind: 66, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 65, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '!' = 33 — could be '!' or '!='
+        if ch == 33 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 61 {
+                    return Token { kind: 67, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 74, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '<' = 60 — could be '<' or '<='
+        if ch == 60 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 61 {
+                    return Token { kind: 70, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 68, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '>' = 62 — could be '>' or '>='
+        if ch == 62 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 61 {
+                    return Token { kind: 71, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 69, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '&' = 38 — '&&'
+        if ch == 38 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 38 {
+                    return Token { kind: 72, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 91, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+        // '|' = 124 — '||' or single '|'
+        if ch == 124 {
+            if p + 1 < len {
+                let nc: Int = source.char_at(p + 1)
+                if nc == 124 {
+                    return Token { kind: 73, int_val: 0, start: p, end: p + 2, new_pos: p + 2 }
+                }
+            }
+            return Token { kind: 75, int_val: 0, start: p, end: p + 1, new_pos: p + 1 }
+        }
+
+        // Unknown character
+        return Token { kind: 91, int_val: ch, start: p, end: p + 1, new_pos: p + 1 }
+    }
+
+    // ── Token Name Lookup ─────────────────────────────────────────────
+
+    fn token_name(kind: Int) -> String {
+        if kind == 1 { return "KW_FN" }
+        if kind == 2 { return "KW_LET" }
+        if kind == 3 { return "KW_RETURN" }
+        if kind == 4 { return "KW_IF" }
+        if kind == 5 { return "KW_ELSE" }
+        if kind == 6 { return "KW_WHILE" }
+        if kind == 7 { return "KW_FOR" }
+        if kind == 8 { return "KW_TRUE" }
+        if kind == 9 { return "KW_FALSE" }
+        if kind == 10 { return "KW_STRUCT" }
+        if kind == 11 { return "KW_ENUM" }
+        if kind == 12 { return "KW_MATCH" }
+        if kind == 13 { return "KW_IMPORT" }
+        if kind == 14 { return "KW_TEST" }
+        if kind == 15 { return "KW_SPAWN" }
+        if kind == 16 { return "KW_MODULE" }
+        if kind == 17 { return "KW_META" }
+        if kind == 18 { return "KW_REQUIRES" }
+        if kind == 19 { return "KW_ENSURES" }
+        if kind == 20 { return "INT" }
+        if kind == 21 { return "STRING" }
+        if kind == 30 { return "IDENT" }
+        if kind == 40 { return "LPAREN" }
+        if kind == 41 { return "RPAREN" }
+        if kind == 42 { return "LBRACE" }
+        if kind == 43 { return "RBRACE" }
+        if kind == 44 { return "LBRACKET" }
+        if kind == 45 { return "RBRACKET" }
+        if kind == 46 { return "COMMA" }
+        if kind == 47 { return "COLON" }
+        if kind == 48 { return "COLONCOLON" }
+        if kind == 49 { return "SEMICOLON" }
+        if kind == 50 { return "DOT" }
+        if kind == 51 { return "ARROW" }
+        if kind == 52 { return "AT" }
+        if kind == 60 { return "PLUS" }
+        if kind == 61 { return "MINUS" }
+        if kind == 62 { return "STAR" }
+        if kind == 63 { return "SLASH" }
+        if kind == 64 { return "PERCENT" }
+        if kind == 65 { return "EQ" }
+        if kind == 66 { return "EQEQ" }
+        if kind == 67 { return "BANGEQ" }
+        if kind == 68 { return "LT" }
+        if kind == 69 { return "GT" }
+        if kind == 70 { return "LTEQ" }
+        if kind == 71 { return "GTEQ" }
+        if kind == 72 { return "AND" }
+        if kind == 73 { return "OR" }
+        if kind == 74 { return "NOT" }
+        if kind == 75 { return "PIPE" }
+        if kind == 90 { return "EOF" }
+        if kind == 91 { return "ERROR" }
+        return "UNKNOWN"
+    }
+
+    // ── Print Token ───────────────────────────────────────────────────
+
+    fn print_token(ref tok: Token, ref source: String) {
+        let name: String = token_name(tok.kind)
+        let text: String = source.substring(tok.start, tok.end)
+
+        if tok.kind == 20 {
+            println(f"{name}({tok.int_val})")
+        } else {
+            if tok.kind == 21 {
+                println(f"{name}({text})")
+            } else {
+                if tok.kind == 30 {
+                    println(f"{name}({text})")
+                } else {
+                    if tok.kind == 90 {
+                        println("EOF")
+                    } else {
+                        if tok.kind == 91 {
+                            println(f"ERROR({text})")
+                        } else {
+                            println(name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Tokenize ──────────────────────────────────────────────────────
+
+    fn tokenize(ref source: String) -> Int {
+        let len: Int = source.length()
+        let mut pos: Int = 0
+        let mut count: Int = 0
+        let mut done: Bool = false
+
+        while !done {
+            let tok: Token = next_token(source, pos, len)
+            print_token(tok, source)
+            pos = tok.new_pos
+            if tok.kind == 90 {
+                done = true
+            } else {
+                count = count + 1
+            }
+        }
+
+        return count
+    }
+
+    // ── Main ──────────────────────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.92)
+    fn main() -> Int {
+        println("=== Kodo Self-Hosted Lexer ===")
+        println("")
+
+        // Test 1: Simple function
+        println("--- Test 1: Simple function ---")
+        let src1: String = "fn add(a: Int, b: Int) -> Int { return a + b }"
+        let count1: Int = tokenize(src1)
+        println(f"Tokens: {count1}")
+        println("")
+
+        // Test 2: Variable declaration with operators
+        println("--- Test 2: Variable declaration ---")
+        let src2: String = "let x: Int = 42 + 10 * 3"
+        let count2: Int = tokenize(src2)
+        println(f"Tokens: {count2}")
+        println("")
+
+        // Test 3: Control flow
+        println("--- Test 3: Control flow ---")
+        let src3: String = "if x >= 10 && y != 0 { return true } else { return false }"
+        let count3: Int = tokenize(src3)
+        println(f"Tokens: {count3}")
+        println("")
+
+        // Test 4: Struct definition
+        println("--- Test 4: Struct ---")
+        let src4: String = "struct Point { x: Int, y: Int }"
+        let count4: Int = tokenize(src4)
+        println(f"Tokens: {count4}")
+        println("")
+
+        // Test 5: Module with meta and contracts
+        println("--- Test 5: Module with contracts ---")
+        let src5: String = "module main { meta { version: \"1.0\" } fn check(n: Int) requires { n > 0 } ensures { result > 0 } { return n } }"
+        let count5: Int = tokenize(src5)
+        println(f"Tokens: {count5}")
+        println("")
+
+        // Test 6: Comments
+        println("--- Test 6: Comments ---")
+        let src6: String = "let x: Int = 1 // this is a comment\nlet y: Int = 2"
+        let count6: Int = tokenize(src6)
+        println(f"Tokens: {count6}")
+        println("")
+
+        // Test 7: Multi-character operators
+        println("--- Test 7: Multi-char operators ---")
+        let src7: String = "a == b != c <= d >= e -> f :: g"
+        let count7: Int = tokenize(src7)
+        println(f"Tokens: {count7}")
+        println("")
+
+        // Test 8: Annotations
+        println("--- Test 8: Annotations ---")
+        let src8: String = "@authored_by @confidence(95)"
+        let count8: Int = tokenize(src8)
+        println(f"Tokens: {count8}")
+        println("")
+
+        // Summary
+        let total: Int = count1 + count2 + count3 + count4 + count5 + count6 + count7 + count8
+        println(f"=== Total tokens produced: {total} ===")
+        println("Self-hosted lexer: SUCCESS")
+
+        return 0
+    }
+}

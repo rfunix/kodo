@@ -439,6 +439,7 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 | [`url_shortener.ko`](examples/url_shortener.ko) | URL shortener with `@security_sensitive`, contracts, `Map<Int,Int>` lookup |
 | [`word_counter.ko`](examples/word_counter.ko) | Word counter demonstrating `ref` borrowing (E0240 prevention), `for-in` over `.split()` |
 | [`audit_log/`](examples/audit_log/) | Multi-file audit log: 15+ features (contracts, refinement types, agent traceability, functional pipelines, enums, pattern matching, multi-file imports) |
+| [`self_hosted_lexer/`](examples/self_hosted_lexer/) | Self-hosted lexer: a Kodo tokenizer written in Kodo itself — proves language expressiveness for compiler work |
 
 ### Concurrency & Multi-File
 
