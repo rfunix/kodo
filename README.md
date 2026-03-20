@@ -209,7 +209,8 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | Category | Features |
 |----------|----------|
 | **Type system** | `Int`, `Float64`, `Bool`, `String`, structs, enums, tuples (`(Int, String)`), generics with monomorphization and trait bounds (`<T: Ord + Display>`), `dyn Trait` (dynamic dispatch with vtables), local type inference, no implicit conversions |
-| **Pattern matching** | Exhaustive `match` on enums with destructuring |
+| **Pattern matching** | Exhaustive `match` on enums with destructuring, short variant patterns (`Ok(v)`, `Some(v)` without enum prefix) |
+| **Testing** | Built-in `test` blocks, `describe` grouping with `setup`/`teardown`, `@skip`/`@todo`/`@timeout` annotations, `@property` + `forall` property-based testing with basic shrinking, `kodoc generate-tests` for contract-driven stub generation, `kodoc test --json` for agent consumption |
 | **Closures** | Lambda lifting, capture analysis with ownership tracking (E0281–E0283), higher-order functions, `(Int) -> Int` types |
 | **Ownership** | Linear ownership (`own`/`ref`/`mut`), Copy semantics for primitives, use-after-move (E0240), borrow-escapes-scope (E0241), move-while-borrowed (E0242), mut-borrow-while-ref-borrowed (E0245), ref-borrow-while-mut-borrowed (E0246), double-mut-borrow (E0247), assign-through-ref (E0248), closure capture ownership (E0281–E0283), atomic reference counting (thread-safe automatic deallocation) |
 | **Contracts** | `requires`/`ensures` verified by Z3 SMT solver, runtime fallback, `recoverable` mode, module-level `invariant` blocks |
