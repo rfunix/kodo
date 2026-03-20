@@ -58,6 +58,35 @@ fn safe_head(items: List<Int>) -> Int {
 }
 ```
 
+### Short Variant Patterns
+
+For `Option` and `Result`, you can omit the enum prefix in match arms. Both forms are equivalent:
+
+```rust
+// Long form (explicit enum prefix)
+match result {
+    Result::Ok(v) => { return v }
+    Result::Err(e) => { return 0 }
+}
+
+// Short form (no prefix)
+match result {
+    Ok(v) => { return v }
+    Err(e) => { return 0 }
+}
+```
+
+The same applies to `Option`:
+
+```rust
+match maybe_val {
+    Some(v) => { return v }
+    None => { return 0 }
+}
+```
+
+The compiler infers the enum type from the matched expression, so the prefix is optional.
+
 ## Example
 
-See [`examples/enums.ko`](../../examples/enums.ko) for a complete working example with enum types and pattern matching.
+See [`examples/enums.ko`](../../examples/enums.ko) for a complete working example with enum types and pattern matching, and [`examples/result_patterns.ko`](../../examples/result_patterns.ko) for Result/Option patterns and unwrap methods.

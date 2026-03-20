@@ -99,6 +99,30 @@ fn main() {
 }
 ```
 
+## Unwrap Methods
+
+When you are confident a `Result` or `Option` holds the expected variant, you can extract the value directly:
+
+```rust
+let ok_val: Result<Int, String> = Result::Ok(42)
+let x: Int = ok_val.unwrap()          // 42
+
+let err_val: Result<Int, String> = Result::Err("oops")
+let e: String = err_val.unwrap_err()  // "oops"
+
+let some_val: Option<Int> = Option::Some(99)
+let y: Int = some_val.unwrap()        // 99
+```
+
+Use `unwrap_or` to provide a default when the value might be an error:
+
+```rust
+let fallback: Result<Int, String> = Result::Err("fail")
+let d: Int = fallback.unwrap_or(0)    // 0
+```
+
+**Warning:** `unwrap()` aborts the program if called on `Err`/`None`. Prefer `match` or `unwrap_or` in production code. Use `unwrap()` in tests and prototypes.
+
 ## When to Use What
 
 | Situation | Use |
