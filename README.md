@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/tests-2375%20passing-brightgreen" alt="Tests: 2375 passing">
+  <img src="https://img.shields.io/badge/tests-2385%20passing-brightgreen" alt="Tests: 2385 passing">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>
 
@@ -219,7 +219,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude, `?` operator for Result propagation — no null, no exceptions |
 | **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
 | **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
-| **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`; functional combinators (`map`, `filter`, `fold`, `count`, `any`, `all`); functional pipelines |
+| **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`; functional combinators (`map`, `filter`, `fold`, `reduce`, `count`, `any`, `all`); functional pipelines |
 | **Standard library** | `abs`, `min`, `max`, `clamp`, string methods (`length`, `contains`, `split`, `trim`, `to_upper`, `to_lower`, `substring`, `concat`, `index_of`, `replace`, `lines`, `parse_int`), `List<T>` (push, get, pop, remove, set, slice, sort, join), `Map<K,V>` (Int and String keys), methods on `Option<T>` and `Result<T,E>`, generic method dispatch, File I/O (`file_read`, `file_write`, `file_append`, `file_delete`, `file_exists`, `dir_list`, `dir_exists`), HTTP client (`http_get`, `http_post` returning `Result<String, String>`), HTTP server (`http_server_new`, `http_server_recv`, `http_request_method/path/body`, `http_respond`), JSON (`json_parse`, `json_get_string`, `json_get_int`, `json_free`, `json_new_object`, `json_set_string/int/bool`, `json_stringify`), CLI (`args`, `readln`, `exit`), Math (`sqrt`, `pow`, `sin`, `cos`, `log`, `floor`, `ceil`, `round`, `rand_int`) |
 | **Visibility** | `pub fn`, `pub struct` — declarations are private by default, `pub` makes them accessible from other modules |
 | **Multi-file** | `import module_name` across `.ko` files, selective imports (`import math { add, Point }`), qualified calls (`math.add(1, 2)`) |

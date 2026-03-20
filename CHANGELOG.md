@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0] — 2026-03-20
+
+### Added
+
+- **Error fix patches: 98% coverage** — 17 new fix patches added to TypeError variants. Coverage increased from 58% to 98% (42/43 variants). New patches for: UndefinedVariable (stub), ExtraStructField (delete), UnknownStruct/Enum (stub), TraitBoundNotSatisfied (impl stub), and more
+- **4 multi-step repair plans** — RepairPlan for NonExhaustiveMatch, MissingTraitMethod, SecuritySensitiveWithoutContract, TraitBoundNotSatisfied
+- **LSP: enhanced hover** — full function signatures with contracts (`requires`/`ensures`), annotations as inline code, struct/enum definitions, contract-aware hover on function calls
+- **LSP: expanded completions** — 10 List methods, 9 Map methods, 24 keywords, struct field types in completions
+- **Collection methods: `reduce` and `count(fn)`** — `list.reduce(init, fn)` as fold alias, `list.count(fn)` counts elements matching predicate
+- **Open-source readiness** — expanded CONTRIBUTING.md (265 lines), GitHub issue templates (bug report, feature request), PR template with compiler-phase checklist, CODE_OF_CONDUCT.md, SECURITY.md
+- New example `examples/list_functional.ko`
+- New UI test `tests/ui/collections/list_functional.ko`
+
+### Changed
+
+- Test count: 2375 → 2385
+- UI test count: 51 → 52
+- `docs/error_index.md` updated with fix patch coverage table and repair plans section
+
 ## [0.7.0] — 2026-03-20
 
 ### Added
