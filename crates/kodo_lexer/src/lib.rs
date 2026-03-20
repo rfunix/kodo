@@ -165,6 +165,18 @@ pub enum TokenKind {
     /// The `test` keyword — declares a test block.
     #[token("test")]
     Test,
+    /// The `describe` keyword — groups related tests into a named suite.
+    #[token("describe")]
+    Describe,
+    /// The `setup` keyword — runs before each test in a describe block.
+    #[token("setup")]
+    Setup,
+    /// The `teardown` keyword — runs after each test in a describe block.
+    #[token("teardown")]
+    Teardown,
+    /// The `forall` keyword — introduces universally quantified variables in property tests.
+    #[token("forall")]
+    Forall,
 
     // --- Literals ---
     /// An integer literal.
@@ -764,6 +776,30 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_describe_keyword() {
+        let tokens = tokenize("describe").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Describe);
+    }
+
+    #[test]
+    fn tokenize_setup_keyword() {
+        let tokens = tokenize("setup").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Setup);
+    }
+
+    #[test]
+    fn tokenize_teardown_keyword() {
+        let tokens = tokenize("teardown").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Teardown);
+    }
+
+    #[test]
+    fn tokenize_forall_keyword() {
+        let tokens = tokenize("forall").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Forall);
+    }
+
+    #[test]
     fn tokenize_fstring_simple() {
         let tokens = tokenize(r#"f"hello {name}!""#).unwrap_or_default();
         assert_eq!(tokens.len(), 1);
@@ -991,7 +1027,8 @@ mod tests {
                                 "while", "for", "true", "false", "struct", "enum",
                                 "match", "import", "from", "trait", "impl", "self",
                                 "own", "ref", "is", "async", "await", "spawn", "actor",
-                                "parallel", "break", "continue", "pub", "test"];
+                                "parallel", "break", "continue", "pub", "test",
+                                "describe", "setup", "teardown", "forall"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
                     let tokens = tokenize(&name).unwrap();
@@ -1006,7 +1043,7 @@ mod tests {
 
             /// All Kōdo keywords must tokenize as their keyword variant, not Ident.
             #[test]
-            fn keywords_are_not_identifiers(idx in 0usize..32usize) {
+            fn keywords_are_not_identifiers(idx in 0usize..36usize) {
                 let keywords = [
                     ("module", TokenKind::Module), ("meta", TokenKind::Meta),
                     ("fn", TokenKind::Fn), ("let", TokenKind::Let),
@@ -1025,6 +1062,8 @@ mod tests {
                     ("parallel", TokenKind::Parallel),
                     ("break", TokenKind::Break), ("continue", TokenKind::Continue),
                     ("pub", TokenKind::Pub), ("test", TokenKind::Test),
+                    ("describe", TokenKind::Describe), ("setup", TokenKind::Setup),
+                    ("teardown", TokenKind::Teardown), ("forall", TokenKind::Forall),
                 ];
                 let (src, expected) = &keywords[idx % keywords.len()];
                 let tokens = tokenize(src).unwrap();

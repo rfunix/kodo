@@ -156,6 +156,24 @@ impl Parser {
                 kind: TokenKind::Test,
                 ..
             }) => Ok("test".to_string()),
+            // `describe`, `setup`, `teardown`, `forall` are contextual testing keywords —
+            // they can be used as identifiers outside test contexts.
+            Some(Token {
+                kind: TokenKind::Describe,
+                ..
+            }) => Ok("describe".to_string()),
+            Some(Token {
+                kind: TokenKind::Setup,
+                ..
+            }) => Ok("setup".to_string()),
+            Some(Token {
+                kind: TokenKind::Teardown,
+                ..
+            }) => Ok("teardown".to_string()),
+            Some(Token {
+                kind: TokenKind::Forall,
+                ..
+            }) => Ok("forall".to_string()),
             Some(token) => Err(ParseError::UnexpectedToken {
                 expected: "identifier".to_string(),
                 found: token.kind.clone(),
