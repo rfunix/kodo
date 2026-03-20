@@ -88,3 +88,8 @@ serde_json = "1"
 sha2 = "0.10"
 strsim = "0.11"
 rand = "0.8"
+
+# Green threads / concurrency
+crossbeam-deque = "0.8"
+num_cpus = "1.16"
+libc = "0.2"

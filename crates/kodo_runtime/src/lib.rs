@@ -20,6 +20,7 @@
 //! - [`server`] — HTTP server builtins (`tiny_http`)
 //! - [`test_ops`] — Test framework assertions and lifecycle
 //! - [`prop_ops`] — Property testing engine (generators and shrinking)
+//! - [`context`] — CPU context switch primitives for green threads
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -27,6 +28,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod collections;
+pub mod context;
 pub mod db;
 mod helpers;
 pub mod http;

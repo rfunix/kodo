@@ -13,6 +13,9 @@ tiny_http = "0.12"
 fastrand = "2"
 rand = { workspace = true }
 rusqlite = { version = "0.31", features = ["bundled"] }
+crossbeam-deque = { workspace = true }
+num_cpus = { workspace = true }
+libc = { workspace = true }
 
 [lib]
 crate-type = ["staticlib", "rlib"]
