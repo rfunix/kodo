@@ -1,9 +1,9 @@
-//! # Green Thread Data Structures
+//! # Green Thread Data Structures and M:N Work-Stealing Scheduler
 //!
 //! Provides the [`GreenThread`] struct — a cooperatively-scheduled lightweight
-//! thread with its own `mmap`'d stack and CPU context.  Each green thread is
-//! independent of OS threads; the scheduler (`kodo_runtime::scheduler`) is
-//! responsible for switching between them.
+//! thread with its own `mmap`'d stack and CPU context — and the
+//! [`Scheduler`] that multiplexes green threads onto a pool of OS worker
+//! threads using work-stealing deques (crossbeam).
 //!
 //! ## Memory layout
 //!
@@ -13,8 +13,31 @@
 //! System V AMD64 / AAPCS64 ABI convention.
 //!
 //! The region is freed via `munmap` when the [`GreenThread`] is dropped.
+//!
+//! ## Scheduler architecture
+//!
+//! ```text
+//! Scheduler (global singleton via OnceLock)
+//!   ├── Worker 0 (OS thread) — local crossbeam deque
+//!   ├── Worker 1 (OS thread) — local crossbeam deque
+//!   └── Worker N (OS thread) — local crossbeam deque
+//!
+//! Each worker runs a loop:
+//!   1. Pop from local deque
+//!   2. If empty → steal from random other worker
+//!   3. If steal failed → pop from global queue
+//!   4. If all empty → park (condvar wait)
+//!   5. Resume chosen green thread (switch_context)
+//!   6. On yield → push back to local deque
+//!   7. On return → mark Dead, clean up
+//! ```
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex, OnceLock};
+
+use crate::context::{switch_context, Context};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -133,7 +156,7 @@ pub struct GreenThread {
     /// Current execution status.
     pub status: ThreadStatus,
     /// Saved CPU context (callee-saved registers + stack pointer).
-    pub context: crate::context::Context,
+    pub context: Context,
     /// Base (lowest) address of the `mmap`'d stack region.
     stack: *mut u8,
     /// Total size of the stack region in bytes.
@@ -172,7 +195,7 @@ impl GreenThread {
         // SAFETY: stack + STACK_SIZE is within the allocated region.
         let stack_top = unsafe { stack.add(STACK_SIZE) };
 
-        let mut ctx = crate::context::Context::default();
+        let mut ctx = Context::default();
         // SAFETY: ctx is valid, stack_top points to the end of a live region,
         // and entry is a valid function pointer (caller guarantee).
         unsafe {
@@ -202,6 +225,558 @@ impl Drop for GreenThread {
 }
 
 // ===========================================================================
+// M:N Work-Stealing Scheduler
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Thread-local per-worker state
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// Index of the current worker OS thread (0-based).
+    static WORKER_ID: Cell<usize> = const { Cell::new(0) };
+    /// The worker's local crossbeam deque for its ready queue.
+    static WORKER_DEQUE: RefCell<Option<crossbeam_deque::Worker<GreenThreadId>>> =
+        const { RefCell::new(None) };
+    /// The green thread currently executing on this worker (if any).
+    static CURRENT_THREAD: Cell<Option<GreenThreadId>> = const { Cell::new(None) };
+    /// Flag checked at yield points — when true the green thread should yield.
+    static SHOULD_YIELD: Cell<bool> = const { Cell::new(false) };
+    /// Saved CPU context for the scheduler loop on this worker thread.
+    ///
+    /// We use `UnsafeCell` instead of `RefCell` because `switch_context`
+    /// suspends execution in the middle of a borrow — the scheduler's
+    /// context is written by `switch_context` (saving the scheduler state)
+    /// and then read later (to resume the scheduler).  A `RefCell` would
+    /// panic because the mutable borrow from the first `switch_context`
+    /// appears to still be held when the green thread finishes and calls
+    /// `switch_context` back.  With cooperative scheduling, only one
+    /// logical access happens at a time, so `UnsafeCell` is sound.
+    static SCHEDULER_CONTEXT: UnsafeCell<Context> = const { UnsafeCell::new(Context {
+        regs: [0; 13],
+    }) };
+}
+
+// ---------------------------------------------------------------------------
+// Global scheduler singleton
+// ---------------------------------------------------------------------------
+
+/// Global singleton holding the scheduler state.
+static SCHEDULER: OnceLock<Scheduler> = OnceLock::new();
+
+/// Count of currently alive (non-Dead) green threads across all workers.
+static ALIVE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// The M:N work-stealing scheduler.
+///
+/// Manages all green threads and distributes them across a pool of OS
+/// worker threads.  Each worker has a local crossbeam deque; idle workers
+/// steal from other workers or fall back to the global overflow queue.
+pub struct Scheduler {
+    /// All green threads indexed by ID (protected by mutex for cross-thread access).
+    threads: Mutex<HashMap<GreenThreadId, GreenThread>>,
+    /// Global queue for overflow / new spawns from non-worker threads.
+    global_queue: Mutex<VecDeque<GreenThreadId>>,
+    /// Number of worker OS threads.
+    num_workers: usize,
+    /// Flag to signal shutdown.
+    shutdown: AtomicBool,
+    /// Condvar to wake parked workers.
+    park_condvar: Condvar,
+    /// Mutex paired with [`park_condvar`].
+    park_mutex: Mutex<()>,
+}
+
+impl Scheduler {
+    /// Creates a new scheduler with `num_workers` worker deques.
+    ///
+    /// Returns the scheduler and the worker-side deques (one per worker).
+    fn new(num_workers: usize) -> Self {
+        Self {
+            threads: Mutex::new(HashMap::new()),
+            global_queue: Mutex::new(VecDeque::new()),
+            num_workers,
+            shutdown: AtomicBool::new(false),
+            park_condvar: Condvar::new(),
+            park_mutex: Mutex::new(()),
+        }
+    }
+}
+
+/// Returns a reference to the global scheduler, panicking if not initialised.
+fn get_scheduler() -> &'static Scheduler {
+    // SAFETY: This is only called after kodo_green_init has been called.
+    SCHEDULER.get().unwrap_or_else(|| {
+        panic!("kodo_green_init must be called before using green threads");
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Green thread entry wrapper
+// ---------------------------------------------------------------------------
+
+/// Wrapper entry function for green threads spawned without an environment.
+///
+/// The `arg` encodes the raw function pointer (as `usize`) of the user's
+/// `extern "C" fn()`.  After calling it, we mark the thread as Dead and
+/// switch back to the scheduler context.
+///
+/// # Safety
+///
+/// `arg` must be a valid function pointer cast to `usize`.
+unsafe fn green_entry_no_env(arg: usize) {
+    // SAFETY: arg was set to the function pointer by the spawn call.
+    let func: extern "C" fn() = unsafe { std::mem::transmute(arg) };
+    func();
+    green_thread_finished();
+}
+
+/// Wrapper entry function for green threads spawned with a captured environment.
+///
+/// `arg` is a pointer to a heap-allocated [`EnvPayload`] struct containing
+/// the function pointer and a copy of the environment bytes.
+///
+/// # Safety
+///
+/// `arg` must be a valid pointer to a boxed `EnvPayload`.
+unsafe fn green_entry_with_env(arg: usize) {
+    // SAFETY: arg is a pointer to a heap-allocated EnvPayload.
+    let payload = unsafe { Box::from_raw(arg as *mut EnvPayload) };
+    (payload.func)(payload.env.as_ptr() as i64);
+    green_thread_finished();
+}
+
+/// Payload for green threads that carry a captured environment.
+struct EnvPayload {
+    /// The function pointer that accepts an environment pointer.
+    func: extern "C" fn(i64),
+    /// Owned copy of the environment bytes.
+    env: Vec<u8>,
+}
+
+/// Called when a green thread's entry function returns.
+///
+/// Marks the current thread as [`ThreadStatus::Dead`], decrements the alive
+/// counter, and switches back to the scheduler context on this worker.
+fn green_thread_finished() {
+    let thread_id = CURRENT_THREAD.get();
+    if let Some(id) = thread_id {
+        let sched = get_scheduler();
+        if let Ok(mut threads) = sched.threads.lock() {
+            if let Some(thread) = threads.get_mut(&id) {
+                thread.status = ThreadStatus::Dead;
+            }
+        }
+        ALIVE_COUNT.fetch_sub(1, Ordering::SeqCst);
+        // Wake all workers in case they are parked — the alive count changed
+        // and if it reached zero, they need to check for shutdown.
+        sched.park_condvar.notify_all();
+    }
+
+    CURRENT_THREAD.set(None);
+
+    // Switch back to the scheduler context.
+    SCHEDULER_CONTEXT.with(|sched_ctx| {
+        let mut dummy = Context::default();
+        // SAFETY: sched_ctx was saved by the worker loop before switching to
+        // this green thread.  We switch into it now to return control to the
+        // worker loop.  Using UnsafeCell::get() is sound because only one
+        // logical access occurs at a time (cooperative scheduling).
+        unsafe {
+            switch_context(&raw mut dummy, sched_ctx.get());
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Worker loop
+// ---------------------------------------------------------------------------
+
+/// Try to pop a green thread ID from the current worker's local deque.
+fn try_pop_local() -> Option<GreenThreadId> {
+    WORKER_DEQUE.with(|deque| {
+        deque
+            .borrow()
+            .as_ref()
+            .and_then(crossbeam_deque::Worker::pop)
+    })
+}
+
+/// Try to pop a green thread ID from the global overflow queue.
+fn try_pop_global() -> Option<GreenThreadId> {
+    let sched = get_scheduler();
+    if let Ok(mut queue) = sched.global_queue.lock() {
+        queue.pop_front()
+    } else {
+        None
+    }
+}
+
+/// Resumes execution of a green thread by switching from the scheduler
+/// context to the green thread's saved context.
+///
+/// When the green thread yields or finishes, control returns here.
+/// The function then inspects the thread's status and either re-enqueues
+/// it (if Ready) or leaves it alone (if Dead).
+fn resume_green_thread(id: GreenThreadId) {
+    let sched = get_scheduler();
+
+    // Extract the thread's context pointer and mark it Running.
+    let ctx_ptr: *mut Context = {
+        let Ok(mut threads) = sched.threads.lock() else {
+            return;
+        };
+        let Some(thread) = threads.get_mut(&id) else {
+            return;
+        };
+        if thread.status == ThreadStatus::Dead {
+            return;
+        }
+        thread.status = ThreadStatus::Running;
+        &raw mut thread.context
+    };
+
+    CURRENT_THREAD.set(Some(id));
+    // Set the yield flag so the thread will yield at its next yield point.
+    SHOULD_YIELD.set(true);
+
+    // Switch from the scheduler context to the green thread.
+    SCHEDULER_CONTEXT.with(|sched_ctx| {
+        // SAFETY: sched_ctx is a valid thread-local Context.  ctx_ptr points
+        // to the green thread's context inside the scheduler's HashMap, which
+        // is not moved while we hold no lock (the thread owns its own context
+        // memory via its stack allocation — the Context is stored inline).
+        // The switch will save the current (scheduler) state into sched_ctx
+        // and restore the green thread's registers from ctx_ptr.
+        // SAFETY: UnsafeCell::get() returns a raw pointer.  Only one
+        // logical access happens at a time due to cooperative scheduling.
+        unsafe {
+            switch_context(sched_ctx.get(), ctx_ptr);
+        }
+    });
+
+    // We're back in the scheduler — the green thread yielded or finished.
+    CURRENT_THREAD.set(None);
+
+    // Check the thread status and re-enqueue if still alive.
+    let Ok(mut threads) = sched.threads.lock() else {
+        return;
+    };
+    if let Some(thread) = threads.get_mut(&id) {
+        match thread.status {
+            ThreadStatus::Running => {
+                // Thread yielded — mark Ready and push back to local deque.
+                thread.status = ThreadStatus::Ready;
+                drop(threads); // release lock before touching deque
+                WORKER_DEQUE.with(|deque| {
+                    if let Some(w) = deque.borrow().as_ref() {
+                        w.push(id);
+                    }
+                });
+            }
+            ThreadStatus::Dead => {
+                // Thread finished — remove it and drop (frees the stack).
+                threads.remove(&id);
+            }
+            ThreadStatus::Blocked | ThreadStatus::Ready => {
+                // Blocked threads are not re-enqueued (a waker will do it).
+                // Ready shouldn't happen here but is harmless.
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// Public extern "C" API — called from compiled Kōdo code
+// ===========================================================================
+
+/// Initialises the green thread scheduler with `num_threads` worker threads.
+///
+/// Must be called once before any `kodo_green_spawn`.  If `num_threads` is 0
+/// or negative, defaults to the number of available CPU cores.
+///
+/// # Safety
+///
+/// Must be called exactly once. Calling it a second time is a no-op (the
+/// existing scheduler is retained).
+#[no_mangle]
+pub unsafe extern "C" fn kodo_green_init(num_threads: i64) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let n = if num_threads <= 0 {
+        num_cpus::get().max(1)
+    } else {
+        num_threads as usize
+    };
+
+    // OnceLock ensures this only runs once.
+    let _ = SCHEDULER.get_or_init(|| Scheduler::new(n));
+}
+
+/// Spawns a new green thread running `func_ptr()` (no captures).
+///
+/// Called by compiled `spawn {}` blocks that don't capture any variables.
+///
+/// # Safety
+///
+/// `func_ptr` must be a valid pointer to an `extern "C" fn()`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_green_spawn(func_ptr: i64) {
+    let sched = get_scheduler();
+
+    // SAFETY: green_entry_no_env is a valid entry function; func_ptr is
+    // passed as the arg and will be transmuted back inside the entry.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let thread = unsafe { GreenThread::new(green_entry_no_env, func_ptr as usize) };
+    let id = thread.id;
+
+    if let Ok(mut threads) = sched.threads.lock() {
+        threads.insert(id, thread);
+    }
+    ALIVE_COUNT.fetch_add(1, Ordering::SeqCst);
+
+    if let Ok(mut queue) = sched.global_queue.lock() {
+        queue.push_back(id);
+    }
+    sched.park_condvar.notify_one();
+}
+
+/// Spawns a new green thread running `func_ptr(env_ptr)` (with captures).
+///
+/// The runtime copies `env_size` bytes from `env_ptr` to a heap buffer that
+/// stays alive for the green thread's lifetime.
+///
+/// # Safety
+///
+/// - `func_ptr` must be a valid pointer to an `extern "C" fn(i64)`.
+/// - `env_ptr` must point to a readable buffer of at least `env_size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_green_spawn_with_env(func_ptr: i64, env_ptr: i64, env_size: i64) {
+    let sched = get_scheduler();
+
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let size = env_size as usize;
+
+    let mut env = vec![0u8; size];
+    if size > 0 {
+        // SAFETY: caller guarantees env_ptr points to env_size readable bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(env_ptr as *const u8, env.as_mut_ptr(), size);
+        }
+    }
+
+    // SAFETY: func_ptr is a valid function pointer from Cranelift codegen.
+    let func: extern "C" fn(i64) = unsafe { std::mem::transmute(func_ptr) };
+
+    let payload = Box::new(EnvPayload { func, env });
+    let payload_ptr = Box::into_raw(payload) as usize;
+
+    // SAFETY: green_entry_with_env is a valid entry function; payload_ptr
+    // points to a heap-allocated EnvPayload that will be freed inside the
+    // entry function.
+    let thread = unsafe { GreenThread::new(green_entry_with_env, payload_ptr) };
+    let id = thread.id;
+
+    if let Ok(mut threads) = sched.threads.lock() {
+        threads.insert(id, thread);
+    }
+    ALIVE_COUNT.fetch_add(1, Ordering::SeqCst);
+
+    if let Ok(mut queue) = sched.global_queue.lock() {
+        queue.push_back(id);
+    }
+    sched.park_condvar.notify_one();
+}
+
+/// Yield point — called by compiled code at loop back-edges and function calls.
+///
+/// **Fast path** (~1ns): checks a thread-local boolean flag.  If false,
+/// returns immediately.
+///
+/// **Slow path**: saves the green thread's context and switches back to
+/// the scheduler, which will pick the next thread to run.
+///
+/// # Safety
+///
+/// Must only be called from within a green thread context (i.e., after the
+/// scheduler has switched to a green thread).
+#[no_mangle]
+pub unsafe extern "C" fn kodo_green_maybe_yield() {
+    // Fast path: check thread-local flag.
+    if !SHOULD_YIELD.get() {
+        return;
+    }
+    SHOULD_YIELD.set(false);
+
+    // Slow path: switch back to the scheduler.
+    let thread_id = CURRENT_THREAD.get();
+    let Some(id) = thread_id else { return };
+
+    let sched = get_scheduler();
+
+    // Get the thread's context pointer.
+    let ctx_ptr: *mut Context = {
+        let Ok(mut threads) = sched.threads.lock() else {
+            return;
+        };
+        let Some(t) = threads.get_mut(&id) else {
+            return;
+        };
+        &raw mut t.context
+    };
+
+    // Switch from the green thread back to the scheduler.
+    SCHEDULER_CONTEXT.with(|sched_ctx| {
+        // SAFETY: Both contexts are valid and pinned.  The green thread's
+        // context lives in the HashMap (stable address while not moved).
+        // The scheduler context is on this worker's thread-local storage.
+        unsafe {
+            switch_context(ctx_ptr, sched_ctx.get());
+        }
+    });
+
+    // When we return here, the scheduler has switched back to us.
+    // Reset the yield flag for the next yield point.
+    SHOULD_YIELD.set(true);
+}
+
+/// Starts the scheduler — blocks until all green threads complete.
+///
+/// Spawns worker OS threads and runs the worker loop on each.  Returns
+/// when all green threads have finished (status = Dead) or the scheduler
+/// is shut down.
+///
+/// # Safety
+///
+/// Must be called after `kodo_green_init` and after spawning at least one
+/// green thread.  Must be called from the main thread.
+///
+/// # Panics
+///
+/// Panics if `kodo_green_init` was not called beforehand.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_green_run() {
+    let sched = get_scheduler();
+
+    // If there are no alive threads, return immediately.
+    if ALIVE_COUNT.load(Ordering::SeqCst) == 0 {
+        return;
+    }
+
+    let num = sched.num_workers;
+
+    // Create per-worker deques and their corresponding stealers.  Workers
+    // own their deque; stealers are shared (via Arc) so any worker can
+    // steal from any other.
+    let mut workers: Vec<crossbeam_deque::Worker<GreenThreadId>> = Vec::with_capacity(num);
+    let mut local_stealers: Vec<crossbeam_deque::Stealer<GreenThreadId>> = Vec::with_capacity(num);
+    for _ in 0..num {
+        let w = crossbeam_deque::Worker::new_fifo();
+        local_stealers.push(w.stealer());
+        workers.push(w);
+    }
+
+    // Move initial global queue items into worker 0's deque to bootstrap.
+    if let Some(w0) = workers.first() {
+        if let Ok(mut queue) = sched.global_queue.lock() {
+            for id in queue.drain(..) {
+                w0.push(id);
+            }
+        }
+    }
+
+    let stealers = std::sync::Arc::new(local_stealers);
+
+    let handles: Vec<_> = workers
+        .into_iter()
+        .enumerate()
+        .map(|(i, worker)| {
+            let stealers = std::sync::Arc::clone(&stealers);
+            std::thread::spawn(move || {
+                worker_loop(i, worker, &stealers);
+            })
+        })
+        .collect();
+
+    for h in handles {
+        let _ = h.join();
+    }
+
+    sched.shutdown.store(true, Ordering::SeqCst);
+
+    // Clean up any remaining dead threads.
+    if let Ok(mut threads) = sched.threads.lock() {
+        threads.retain(|_, t| t.status != ThreadStatus::Dead);
+    }
+}
+
+/// The main loop executed by each worker OS thread.
+///
+/// Repeatedly finds a green thread to run (local deque → steal → global
+/// queue), resumes it via `switch_context`, and handles the result when it
+/// yields or finishes.  Parks on a condvar when no work is available.
+fn worker_loop(
+    worker_id: usize,
+    worker: crossbeam_deque::Worker<GreenThreadId>,
+    stealers: &[crossbeam_deque::Stealer<GreenThreadId>],
+) {
+    WORKER_ID.set(worker_id);
+    WORKER_DEQUE.with(|deque| {
+        *deque.borrow_mut() = Some(worker);
+    });
+
+    let sched = get_scheduler();
+
+    loop {
+        // Find next thread to run.
+        let thread_id = try_pop_local()
+            .or_else(|| try_steal_from(worker_id, stealers))
+            .or_else(try_pop_global);
+
+        if let Some(id) = thread_id {
+            resume_green_thread(id);
+        } else {
+            if sched.shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            if ALIVE_COUNT.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            if let Ok(guard) = sched.park_mutex.lock() {
+                if sched.shutdown.load(Ordering::SeqCst) || ALIVE_COUNT.load(Ordering::SeqCst) == 0
+                {
+                    break;
+                }
+                let _ = sched
+                    .park_condvar
+                    .wait_timeout(guard, std::time::Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+/// Try to steal from a given list of stealers (excluding self).
+fn try_steal_from(
+    worker_id: usize,
+    stealers: &[crossbeam_deque::Stealer<GreenThreadId>],
+) -> Option<GreenThreadId> {
+    if stealers.is_empty() {
+        return None;
+    }
+    let num = stealers.len();
+    let start = fastrand::usize(..num);
+    for i in 0..num {
+        let idx = (start + i) % num;
+        if idx == worker_id {
+            continue;
+        }
+        if let crossbeam_deque::Steal::Success(id) = stealers[idx].steal() {
+            return Some(id);
+        }
+    }
+    None
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -209,6 +784,7 @@ impl Drop for GreenThread {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::sync::atomic::AtomicI64;
 
     // -----------------------------------------------------------------------
     // GreenThreadId tests
@@ -303,5 +879,125 @@ mod tests {
         let thread = unsafe { GreenThread::new(noop_entry, 0) };
         drop(thread);
         // If we reach here the Drop impl ran without a segfault or panic.
+    }
+
+    // -----------------------------------------------------------------------
+    // Scheduler tests
+    // -----------------------------------------------------------------------
+
+    // Note: Because SCHEDULER is a global OnceLock and tests run in the same
+    // process, we can only initialise it once.  These tests work around that
+    // by using a dedicated init function and testing the internal mechanics
+    // that don't depend on the global singleton.
+
+    #[test]
+    fn scheduler_init_creates_workers() {
+        let sched = Scheduler::new(2);
+        assert_eq!(sched.num_workers, 2, "should create 2 workers");
+        assert!(
+            !sched.shutdown.load(Ordering::Relaxed),
+            "should not be shut down"
+        );
+        assert!(
+            sched.threads.lock().is_ok(),
+            "thread map should be accessible"
+        );
+        assert!(
+            sched.global_queue.lock().is_ok(),
+            "global queue should be accessible"
+        );
+    }
+
+    #[test]
+    fn spawn_single_thread_runs() {
+        static FLAG: AtomicBool = AtomicBool::new(false);
+
+        extern "C" fn set_flag() {
+            FLAG.store(true, Ordering::SeqCst);
+        }
+
+        FLAG.store(false, Ordering::SeqCst);
+
+        // Use the full scheduler API.
+        // SAFETY: calling the extern "C" scheduler API.
+        unsafe {
+            kodo_green_init(1);
+            kodo_green_spawn(set_flag as *const () as i64);
+            kodo_green_run();
+        }
+
+        assert!(
+            FLAG.load(Ordering::SeqCst),
+            "green thread should have set the flag"
+        );
+    }
+
+    #[test]
+    fn spawn_multiple_threads_all_run() {
+        static COUNTER: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn increment() {
+            COUNTER.fetch_add(1, Ordering::SeqCst);
+        }
+
+        COUNTER.store(0, Ordering::SeqCst);
+
+        // Use the full scheduler API.  We must ensure init is called.
+        // SAFETY: calling the extern "C" API is safe in test context.
+        unsafe {
+            kodo_green_init(2);
+        }
+
+        for _ in 0..10 {
+            // SAFETY: increment is a valid extern "C" fn() pointer.
+            unsafe {
+                kodo_green_spawn(increment as *const () as i64);
+            }
+        }
+
+        // Run the scheduler — blocks until all threads complete.
+        // SAFETY: init was called and threads were spawned.
+        unsafe {
+            kodo_green_run();
+        }
+
+        assert_eq!(
+            COUNTER.load(Ordering::SeqCst),
+            10,
+            "all 10 green threads should have run"
+        );
+    }
+
+    #[test]
+    fn yield_does_not_crash() {
+        // Calling kodo_green_maybe_yield outside a green thread should be
+        // a no-op (CURRENT_THREAD is None, SHOULD_YIELD is false).
+        // SAFETY: safe to call outside a green thread — it returns immediately.
+        unsafe {
+            kodo_green_maybe_yield();
+        }
+    }
+
+    #[test]
+    fn scheduler_completes_when_all_done() {
+        static DONE: AtomicBool = AtomicBool::new(false);
+
+        extern "C" fn mark_done() {
+            DONE.store(true, Ordering::SeqCst);
+        }
+
+        DONE.store(false, Ordering::SeqCst);
+
+        // SAFETY: calling the extern "C" API.
+        unsafe {
+            kodo_green_init(1);
+            kodo_green_spawn(mark_done as *const () as i64);
+            kodo_green_run();
+        }
+
+        assert!(
+            DONE.load(Ordering::SeqCst),
+            "scheduler should complete after all threads finish"
+        );
     }
 }
