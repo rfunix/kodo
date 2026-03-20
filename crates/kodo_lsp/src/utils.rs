@@ -101,6 +101,33 @@ pub(crate) fn format_type_expr(ty: &kodo_ast::TypeExpr) -> String {
     }
 }
 
+/// Formats a binary operator as its source-level symbol.
+pub(crate) fn format_binop(op: kodo_ast::BinOp) -> &'static str {
+    match op {
+        kodo_ast::BinOp::Add => "+",
+        kodo_ast::BinOp::Sub => "-",
+        kodo_ast::BinOp::Mul => "*",
+        kodo_ast::BinOp::Div => "/",
+        kodo_ast::BinOp::Mod => "%",
+        kodo_ast::BinOp::Eq => "==",
+        kodo_ast::BinOp::Ne => "!=",
+        kodo_ast::BinOp::Lt => "<",
+        kodo_ast::BinOp::Gt => ">",
+        kodo_ast::BinOp::Le => "<=",
+        kodo_ast::BinOp::Ge => ">=",
+        kodo_ast::BinOp::And => "&&",
+        kodo_ast::BinOp::Or => "||",
+    }
+}
+
+/// Formats a unary operator as its source-level symbol.
+pub(crate) fn format_unaryop(op: kodo_ast::UnaryOp) -> &'static str {
+    match op {
+        kodo_ast::UnaryOp::Neg => "-",
+        kodo_ast::UnaryOp::Not => "!",
+    }
+}
+
 /// Formats an expression as a string for display (used in contract display).
 pub(crate) fn format_expr(expr: &kodo_ast::Expr) -> String {
     match expr {
@@ -112,10 +139,15 @@ pub(crate) fn format_expr(expr: &kodo_ast::Expr) -> String {
         kodo_ast::Expr::BinaryOp {
             left, op, right, ..
         } => {
-            format!("{} {op:?} {}", format_expr(left), format_expr(right))
+            format!(
+                "{} {} {}",
+                format_expr(left),
+                format_binop(*op),
+                format_expr(right)
+            )
         }
         kodo_ast::Expr::UnaryOp { op, operand, .. } => {
-            format!("{op:?}{}", format_expr(operand))
+            format!("{}{}", format_unaryop(*op), format_expr(operand))
         }
         kodo_ast::Expr::Call { callee, .. } => {
             if let kodo_ast::Expr::Ident(name, _) = callee.as_ref() {

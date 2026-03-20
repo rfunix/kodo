@@ -59,6 +59,19 @@ pub(crate) fn completions_for_source(source: &str, position: Position) -> Vec<Co
     let mut checker = kodo_types::TypeChecker::new();
     let _ = checker.check_module(&module);
 
+    add_module_completions(&module, &mut items);
+    add_builtin_completions(&mut items);
+    add_string_method_completions(&mut items);
+    add_list_method_completions(&mut items);
+    add_map_method_completions(&mut items);
+    add_keyword_completions(&mut items);
+
+    items
+}
+
+/// Adds completions derived from the parsed module (functions, structs,
+/// enums, and struct fields) to the items list.
+fn add_module_completions(module: &kodo_ast::Module, items: &mut Vec<CompletionItem>) {
     for func in &module.functions {
         let params_str: Vec<String> = func
             .params
@@ -112,21 +125,25 @@ pub(crate) fn completions_for_source(source: &str, position: Position) -> Vec<Co
         });
     }
 
-    add_builtin_completions(&mut items);
-    add_string_method_completions(&mut items);
-
     for type_decl in &module.type_decls {
         for field in &type_decl.fields {
             items.push(CompletionItem {
                 label: field.name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
-                detail: Some(format!("{}.{}", type_decl.name, field.name)),
+                detail: Some(format!(
+                    "{}.{}: {}",
+                    type_decl.name,
+                    field.name,
+                    format_type_expr(&field.ty)
+                )),
+                documentation: Some(Documentation::String(format!(
+                    "Field `{}` of struct `{}`",
+                    field.name, type_decl.name
+                ))),
                 ..Default::default()
             });
         }
     }
-
-    items
 }
 
 /// Extracts the qualified prefix before the cursor (e.g., `"Color"` from `Color::`).
@@ -258,6 +275,160 @@ fn add_string_method_completions(items: &mut Vec<CompletionItem>) {
             kind: Some(CompletionItemKind::METHOD),
             detail: Some(format!("String.{name}{signature}")),
             documentation: Some(Documentation::String((*doc).to_string())),
+            ..Default::default()
+        });
+    }
+}
+
+/// Adds `List<T>` method completions to the list.
+fn add_list_method_completions(items: &mut Vec<CompletionItem>) {
+    let list_methods = [
+        (
+            "push",
+            "Appends a value to the end of the list",
+            "(value: T) -> Unit",
+        ),
+        (
+            "get",
+            "Returns the element at the given index",
+            "(index: Int) -> T",
+        ),
+        ("length", "Returns the number of elements", "() -> Int"),
+        (
+            "contains",
+            "Checks if the list contains a value",
+            "(value: T) -> Bool",
+        ),
+        ("pop", "Removes and returns the last element", "() -> T"),
+        (
+            "remove",
+            "Removes and returns the element at the given index",
+            "(index: Int) -> T",
+        ),
+        (
+            "set",
+            "Sets the element at the given index",
+            "(index: Int, value: T) -> Unit",
+        ),
+        (
+            "slice",
+            "Returns a sub-list from start to end",
+            "(start: Int, end: Int) -> List<T>",
+        ),
+        ("reverse", "Reverses the list in place", "() -> Unit"),
+        (
+            "is_empty",
+            "Returns true if the list has no elements",
+            "() -> Bool",
+        ),
+    ];
+    for (name, doc, signature) in &list_methods {
+        items.push(CompletionItem {
+            label: (*name).to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some(format!("List<T>.{name}{signature}")),
+            documentation: Some(Documentation::String((*doc).to_string())),
+            sort_text: Some(format!("1_{name}")),
+            ..Default::default()
+        });
+    }
+}
+
+/// Adds `Map<K, V>` method completions to the list.
+fn add_map_method_completions(items: &mut Vec<CompletionItem>) {
+    let map_methods = [
+        (
+            "insert",
+            "Inserts a key-value pair into the map",
+            "(key: K, value: V) -> Unit",
+        ),
+        (
+            "get",
+            "Returns the value for the given key",
+            "(key: K) -> V",
+        ),
+        (
+            "contains_key",
+            "Checks if the map contains the given key",
+            "(key: K) -> Bool",
+        ),
+        (
+            "length",
+            "Returns the number of key-value pairs",
+            "() -> Int",
+        ),
+        (
+            "remove",
+            "Removes the entry for the given key",
+            "(key: K) -> Bool",
+        ),
+        (
+            "is_empty",
+            "Returns true if the map has no entries",
+            "() -> Bool",
+        ),
+        (
+            "keys",
+            "Returns a list of all keys in the map",
+            "() -> List<K>",
+        ),
+        (
+            "values",
+            "Returns a list of all values in the map",
+            "() -> List<V>",
+        ),
+        (
+            "entries",
+            "Returns a list of all key-value pairs",
+            "() -> List<(K, V)>",
+        ),
+    ];
+    for (name, doc, signature) in &map_methods {
+        items.push(CompletionItem {
+            label: (*name).to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some(format!("Map<K, V>.{name}{signature}")),
+            documentation: Some(Documentation::String((*doc).to_string())),
+            sort_text: Some(format!("1_{name}")),
+            ..Default::default()
+        });
+    }
+}
+
+/// Adds Kōdo keyword completions to the list.
+fn add_keyword_completions(items: &mut Vec<CompletionItem>) {
+    let keywords = [
+        ("fn", "Function declaration"),
+        ("let", "Variable binding"),
+        ("mut", "Mutable binding"),
+        ("if", "Conditional expression"),
+        ("else", "Alternative branch"),
+        ("match", "Pattern matching"),
+        ("for", "Loop over a range or collection"),
+        ("while", "Conditional loop"),
+        ("return", "Return a value from a function"),
+        ("struct", "Struct type declaration"),
+        ("enum", "Enum type declaration"),
+        ("trait", "Trait declaration"),
+        ("impl", "Implementation block"),
+        ("requires", "Precondition contract"),
+        ("ensures", "Postcondition contract"),
+        ("module", "Module declaration"),
+        ("meta", "Module metadata block"),
+        ("import", "Import declaration"),
+        ("pub", "Public visibility"),
+        ("own", "Ownership qualifier"),
+        ("ref", "Immutable reference"),
+        ("spawn", "Spawn a concurrent task"),
+        ("async", "Async function modifier"),
+        ("await", "Await an async result"),
+    ];
+    for (kw, doc) in &keywords {
+        items.push(CompletionItem {
+            label: (*kw).to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some((*doc).to_string()),
+            sort_text: Some(format!("2_{kw}")),
             ..Default::default()
         });
     }
@@ -556,6 +727,108 @@ mod tests {
         assert!(
             doc.contains("requires"),
             "documentation should mention contracts, got: {doc}"
+        );
+    }
+
+    #[test]
+    fn completions_include_list_methods() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let list_methods: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    && i.detail.as_deref().unwrap_or("").starts_with("List<T>.")
+            })
+            .collect();
+        assert!(
+            !list_methods.is_empty(),
+            "completions should include List methods"
+        );
+        let labels: Vec<&str> = list_methods.iter().map(|i| i.label.as_str()).collect();
+        for method in &[
+            "push", "get", "length", "contains", "pop", "reverse", "slice",
+        ] {
+            assert!(
+                labels.contains(method),
+                "completions should include List method: {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_include_map_methods() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let map_methods: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    && i.detail.as_deref().unwrap_or("").starts_with("Map<K, V>.")
+            })
+            .collect();
+        assert!(
+            !map_methods.is_empty(),
+            "completions should include Map methods"
+        );
+        let labels: Vec<&str> = map_methods.iter().map(|i| i.label.as_str()).collect();
+        for method in &["insert", "get", "contains_key", "keys", "values", "entries"] {
+            assert!(
+                labels.contains(method),
+                "completions should include Map method: {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_include_keywords() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let keyword_items: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+            .collect();
+        assert!(
+            !keyword_items.is_empty(),
+            "completions should include keywords"
+        );
+        let labels: Vec<&str> = keyword_items.iter().map(|i| i.label.as_str()).collect();
+        for kw in &[
+            "fn", "let", "if", "match", "struct", "enum", "requires", "ensures",
+        ] {
+            assert!(
+                labels.contains(kw),
+                "completions should include keyword: {kw}"
+            );
+        }
+    }
+
+    #[test]
+    fn struct_field_completions_show_type() {
+        let source = r#"module test {
+    meta {
+        purpose: "test",
+        version: "1.0.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 1, y: 2 }
+    }
+}"#;
+        let items = completions_for_source(source, Position::new(0, 0));
+        let field_x = items
+            .iter()
+            .find(|i| i.label == "x" && i.kind == Some(CompletionItemKind::FIELD));
+        assert!(field_x.is_some(), "should find field x completion");
+        let detail = field_x.unwrap().detail.as_deref().unwrap_or("");
+        assert!(
+            detail.contains("Point.x: Int"),
+            "field detail should show type, got: {detail}"
         );
     }
 }
