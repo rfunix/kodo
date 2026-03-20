@@ -31,7 +31,8 @@ declaration     = function_decl
                 | intent_decl
                 | invariant_decl
                 | import_decl
-                | test_decl ;
+                | test_decl
+                | describe_decl ;
 
 (* ===== Imports ===== *)
 
@@ -99,6 +100,15 @@ annotation_arg  = IDENT ":" expr
 (* ===== Tests ===== *)
 
 test_decl       = annotation* "test" STRING_LIT block ;
+
+describe_decl   = annotation* "describe" STRING_LIT "{"
+                    setup_block? teardown_block?
+                    ( test_decl | describe_decl )*
+                  "}" ;
+setup_block     = "setup" block ;
+teardown_block  = "teardown" block ;
+
+forall_stmt     = "forall" IDENT ":" type_expr ( "," IDENT ":" type_expr )* block ;
 
 (* ===== Intent System ===== *)
 
