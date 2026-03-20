@@ -1,0 +1,11 @@
+//@ check-pass
+module hello {
+    meta {
+        purpose: "A minimal valid Kōdo program",
+        version: "0.1.0",
+        author: "test"
+    }
+
+    fn main() {
+    }
+}

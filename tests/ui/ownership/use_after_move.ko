@@ -1,0 +1,13 @@
+//@ compile-fail
+//@ error-code: E0240
+module use_after_move {
+    meta { purpose: "Use-after-move detection" }
+
+    fn consume(own s: String) { }
+
+    fn main() {
+        let x: String = "hello"
+        let y: String = x
+        println(x)  //~ ERROR E0240
+    }
+}

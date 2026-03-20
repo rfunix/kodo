@@ -1,0 +1,20 @@
+//@ compile-fail
+//@ error-code: E0220
+module non_exhaustive {
+    meta { purpose: "Non-exhaustive match detection" }
+
+    enum Direction {
+        North,
+        South,
+        East,
+        West
+    }
+
+    fn main() {
+        let d: Direction = Direction::North
+        let x: Int = match d {  //~ ERROR E0220
+            Direction::North => 1,
+            Direction::South => 2
+        }
+    }
+}

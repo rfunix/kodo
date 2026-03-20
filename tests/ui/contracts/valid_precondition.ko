@@ -1,0 +1,24 @@
+//@ check-pass
+//@ compile-flags: --contracts=runtime
+module contracts_valid {
+    meta { purpose: "Valid contracts pass type checking" }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+
+    fn clamp(value: Int, min: Int, max: Int) -> Int
+        requires { min <= max }
+    {
+        if value < min {
+            return min
+        }
+        if value > max {
+            return max
+        }
+        return value
+    }
+}

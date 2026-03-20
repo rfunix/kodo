@@ -1,0 +1,14 @@
+//@ check-pass
+module higher_order {
+    meta { purpose: "Higher-order functions with closures" }
+
+    fn apply(f: (Int) -> Int, x: Int) -> Int {
+        return f(x)
+    }
+
+    fn main() {
+        let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        let result: Int = apply(double, 21)
+        print_int(result)
+    }
+}

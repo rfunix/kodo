@@ -1,0 +1,13 @@
+//@ compile-fail
+module missing_field_err {
+    meta { purpose: "Error message for missing struct field" }
+
+    struct Config {
+        host: String,
+        port: Int
+    }
+
+    fn main() {
+        let c: Config = Config { host: "localhost" }  //~ ERROR: missing field
+    }
+}

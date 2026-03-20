@@ -1,0 +1,12 @@
+//@ check-pass
+module for_loop {
+    meta { purpose: "For loop with range" }
+
+    fn main() {
+        let sum: Int = 0
+        for i in 0..10 {
+            sum = sum + i
+        }
+        print_int(sum)
+    }
+}

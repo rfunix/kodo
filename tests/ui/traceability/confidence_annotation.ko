@@ -1,0 +1,15 @@
+//@ check-pass
+module traceability {
+    meta { purpose: "Agent traceability annotations" }
+
+    @confidence(0.95)
+    @authored_by(agent: "claude", model: "opus-4")
+    fn compute(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() {
+        let result: Int = compute(21)
+        print_int(result)
+    }
+}

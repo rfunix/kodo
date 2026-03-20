@@ -1,0 +1,16 @@
+//@ check-pass
+//@ compile-flags: --contracts=runtime
+module runtime_contract {
+    meta { purpose: "Contract verified at runtime" }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() {
+        let x: Int = divide(10, 2)
+        print_int(x)
+    }
+}

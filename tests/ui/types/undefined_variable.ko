@@ -1,0 +1,9 @@
+//@ compile-fail
+//@ error-code: E0201
+module undefined_var {
+    meta { purpose: "Uses an undefined variable" }
+
+    fn bad() -> Int {
+        return x  //~ ERROR E0201
+    }
+}

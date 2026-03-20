@@ -1,0 +1,19 @@
+//@ check-pass
+module while_loop {
+    meta { purpose: "While loop" }
+
+    fn countdown(n: Int) -> Int {
+        let i: Int = n
+        let sum: Int = 0
+        while i > 0 {
+            sum = sum + i
+            i = i - 1
+        }
+        return sum
+    }
+
+    fn main() {
+        let result: Int = countdown(10)
+        print_int(result)
+    }
+}

@@ -1,0 +1,14 @@
+//@ check-pass
+module generics_basic {
+    meta { purpose: "Basic generic function type checking" }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() {
+        let a: Int = identity(42)
+        let b: String = identity("hello")
+        let c: Bool = identity(true)
+    }
+}

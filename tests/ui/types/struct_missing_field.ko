@@ -1,0 +1,13 @@
+//@ compile-fail
+module struct_missing {
+    meta { purpose: "Missing struct field" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10 }  //~ ERROR: missing field
+    }
+}

@@ -1,0 +1,23 @@
+//@ check-pass
+module simple_arith {
+    meta { purpose: "Simple arithmetic through full pipeline" }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn subtract(a: Int, b: Int) -> Int {
+        return a - b
+    }
+
+    fn multiply(a: Int, b: Int) -> Int {
+        return a * b
+    }
+
+    fn main() {
+        let x: Int = add(10, 20)
+        let y: Int = subtract(x, 5)
+        let z: Int = multiply(y, 2)
+        print_int(z)
+    }
+}

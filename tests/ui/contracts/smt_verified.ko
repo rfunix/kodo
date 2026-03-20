@@ -1,0 +1,14 @@
+//@ check-pass
+//@ compile-flags: --contracts=runtime
+module smt_verified {
+    meta { purpose: "Contracts that pass in runtime mode" }
+
+    fn absolute(x: Int) -> Int
+        ensures { result >= 0 }
+    {
+        if x < 0 {
+            return -x
+        }
+        return x
+    }
+}

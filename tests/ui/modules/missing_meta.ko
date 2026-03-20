@@ -1,0 +1,6 @@
+//@ compile-fail
+//@ error-code: E0210
+module no_meta {
+    fn main() {
+    }
+}

@@ -1,0 +1,20 @@
+//@ check-pass
+module try_op {
+    meta { purpose: "Try operator with Result" }
+
+    fn may_fail(x: Int) -> Result<Int, String> {
+        if x < 0 {
+            return Result::Err("negative")
+        }
+        return Result::Ok(x)
+    }
+
+    fn use_try(x: Int) -> Result<Int, String> {
+        let val: Int = may_fail(x)?
+        return Result::Ok(val * 2)
+    }
+
+    fn main() {
+        let r: Result<Int, String> = use_try(5)
+    }
+}

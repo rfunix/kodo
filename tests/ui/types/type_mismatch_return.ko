@@ -1,0 +1,9 @@
+//@ compile-fail
+//@ error-code: E0200
+module type_mismatch {
+    meta { purpose: "Return type mismatch" }
+
+    fn bad_return() -> Int {
+        return true  //~ ERROR E0200
+    }
+}

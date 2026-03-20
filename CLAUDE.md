@@ -53,6 +53,7 @@ kodo_mir         ← kodo_ast, kodo_types
 kodo_codegen     ← kodo_mir
 kodo_std         ← kodo_ast
 kodoc            ← all crates + clap + tracing + ariadne
+kotest           ← clap + serde_json (UI test harness, no internal deps)
 ```
 
 ## Academic Foundations
@@ -116,8 +117,21 @@ See `docs/REFERENCES.md` for the full bibliography with chapter-by-chapter mappi
 - **Snapshot tests**: `insta` for lexer output, parser AST, error messages.
 - **Property tests**: `proptest` for fuzzing lexer and parser.
 - **Integration tests**: `crates/kodoc/tests/` for full pipeline.
+- **UI tests**: `kotest` harness with `.ko` files in `tests/ui/` (inspired by Rust's `compiletest`).
 - **Benchmarks**: `criterion` in `crates/kodo_lexer/benches/`.
 - Test fixtures live in `tests/fixtures/{valid,invalid}/`.
+- UI test files live in `tests/ui/` organized by feature (basics, types, ownership, contracts, etc.).
+
+#### UI Test Directives
+
+UI tests use `//@ ` directives in `.ko` files:
+- `//@ check-pass` — must compile without errors
+- `//@ compile-fail` — must fail compilation
+- `//@ run-pass` — must compile AND run successfully
+- `//@ run-fail` — must compile but fail at runtime
+- `//@ error-code: E0200` — expected error code
+- `//@ compile-flags: --contracts=static` — extra kodoc flags
+- `//~ ERROR E0200: message` — inline annotation (bidirectional verification)
 
 ## Error Messages — Primary UX Surface
 
@@ -182,8 +196,11 @@ Examples:
 | `clippy.toml` | Lint configuration |
 | `deny.toml` | Dependency audit rules |
 | `Makefile` | Build, test, and run shortcuts |
+| `crates/kotest/` | UI test harness (compiletest-inspired) |
+| `tests/ui/` | UI test files organized by feature |
 | `scripts/validate-doc-examples.sh` | Validates every doc example compiles, runs, and produces correct output |
 | `~/dev/kodo-website` | Kōdo language website (update when user-facing changes occur) |
+| `~/dev/kodo-website/public/llms.txt` | llms.txt for AI agent discoverability (update when docs pages are added/removed/renamed) |
 
 ## Quick Language Reference
 
@@ -289,7 +306,9 @@ After completing ANY task (feature, bugfix, refactor, etc.), you MUST execute AL
 - Write unit tests for every new function or changed behavior.
 - Write integration tests for new features (in `crates/kodoc/tests/`).
 - If adding a new language feature, create a `.ko` example in `examples/`.
+- Add UI tests in `tests/ui/` for new features or error messages (with `//@ ` directives).
 - Run `cargo test --workspace` and confirm ALL tests pass.
+- Run `make ui-test` and confirm all UI tests pass.
 
 ### 2. Linters and Formatting
 
@@ -306,6 +325,7 @@ After completing ANY task (feature, bugfix, refactor, etc.), you MUST execute AL
 - Ensure all new public items have `///` doc comments.
 - Update examples table in `README.md` if new `.ko` examples were added.
 - If any user-facing feature, documentation, or README content was changed, check if `~/dev/kodo-website` needs updates and update it accordingly.
+- If doc pages were added, removed, or renamed on the website, update `~/dev/kodo-website/public/llms.txt` to keep the AI-facing sitemap in sync.
 
 ### 4. Verification
 
@@ -315,6 +335,7 @@ Run this exact sequence and confirm all pass:
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
+make ui-test
 ```
 
 If any user-facing feature or codegen change was made, also run:
@@ -366,4 +387,10 @@ cargo run -p kodoc -- lex examples/hello.ko
 cargo run -p kodoc -- parse examples/hello.ko
 cargo run -p kodoc -- check examples/hello.ko
 cargo run -p kodoc -- build examples/hello.ko
+
+# Run UI tests (kotest harness)
+make ui-test
+
+# Auto-update UI test baselines
+make ui-bless
 ```

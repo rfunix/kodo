@@ -1,0 +1,17 @@
+[package]
+name = "kotest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "UI test harness for the Kōdo compiler — inspired by Rust's compiletest"
+
+[[bin]]
+name = "kotest"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

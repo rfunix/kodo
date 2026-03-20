@@ -1,0 +1,13 @@
+//@ compile-fail
+//@ error-code: E0202
+module arity_mismatch {
+    meta { purpose: "Wrong number of arguments" }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() {
+        let x: Int = add(1)  //~ ERROR E0202
+    }
+}

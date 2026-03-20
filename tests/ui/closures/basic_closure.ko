@@ -1,0 +1,15 @@
+//@ check-pass
+module basic_closure {
+    meta { purpose: "Basic closure expressions and variable capture" }
+
+    fn main() {
+        let factor: Int = 10
+        let mul: (Int) -> Int = |x: Int| -> Int { x * factor }
+
+        let a: Int = mul(3)
+        let b: Int = mul(7)
+
+        print_int(a)
+        print_int(b)
+    }
+}

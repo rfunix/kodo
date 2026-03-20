@@ -1,0 +1,4 @@
+//@ compile-fail
+//@ error-code: E0101
+module broken {
+    fn bad(

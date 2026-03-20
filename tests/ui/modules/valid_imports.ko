@@ -1,0 +1,13 @@
+//@ check-pass
+module valid_imports {
+    meta { purpose: "Module with meta and functions" }
+
+    fn helper(x: Int) -> Int {
+        return x + 1
+    }
+
+    fn main() {
+        let result: Int = helper(41)
+        print_int(result)
+    }
+}

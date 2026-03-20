@@ -1,0 +1,10 @@
+//@ check-pass
+module basic_spawn {
+    meta { purpose: "Basic spawn statement" }
+
+    fn main() {
+        spawn {
+            print_int(42)
+        }
+    }
+}

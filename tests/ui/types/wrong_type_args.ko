@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0221
+module wrong_type_args {
+    meta { purpose: "Wrong number of type arguments" }
+
+    struct Pair<A, B> {
+        first: A,
+        second: B
+    }
+
+    fn main() {
+        let p: Pair<Int> = Pair { first: 1, second: 2 }  //~ ERROR E0221
+    }
+}

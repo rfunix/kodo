@@ -1,0 +1,16 @@
+//@ check-pass
+module map_ops {
+    meta { purpose: "Map collection operations" }
+
+    fn main() {
+        let m = map_new()
+        map_insert(m, 1, 100)
+        map_insert(m, 2, 200)
+
+        let v: Int = map_get(m, 1)
+        print_int(v)
+
+        let has: Bool = map_contains_key(m, 2)
+        let size: Int = map_length(m)
+    }
+}

@@ -15,6 +15,7 @@ members = [
     "crates/kodo_lsp",
     "crates/kodoc",
     "crates/kodo_mcp",
+    "crates/kotest",
     "tools/ko",
 ]
 

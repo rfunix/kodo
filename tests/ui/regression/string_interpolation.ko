@@ -1,0 +1,11 @@
+//@ check-pass
+module string_interp {
+    meta { purpose: "String interpolation with expressions" }
+
+    fn main() {
+        let name: String = "world"
+        let x: Int = 42
+        let msg: String = f"hello {name}, value is {x}"
+        println(msg)
+    }
+}

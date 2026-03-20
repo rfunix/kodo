@@ -1,0 +1,16 @@
+//@ check-pass
+module tuple_support {
+    meta { purpose: "Tuple creation and access" }
+
+    fn swap(a: Int, b: Int) -> (Int, Int) {
+        return (b, a)
+    }
+
+    fn main() {
+        let pair: (Int, Int) = swap(1, 2)
+        let first: Int = pair.0
+        let second: Int = pair.1
+        print_int(first)
+        print_int(second)
+    }
+}

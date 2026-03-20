@@ -1,0 +1,11 @@
+//@ check-pass
+module variables {
+    meta { purpose: "Variable declarations and basic types" }
+
+    fn main() {
+        let x: Int = 42
+        let s: String = "hello"
+        let b: Bool = true
+        let f: Float64 = 3.14
+    }
+}

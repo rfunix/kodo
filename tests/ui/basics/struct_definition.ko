@@ -1,0 +1,15 @@
+//@ check-pass
+module struct_def {
+    meta { purpose: "Struct definition and construction" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() {
+        let p: Point = Point { x: 10, y: 20 }
+        print_int(p.x)
+        print_int(p.y)
+    }
+}

@@ -1,0 +1,20 @@
+//@ check-pass
+module option_handling {
+    meta { purpose: "Option type with match" }
+
+    fn find(x: Int) -> Option<Int> {
+        if x > 0 {
+            return Option::Some(x)
+        }
+        return Option::None
+    }
+
+    fn main() {
+        let o: Option<Int> = find(42)
+        let val: Int = match o {
+            Option::Some(v) => v,
+            Option::None => 0
+        }
+        print_int(val)
+    }
+}

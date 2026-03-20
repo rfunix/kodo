@@ -1460,6 +1460,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotest"
+version = "0.5.1"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,12 @@
+//@ check-pass
+module basic_intent {
+    meta { purpose: "Basic intent block" }
+
+    intent math_utils {
+        operations: "add,subtract"
+    }
+
+    fn main() {
+        print_int(42)
+    }
+}

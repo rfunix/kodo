@@ -1,0 +1,9 @@
+//@ compile-fail
+//@ error-code: E0200
+module type_error_suggestion {
+    meta { purpose: "Type error with suggestion in JSON" }
+
+    fn bad() -> Int {
+        return "hello"  //~ ERROR E0200
+    }
+}

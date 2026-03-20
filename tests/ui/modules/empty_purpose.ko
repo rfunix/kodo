@@ -1,0 +1,6 @@
+//@ compile-fail
+module empty_purpose {
+    meta { purpose: "" }
+    fn main() {
+    }
+}

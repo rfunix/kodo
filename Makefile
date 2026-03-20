@@ -1,4 +1,4 @@
-.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report validate-docs
+.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report validate-docs ui-test ui-bless
 
 # Default: run all checks
 all: fmt clippy test doc
@@ -27,8 +27,16 @@ doc-open:
 validate-docs:
 	./scripts/validate-doc-examples.sh
 
+# Run UI tests (kotest harness)
+ui-test:
+	cargo run -p kotest -- tests/ui/
+
+# Auto-update UI test baselines
+ui-bless:
+	cargo run -p kotest -- tests/ui/ --bless
+
 # All checks (CI-equivalent)
-ci: fmt-check clippy test doc
+ci: fmt-check clippy test ui-test doc
 
 # === Build ===
 

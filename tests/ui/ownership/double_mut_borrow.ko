@@ -1,0 +1,13 @@
+//@ compile-fail
+//@ error-code: E0240
+module double_mut {
+    meta { purpose: "Use-after-move detection" }
+
+    fn take(own s: String) {}
+
+    fn main() {
+        let x: String = "hello"
+        take(x)
+        println(x)  //~ ERROR E0240
+    }
+}

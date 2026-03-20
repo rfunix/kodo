@@ -1,0 +1,23 @@
+//@ check-pass
+module result_option {
+    meta { purpose: "Result and Option type usage" }
+
+    fn safe_divide(a: Int, b: Int) -> Result<Int, String> {
+        if b == 0 {
+            return Result::Err("division by zero")
+        }
+        return Result::Ok(a / b)
+    }
+
+    fn find_positive(x: Int) -> Option<Int> {
+        if x > 0 {
+            return Option::Some(x)
+        }
+        return Option::None
+    }
+
+    fn main() {
+        let r: Result<Int, String> = safe_divide(10, 2)
+        let o: Option<Int> = find_positive(42)
+    }
+}

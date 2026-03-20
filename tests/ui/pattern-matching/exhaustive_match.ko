@@ -1,0 +1,20 @@
+//@ check-pass
+module exhaustive_match {
+    meta { purpose: "Exhaustive match with all variants" }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main() {
+        let c: Color = Color::Red
+        let n: Int = match c {
+            Color::Red => 1,
+            Color::Green => 2,
+            Color::Blue => 3
+        }
+        print_int(n)
+    }
+}
