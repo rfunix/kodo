@@ -3,7 +3,7 @@
 //! Statements are the building blocks of function bodies. This module
 //! handles `let` bindings (including tuple destructuring), `return`,
 //! `while`, `for`/`for-in` loops, `if let`, `break`, `continue`,
-//! `spawn`, `parallel`, assignment, and expression statements.
+//! `spawn`, `parallel`, `forall`, assignment, and expression statements.
 
 use kodo_ast::{Expr, Span, Stmt};
 use kodo_lexer::TokenKind;
@@ -44,6 +44,7 @@ impl Parser {
             Some(TokenKind::Continue) => self.parse_continue_stmt(),
             Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
             Some(TokenKind::Parallel) => self.parse_parallel_stmt(),
+            Some(TokenKind::Forall) => self.parse_forall_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
         }
     }
@@ -287,6 +288,33 @@ impl Parser {
         })
     }
 
+    /// Parses a `forall` statement: `forall name: Type, name: Type { body }`.
+    ///
+    /// Introduces universally quantified bindings used inside property test
+    /// blocks. Each binding specifies a name and a type that the test runtime
+    /// will generate random values for.
+    fn parse_forall_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Forall)?.span;
+        let mut bindings = Vec::new();
+        loop {
+            let name = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let ty = self.parse_type()?;
+            bindings.push((name, ty));
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume comma
+        }
+        let body = self.parse_block()?;
+        let end = body.span;
+        Ok(Stmt::ForAll {
+            span: start.merge(end),
+            bindings,
+            body,
+        })
+    }
+
     /// Parses a parallel block: `parallel { spawn { ... } spawn { ... } }`.
     fn parse_parallel_stmt(&mut self) -> Result<Stmt> {
         let start = self.expect(&TokenKind::Parallel)?.span;
@@ -307,6 +335,60 @@ impl Parser {
 mod tests {
     use crate::parse;
     use kodo_ast::{Expr, Stmt};
+
+    #[test]
+    fn parse_forall_single_binding() {
+        let source = r#"module test_mod {
+            test "prop" {
+                forall x: Int {
+                    let _ = x
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.test_decls[0].body;
+        assert!(
+            matches!(&body.stmts[0], Stmt::ForAll { bindings, .. } if bindings.len() == 1),
+            "expected ForAll with 1 binding"
+        );
+    }
+
+    #[test]
+    fn parse_forall_multiple_bindings() {
+        let source = r#"module test_mod {
+            test "prop" {
+                forall x: Int, y: String, z: Bool {
+                    let _ = x
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.test_decls[0].body;
+        assert!(
+            matches!(&body.stmts[0], Stmt::ForAll { bindings, .. } if bindings.len() == 3),
+            "expected ForAll with 3 bindings"
+        );
+    }
+
+    #[test]
+    fn parse_forall_binding_names() {
+        let source = r#"module test_mod {
+            test "prop" {
+                forall x: Int, y: String {
+                    let _ = x
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let body = &module.test_decls[0].body;
+        match &body.stmts[0] {
+            Stmt::ForAll { bindings, .. } => {
+                assert_eq!(bindings[0].0, "x");
+                assert_eq!(bindings[1].0, "y");
+            }
+            other => panic!("expected ForAll, got {other:?}"),
+        }
+    }
 
     #[test]
     fn stmt_let_with_type_inference() {
