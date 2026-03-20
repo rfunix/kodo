@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] — 2026-03-20
+
+### Added
+
+- **Stdlib: Character operations** — `char_at`, `char_from_code`, `is_alpha`, `is_digit`, `is_alphanumeric`, `is_whitespace` for text processing and lexer development
+- **Stdlib: StringBuilder** — `string_builder_new/push/push_char/to_string/len` for efficient string construction
+- **Stdlib: Number formatting** — `format_int(n, base)` for bases 2-36 (binary, hex, etc.)
+- **Stdlib: Date/Time** — `timestamp()` returns Unix epoch ms, `sleep(ms)` pauses execution
+- **Self-hosted lexer** — a complete Kōdo tokenizer written in Kōdo (~350 lines), recognizing 19 keywords, identifiers, int/string literals, 16 operators, 13 punctuation types, and comments. Proves language expressiveness for compiler work.
+- New example: `char_ops_demo.ko`, `self_hosted_lexer/main.ko`
+- New UI test: `char_ops.ko`
+
 ## [0.15.0] — 2026-03-20
 
 ### Added
