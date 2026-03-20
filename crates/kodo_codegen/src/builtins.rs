@@ -1027,6 +1027,32 @@ fn declare_channel_builtins(
         types::I64
     );
     decl_void!("kodo_channel_free", "channel_free", types::I64);
+
+    // Generic type-erased channel builtins.
+    decl_ret!(
+        "kodo_channel_generic_new",
+        "channel_generic_new",
+        [],
+        types::I64
+    );
+    decl_void!(
+        "kodo_channel_generic_send",
+        "channel_generic_send",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_ret!(
+        "kodo_channel_generic_recv",
+        "channel_generic_recv",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_void!(
+        "kodo_channel_generic_free",
+        "channel_generic_free",
+        types::I64
+    );
     Ok(())
 }
 

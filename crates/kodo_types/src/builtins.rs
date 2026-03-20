@@ -1322,6 +1322,28 @@ impl TypeChecker {
             "channel_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
+
+        // Generic channel functions — type-erased channels for any type T.
+        // channel_generic_new() -> Int (opaque handle)
+        self.env.insert(
+            "channel_generic_new".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        // channel_generic_send(handle: Int, data_ptr: Int, data_size: Int) -> ()
+        self.env.insert(
+            "channel_generic_send".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        // channel_generic_recv(handle: Int, out_ptr: Int, data_size: Int) -> Int
+        self.env.insert(
+            "channel_generic_recv".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        // channel_generic_free(handle: Int) -> ()
+        self.env.insert(
+            "channel_generic_free".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
     }
 
     /// Registers CLI builtins: args, readln, exit.

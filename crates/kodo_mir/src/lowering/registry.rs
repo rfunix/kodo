@@ -175,6 +175,14 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("kodo_green_maybe_yield".to_string())
         .or_insert(Type::Unit);
 
+    // Generic channel builtins.
+    fn_return_types
+        .entry("channel_generic_new".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("channel_generic_recv".to_string())
+        .or_insert(Type::Int);
+
     register_sprint5_return_types(fn_return_types);
     register_test_return_types(fn_return_types);
 }

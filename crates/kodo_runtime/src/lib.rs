@@ -15,6 +15,7 @@
 //! - [`collections`] — List and Map builtins, actor runtime
 //! - [`db`] — `SQLite` database builtins
 //! - [`scheduler`] — Cooperative scheduler, channels, async runtime
+//! - [`channel_generic`] — Generic type-erased channels for any Kodo type
 //! - [`memory`] — Reference-counted allocator
 //! - [`http`] — HTTP client builtins
 //! - [`server`] — HTTP server builtins (`tiny_http`)
@@ -28,6 +29,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(clippy::pedantic)]
 
+pub mod channel_generic;
 pub mod collections;
 pub mod context;
 pub mod db;
