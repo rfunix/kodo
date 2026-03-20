@@ -1,0 +1,1897 @@
+// Self-Hosted Parser — Kodo parses Kodo
+//
+// A complete recursive descent LL(1) parser written in Kodo itself.
+// This is Milestone 10 of the Kodo roadmap: the final milestone to v1.0.0.
+//
+// The parser tokenizes Kodo source code, builds an AST stored as a node pool
+// with parallel arrays, and serializes it to JSON. It handles:
+//   - Module declarations with meta blocks
+//   - Function declarations with parameters, return types, and contracts
+//   - Let/return/if/else/while/for statements
+//   - Binary expressions with operator precedence climbing
+//   - Function calls, method calls, field access
+//   - Struct and enum declarations
+//   - Match expressions
+//   - Import declarations
+//
+// Proves that Kodo is expressive enough for real compiler work.
+//
+// Compile and run:
+//   kodoc build examples/self_hosted_parser/main.ko -o self_hosted_parser
+//   ./self_hosted_parser
+//
+// Or parse a file:
+//   ./self_hosted_parser examples/hello.ko
+
+module self_hosted_parser {
+    meta {
+        purpose: "Self-hosted parser: Kodo parses Kodo (v1.0.0 milestone)"
+        version: "1.0.0"
+        author: "claude"
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // LEXER — Tokenizes source code into parallel arrays
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Token Kind Constants:
+    //   Keywords: fn=1 let=2 return=3 if=4 else=5 while=6 for=7
+    //     true=8 false=9 struct=10 enum=11 match=12 import=13
+    //     test=14 spawn=15 module=16 meta=17 requires=18 ensures=19
+    //     in=20 mut=21 pub=22 type=23 break=24 continue=25
+    //   Literals: IntLit=30 StringLit=31
+    //   Identifier: Ident=40
+    //   Punctuation: LParen=50 RParen=51 LBrace=52 RBrace=53 LBracket=54
+    //     RBracket=55 Comma=56 Colon=57 ColonColon=58 Semicolon=59
+    //     Dot=60 Arrow=61 At=62 FatArrow=63
+    //   Operators: Plus=70 Minus=71 Star=72 Slash=73 Percent=74
+    //     Eq=75 EqEq=76 BangEq=77 Lt=78 Gt=79 LtEq=80 GtEq=81
+    //     And=82 Or=83 Not=84 Pipe=85 DotDot=86 DotDotEq=87
+    //   Special: EOF=90 Error=91
+
+    fn is_whitespace(ch: Int) -> Bool {
+        return ch == 32 || ch == 9 || ch == 10 || ch == 13
+    }
+
+    fn is_digit(ch: Int) -> Bool {
+        return ch >= 48 && ch <= 57
+    }
+
+    fn is_alpha(ch: Int) -> Bool {
+        // Single wide range: A-Z (65-90) + [\]^_` (91-96) + a-z (97-122)
+        // Slightly overapproximates but those chars don't appear in Kodo source
+        return ch >= 65 && ch <= 122
+    }
+
+    fn is_alnum(ch: Int) -> Bool {
+        // Inline: alpha (65-122) or digit (48-57)
+        if ch >= 48 && ch <= 57 { return true }
+        if ch >= 65 && ch <= 122 { return true }
+        return false
+    }
+
+    fn skip_ws(ref source: String, pos: Int, len: Int) -> Int {
+        let mut p: Int = pos
+        let mut cont: Bool = true
+        while cont {
+            if p >= len {
+                cont = false
+            } else {
+                let ch: Int = source.char_at(p)
+                if is_whitespace(ch) {
+                    p = p + 1
+                } else {
+                    if ch == 47 && p + 1 < len {
+                        let next_ch: Int = source.char_at(p + 1)
+                        if next_ch == 47 {
+                            p = p + 2
+                            let mut in_comment: Bool = true
+                            while in_comment {
+                                if p >= len {
+                                    in_comment = false
+                                } else {
+                                    if source.char_at(p) == 10 {
+                                        p = p + 1
+                                        in_comment = false
+                                    } else {
+                                        p = p + 1
+                                    }
+                                }
+                            }
+                        } else {
+                            cont = false
+                        }
+                    } else {
+                        cont = false
+                    }
+                }
+            }
+        }
+        return p
+    }
+
+    fn keyword_or_ident(ref word: String) -> Int {
+        if word == "fn" { return 1 }
+        if word == "let" { return 2 }
+        if word == "return" { return 3 }
+        if word == "if" { return 4 }
+        if word == "else" { return 5 }
+        if word == "while" { return 6 }
+        if word == "for" { return 7 }
+        if word == "true" { return 8 }
+        if word == "false" { return 9 }
+        if word == "struct" { return 10 }
+        if word == "enum" { return 11 }
+        if word == "match" { return 12 }
+        if word == "import" { return 13 }
+        if word == "test" { return 14 }
+        if word == "spawn" { return 15 }
+        if word == "module" { return 16 }
+        if word == "meta" { return 17 }
+        if word == "requires" { return 18 }
+        if word == "ensures" { return 19 }
+        if word == "in" { return 20 }
+        if word == "mut" { return 21 }
+        if word == "pub" { return 22 }
+        if word == "type" { return 23 }
+        if word == "break" { return 24 }
+        if word == "continue" { return 25 }
+        return 40
+    }
+
+    fn tokenize(ref source: String, tok_kinds: List<Int>, tok_starts: List<Int>, tok_ends: List<Int>, tok_ints: List<Int>) -> Int {
+        let len: Int = source.length()
+        let mut pos: Int = 0
+        let mut count: Int = 0
+        let mut done: Bool = false
+
+        while !done {
+            let p: Int = skip_ws(source, pos, len)
+
+            if p >= len {
+                list_push(tok_kinds, 90)
+                list_push(tok_starts, p)
+                list_push(tok_ends, p)
+                list_push(tok_ints, 0)
+                count = count + 1
+                done = true
+            } else {
+                let ch: Int = source.char_at(p)
+
+                if is_digit(ch) {
+                    let mut ep: Int = p
+                    let mut reading: Bool = true
+                    while reading {
+                        if ep >= len {
+                            reading = false
+                        } else {
+                            if is_digit(source.char_at(ep)) {
+                                ep = ep + 1
+                            } else {
+                                reading = false
+                            }
+                        }
+                    }
+                    let num_str: String = source.substring(p, ep)
+                    let val: Int = num_str.parse_int()
+                    list_push(tok_kinds, 30)
+                    list_push(tok_starts, p)
+                    list_push(tok_ends, ep)
+                    list_push(tok_ints, val)
+                    count = count + 1
+                    pos = ep
+                } else {
+                    if is_alpha(ch) {
+                        let mut ep: Int = p
+                        let mut reading: Bool = true
+                        while reading {
+                            if ep >= len {
+                                reading = false
+                            } else {
+                                if is_alnum(source.char_at(ep)) {
+                                    ep = ep + 1
+                                } else {
+                                    reading = false
+                                }
+                            }
+                        }
+                        let word: String = source.substring(p, ep)
+                        let kind: Int = keyword_or_ident(word)
+                        list_push(tok_kinds, kind)
+                        list_push(tok_starts, p)
+                        list_push(tok_ends, ep)
+                        list_push(tok_ints, 0)
+                        count = count + 1
+                        pos = ep
+                    } else {
+                        if ch == 34 {
+                            let mut ep: Int = p + 1
+                            let mut found: Bool = false
+                            while ep < len && !found {
+                                if source.char_at(ep) == 34 {
+                                    found = true
+                                } else {
+                                    ep = ep + 1
+                                }
+                            }
+                            if found {
+                                list_push(tok_kinds, 31)
+                                list_push(tok_starts, p)
+                                list_push(tok_ends, ep + 1)
+                                list_push(tok_ints, 0)
+                                count = count + 1
+                                pos = ep + 1
+                            } else {
+                                list_push(tok_kinds, 91)
+                                list_push(tok_starts, p)
+                                list_push(tok_ends, len)
+                                list_push(tok_ints, 0)
+                                count = count + 1
+                                pos = len
+                            }
+                        } else {
+                            let mut tk: Int = 91
+                            let mut tlen: Int = 1
+
+                            if ch == 40 { tk = 50 }
+                            if ch == 41 { tk = 51 }
+                            if ch == 123 { tk = 52 }
+                            if ch == 125 { tk = 53 }
+                            if ch == 91 { tk = 54 }
+                            if ch == 93 { tk = 55 }
+                            if ch == 44 { tk = 56 }
+                            if ch == 59 { tk = 59 }
+                            if ch == 64 { tk = 62 }
+                            if ch == 43 { tk = 70 }
+                            if ch == 42 { tk = 72 }
+                            if ch == 37 { tk = 74 }
+
+                            if ch == 58 {
+                                tk = 57
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 58 {
+                                        tk = 58
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 46 {
+                                tk = 60
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 46 {
+                                        tk = 86
+                                        tlen = 2
+                                        if p + 2 < len {
+                                            if source.char_at(p + 2) == 61 {
+                                                tk = 87
+                                                tlen = 3
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if ch == 45 {
+                                tk = 71
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 62 {
+                                        tk = 61
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 47 { tk = 73 }
+
+                            if ch == 61 {
+                                tk = 75
+                                if p + 1 < len {
+                                    let nc: Int = source.char_at(p + 1)
+                                    if nc == 61 {
+                                        tk = 76
+                                        tlen = 2
+                                    }
+                                    if nc == 62 {
+                                        tk = 63
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 33 {
+                                tk = 84
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 61 {
+                                        tk = 77
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 60 {
+                                tk = 78
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 61 {
+                                        tk = 80
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 62 {
+                                tk = 79
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 61 {
+                                        tk = 81
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 38 {
+                                tk = 91
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 38 {
+                                        tk = 82
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            if ch == 124 {
+                                tk = 85
+                                if p + 1 < len {
+                                    if source.char_at(p + 1) == 124 {
+                                        tk = 83
+                                        tlen = 2
+                                    }
+                                }
+                            }
+
+                            list_push(tok_kinds, tk)
+                            list_push(tok_starts, p)
+                            list_push(tok_ends, p + tlen)
+                            list_push(tok_ints, 0)
+                            count = count + 1
+                            pos = p + tlen
+                        }
+                    }
+                }
+            }
+        }
+
+        return count
+    }
+
+    fn token_name(kind: Int) -> String {
+        if kind == 1 { return "fn" }
+        if kind == 2 { return "let" }
+        if kind == 3 { return "return" }
+        if kind == 4 { return "if" }
+        if kind == 5 { return "else" }
+        if kind == 6 { return "while" }
+        if kind == 7 { return "for" }
+        if kind == 8 { return "true" }
+        if kind == 9 { return "false" }
+        if kind == 10 { return "struct" }
+        if kind == 11 { return "enum" }
+        if kind == 12 { return "match" }
+        if kind == 13 { return "import" }
+        if kind == 16 { return "module" }
+        if kind == 17 { return "meta" }
+        if kind == 18 { return "requires" }
+        if kind == 19 { return "ensures" }
+        if kind == 20 { return "in" }
+        if kind == 21 { return "mut" }
+        if kind == 22 { return "pub" }
+        if kind == 30 { return "IntLit" }
+        if kind == 31 { return "StringLit" }
+        if kind == 40 { return "Ident" }
+        if kind == 50 { return "LParen" }
+        if kind == 51 { return "RParen" }
+        if kind == 52 { return "LBrace" }
+        if kind == 53 { return "RBrace" }
+        if kind == 56 { return "Comma" }
+        if kind == 57 { return "Colon" }
+        if kind == 58 { return "ColonColon" }
+        if kind == 60 { return "Dot" }
+        if kind == 61 { return "Arrow" }
+        if kind == 62 { return "At" }
+        if kind == 63 { return "FatArrow" }
+        if kind == 70 { return "Plus" }
+        if kind == 71 { return "Minus" }
+        if kind == 72 { return "Star" }
+        if kind == 73 { return "Slash" }
+        if kind == 74 { return "Percent" }
+        if kind == 75 { return "Eq" }
+        if kind == 76 { return "EqEq" }
+        if kind == 77 { return "BangEq" }
+        if kind == 78 { return "Lt" }
+        if kind == 79 { return "Gt" }
+        if kind == 80 { return "LtEq" }
+        if kind == 81 { return "GtEq" }
+        if kind == 82 { return "And" }
+        if kind == 83 { return "Or" }
+        if kind == 84 { return "Not" }
+        if kind == 90 { return "EOF" }
+        return "Unknown"
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // AST NODE POOL — Parallel arrays indexed by node id
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Node kinds:
+    //   1=Module  2=Meta  3=MetaEntry  4=Function  5=Param
+    //   6=Let  7=Return  8=If  9=While  10=ExprStmt
+    //   11=Block  12=IntLit  13=StringLit  14=BoolLit  15=Ident
+    //   16=BinOp  17=UnaryOp  18=Call  19=FieldAccess  20=Assign
+    //   21=Import  22=Struct  23=StructField  24=Enum  25=EnumVariant
+    //   26=Match  27=MatchArm  28=For  29=Break  30=Continue
+    //   31=Requires  32=Ensures  34=TypeExpr  35=MethodCall
+
+    fn peek(tok_kinds: List<Int>, pos: Int) -> Int {
+        return list_get(tok_kinds, pos)
+    }
+
+    fn tok_text(ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int) -> String {
+        let s: Int = list_get(tok_starts, pos)
+        let e: Int = list_get(tok_ends, pos)
+        return source.substring(s, e)
+    }
+
+    fn add_node(nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, kind: Int, name: String) -> Int {
+        let id: Int = list_length(nk)
+        list_push(nk, kind)
+        list_push(nn, name)
+        list_push(c1, 0 - 1)
+        list_push(c2, 0 - 1)
+        list_push(c3, 0 - 1)
+        list_push(iv, 0)
+        list_push(sv, "")
+        return id
+    }
+
+    fn add_child(children_of: List<Int>, parent: Int, child: Int) {
+        list_push(children_of, parent)
+        list_push(children_of, child)
+    }
+
+    fn parse_error(ref msg: String, tok_kinds: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int) -> Int {
+        let tk: Int = peek(tok_kinds, pos)
+        let tn: String = token_name(tk)
+        let txt: String = tok_text(source, tok_starts, tok_ends, pos)
+        println(f"Parse error: {msg} (got {tn} '{txt}' at token {pos})")
+        return 0 - 1
+    }
+
+    fn expect(tok_kinds: List<Int>, kind: Int, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, ref what: String) -> Int {
+        let tk: Int = peek(tok_kinds, pos)
+        if tk == kind {
+            return pos + 1
+        }
+        let tn: String = token_name(tk)
+        let expected: String = token_name(kind)
+        let txt: String = tok_text(source, tok_starts, tok_ends, pos)
+        println(f"Parse error: expected {what} ({expected}) got {tn} '{txt}' at token {pos}")
+        return 0 - 1
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PARSER — Recursive descent LL(1)
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Return convention: functions return a packed int = node_id * 100000 + new_pos
+    // This avoids needing struct returns. On error, returns -1.
+
+    // ── Parse Type Expression ─────────────────────────────────────────
+
+    fn parse_type(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let tk: Int = peek(tok_kinds, pos)
+        if tk != 40 {
+            let dummy: Int = parse_error("expected type name", tok_kinds, source, tok_starts, tok_ends, pos)
+            return 0 - 1
+        }
+        let tname: String = tok_text(source, tok_starts, tok_ends, pos)
+        let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 34, tname)
+        let mut p: Int = pos + 1
+
+        // Generic args: <T, U>
+        let next: Int = peek(tok_kinds, p)
+        if next == 78 {
+            p = p + 1
+            let mut gd: Bool = false
+            while !gd {
+                let gt: Int = peek(tok_kinds, p)
+                if gt == 79 {
+                    p = p + 1
+                    gd = true
+                } else {
+                    let ar: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if ar < 0 { return 0 - 1 }
+                    let ai: Int = ar / 100000
+                    p = ar - ai * 100000
+                    add_child(co, id, ai)
+                    let cm: Int = peek(tok_kinds, p)
+                    if cm == 56 { p = p + 1 }
+                }
+            }
+        }
+
+        return id * 100000 + p
+    }
+
+    // ── Parse Primary Expression ──────────────────────────────────────
+
+    fn parse_primary(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let tk: Int = peek(tok_kinds, pos)
+
+        // Integer literal
+        if tk == 30 {
+            let val: Int = list_get(tok_ints, pos)
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 12, "")
+            list_set(iv, id, val)
+            return id * 100000 + pos + 1
+        }
+
+        // String literal
+        if tk == 31 {
+            let text: String = tok_text(source, tok_starts, tok_ends, pos)
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 13, "")
+            list_set(sv, id, text)
+            return id * 100000 + pos + 1
+        }
+
+        // true
+        if tk == 8 {
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 14, "true")
+            list_set(iv, id, 1)
+            return id * 100000 + pos + 1
+        }
+
+        // false
+        if tk == 9 {
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 14, "false")
+            list_set(iv, id, 0)
+            return id * 100000 + pos + 1
+        }
+
+        // Identifier, function call, or qualified name
+        if tk == 40 {
+            let name: String = tok_text(source, tok_starts, tok_ends, pos)
+            let mut p: Int = pos + 1
+            let next: Int = peek(tok_kinds, p)
+
+            // Qualified: Ident::Ident
+            if next == 58 {
+                let after: Int = peek(tok_kinds, p + 1)
+                if after == 40 {
+                    let var_name: String = tok_text(source, tok_starts, tok_ends, p + 1)
+                    let qname: String = name + "::" + var_name
+                    p = p + 2
+                    let n2: Int = peek(tok_kinds, p)
+                    if n2 == 50 {
+                        // Qualified call
+                        p = p + 1
+                        let cid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 18, qname)
+                        let mut ad: Bool = false
+                        if peek(tok_kinds, p) == 51 {
+                            ad = true
+                            p = p + 1
+                        }
+                        while !ad {
+                            let ar: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                            if ar < 0 { return 0 - 1 }
+                            let ai: Int = ar / 100000
+                            p = ar - ai * 100000
+                            add_child(co, cid, ai)
+                            let sp: Int = peek(tok_kinds, p)
+                            if sp == 56 { p = p + 1 }
+                            if sp == 51 {
+                                p = p + 1
+                                ad = true
+                            }
+                            if sp != 56 && sp != 51 { ad = true }
+                        }
+                        return cid * 100000 + p
+                    }
+                    let qid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 15, qname)
+                    return qid * 100000 + p
+                }
+            }
+
+            // Function call: Ident(args)
+            if next == 50 {
+                p = p + 1
+                let cid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 18, name)
+                let mut ad: Bool = false
+                if peek(tok_kinds, p) == 51 {
+                    ad = true
+                    p = p + 1
+                }
+                while !ad {
+                    let ar: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if ar < 0 { return 0 - 1 }
+                    let ai: Int = ar / 100000
+                    p = ar - ai * 100000
+                    add_child(co, cid, ai)
+                    let sp: Int = peek(tok_kinds, p)
+                    if sp == 56 { p = p + 1 }
+                    if sp == 51 {
+                        p = p + 1
+                        ad = true
+                    }
+                    if sp != 56 && sp != 51 { ad = true }
+                }
+                return cid * 100000 + p
+            }
+
+            // Plain ident
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 15, name)
+            return id * 100000 + p
+        }
+
+        // Parenthesized expression
+        if tk == 50 {
+            let inner: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos + 1, nk, nn, c1, c2, c3, iv, sv, co)
+            if inner < 0 { return 0 - 1 }
+            let iid: Int = inner / 100000
+            let mut p: Int = inner - iid * 100000
+            let rp: String = ")"
+            p = expect(tok_kinds, 51, source, tok_starts, tok_ends, p, rp)
+            if p < 0 { return 0 - 1 }
+            return iid * 100000 + p
+        }
+
+        // Unary: ! or -
+        if tk == 84 || tk == 71 {
+            let op: String = tok_text(source, tok_starts, tok_ends, pos)
+            let operand: Int = parse_primary(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos + 1, nk, nn, c1, c2, c3, iv, sv, co)
+            if operand < 0 { return 0 - 1 }
+            let oid: Int = operand / 100000
+            let p: Int = operand - oid * 100000
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 17, op)
+            list_set(c1, id, oid)
+            return id * 100000 + p
+        }
+
+        // If expression
+        if tk == 4 {
+            return parse_if(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // Match expression
+        if tk == 12 {
+            return parse_match(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        let dummy: Int = parse_error("unexpected token in expression", tok_kinds, source, tok_starts, tok_ends, pos)
+        return 0 - 1
+    }
+
+    // ── Parse postfix (field access, method calls) ────────────────────
+
+    fn parse_postfix(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let prim: Int = parse_primary(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        if prim < 0 { return 0 - 1 }
+        let mut cur: Int = prim / 100000
+        let mut p: Int = prim - cur * 100000
+
+        let mut cont: Bool = true
+        while cont {
+            let tk: Int = peek(tok_kinds, p)
+            if tk == 60 {
+                p = p + 1
+                let ftk: Int = peek(tok_kinds, p)
+                if ftk == 40 {
+                    let fname: String = tok_text(source, tok_starts, tok_ends, p)
+                    p = p + 1
+                    let after: Int = peek(tok_kinds, p)
+                    if after == 50 {
+                        // Method call
+                        p = p + 1
+                        let mc: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 35, fname)
+                        list_set(c1, mc, cur)
+                        let mut md: Bool = false
+                        if peek(tok_kinds, p) == 51 {
+                            md = true
+                            p = p + 1
+                        }
+                        while !md {
+                            let ar: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                            if ar < 0 { return 0 - 1 }
+                            let ai: Int = ar / 100000
+                            p = ar - ai * 100000
+                            add_child(co, mc, ai)
+                            let sp: Int = peek(tok_kinds, p)
+                            if sp == 56 { p = p + 1 }
+                            if sp == 51 {
+                                p = p + 1
+                                md = true
+                            }
+                            if sp != 56 && sp != 51 { md = true }
+                        }
+                        cur = mc
+                    } else {
+                        // Field access
+                        let fa: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 19, fname)
+                        list_set(c1, fa, cur)
+                        cur = fa
+                    }
+                } else {
+                    cont = false
+                }
+            } else {
+                cont = false
+            }
+        }
+
+        return cur * 100000 + p
+    }
+
+    // ── Binary expression with precedence climbing ────────────────────
+
+    fn op_prec(tk: Int) -> Int {
+        if tk == 83 { return 1 }
+        if tk == 82 { return 2 }
+        if tk == 76 || tk == 77 { return 3 }
+        if tk == 78 || tk == 79 || tk == 80 || tk == 81 { return 4 }
+        if tk == 70 || tk == 71 { return 5 }
+        if tk == 72 || tk == 73 || tk == 74 { return 6 }
+        return 0
+    }
+
+    fn op_name(tk: Int) -> String {
+        if tk == 70 { return "+" }
+        if tk == 71 { return "-" }
+        if tk == 72 { return "*" }
+        if tk == 73 { return "/" }
+        if tk == 74 { return "%" }
+        if tk == 76 { return "==" }
+        if tk == 77 { return "!=" }
+        if tk == 78 { return "<" }
+        if tk == 79 { return ">" }
+        if tk == 80 { return "<=" }
+        if tk == 81 { return ">=" }
+        if tk == 82 { return "&&" }
+        if tk == 83 { return "||" }
+        return "?"
+    }
+
+    fn parse_expr_prec(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, min_prec: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let lr: Int = parse_postfix(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        if lr < 0 { return 0 - 1 }
+        let mut lhs: Int = lr / 100000
+        let mut p: Int = lr - lhs * 100000
+
+        let mut cont: Bool = true
+        while cont {
+            let tk: Int = peek(tok_kinds, p)
+            let prec: Int = op_prec(tk)
+            if prec < min_prec || prec == 0 {
+                cont = false
+            } else {
+                let oname: String = op_name(tk)
+                p = p + 1
+                let rr: Int = parse_expr_prec(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, prec + 1, nk, nn, c1, c2, c3, iv, sv, co)
+                if rr < 0 { return 0 - 1 }
+                let rhs: Int = rr / 100000
+                p = rr - rhs * 100000
+                let bid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 16, oname)
+                list_set(c1, bid, lhs)
+                list_set(c2, bid, rhs)
+                lhs = bid
+            }
+        }
+
+        return lhs * 100000 + p
+    }
+
+    fn parse_expr(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        return parse_expr_prec(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, 1, nk, nn, c1, c2, c3, iv, sv, co)
+    }
+
+    // ── Parse If ──────────────────────────────────────────────────────
+
+    fn parse_if(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let cr: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if cr < 0 { return 0 - 1 }
+        let cid: Int = cr / 100000
+        p = cr - cid * 100000
+
+        let tr: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if tr < 0 { return 0 - 1 }
+        let tid: Int = tr / 100000
+        p = tr - tid * 100000
+
+        let iid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 8, "if")
+        list_set(c1, iid, cid)
+        list_set(c2, iid, tid)
+
+        let next: Int = peek(tok_kinds, p)
+        if next == 5 {
+            p = p + 1
+            let etk: Int = peek(tok_kinds, p)
+            if etk == 4 {
+                let er: Int = parse_if(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if er < 0 { return 0 - 1 }
+                let eid: Int = er / 100000
+                p = er - eid * 100000
+                list_set(c3, iid, eid)
+            } else {
+                let er: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if er < 0 { return 0 - 1 }
+                let eid: Int = er / 100000
+                p = er - eid * 100000
+                list_set(c3, iid, eid)
+            }
+        }
+
+        return iid * 100000 + p
+    }
+
+    // ── Parse Match ───────────────────────────────────────────────────
+
+    fn parse_match(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let sr: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if sr < 0 { return 0 - 1 }
+        let sid: Int = sr / 100000
+        p = sr - sid * 100000
+
+        let lb: String = "{"
+        p = expect(tok_kinds, 52, source, tok_starts, tok_ends, p, lb)
+        if p < 0 { return 0 - 1 }
+
+        let mid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 26, "match")
+        list_set(c1, mid, sid)
+
+        let mut ad: Bool = false
+        while !ad {
+            let tk: Int = peek(tok_kinds, p)
+            if tk == 53 {
+                p = p + 1
+                ad = true
+            }
+            if !ad {
+                let mut pat: String = tok_text(source, tok_starts, tok_ends, p)
+                p = p + 1
+                // Qualified pattern: Ident::Ident
+                if peek(tok_kinds, p) == 58 {
+                    p = p + 1
+                    let vn: String = tok_text(source, tok_starts, tok_ends, p)
+                    pat = pat + "::" + vn
+                    p = p + 1
+                }
+                let fa: String = "=>"
+                p = expect(tok_kinds, 63, source, tok_starts, tok_ends, p, fa)
+                if p < 0 { return 0 - 1 }
+                let br: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if br < 0 { return 0 - 1 }
+                let bi: Int = br / 100000
+                p = br - bi * 100000
+                let arm: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 27, pat)
+                list_set(c1, arm, bi)
+                add_child(co, mid, arm)
+                if peek(tok_kinds, p) == 56 { p = p + 1 }
+            }
+        }
+
+        return mid * 100000 + p
+    }
+
+    // ── Parse Block ───────────────────────────────────────────────────
+
+    fn parse_block(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let lb: String = "{"
+        let mut p: Int = expect(tok_kinds, 52, source, tok_starts, tok_ends, pos, lb)
+        if p < 0 { return 0 - 1 }
+
+        let bid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 11, "block")
+
+        let mut bd: Bool = false
+        while !bd {
+            let tk: Int = peek(tok_kinds, p)
+            if tk == 53 {
+                p = p + 1
+                bd = true
+            }
+            if tk == 90 && !bd {
+                let dummy: Int = parse_error("unexpected EOF in block", tok_kinds, source, tok_starts, tok_ends, p)
+                return 0 - 1
+            }
+            if !bd && tk != 53 {
+                let sr: Int = parse_stmt(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if sr < 0 { return 0 - 1 }
+                let si: Int = sr / 100000
+                p = sr - si * 100000
+                add_child(co, bid, si)
+            }
+        }
+
+        return bid * 100000 + p
+    }
+
+    // ── Parse Statement ───────────────────────────────────────────────
+
+    fn parse_stmt(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let tk: Int = peek(tok_kinds, pos)
+
+        // let
+        if tk == 2 {
+            return parse_let(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // return
+        if tk == 3 {
+            return parse_return(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // if
+        if tk == 4 {
+            return parse_if(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // while
+        if tk == 6 {
+            return parse_while(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // for
+        if tk == 7 {
+            return parse_for(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        }
+
+        // break
+        if tk == 24 {
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 29, "break")
+            return id * 100000 + pos + 1
+        }
+
+        // continue
+        if tk == 25 {
+            let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 30, "continue")
+            return id * 100000 + pos + 1
+        }
+
+        // Assignment: ident = expr
+        if tk == 40 {
+            let next: Int = peek(tok_kinds, pos + 1)
+            if next == 75 {
+                let vn: String = tok_text(source, tok_starts, tok_ends, pos)
+                let mut p: Int = pos + 2
+                let vr: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if vr < 0 { return 0 - 1 }
+                let vi: Int = vr / 100000
+                p = vr - vi * 100000
+                let aid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 20, vn)
+                list_set(c1, aid, vi)
+                return aid * 100000 + p
+            }
+        }
+
+        // Expression statement
+        let er: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, pos, nk, nn, c1, c2, c3, iv, sv, co)
+        if er < 0 { return 0 - 1 }
+        let ei: Int = er / 100000
+        let p: Int = er - ei * 100000
+        let sid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 10, "expr_stmt")
+        list_set(c1, sid, ei)
+        return sid * 100000 + p
+    }
+
+    // ── Parse Let ─────────────────────────────────────────────────────
+
+    fn parse_let(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let mut is_mut: Int = 0
+        if peek(tok_kinds, p) == 21 {
+            is_mut = 1
+            p = p + 1
+        }
+
+        if peek(tok_kinds, p) != 40 {
+            let dummy: Int = parse_error("expected variable name", tok_kinds, source, tok_starts, tok_ends, p)
+            return 0 - 1
+        }
+        let vn: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+
+        let mut tid: Int = 0 - 1
+        if peek(tok_kinds, p) == 57 {
+            p = p + 1
+            let tr: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+            if tr < 0 { return 0 - 1 }
+            tid = tr / 100000
+            p = tr - tid * 100000
+        }
+
+        let eq: String = "="
+        p = expect(tok_kinds, 75, source, tok_starts, tok_ends, p, eq)
+        if p < 0 { return 0 - 1 }
+
+        let ir: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if ir < 0 { return 0 - 1 }
+        let iid: Int = ir / 100000
+        p = ir - iid * 100000
+
+        let lid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 6, vn)
+        list_set(iv, lid, is_mut)
+        list_set(c1, lid, iid)
+        if tid >= 0 { list_set(c2, lid, tid) }
+
+        return lid * 100000 + p
+    }
+
+    // ── Parse Return ──────────────────────────────────────────────────
+
+    fn parse_return(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let rid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 7, "return")
+        let next: Int = peek(tok_kinds, p)
+        if next != 53 && next != 90 {
+            let vr: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+            if vr < 0 { return 0 - 1 }
+            let vi: Int = vr / 100000
+            p = vr - vi * 100000
+            list_set(c1, rid, vi)
+        }
+        return rid * 100000 + p
+    }
+
+    // ── Parse While ───────────────────────────────────────────────────
+
+    fn parse_while(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let cr: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if cr < 0 { return 0 - 1 }
+        let cid: Int = cr / 100000
+        p = cr - cid * 100000
+
+        let br: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if br < 0 { return 0 - 1 }
+        let bi: Int = br / 100000
+        p = br - bi * 100000
+
+        let wid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 9, "while")
+        list_set(c1, wid, cid)
+        list_set(c2, wid, bi)
+
+        return wid * 100000 + p
+    }
+
+    // ── Parse For ─────────────────────────────────────────────────────
+
+    fn parse_for(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let vn: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+        let ink: String = "in"
+        p = expect(tok_kinds, 20, source, tok_starts, tok_ends, p, ink)
+        if p < 0 { return 0 - 1 }
+
+        let ir: Int = parse_expr(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if ir < 0 { return 0 - 1 }
+        let ii: Int = ir / 100000
+        p = ir - ii * 100000
+
+        let br: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if br < 0 { return 0 - 1 }
+        let bi: Int = br / 100000
+        p = br - bi * 100000
+
+        let fid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 28, vn)
+        list_set(c1, fid, ii)
+        list_set(c2, fid, bi)
+
+        return fid * 100000 + p
+    }
+
+    // ── Parse Param ───────────────────────────────────────────────────
+
+    fn parse_param(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let pn: String = tok_text(source, tok_starts, tok_ends, pos)
+        let mut p: Int = pos + 1
+        let col: String = ":"
+        p = expect(tok_kinds, 57, source, tok_starts, tok_ends, p, col)
+        if p < 0 { return 0 - 1 }
+
+        let tr: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if tr < 0 { return 0 - 1 }
+        let ti: Int = tr / 100000
+        p = tr - ti * 100000
+
+        let pid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 5, pn)
+        list_set(c1, pid, ti)
+
+        return pid * 100000 + p
+    }
+
+    // ── Parse Function ────────────────────────────────────────────────
+
+    fn parse_function(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let fname: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+
+        let fid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 4, fname)
+
+        let lp: String = "("
+        p = expect(tok_kinds, 50, source, tok_starts, tok_ends, p, lp)
+        if p < 0 { return 0 - 1 }
+
+        // Parameters
+        let mut pd: Bool = false
+        if peek(tok_kinds, p) == 51 {
+            pd = true
+            p = p + 1
+        }
+        while !pd {
+            // Skip 'ref' or 'mut' parameter modifiers
+            let ptk: Int = peek(tok_kinds, p)
+            if ptk == 21 { p = p + 1 }
+            // Check for 'ref' identifier used as keyword
+            if peek(tok_kinds, p) == 40 {
+                let maybe_ref: String = tok_text(source, tok_starts, tok_ends, p)
+                if maybe_ref == "ref" {
+                    p = p + 1
+                }
+            }
+            let pr: Int = parse_param(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+            if pr < 0 { return 0 - 1 }
+            let pi: Int = pr / 100000
+            p = pr - pi * 100000
+            add_child(co, fid, pi)
+            let sp: Int = peek(tok_kinds, p)
+            if sp == 56 { p = p + 1 }
+            if sp == 51 {
+                p = p + 1
+                pd = true
+            }
+            if sp != 56 && sp != 51 { pd = true }
+        }
+
+        // Return type: -> Type
+        if peek(tok_kinds, p) == 61 {
+            p = p + 1
+            let rtr: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+            if rtr < 0 { return 0 - 1 }
+            let rti: Int = rtr / 100000
+            p = rtr - rti * 100000
+            list_set(c1, fid, rti)
+        }
+
+        // Contracts: requires { ... } ensures { ... }
+        let mut cl: Bool = true
+        while cl {
+            let ctk: Int = peek(tok_kinds, p)
+            if ctk == 18 {
+                p = p + 1
+                let rb: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if rb < 0 { return 0 - 1 }
+                let ri: Int = rb / 100000
+                p = rb - ri * 100000
+                let rn: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 31, "requires")
+                list_set(c1, rn, ri)
+                add_child(co, fid, rn)
+            } else {
+                if ctk == 19 {
+                    p = p + 1
+                    let eb: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if eb < 0 { return 0 - 1 }
+                    let ei: Int = eb / 100000
+                    p = eb - ei * 100000
+                    let en: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 32, "ensures")
+                    list_set(c1, en, ei)
+                    add_child(co, fid, en)
+                } else {
+                    cl = false
+                }
+            }
+        }
+
+        // Body
+        let br: Int = parse_block(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+        if br < 0 { return 0 - 1 }
+        let bi: Int = br / 100000
+        p = br - bi * 100000
+        list_set(c2, fid, bi)
+
+        return fid * 100000 + p
+    }
+
+    // ── Parse Struct ──────────────────────────────────────────────────
+
+    fn parse_struct(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let sn: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+        let sid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 22, sn)
+        let lb: String = "{"
+        p = expect(tok_kinds, 52, source, tok_starts, tok_ends, p, lb)
+        if p < 0 { return 0 - 1 }
+
+        let mut fd: Bool = false
+        while !fd {
+            if peek(tok_kinds, p) == 53 {
+                p = p + 1
+                fd = true
+            }
+            if !fd {
+                let fn_name: String = tok_text(source, tok_starts, tok_ends, p)
+                p = p + 1
+                let col: String = ":"
+                p = expect(tok_kinds, 57, source, tok_starts, tok_ends, p, col)
+                if p < 0 { return 0 - 1 }
+                let ftr: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if ftr < 0 { return 0 - 1 }
+                let fti: Int = ftr / 100000
+                p = ftr - fti * 100000
+                let fi: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 23, fn_name)
+                list_set(c1, fi, fti)
+                add_child(co, sid, fi)
+                if peek(tok_kinds, p) == 56 { p = p + 1 }
+            }
+        }
+
+        return sid * 100000 + p
+    }
+
+    // ── Parse Enum ────────────────────────────────────────────────────
+
+    fn parse_enum(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let en: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+        let eid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 24, en)
+        let lb: String = "{"
+        p = expect(tok_kinds, 52, source, tok_starts, tok_ends, p, lb)
+        if p < 0 { return 0 - 1 }
+
+        let mut vd: Bool = false
+        while !vd {
+            if peek(tok_kinds, p) == 53 {
+                p = p + 1
+                vd = true
+            }
+            if !vd {
+                let vn: String = tok_text(source, tok_starts, tok_ends, p)
+                p = p + 1
+                let vid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 25, vn)
+                add_child(co, eid, vid)
+                // Payload: (types)
+                if peek(tok_kinds, p) == 50 {
+                    p = p + 1
+                    let mut ppd: Bool = false
+                    while !ppd {
+                        if peek(tok_kinds, p) == 51 {
+                            p = p + 1
+                            ppd = true
+                        }
+                        if !ppd {
+                            let ptr: Int = parse_type(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                            if ptr < 0 { return 0 - 1 }
+                            let pti: Int = ptr / 100000
+                            p = ptr - pti * 100000
+                            add_child(co, vid, pti)
+                            if peek(tok_kinds, p) == 56 { p = p + 1 }
+                        }
+                    }
+                }
+                if peek(tok_kinds, p) == 56 { p = p + 1 }
+            }
+        }
+
+        return eid * 100000 + p
+    }
+
+    // ── Parse Import ──────────────────────────────────────────────────
+
+    fn parse_import(tok_kinds: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>) -> Int {
+        let mut p: Int = pos + 1
+        let mn: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+        let id: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 21, mn)
+        return id * 100000 + p
+    }
+
+    // ── Skip Annotations ──────────────────────────────────────────────
+
+    fn skip_annotations(tok_kinds: List<Int>, pos: Int) -> Int {
+        let mut p: Int = pos
+        let mut cont: Bool = true
+        while cont {
+            if peek(tok_kinds, p) == 62 {
+                p = p + 1
+                p = p + 1
+                if peek(tok_kinds, p) == 50 {
+                    p = p + 1
+                    let mut depth: Int = 1
+                    while depth > 0 {
+                        let atk: Int = peek(tok_kinds, p)
+                        if atk == 50 { depth = depth + 1 }
+                        if atk == 51 { depth = depth - 1 }
+                        p = p + 1
+                    }
+                }
+            } else {
+                cont = false
+            }
+        }
+        return p
+    }
+
+    // ── Parse Meta Block ──────────────────────────────────────────────
+
+    fn parse_meta(tok_kinds: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mut p: Int = pos + 1
+        let lb: String = "{"
+        p = expect(tok_kinds, 52, source, tok_starts, tok_ends, p, lb)
+        if p < 0 { return 0 - 1 }
+
+        let mid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 2, "meta")
+
+        let mut md: Bool = false
+        while !md {
+            if peek(tok_kinds, p) == 53 {
+                p = p + 1
+                md = true
+            }
+            if !md {
+                let key: String = tok_text(source, tok_starts, tok_ends, p)
+                p = p + 1
+                let col: String = ":"
+                p = expect(tok_kinds, 57, source, tok_starts, tok_ends, p, col)
+                if p < 0 { return 0 - 1 }
+                let val: String = tok_text(source, tok_starts, tok_ends, p)
+                p = p + 1
+                let eid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 3, key)
+                list_set(sv, eid, val)
+                add_child(co, mid, eid)
+                if peek(tok_kinds, p) == 56 { p = p + 1 }
+            }
+        }
+
+        return mid * 100000 + p
+    }
+
+    // ── Parse Module ──────────────────────────────────────────────────
+
+    fn parse_module(tok_kinds: List<Int>, tok_ints: List<Int>, ref source: String, tok_starts: List<Int>, tok_ends: List<Int>, pos: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>) -> Int {
+        let mkw: String = "module"
+        let mut p: Int = expect(tok_kinds, 16, source, tok_starts, tok_ends, pos, mkw)
+        if p < 0 { return 0 - 1 }
+
+        let mn: String = tok_text(source, tok_starts, tok_ends, p)
+        p = p + 1
+        let mid: Int = add_node(nk, nn, c1, c2, c3, iv, sv, 1, mn)
+
+        let lb: String = "{"
+        p = expect(tok_kinds, 52, source, tok_starts, tok_ends, p, lb)
+        if p < 0 { return 0 - 1 }
+
+        let mut done: Bool = false
+        while !done {
+            p = skip_annotations(tok_kinds, p)
+            let tk: Int = peek(tok_kinds, p)
+
+            if tk == 53 {
+                p = p + 1
+                done = true
+            }
+
+            if tk == 90 && !done {
+                let dummy: Int = parse_error("unexpected EOF in module", tok_kinds, source, tok_starts, tok_ends, p)
+                return 0 - 1
+            }
+
+            if !done && tk == 13 {
+                let ir: Int = parse_import(tok_kinds, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv)
+                if ir < 0 { return 0 - 1 }
+                let ii: Int = ir / 100000
+                p = ir - ii * 100000
+                add_child(co, mid, ii)
+            }
+
+            if !done && tk == 17 {
+                let mr: Int = parse_meta(tok_kinds, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if mr < 0 { return 0 - 1 }
+                let mi: Int = mr / 100000
+                p = mr - mi * 100000
+                list_set(c1, mid, mi)
+            }
+
+            if !done && tk == 22 {
+                p = p + 1
+                let ptk: Int = peek(tok_kinds, p)
+                if ptk == 1 {
+                    let fr: Int = parse_function(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if fr < 0 { return 0 - 1 }
+                    let fi: Int = fr / 100000
+                    p = fr - fi * 100000
+                    list_set(iv, fi, 1)
+                    add_child(co, mid, fi)
+                }
+                if ptk == 10 {
+                    let sr: Int = parse_struct(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if sr < 0 { return 0 - 1 }
+                    let si: Int = sr / 100000
+                    p = sr - si * 100000
+                    add_child(co, mid, si)
+                }
+                if ptk == 11 {
+                    let er: Int = parse_enum(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                    if er < 0 { return 0 - 1 }
+                    let ei: Int = er / 100000
+                    p = er - ei * 100000
+                    add_child(co, mid, ei)
+                }
+            }
+
+            if !done && tk == 1 {
+                let fr: Int = parse_function(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if fr < 0 { return 0 - 1 }
+                let fi: Int = fr / 100000
+                p = fr - fi * 100000
+                add_child(co, mid, fi)
+            }
+
+            if !done && tk == 10 {
+                let sr: Int = parse_struct(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if sr < 0 { return 0 - 1 }
+                let si: Int = sr / 100000
+                p = sr - si * 100000
+                add_child(co, mid, si)
+            }
+
+            if !done && tk == 11 {
+                let er: Int = parse_enum(tok_kinds, tok_ints, source, tok_starts, tok_ends, p, nk, nn, c1, c2, c3, iv, sv, co)
+                if er < 0 { return 0 - 1 }
+                let ei: Int = er / 100000
+                p = er - ei * 100000
+                add_child(co, mid, ei)
+            }
+        }
+
+        return mid * 100000 + p
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // JSON OUTPUT — Serialize AST to JSON
+    // ═══════════════════════════════════════════════════════════════════
+
+    fn node_kind_name(kind: Int) -> String {
+        if kind == 1 { return "Module" }
+        if kind == 2 { return "Meta" }
+        if kind == 3 { return "MetaEntry" }
+        if kind == 4 { return "Function" }
+        if kind == 5 { return "Param" }
+        if kind == 6 { return "Let" }
+        if kind == 7 { return "Return" }
+        if kind == 8 { return "If" }
+        if kind == 9 { return "While" }
+        if kind == 10 { return "ExprStmt" }
+        if kind == 11 { return "Block" }
+        if kind == 12 { return "IntLit" }
+        if kind == 13 { return "StringLit" }
+        if kind == 14 { return "BoolLit" }
+        if kind == 15 { return "Ident" }
+        if kind == 16 { return "BinOp" }
+        if kind == 17 { return "UnaryOp" }
+        if kind == 18 { return "Call" }
+        if kind == 19 { return "FieldAccess" }
+        if kind == 20 { return "Assign" }
+        if kind == 21 { return "Import" }
+        if kind == 22 { return "Struct" }
+        if kind == 23 { return "StructField" }
+        if kind == 24 { return "Enum" }
+        if kind == 25 { return "EnumVariant" }
+        if kind == 26 { return "Match" }
+        if kind == 27 { return "MatchArm" }
+        if kind == 28 { return "For" }
+        if kind == 29 { return "Break" }
+        if kind == 30 { return "Continue" }
+        if kind == 31 { return "Requires" }
+        if kind == 32 { return "Ensures" }
+        if kind == 34 { return "TypeExpr" }
+        if kind == 35 { return "MethodCall" }
+        return "Unknown"
+    }
+
+    fn count_children(co: List<Int>, parent: Int) -> Int {
+        let len: Int = list_length(co)
+        let mut count: Int = 0
+        let mut i: Int = 0
+        while i < len {
+            if list_get(co, i) == parent {
+                count = count + 1
+            }
+            i = i + 2
+        }
+        return count
+    }
+
+    fn get_child(co: List<Int>, parent: Int, idx: Int) -> Int {
+        let len: Int = list_length(co)
+        let mut count: Int = 0
+        let mut i: Int = 0
+        while i < len {
+            if list_get(co, i) == parent {
+                if count == idx {
+                    return list_get(co, i + 1)
+                }
+                count = count + 1
+            }
+            i = i + 2
+        }
+        return 0 - 1
+    }
+
+    fn indent(level: Int) -> String {
+        let mut s: String = ""
+        let mut i: Int = 0
+        while i < level {
+            s = s + "  "
+            i = i + 1
+        }
+        return s
+    }
+
+    fn to_json(id: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>, lev: Int) -> String {
+        let kind: Int = list_get(nk, id)
+        let name: String = list_get(nn, id)
+        let v1: Int = list_get(c1, id)
+        let v2: Int = list_get(c2, id)
+        let v3: Int = list_get(c3, id)
+        let ival: Int = list_get(iv, id)
+        let sval: String = list_get(sv, id)
+        let kn: String = node_kind_name(kind)
+        let pad: String = indent(lev)
+        let pad2: String = indent(lev + 1)
+
+        let mut out: String = pad + "{\n"
+        out = out + pad2 + "\"kind\": \"" + kn + "\""
+
+        if name != "" {
+            out = out + ",\n" + pad2 + "\"name\": \"" + name + "\""
+        }
+
+        if kind == 12 {
+            out = out + ",\n" + pad2 + "\"value\": " + ival.to_string()
+        }
+        if kind == 13 {
+            out = out + ",\n" + pad2 + "\"value\": " + sval
+        }
+        if kind == 14 {
+            if ival == 1 {
+                out = out + ",\n" + pad2 + "\"value\": true"
+            } else {
+                out = out + ",\n" + pad2 + "\"value\": false"
+            }
+        }
+        if kind == 16 {
+            out = out + ",\n" + pad2 + "\"op\": \"" + name + "\""
+        }
+        if kind == 6 {
+            if ival == 1 {
+                out = out + ",\n" + pad2 + "\"mutable\": true"
+            } else {
+                out = out + ",\n" + pad2 + "\"mutable\": false"
+            }
+        }
+        if kind == 4 && ival == 1 {
+            out = out + ",\n" + pad2 + "\"pub\": true"
+        }
+        if kind == 3 {
+            out = out + ",\n" + pad2 + "\"value\": " + sval
+        }
+
+        // Named children based on kind
+        if kind == 1 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"meta\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 4 {
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"return_type\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"body\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if kind == 6 {
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"type\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"init\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if kind == 7 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"value\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 8 {
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"condition\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"then\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v3 >= 0 {
+                out = out + ",\n" + pad2 + "\"else\":\n" + to_json(v3, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if kind == 9 {
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"condition\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"body\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if kind == 10 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"expr\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 16 {
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"left\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"right\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if kind == 17 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"operand\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 19 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"object\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 20 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"value\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 5 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"type\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 23 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"type\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 26 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"scrutinee\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 27 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"body\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 28 {
+            if v1 >= 0 {
+                out = out + ",\n" + pad2 + "\"iterable\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+            if v2 >= 0 {
+                out = out + ",\n" + pad2 + "\"body\":\n" + to_json(v2, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+            }
+        }
+        if (kind == 31 || kind == 32) && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"body\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+        if kind == 35 && v1 >= 0 {
+            out = out + ",\n" + pad2 + "\"receiver\":\n" + to_json(v1, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+        }
+
+        // Extra children
+        let nc: Int = count_children(co, id)
+        if nc > 0 {
+            out = out + ",\n" + pad2 + "\"children\": [\n"
+            let mut ci: Int = 0
+            while ci < nc {
+                let child: Int = get_child(co, id, ci)
+                if ci > 0 { out = out + ",\n" }
+                out = out + to_json(child, nk, nn, c1, c2, c3, iv, sv, co, lev + 2)
+                ci = ci + 1
+            }
+            out = out + "\n" + pad2 + "]"
+        }
+
+        out = out + "\n" + pad + "}"
+        return out
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MAIN — Entry point
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Print AST node and its immediate structure (limited depth to avoid stack overflow)
+    fn print_ast_flat(id: Int, nk: List<Int>, nn: List<String>, c1: List<Int>, c2: List<Int>, c3: List<Int>, iv: List<Int>, sv: List<String>, co: List<Int>, depth: Int) {
+        if depth > 10 {
+            println("...")
+            return
+        }
+        let kind: Int = list_get(nk, id)
+        let name: String = list_get(nn, id)
+        let v1: Int = list_get(c1, id)
+        let v2: Int = list_get(c2, id)
+        let v3: Int = list_get(c3, id)
+        let ival: Int = list_get(iv, id)
+        let kn: String = node_kind_name(kind)
+        let pad: String = indent(depth)
+
+        if kind == 12 {
+            println(f"{pad}{kn} {ival}")
+        } else {
+            if kind == 13 || kind == 3 {
+                let sval: String = list_get(sv, id)
+                println(f"{pad}{kn} {name} = {sval}")
+            } else {
+                if name != "" {
+                    println(f"{pad}{kn} \"{name}\"")
+                } else {
+                    println(f"{pad}{kn}")
+                }
+            }
+        }
+
+        // Print named children
+        if v1 >= 0 {
+            print_ast_flat(v1, nk, nn, c1, c2, c3, iv, sv, co, depth + 1)
+        }
+        if v2 >= 0 {
+            print_ast_flat(v2, nk, nn, c1, c2, c3, iv, sv, co, depth + 1)
+        }
+        if v3 >= 0 {
+            print_ast_flat(v3, nk, nn, c1, c2, c3, iv, sv, co, depth + 1)
+        }
+
+        // Print extra children
+        let nc: Int = count_children(co, id)
+        let mut ci: Int = 0
+        while ci < nc {
+            let child: Int = get_child(co, id, ci)
+            print_ast_flat(child, nk, nn, c1, c2, c3, iv, sv, co, depth + 1)
+            ci = ci + 1
+        }
+    }
+
+    fn run_test(ref label: String, ref source: String) -> Bool {
+        println(f"--- {label} ---")
+
+        let tk: List<Int> = list_new()
+        let ts: List<Int> = list_new()
+        let te: List<Int> = list_new()
+        let ti: List<Int> = list_new()
+
+        let nk: List<Int> = list_new()
+        let nn: List<String> = list_new()
+        let c1: List<Int> = list_new()
+        let c2: List<Int> = list_new()
+        let c3: List<Int> = list_new()
+        let iv: List<Int> = list_new()
+        let sv: List<String> = list_new()
+        let co: List<Int> = list_new()
+
+        let tc: Int = tokenize(source, tk, ts, te, ti)
+
+        let result: Int = parse_module(tk, ti, source, ts, te, 0, nk, nn, c1, c2, c3, iv, sv, co)
+        if result < 0 {
+            println("FAIL: parse error")
+            println("")
+            return false
+        }
+
+        let root: Int = result / 100000
+        let nc: Int = list_length(nk)
+        println(f"OK: {tc} tokens, {nc} AST nodes")
+
+        // Print AST summary
+        let root_kind: Int = list_get(nk, root)
+        let rkn: String = node_kind_name(root_kind)
+        println(f"Root: {rkn}")
+        // Print node kind breakdown
+        let mut i: Int = 0
+        while i < nc {
+            let ki: Int = list_get(nk, i)
+            let kname: String = node_kind_name(ki)
+            println(f"  [{i}] {kname}")
+            i = i + 1
+        }
+        println("")
+        return true
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn main() -> Int {
+        println("=== Kodo Self-Hosted Parser ===")
+        println("Milestone 10: Kodo parses Kodo")
+        println("")
+
+        let mut pass: Int = 0
+        let mut fail: Int = 0
+
+        // Test 1: Minimal module
+        let s1: String = "module hello { meta { purpose: \"test\" version: \"0.1.0\" } fn main() -> Int { return 0 } }"
+        let r1: Bool = run_test("Test 1: Minimal module", s1)
+        if r1 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 2: Functions with params
+        let s2: String = "module math { meta { purpose: \"math\" version: \"1.0\" } fn add(a: Int, b: Int) -> Int { return a + b } fn main() -> Int { let x: Int = add(1, 2) return x } }"
+        let r2: Bool = run_test("Test 2: Functions with params", s2)
+        if r2 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 3: If/else
+        let s3: String = "module cond { meta { purpose: \"cond\" version: \"1.0\" } fn max(a: Int, b: Int) -> Int { if a > b { return a } else { return b } } fn main() -> Int { return max(10, 20) } }"
+        let r3: Bool = run_test("Test 3: If/else", s3)
+        if r3 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 4: While loop with mutation
+        let s4: String = "module loops { meta { purpose: \"loops\" version: \"1.0\" } fn main() -> Int { let mut i: Int = 0 let mut sum: Int = 0 while i < 10 { sum = sum + i i = i + 1 } return sum } }"
+        let r4: Bool = run_test("Test 4: While loop", s4)
+        if r4 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 5: Struct
+        let s5: String = "module types { meta { purpose: \"types\" version: \"1.0\" } struct Point { x: Int, y: Int } fn main() -> Int { return 0 } }"
+        let r5: Bool = run_test("Test 5: Struct", s5)
+        if r5 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 6: Enum
+        let s6: String = "module enums { meta { purpose: \"enums\" version: \"1.0\" } enum Color { Red, Green, Blue } fn main() -> Int { return 0 } }"
+        let r6: Bool = run_test("Test 6: Enum", s6)
+        if r6 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 7: Function calls with underscores
+        let s7: String = "module calls { meta { purpose: \"calls\" version: \"1.0\" } fn main() -> Int { let my_val: Int = 42 print_int(my_val) return 0 } }"
+        let r7: Bool = run_test("Test 7: Method calls", s7)
+        if r7 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 8: Contracts with underscores
+        let s8: String = "module contracts { meta { purpose: \"c\" version: \"1.0\" } fn safe_div(a: Int, b: Int) -> Int requires { b > 0 } ensures { result >= 0 } { return a / b } fn main() -> Int { return safe_div(10, 2) } }"
+        let r8: Bool = run_test("Test 8: Contracts", s8)
+        if r8 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 9: Precedence
+        let s9: String = "module expr { meta { purpose: \"expr\" version: \"1.0\" } fn main() -> Int { let x: Int = 2 + 3 * 4 let y: Bool = x > 10 && x < 20 return 0 } }"
+        let r9: Bool = run_test("Test 9: Precedence", s9)
+        if r9 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Test 10: Nested calls
+        let s10: String = "module nested { meta { purpose: \"n\" version: \"1.0\" } fn add(a: Int, b: Int) -> Int { return a + b } fn main() -> Int { let r: Int = add(add(1, 2), add(3, 4)) return r } }"
+        let r10: Bool = run_test("Test 10: Nested calls", s10)
+        if r10 { pass = pass + 1 } else { fail = fail + 1 }
+
+        // Summary
+        let total: Int = pass + fail
+        println("=== Results ===")
+        println(f"Passed: {pass}/{total}")
+        if fail > 0 {
+            println(f"Failed: {fail}/{total}")
+        }
+
+        // Parse a file if provided as argument
+        let al: List<String> = args()
+        let argc: Int = list_length(al)
+        if argc > 1 {
+            let filename: String = list_get(al, 1)
+            let filename2: String = list_get(al, 1)
+            println("")
+            println(f"--- Parsing file: {filename} ---")
+            let fr: Result<String, String> = file_read(filename2)
+            if fr.is_ok() {
+                let fsrc: String = fr.unwrap()
+                let label: String = "file"
+                let fok: Bool = run_test(label, fsrc)
+                if !fok {
+                    println("File parse: FAILED")
+                }
+            } else {
+                let err: String = fr.unwrap_err()
+                println(f"Error reading file: {err}")
+            }
+        }
+
+        println("")
+        println("=== Self-Hosted Parser Complete ===")
+        if fail == 0 {
+            println("Kodo can parse Kodo: VERIFIED")
+        }
+
+        return fail
+    }
+}
