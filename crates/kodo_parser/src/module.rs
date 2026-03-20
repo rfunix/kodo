@@ -11,8 +11,8 @@
 //! *Crafting Interpreters* Ch. 6 and **\[EC\]** *Engineering a Compiler* Ch. 3.4.
 
 use kodo_ast::{
-    ActorDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl, Meta,
-    MetaEntry, Module, Span, TestDecl, TraitDecl, TypeAlias, TypeDecl, TypeExpr, Visibility,
+    ActorDecl, DescribeDecl, EnumDecl, Function, ImplBlock, ImportDecl, IntentDecl, InvariantDecl,
+    Meta, MetaEntry, Module, Span, TestDecl, TraitDecl, TypeAlias, TypeDecl, TypeExpr, Visibility,
 };
 use kodo_lexer::TokenKind;
 
@@ -42,6 +42,8 @@ struct RecoveredDeclarations {
     functions: Vec<Function>,
     /// Collected test declarations.
     test_decls: Vec<TestDecl>,
+    /// Collected describe declarations.
+    describe_decls: Vec<DescribeDecl>,
 }
 
 impl Parser {
@@ -50,6 +52,7 @@ impl Parser {
     /// # Errors
     ///
     /// Returns a [`ParseError`] if the token stream does not form a valid module.
+    #[allow(clippy::too_many_lines)]
     pub fn parse_module(&mut self) -> Result<Module> {
         let start = self.peek().map_or(Span::new(0, 0), |t| t.span);
 
@@ -82,6 +85,7 @@ impl Parser {
         let mut invariants = Vec::new();
         let mut functions = Vec::new();
         let mut test_decls = Vec::new();
+        let mut describe_decls = Vec::new();
         while self.check(&TokenKind::Fn)
             || self.check(&TokenKind::At)
             || self.check(&TokenKind::Struct)
@@ -95,9 +99,12 @@ impl Parser {
             || self.check(&TokenKind::Type)
             || self.check(&TokenKind::Pub)
             || self.check(&TokenKind::Test)
+            || self.check(&TokenKind::Describe)
         {
             if self.check(&TokenKind::Test) {
                 test_decls.push(self.parse_test_decl(vec![])?);
+            } else if self.check(&TokenKind::Describe) {
+                describe_decls.push(self.parse_describe_decl(vec![])?);
             } else if self.check(&TokenKind::Pub) {
                 self.advance();
                 if self.check(&TokenKind::Struct) {
@@ -126,10 +133,12 @@ impl Parser {
             } else if self.check(&TokenKind::Intent) {
                 intent_decls.push(self.parse_intent()?);
             } else {
-                // Parse annotations first, then dispatch to test or function.
+                // Parse annotations first, then dispatch to test, describe, or function.
                 let annotations = self.parse_annotations()?;
                 if self.check(&TokenKind::Test) {
                     test_decls.push(self.parse_test_decl(annotations)?);
+                } else if self.check(&TokenKind::Describe) {
+                    describe_decls.push(self.parse_describe_decl(annotations)?);
                 } else {
                     let mut func = self.parse_function()?;
                     func.annotations = annotations;
@@ -157,7 +166,7 @@ impl Parser {
             invariants,
             functions,
             test_decls,
-            describe_decls: vec![],
+            describe_decls,
         })
     }
 
@@ -186,6 +195,7 @@ impl Parser {
                 | TokenKind::Type
                 | TokenKind::Pub
                 | TokenKind::Test
+                | TokenKind::Describe
         )
     }
 
@@ -339,7 +349,7 @@ impl Parser {
                 invariants: module_body.invariants,
                 functions: module_body.functions,
                 test_decls: module_body.test_decls,
-                describe_decls: vec![],
+                describe_decls: module_body.describe_decls,
             },
             errors,
         }
@@ -402,10 +412,13 @@ impl Parser {
             || self.check(&TokenKind::Type)
             || self.check(&TokenKind::Pub)
             || self.check(&TokenKind::Test)
+            || self.check(&TokenKind::Describe)
         {
             let result: std::result::Result<(), ParseError> = (|| {
                 if self.check(&TokenKind::Test) {
                     decls.test_decls.push(self.parse_test_decl(vec![])?);
+                } else if self.check(&TokenKind::Describe) {
+                    decls.describe_decls.push(self.parse_describe_decl(vec![])?);
                 } else if self.check(&TokenKind::Pub) {
                     self.advance();
                     if self.check(&TokenKind::Struct) {
@@ -434,10 +447,14 @@ impl Parser {
                 } else if self.check(&TokenKind::Intent) {
                     decls.intent_decls.push(self.parse_intent()?);
                 } else {
-                    // Parse annotations first, then dispatch to test or function.
+                    // Parse annotations first, then dispatch to test, describe, or function.
                     let annotations = self.parse_annotations()?;
                     if self.check(&TokenKind::Test) {
                         decls.test_decls.push(self.parse_test_decl(annotations)?);
+                    } else if self.check(&TokenKind::Describe) {
+                        decls
+                            .describe_decls
+                            .push(self.parse_describe_decl(annotations)?);
                     } else {
                         let mut func = self.parse_function_with_recovery(errors)?;
                         func.annotations = annotations;

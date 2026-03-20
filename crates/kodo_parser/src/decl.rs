@@ -6,8 +6,8 @@
 //! and type aliases.
 
 use kodo_ast::{
-    ActorDecl, Annotation, AnnotationArg, AssociatedType, EnumDecl, EnumVariant, FieldDef,
-    Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, InvariantDecl,
+    ActorDecl, Annotation, AnnotationArg, AssociatedType, DescribeDecl, EnumDecl, EnumVariant,
+    FieldDef, Function, ImplBlock, IntentConfigEntry, IntentConfigValue, IntentDecl, InvariantDecl,
     Ownership, Param, Span, TestDecl, TraitDecl, TraitMethod, TypeAlias, TypeDecl, TypeExpr,
     Visibility,
 };
@@ -799,6 +799,93 @@ impl Parser {
         })
     }
 
+    /// Parses a `describe` block: `describe "name" { setup? teardown? (test|describe)* }`.
+    ///
+    /// Annotations are passed in from the caller (parsed before the `describe` keyword).
+    /// Nested `describe` blocks and `test` declarations are recursively parsed.
+    /// `setup` and `teardown` blocks are optional and may appear at most once each.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] if an unexpected token is encountered inside the block.
+    pub(crate) fn parse_describe_decl(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> crate::error::Result<DescribeDecl> {
+        let start = self.expect(&TokenKind::Describe)?.span;
+
+        // The describe name must be a string literal (like test names).
+        let name_token = self.advance().ok_or(ParseError::UnexpectedEof {
+            expected: "string literal for describe name".to_string(),
+        })?;
+        let name = match &name_token.kind {
+            TokenKind::StringLit(s) => s.clone(),
+            other => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "string literal for describe name".to_string(),
+                    found: other.clone(),
+                    span: name_token.span,
+                });
+            }
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut setup = None;
+        let mut teardown = None;
+        let mut tests = Vec::new();
+        let mut describes = Vec::new();
+
+        while !self.check(&TokenKind::RBrace) {
+            if self.peek().is_none() {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "}".to_string(),
+                });
+            }
+
+            // Parse optional annotations that may precede `test` or `describe`.
+            let inner_annotations = if self.check(&TokenKind::At) {
+                self.parse_annotations()?
+            } else {
+                vec![]
+            };
+
+            if self.check(&TokenKind::Setup) {
+                self.advance();
+                setup = Some(self.parse_block()?);
+            } else if self.check(&TokenKind::Teardown) {
+                self.advance();
+                teardown = Some(self.parse_block()?);
+            } else if self.check(&TokenKind::Test) {
+                tests.push(self.parse_test_decl(inner_annotations)?);
+            } else if self.check(&TokenKind::Describe) {
+                describes.push(self.parse_describe_decl(inner_annotations)?);
+            } else {
+                // peek() is Some here (checked for is_none above), so this is always valid.
+                let token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "setup, teardown, test, describe, or `}`".to_string(),
+                })?;
+                return Err(ParseError::UnexpectedToken {
+                    expected: "setup, teardown, test, describe, or `}`".to_string(),
+                    found: token.kind.clone(),
+                    span: token.span,
+                });
+            }
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(DescribeDecl {
+            id: self.next_id(),
+            span: start.merge(end),
+            name,
+            annotations,
+            setup,
+            teardown,
+            tests,
+            describes,
+        })
+    }
+
     /// Parses an actor declaration: `actor Name { fields... fn handler(self) { ... } ... }`
     pub(crate) fn parse_actor_decl(&mut self) -> Result<ActorDecl> {
         let start = self.expect(&TokenKind::Actor)?.span;
@@ -992,6 +1079,118 @@ mod tests {
         assert_eq!(module.test_decls[0].name, "first");
         assert_eq!(module.test_decls[1].name, "second");
         assert_eq!(module.test_decls[2].name, "third");
+    }
+
+    #[test]
+    fn parse_describe_basic() {
+        let source = r#"module test {
+            meta { purpose: "test" version: "0.1.0" }
+            describe "math" {
+                test "add" {
+                    let x: Int = 1
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls.len(), 1);
+        assert_eq!(module.describe_decls[0].name, "math");
+        assert_eq!(module.describe_decls[0].tests.len(), 1);
+        assert_eq!(module.describe_decls[0].tests[0].name, "add");
+    }
+
+    #[test]
+    fn parse_describe_with_setup_teardown() {
+        let source = r#"module test {
+            meta { purpose: "test" version: "0.1.0" }
+            describe "group" {
+                setup {
+                    let x: Int = 1
+                }
+                teardown {
+                    let y: Int = 2
+                }
+                test "a" {
+                    let z: Int = 3
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls.len(), 1);
+        assert!(module.describe_decls[0].setup.is_some());
+        assert!(module.describe_decls[0].teardown.is_some());
+        assert_eq!(module.describe_decls[0].tests.len(), 1);
+    }
+
+    #[test]
+    fn parse_nested_describe() {
+        let source = r#"module test {
+            meta { purpose: "test" version: "0.1.0" }
+            describe "outer" {
+                describe "inner" {
+                    test "nested" {
+                        let x: Int = 1
+                    }
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls.len(), 1);
+        assert_eq!(module.describe_decls[0].name, "outer");
+        assert_eq!(module.describe_decls[0].describes.len(), 1);
+        assert_eq!(module.describe_decls[0].describes[0].name, "inner");
+        assert_eq!(module.describe_decls[0].describes[0].tests.len(), 1);
+        assert_eq!(
+            module.describe_decls[0].describes[0].tests[0].name,
+            "nested"
+        );
+    }
+
+    #[test]
+    fn parse_describe_with_annotations() {
+        let source = r#"module test {
+            meta { purpose: "test" version: "0.1.0" }
+            @confidence(0.9)
+            describe "annotated group" {
+                test "one" {
+                    let x: Int = 1
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls.len(), 1);
+        assert_eq!(module.describe_decls[0].name, "annotated group");
+        assert_eq!(module.describe_decls[0].annotations.len(), 1);
+        assert_eq!(module.describe_decls[0].annotations[0].name, "confidence");
+    }
+
+    #[test]
+    fn parse_describe_multiple_tests() {
+        let source = r#"module test {
+            describe "suite" {
+                test "first" { let a: Int = 1 }
+                test "second" { let b: Int = 2 }
+                test "third" { let c: Int = 3 }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls[0].tests.len(), 3);
+        assert_eq!(module.describe_decls[0].tests[0].name, "first");
+        assert_eq!(module.describe_decls[0].tests[1].name, "second");
+        assert_eq!(module.describe_decls[0].tests[2].name, "third");
+    }
+
+    #[test]
+    fn parse_describe_empty_block() {
+        let source = r#"module test {
+            describe "empty" {}
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(module.describe_decls.len(), 1);
+        assert_eq!(module.describe_decls[0].name, "empty");
+        assert!(module.describe_decls[0].setup.is_none());
+        assert!(module.describe_decls[0].teardown.is_none());
+        assert!(module.describe_decls[0].tests.is_empty());
+        assert!(module.describe_decls[0].describes.is_empty());
     }
 
     #[test]
