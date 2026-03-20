@@ -1,0 +1,19 @@
+//@ check-pass
+// Async function declaration and await expression compile correctly.
+
+module async_await {
+    meta {
+        purpose: "Test async/await syntax"
+        version: "0.1.0"
+    }
+
+    async fn compute(x: Int) -> Int {
+        return x * x
+    }
+
+    async fn main() -> Int {
+        let result: Int = compute(5).await
+        print_int(result)
+        return 0
+    }
+}

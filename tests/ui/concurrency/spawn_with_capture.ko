@@ -1,0 +1,17 @@
+//@ check-pass
+// Spawn with captured variables compiles correctly.
+
+module spawn_with_capture {
+    meta {
+        purpose: "Test spawn captures"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let x: Int = 42
+        spawn {
+            print_int(x)
+        }
+        return 0
+    }
+}

@@ -1,0 +1,16 @@
+module async_demo {
+    meta {
+        purpose: "Async/await demonstration"
+        version: "0.1.0"
+    }
+
+    async fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    async fn main() -> Int {
+        let a: Int = double(21).await
+        print_int(a)
+        return 0
+    }
+}

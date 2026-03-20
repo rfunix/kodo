@@ -1,0 +1,20 @@
+//@ check-pass
+// Green thread spawn compiles correctly.
+
+module green_spawn {
+    meta {
+        purpose: "Test green thread spawn"
+        version: "0.1.0"
+    }
+
+    fn work(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        spawn {
+            work(42)
+        }
+        return 0
+    }
+}
