@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] — 2026-03-20
+
+### Added
+
+- **Testing framework: `describe` blocks** — group related tests with `setup`/`teardown` lifecycle hooks. Setup runs before each test, teardown after. Describe blocks can be nested; test names become hierarchical (`"group > test"`)
+- **Testing framework: `@skip` / `@todo` annotations** — mark tests to skip or as future work. Reported separately in summary, don't count as failures
+- **Testing framework: `@timeout(ms)` annotation** — abort tests that exceed a time limit via timer thread
+- **Testing framework: `@property` + `forall`** — property-based testing with random input generation. Supports `Int`, `Bool`, `Float64`, `String` types in `forall` bindings. Configurable iterations, seed, and value ranges
+- **Testing framework: basic shrinking** — when a property test fails, the runtime tries smaller inputs (Int→0, Bool→false, String→"") to find a minimal failing case
+- **Testing framework: `kodoc generate-tests`** — auto-generate test stubs from function contracts. Reads `requires`/`ensures`, produces `test` and `@property` blocks. Supports `--inline`, `--stdout`, `--json` output modes
+- **Short variant patterns** — `Ok(v)`, `Err(e)`, `Some(v)`, `None` now work in match arms without the enum prefix (`Result::Ok`, `Option::Some`). The compiler infers the enum type from the matched expression
+- **New lexer keywords** — `describe`, `setup`, `teardown`, `forall`
+- **New AST nodes** — `DescribeDecl`, `Stmt::ForAll`
+- **Runtime property engine** — `kodo_prop_start`, `kodo_prop_gen_int/bool/float/string`, `kodo_prop_shrink_int/bool` in `prop_ops.rs`
+- 4 new UI tests (`tests/ui/testing/`)
+- 3 new examples (`test_describe.ko`, `test_property.ko`, `result_patterns.ko`)
+
+### Fixed
+
+- **Result pattern matching segfault** — `unwrap()` on `Result<Int, String>` no longer segfaults. Root cause: MIR generated partial monomorphization `Result__Int_?` (with `Unknown` for uninferred type params), codegen couldn't find the enum layout → no stack slot → scalar treated as memory address. Fixed by propagating concrete types from let annotations to temporaries
+- **`unwrap()` return type** — MIR used placeholder `String` return type for `Result_unwrap` instead of resolving `T` from the receiver's generic parameters. Added `infer_unwrap_return_type()`
+- **Parser short patterns** — `Ok(v)` without `Result::` prefix caused parse error. Parser now accepts optional bindings on unprefixed variant patterns
+
+### Changed
+
+- Test count: 2281 → 2339
+- UI test count: 44 → 48
+- `kodo_test_summary` now takes 5 args (total, passed, failed, skipped, todo)
+- Added `rand` dependency for property testing RNG
+
 ## [0.5.0] — 2026-03-19
 
 ### Fixed
