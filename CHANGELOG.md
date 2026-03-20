@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] — 2026-03-20
+
+### Added
+
+- **Package manager** — `kodo.toml` manifesto with git and path dependencies, `kodo.lock` with commit SHAs for reproducible builds, cache at `~/.kodo/cache/`
+- **`kodoc init [name]`** — create new Kōdo project with manifest and src/main.ko
+- **`kodoc add <url> --tag <version>`** — add git dependency, resolve, update lock file
+- **`kodoc remove <name>`** — remove dependency from manifest and lock file
+- **`kodoc update [name]`** — re-resolve dependencies, update lock file
+- **Build integration** — `kodoc build` automatically resolves deps when `kodo.toml` exists
+- Flat dependency resolution (one version per dep, conflict = error)
+- New dependency: `toml` crate for manifest parsing
+
 ## [0.13.0] — 2026-03-20
 
 ### Added
