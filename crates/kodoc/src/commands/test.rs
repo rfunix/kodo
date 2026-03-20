@@ -969,6 +969,9 @@ pub(crate) fn run_test(
     all_mir_functions.extend(mir_functions);
     kodo_mir::optimize::optimize_all(&mut all_mir_functions);
 
+    // Insert green thread yield points (cooperative scheduling).
+    kodo_mir::yield_insertion::insert_yield_points(&mut all_mir_functions);
+
     if contract_mode == kodo_contracts::ContractMode::Recoverable {
         kodo_mir::apply_recoverable_contracts(&mut all_mir_functions);
     }

@@ -493,7 +493,8 @@ fn resume_green_thread(id: GreenThreadId) {
 /// Initialises the green thread scheduler with `num_threads` worker threads.
 ///
 /// Must be called once before any `kodo_green_spawn`.  If `num_threads` is 0
-/// or negative, defaults to the number of available CPU cores.
+/// or negative, checks the `KODO_THREADS` environment variable first, then
+/// defaults to the number of available CPU cores.
 ///
 /// # Safety
 ///
@@ -503,7 +504,12 @@ fn resume_green_thread(id: GreenThreadId) {
 pub unsafe extern "C" fn kodo_green_init(num_threads: i64) {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let n = if num_threads <= 0 {
-        num_cpus::get().max(1)
+        // Check KODO_THREADS environment variable for runtime override.
+        std::env::var("KODO_THREADS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or_else(|| num_cpus::get().max(1))
     } else {
         num_threads as usize
     };

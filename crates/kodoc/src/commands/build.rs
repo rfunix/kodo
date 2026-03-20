@@ -22,6 +22,7 @@ pub(crate) fn run_build(
     json_errors: bool,
     contracts_mode_str: &str,
     emit_mir: bool,
+    green_threads: bool,
 ) -> i32 {
     tracing::info!("building {}", file.display());
 
@@ -333,6 +334,11 @@ pub(crate) fn run_build(
 
     // Run MIR optimization passes (inlining, constant folding, DCE, copy propagation).
     kodo_mir::optimize::optimize_all(&mut all_mir_functions);
+
+    // Insert green thread yield points (cooperative scheduling).
+    if green_threads {
+        kodo_mir::yield_insertion::insert_yield_points(&mut all_mir_functions);
+    }
 
     // Print MIR to stdout if --emit-mir was requested.
     if emit_mir {

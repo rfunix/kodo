@@ -49,6 +49,14 @@ enum Command {
         /// Print the MIR (Mid-level IR) to stdout before code generation.
         #[arg(long, default_value_t = false)]
         emit_mir: bool,
+
+        /// Number of green thread worker threads (0 = auto-detect via num_cpus).
+        #[arg(long, default_value_t = 0)]
+        threads: u32,
+
+        /// Disable green thread yield point insertion and use legacy scheduler.
+        #[arg(long, default_value_t = false)]
+        no_green_threads: bool,
     },
     /// Lower a source file to MIR and print it without generating code.
     Mir {
@@ -245,8 +253,21 @@ fn main() {
             json_errors,
             contracts,
             emit_mir,
+            threads,
+            no_green_threads,
         } => {
-            commands::build::run_build(&file, output.as_deref(), json_errors, &contracts, emit_mir)
+            // Set KODO_THREADS so the runtime picks up the requested thread count.
+            if threads > 0 {
+                std::env::set_var("KODO_THREADS", threads.to_string());
+            }
+            commands::build::run_build(
+                &file,
+                output.as_deref(),
+                json_errors,
+                &contracts,
+                emit_mir,
+                !no_green_threads,
+            )
         }
         Command::Mir { file, contracts } => commands::misc::run_mir(&file, &contracts),
         Command::Check {

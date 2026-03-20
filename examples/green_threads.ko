@@ -1,0 +1,31 @@
+module green_threads {
+    meta {
+        purpose: "Green threads demonstration"
+        version: "0.1.0"
+    }
+
+    fn work(id: Int) -> Int {
+        let mut sum: Int = 0
+        let mut i: Int = 0
+        while i < 1000 {
+            sum = sum + i
+            i = i + 1
+        }
+        print_int(id)
+        return sum
+    }
+
+    fn main() -> Int {
+        spawn {
+            work(1)
+        }
+        spawn {
+            work(2)
+        }
+        spawn {
+            work(3)
+        }
+        let result: Int = work(0)
+        return 0
+    }
+}
