@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] — 2026-03-20
+
+### Added
+
+- **Green threads with M:N scheduling** — `spawn {}` now creates lightweight green threads (64KB fixed stacks) scheduled across a pool of OS worker threads via work-stealing (`crossbeam-deque`). Default: one worker per CPU core, configurable via `--threads=N`
+- **Context switch assembly** — inline assembly for x86_64 and aarch64, saving/restoring callee-saved registers for green thread suspension and resumption
+- **Work-stealing scheduler** — each worker has a local deque; idle workers steal from random peers. Global queue for overflow. Condvar-based parking for idle workers
+- **Compiler-inserted yield points** — the MIR gains `Instruction::Yield`, inserted automatically at loop back-edges and before user function calls. Runtime fast path (~1ns branch when not yielding)
+- **`Future<T>` type** — new type in the type system for async results. `kodo_future_new/complete/await` runtime functions
+- **Async/await infrastructure** — `async fn` declarations are type-checked (return `Future<T>`), `.await` unwraps `Future<T>` to `T`. Runtime thread pool and futures exist; MIR lowering is v1 (synchronous passthrough)
+- **Generic channels** — `Channel<T>` now supports any type via type-erased binary serialization (`kodo_channel_generic_new/send/recv/free`). `recv` yields green thread instead of blocking OS thread
+- **`--threads=N` flag** — configure worker thread count (default: auto-detect via `KODO_THREADS` env or `num_cpus`)
+- **`--no-green-threads` flag** — disable yield point insertion, use legacy sequential scheduler
+- 3 new UI tests (`tests/ui/concurrency/`)
+- 2 new examples (`green_threads.ko`, `async_await.ko`)
+
+### Changed
+
+- `spawn` now creates green threads (previously enqueued to sequential FIFO)
+- Runtime entry point initializes green thread scheduler before `kodo_main()`
+- Linker uses `-force_load` (macOS) / `--whole-archive` (Linux) to include all runtime symbols
+- Test count: 2339 → 2375
+- UI test count: 48 → 51
+- New dependencies: `crossbeam-deque`, `num_cpus`, `libc`
+
 ## [0.6.0] — 2026-03-20
 
 ### Added
