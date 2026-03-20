@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] — 2026-03-20
+
+### Added
+
+- **Custom error types in Result<T, E>** — `E` can now be any enum, not just `String`. Full end-to-end support: construction, match destructuring, `unwrap_err()`, and `?` operator with custom error enums
+- **Composite enum payload extraction** — codegen correctly copies enum/struct payloads from Result variants (previously only String worked)
+- **`resolve_type_aware()`** — MIR type resolution distinguishes enums from structs using the enum registry
+- 3 new examples: `result_custom_types.ko`, `result_advanced.ko`, `result_question_mark.ko`
+- 3 new UI tests for custom error types
+
+### Fixed
+
+- MIR `let` bindings with enum type annotations resolved as `Struct` instead of `Enum`, causing wrong stack slot allocation in codegen
+- `unwrap_err()` crashed on non-String error types — now copies composite enum data correctly
+- Enum payload extraction from Result only handled String — now handles any enum/struct
+
+### Changed
+
+- Test count: 2385 → 2387
+- UI test count: 52 → 55
+
 ## [0.9.0] — 2026-03-20
 
 ### Added
