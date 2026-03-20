@@ -1,0 +1,30 @@
+//@ check-pass
+module result_question_mark_custom {
+    meta { purpose: "? operator with custom error types" }
+
+    enum CalcError {
+        DivisionByZero,
+        Overflow
+    }
+
+    fn safe_div(a: Int, b: Int) -> Result<Int, CalcError> {
+        if b == 0 {
+            return Result::Err(CalcError::DivisionByZero)
+        }
+        return Result::Ok(a / b)
+    }
+
+    fn compute(a: Int, b: Int) -> Result<Int, CalcError> {
+        let x: Int = safe_div(a, b)?
+        return Result::Ok(x + 1)
+    }
+
+    fn main() -> Int {
+        let r: Result<Int, CalcError> = compute(10, 2)
+        match r {
+            Ok(n) => print_int(n),
+            Err(e) => println("calc failed")
+        }
+        return 0
+    }
+}

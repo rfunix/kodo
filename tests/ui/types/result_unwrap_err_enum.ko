@@ -1,0 +1,29 @@
+//@ check-pass
+module result_unwrap_err_enum {
+    meta { purpose: "unwrap_err with custom enum error types" }
+
+    enum AppError {
+        NotFound,
+        InvalidInput(String)
+    }
+
+    fn may_fail(code: Int) -> Result<String, AppError> {
+        if code == 1 {
+            return Result::Err(AppError::NotFound)
+        }
+        if code == 2 {
+            return Result::Err(AppError::InvalidInput("bad"))
+        }
+        return Result::Ok("ok")
+    }
+
+    fn main() -> Int {
+        let r: Result<String, AppError> = may_fail(1)
+        let e: AppError = r.unwrap_err()
+        match e {
+            NotFound => println("not found"),
+            InvalidInput(msg) => println(msg)
+        }
+        return 0
+    }
+}

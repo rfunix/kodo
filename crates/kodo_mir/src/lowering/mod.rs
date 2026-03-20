@@ -159,6 +159,15 @@ impl MirBuilder {
         }
     }
 
+    /// Resolves a type expression, distinguishing enums from structs using
+    /// the builder's enum registry.
+    fn resolve_type_aware(&self, type_expr: &kodo_ast::TypeExpr) -> Result<Type> {
+        let enum_names: std::collections::HashSet<String> =
+            self.enum_registry.keys().cloned().collect();
+        resolve_type_with_enums(type_expr, kodo_ast::Span::new(0, 0), &enum_names)
+            .map_err(|e| crate::MirError::TypeResolution(e.to_string()))
+    }
+
     /// Allocates a new local variable and returns its identifier.
     fn alloc_local(&mut self, ty: Type, mutable: bool) -> LocalId {
         let id = LocalId(self.next_local);

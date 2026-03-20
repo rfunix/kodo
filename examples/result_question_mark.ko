@@ -1,0 +1,43 @@
+module custom_errors_qmark {
+    meta {
+        purpose: "Test ? operator with custom error types"
+        version: "0.1.0"
+    }
+
+    enum ParseError {
+        EmptyInput,
+        Overflow
+    }
+
+    fn validate(n: Int) -> Result<Int, ParseError> {
+        if n == 0 {
+            return Result::Err(ParseError::EmptyInput)
+        }
+        if n > 100 {
+            return Result::Err(ParseError::Overflow)
+        }
+        return Result::Ok(n)
+    }
+
+    fn process(a: Int, b: Int) -> Result<Int, ParseError> {
+        let x: Int = validate(a)?
+        let y: Int = validate(b)?
+        return Result::Ok(x + y)
+    }
+
+    fn main() -> Int {
+        let r1: Result<Int, ParseError> = process(10, 20)
+        match r1 {
+            Ok(n) => print_int(n),
+            Err(e) => println("error")
+        }
+
+        let r2: Result<Int, ParseError> = process(0, 20)
+        let is_err: Bool = r2.is_err()
+        if is_err {
+            println("process(0, 20) failed as expected")
+        }
+
+        return 0
+    }
+}

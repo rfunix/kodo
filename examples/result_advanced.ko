@@ -1,0 +1,54 @@
+module custom_errors_advanced {
+    meta {
+        purpose: "Advanced custom error types: unwrap_err, nested match, ? operator"
+        version: "0.1.0"
+    }
+
+    enum AppError {
+        NotFound,
+        PermissionDenied,
+        InvalidInput(String)
+    }
+
+    fn may_fail(code: Int) -> Result<String, AppError> {
+        if code == 1 {
+            return Result::Err(AppError::NotFound)
+        }
+        if code == 2 {
+            return Result::Err(AppError::PermissionDenied)
+        }
+        if code == 3 {
+            return Result::Err(AppError::InvalidInput("bad data"))
+        }
+        return Result::Ok("success")
+    }
+
+    fn test_unwrap_err() -> Int {
+        let r: Result<String, AppError> = may_fail(1)
+        let e: AppError = r.unwrap_err()
+        match e {
+            NotFound => println("got NotFound"),
+            PermissionDenied => println("got PermissionDenied"),
+            InvalidInput(msg) => println(msg)
+        }
+        return 0
+    }
+
+    fn main() -> Int {
+        test_unwrap_err()
+
+        let r2: Result<String, AppError> = may_fail(3)
+        match r2 {
+            Ok(val) => println(val),
+            Err(e) => {
+                match e {
+                    NotFound => println("not found"),
+                    PermissionDenied => println("permission denied"),
+                    InvalidInput(msg) => println(msg)
+                }
+            }
+        }
+
+        return 0
+    }
+}

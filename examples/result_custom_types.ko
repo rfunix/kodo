@@ -1,0 +1,41 @@
+module custom_errors {
+    meta {
+        purpose: "Custom error types with Result"
+        version: "0.1.0"
+    }
+
+    enum ParseError {
+        EmptyInput,
+        InvalidChar(Int),
+        Overflow
+    }
+
+    fn validate(n: Int) -> Result<Int, ParseError> {
+        if n == 0 {
+            return Result::Err(ParseError::EmptyInput)
+        }
+        if n < 0 {
+            return Result::Err(ParseError::InvalidChar(n))
+        }
+        if n > 1000000 {
+            return Result::Err(ParseError::Overflow)
+        }
+        return Result::Ok(n)
+    }
+
+    fn main() -> Int {
+        let r1: Result<Int, ParseError> = validate(42)
+        match r1 {
+            Ok(n) => print_int(n),
+            Err(e) => println("error")
+        }
+
+        let r2: Result<Int, ParseError> = validate(0)
+        let is_err: Bool = r2.is_err()
+        if is_err {
+            println("empty input detected")
+        }
+
+        return 0
+    }
+}

@@ -192,6 +192,7 @@ pub(crate) fn translate_instruction(
             builtins,
             var_map,
             struct_layouts,
+            enum_layouts,
         ),
         Instruction::IncRef(local_id) => {
             // Call kodo_rc_inc to increment the reference count.
@@ -441,6 +442,7 @@ fn try_translate_enum_or_struct_assign(
             builtins,
             var_map,
             struct_layouts,
+            enum_layouts,
         ));
     }
 
@@ -724,6 +726,7 @@ fn translate_enum_payload_assign(
     builtins: &HashMap<String, BuiltinInfo>,
     var_map: &VarMap,
     struct_layouts: &HashMap<String, StructLayout>,
+    enum_layouts: &HashMap<String, EnumLayout>,
 ) -> Result<()> {
     let addr = match inner {
         Value::Local(obj_id) => {
@@ -751,12 +754,11 @@ fn translate_enum_payload_assign(
         .ins()
         .load(types::I64, MemFlags::new(), field_addr, 0);
 
-    // If the destination has a _String stack slot, the extracted payload is a
-    // pointer to a KodoString struct (ptr at offset 0, len at offset 8).
-    // We must dereference it and copy (ptr, len) into the destination stack
-    // slot so that downstream consumers (e.g. println) receive both values.
+    // If the destination has a composite stack slot, the extracted payload is
+    // a pointer to the source data. Copy it into the destination stack slot.
     if let Some((dest_slot, ref dest_name)) = var_map.stack_slots.get(&local_id) {
         if dest_name == "_String" {
+            // String: copy (ptr, len) from the source.
             let str_ptr = builder.ins().load(types::I64, MemFlags::new(), loaded, 0);
             let str_len =
                 builder
@@ -779,6 +781,28 @@ fn translate_enum_payload_assign(
             builder.def_var(var, slot_addr);
             return Ok(());
         }
+        // Enum or struct destination: the payload is a pointer to the source
+        // composite data. Copy it word-by-word into the dest stack slot.
+        let slot_size = enum_layouts
+            .get(dest_name)
+            .map(|l| l.total_size)
+            .or_else(|| struct_layouts.get(dest_name).map(|l| l.total_size))
+            .unwrap_or(8);
+        let num_words = slot_size.div_ceil(8);
+        let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+        for i in 0..num_words {
+            #[allow(clippy::cast_possible_wrap)]
+            let off = (i * 8) as i32;
+            let src_field = builder.ins().iadd_imm(loaded, i64::from(off));
+            let val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), src_field, 0);
+            let dest_field = builder.ins().iadd_imm(dest_addr, i64::from(off));
+            builder.ins().store(MemFlags::new(), val, dest_field, 0);
+        }
+        let var = var_map.get(local_id)?;
+        builder.def_var(var, dest_addr);
+        return Ok(());
     }
 
     let var = var_map.get(local_id)?;
@@ -994,6 +1018,7 @@ fn translate_call(
     builtins: &HashMap<String, BuiltinInfo>,
     var_map: &mut VarMap,
     struct_layouts: &HashMap<String, StructLayout>,
+    enum_layouts: &HashMap<String, EnumLayout>,
 ) -> Result<()> {
     // Synthetic __env_pack: allocate a stack slot and pack capture
     // values into it, returning a pointer to the slot.
@@ -1234,10 +1259,11 @@ fn translate_call(
             // Extract payload from offset 8.
             let payload = builder.ins().load(types::I64, MemFlags::new(), addr, 8);
 
-            // For String destinations, payload is a pointer to a (ptr, len) pair.
-            // Copy it into the dest's _String stack slot.
+            // For composite destinations (String, enum, struct), the payload
+            // is a pointer to the source data. Copy it into the dest stack slot.
             if let Some((dest_slot, ref slot_name)) = var_map.stack_slots.get(&dest) {
                 if slot_name == "_String" {
+                    // String: copy (ptr, len) from the source.
                     let ptr = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
                     let len = builder.ins().load(types::I64, MemFlags::new(), payload, 8);
                     let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
@@ -1247,6 +1273,28 @@ fn translate_call(
                     builder.def_var(var, dest_addr);
                     return Ok(());
                 }
+                // Enum or struct destination: the payload is a pointer to the
+                // source composite data. Copy it word-by-word into the dest slot.
+                let slot_size = enum_layouts
+                    .get(slot_name)
+                    .map(|l| l.total_size)
+                    .or_else(|| struct_layouts.get(slot_name).map(|l| l.total_size))
+                    .unwrap_or(8);
+                let num_words = slot_size.div_ceil(8);
+                let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+                for i in 0..num_words {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let off = (i * 8) as i32;
+                    let src_field = builder.ins().iadd_imm(payload, i64::from(off));
+                    let val = builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), src_field, 0);
+                    let dest_field = builder.ins().iadd_imm(dest_addr, i64::from(off));
+                    builder.ins().store(MemFlags::new(), val, dest_field, 0);
+                }
+                let var = var_map.get(dest)?;
+                builder.def_var(var, dest_addr);
+                return Ok(());
             }
 
             // For non-String destinations (Int, Bool, etc.), use the raw value.

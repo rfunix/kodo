@@ -5,7 +5,7 @@
 //! create new basic blocks, or lambda-lift nested functions.
 
 use kodo_ast::{Block, Expr, Stmt};
-use kodo_types::{resolve_type, Type};
+use kodo_types::Type;
 
 use super::MirBuilder;
 use crate::{BlockId, Instruction, LocalId, MirError, MirFunction, Result, Terminator, Value};
@@ -131,12 +131,10 @@ impl MirBuilder {
                 if let Some((base_ty, _)) = self.type_alias_registry.get(alias_name) {
                     base_ty.clone()
                 } else {
-                    resolve_type(type_expr, kodo_ast::Span::new(0, 0))
-                        .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                    self.resolve_type_aware(type_expr)?
                 }
             } else {
-                resolve_type(type_expr, kodo_ast::Span::new(0, 0))
-                    .map_err(|e| MirError::TypeResolution(e.to_string()))?
+                self.resolve_type_aware(type_expr)?
             }
         } else {
             Type::Unknown
