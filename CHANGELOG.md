@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.0] — 2026-03-20
+
+### 🎉 Kōdo Can Parse Itself
+
+**Self-hosted parser**: a 1,897-line recursive descent LL(1) parser written entirely in Kōdo. Combined with the self-hosted lexer (350 lines), Kōdo can now tokenize and parse its own source code. This proves the language is expressive enough for real compiler work.
+
+The self-hosted parser covers: module declarations, functions with contracts (requires/ensures), let/return/if-else/while/for-in/match statements, binary expressions with 6 precedence levels, function calls and method calls, struct and enum declarations, type expressions with generics, and annotations.
+
+### Added
+
+- **Self-hosted parser** — `examples/self_hosted_parser/main.ko` (1,897 lines)
+- 10 internal parser tests + real file parsing (hello.ko, fibonacci.ko)
+- AST stored in parallel-array node pool (pragmatic approach for current language constraints)
+
 ## [0.17.0] — 2026-03-20
 
 ### Added
