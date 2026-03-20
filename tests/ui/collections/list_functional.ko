@@ -1,0 +1,37 @@
+//@ check-pass
+module list_functional_ui {
+    meta { purpose: "Higher-order collection methods on List<Int>" }
+
+    fn main() {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+
+        // map: transform each element
+        let doubled: List<Int> = nums.map(|x: Int| -> Int { x * 2 })
+        print_int(list_get(doubled, 0))
+
+        // filter: keep elements matching predicate
+        let evens: List<Int> = nums.filter(|x: Int| -> Bool { x % 2 == 0 })
+        print_int(list_length(evens))
+
+        // fold: accumulate with initial value
+        let total: Int = nums.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        print_int(total)
+
+        // reduce: alias for fold
+        let product: Int = nums.reduce(1, |acc: Int, x: Int| -> Int { acc * x })
+        print_int(product)
+
+        // count: count elements satisfying predicate
+        let big_count: Int = nums.count(|x: Int| -> Bool { x > 1 })
+        print_int(big_count)
+
+        // any: at least one element satisfies predicate
+        let has_big: Bool = nums.any(|x: Int| -> Bool { x > 2 })
+
+        // all: all elements satisfy predicate
+        let all_pos: Bool = nums.all(|x: Int| -> Bool { x > 0 })
+    }
+}

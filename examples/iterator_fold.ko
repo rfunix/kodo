@@ -20,8 +20,8 @@ module iterator_fold {
         let total: Int = nums.fold(0, |acc: Int, x: Int| -> Int { acc + x })
         print_int(total)
 
-        // count: number of elements (5)
-        let n: Int = nums.count()
+        // count: elements greater than 2 (3, 4, 5 = 3)
+        let n: Int = nums.count(|x: Int| -> Bool { x > 2 })
         print_int(n)
 
         // any: is there any element > 4? (true = 1)

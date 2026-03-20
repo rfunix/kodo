@@ -959,6 +959,7 @@ impl TypeChecker {
     /// These methods are resolved by the type checker and implemented as
     /// synthetic AST functions injected in the compiler pipeline. They use
     /// the Iterator protocol internally.
+    #[allow(clippy::too_many_lines)]
     fn register_combinator_methods(&mut self) {
         let list_ty = Type::Generic("List".to_string(), vec![Type::Int]);
         let fn_int_to_int = Type::Function(vec![Type::Int], Box::new(Type::Int));
@@ -1011,19 +1012,43 @@ impl TypeChecker {
         self.env.insert(
             "List_fold".to_string(),
             Type::Function(
+                vec![list_ty.clone(), Type::Int, fn_acc_int_to_int.clone()],
+                Box::new(Type::Int),
+            ),
+        );
+
+        // List.reduce(init: Int, f: (Int, Int) -> Int) -> Int — alias for fold
+        self.method_lookup.insert(
+            ("List".to_string(), "reduce".to_string()),
+            (
+                "List_reduce".to_string(),
+                vec![list_ty.clone(), Type::Int, fn_acc_int_to_int.clone()],
+                Type::Int,
+            ),
+        );
+        self.env.insert(
+            "List_reduce".to_string(),
+            Type::Function(
                 vec![list_ty.clone(), Type::Int, fn_acc_int_to_int],
                 Box::new(Type::Int),
             ),
         );
 
-        // List.count() -> Int
+        // List.count(f: (Int) -> Bool) -> Int — count elements satisfying predicate
         self.method_lookup.insert(
             ("List".to_string(), "count".to_string()),
-            ("List_count".to_string(), vec![list_ty.clone()], Type::Int),
+            (
+                "List_count".to_string(),
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                Type::Int,
+            ),
         );
         self.env.insert(
             "List_count".to_string(),
-            Type::Function(vec![list_ty.clone()], Box::new(Type::Int)),
+            Type::Function(
+                vec![list_ty.clone(), fn_int_to_bool.clone()],
+                Box::new(Type::Int),
+            ),
         );
 
         // List.any(f: (Int) -> Bool) -> Bool
