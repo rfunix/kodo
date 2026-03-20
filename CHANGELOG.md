@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] — 2026-03-20
+
+### Added
+
+- **Directory compilation** — `kodoc build src/` finds the entry point (`fn main()`), resolves import dependencies via topological sort, and compiles all files into a single binary
+- **Cross-file test discovery** — `kodoc test src/` discovers all `.ko` files with test blocks, runs each file's tests, and aggregates results
+- Utility functions: `find_ko_files`, `find_entry_point`, `topological_sort`, `find_test_files`
+- Multi-file example: `examples/multifile/` with main.ko, math.ko, math_test.ko
+
 ## [0.10.0] — 2026-03-20
 
 ### Added
