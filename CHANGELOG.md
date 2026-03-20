@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0] — 2026-03-20
+
+### Added
+
+- **Channel select** — `channel_select_2(ch1, ch2)` and `channel_select_3(ch1, ch2, ch3)` wait on multiple channels, return index of first with data. Uses peek buffer to avoid consuming data. Green thread yields while waiting.
+- **1MB stacks with guard page** — green thread stacks increased from 64KB to 1MB (configurable via `KODO_STACK_SIZE`). Guard page at bottom catches overflow cleanly instead of silent corruption.
+- New example: `channel_select.ko`, `deep_recursion.ko`
+
 ## [0.11.0] — 2026-03-20
 
 ### Added
