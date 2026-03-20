@@ -71,6 +71,10 @@ pub(crate) fn run_build(
 
     // Process imports -- compile imported modules and collect their types/functions.
     let base_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+
+    // If a kodo.toml exists, resolve dependencies and collect extra import dirs.
+    let dep_import_dirs = resolve_manifest_deps(base_dir);
+
     let mut imported_object_files: Vec<std::path::PathBuf> = Vec::new();
     let mut imported_modules: Vec<kodo_ast::Module> = Vec::new();
 
@@ -96,7 +100,7 @@ pub(crate) fn run_build(
             }
             continue;
         }
-        let import_path = resolve_import_path(base_dir, &import.path);
+        let import_path = resolve_import_with_deps(base_dir, &import.path, &dep_import_dirs);
         match compile_imported_module(&import_path, &mut imported_object_files) {
             Ok(imported_module) => imported_modules.push(imported_module),
             Err(msg) => {
@@ -470,6 +474,97 @@ pub(crate) fn run_build(
             1
         }
     }
+}
+
+/// Resolves dependency import directories from `kodo.toml` if it exists.
+///
+/// Returns a list of additional directories to search for imports.
+/// If no manifest exists or resolution fails, returns an empty list
+/// (with a warning printed).
+fn resolve_manifest_deps(project_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let manifest_path = project_dir.join("kodo.toml");
+    if !manifest_path.exists() {
+        return Vec::new();
+    }
+
+    let manifest = match crate::manifest::read_manifest(project_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            return Vec::new();
+        }
+    };
+
+    if manifest.deps.is_empty() {
+        return Vec::new();
+    }
+
+    // Try to use the lock file for reproducible resolution.
+    let lockfile = crate::lockfile::read_lockfile(project_dir).unwrap_or_default();
+
+    let (resolved, new_lockfile) = if lockfile.package.is_empty() {
+        match crate::dep_resolver::resolve_deps(&manifest, project_dir) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("warning: dependency resolution failed: {e}");
+                return Vec::new();
+            }
+        }
+    } else {
+        match crate::dep_resolver::resolve_deps_from_lock(&manifest, project_dir, &lockfile) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("warning: dependency resolution failed: {e}");
+                return Vec::new();
+            }
+        }
+    };
+
+    // Update lock file if needed.
+    if let Err(e) = crate::lockfile::write_lockfile(project_dir, &new_lockfile) {
+        eprintln!("warning: could not update kodo.lock: {e}");
+    }
+
+    resolved.into_iter().map(|d| d.source_dir).collect()
+}
+
+/// Resolves an import path, also searching in dependency directories.
+///
+/// First tries the standard resolution relative to `base_dir`. If not found,
+/// searches each dependency directory for a matching `.ko` file.
+fn resolve_import_with_deps(
+    base_dir: &std::path::Path,
+    segments: &[String],
+    dep_dirs: &[std::path::PathBuf],
+) -> std::path::PathBuf {
+    // Standard resolution first.
+    let standard = resolve_import_path(base_dir, segments);
+    if standard.exists() {
+        return standard;
+    }
+
+    // Search in dependency directories.
+    for dep_dir in dep_dirs {
+        let dep_path = resolve_import_path(dep_dir, segments);
+        if dep_path.exists() {
+            return dep_path;
+        }
+        // Also try just the last segment (module name) in the dep dir.
+        if let Some(module_name) = segments.last() {
+            let direct = dep_dir.join(format!("{module_name}.ko"));
+            if direct.exists() {
+                return direct;
+            }
+            // Try lib.ko in the dep dir itself.
+            let lib_ko = dep_dir.join("lib.ko");
+            if lib_ko.exists() {
+                return lib_ko;
+            }
+        }
+    }
+
+    // Fall back to the standard (non-existent) path.
+    standard
 }
 
 /// Compiles a directory of `.ko` files to a native executable.

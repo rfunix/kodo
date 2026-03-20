@@ -1,0 +1,17 @@
+module with_deps {
+    meta {
+        version: "0.1.0"
+        purpose: "Demonstrates using path dependencies via kodo.toml"
+    }
+
+    import mathlib { double, square }
+
+    fn main() -> Int {
+        let x: Int = 5
+        let doubled: Int = double(x)
+        let squared: Int = square(x)
+        println("double(5) = " + int_to_string(doubled))
+        println("square(5) = " + int_to_string(squared))
+        return 0
+    }
+}

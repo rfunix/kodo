@@ -1,0 +1,14 @@
+module mathlib {
+    meta {
+        version: "1.0.0"
+        purpose: "Basic math utilities"
+    }
+
+    pub fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    pub fn square(x: Int) -> Int {
+        return x * x
+    }
+}

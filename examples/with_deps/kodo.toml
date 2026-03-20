@@ -1,0 +1,5 @@
+module = "with-deps"
+version = "0.1.0"
+
+[deps]
+mathlib = { path = "./libs/mathlib" }
