@@ -7,12 +7,16 @@
 //!
 //! ## Memory layout
 //!
-//! Each green thread owns a contiguous `STACK_SIZE`-byte region obtained via
-//! `mmap(MAP_PRIVATE | MAP_ANONYMOUS)`.  The stack pointer starts at the **top**
-//! (highest address) of this region and grows downward, following the
-//! System V AMD64 / AAPCS64 ABI convention.
+//! Each green thread owns a contiguous region (default 1 MB, configurable via
+//! `KODO_STACK_SIZE` env var) obtained via `mmap(MAP_PRIVATE | MAP_ANONYMOUS)`.
+//! The bottom OS page is set to `PROT_NONE` as a guard page — any access to
+//! it raises SIGSEGV, giving a clean crash on stack overflow rather than
+//! silent corruption.  The stack pointer starts at the **top** (highest
+//! address) of this region and grows downward, following the System V AMD64 /
+//! AAPCS64 ABI convention.
 //!
-//! The region is freed via `munmap` when the [`GreenThread`] is dropped.
+//! The entire region (including the guard page) is freed via `munmap` when
+//! the [`GreenThread`] is dropped.
 //!
 //! ## Scheduler architecture
 //!
@@ -43,8 +47,43 @@ use crate::context::{switch_context, Context};
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Default stack size per green thread (64 KB).
-pub const STACK_SIZE: usize = 64 * 1024;
+/// Default stack size per green thread (1 MB).
+///
+/// This can be overridden at runtime via the `KODO_STACK_SIZE` environment
+/// variable (value in bytes).  A guard page is placed at the bottom of each
+/// stack so that overflow causes a clean crash (SIGSEGV on the guard page)
+/// instead of silent memory corruption.
+pub const DEFAULT_STACK_SIZE: usize = 1024 * 1024;
+
+/// Returns the effective stack size for green threads.
+///
+/// Reads the `KODO_STACK_SIZE` environment variable (value in bytes).
+/// Falls back to [`DEFAULT_STACK_SIZE`] (1 MB) when the variable is absent
+/// or not a valid `usize`.  The returned value is always at least one OS
+/// page so the guard page logic remains sound.
+#[must_use]
+pub fn get_stack_size() -> usize {
+    let size = std::env::var("KODO_STACK_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_STACK_SIZE);
+    // Ensure at least two pages so there's room for both the guard and usable area.
+    let page_size = page_size();
+    size.max(page_size * 2)
+}
+
+/// Returns the OS page size (typically 4096 on most platforms).
+fn page_size() -> usize {
+    // SAFETY: _SC_PAGESIZE is a valid sysconf parameter on all POSIX systems.
+    let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if ps <= 0 {
+        4096
+    } else {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let result = ps as usize;
+        result
+    }
+}
 
 // ---------------------------------------------------------------------------
 // GreenThreadId
@@ -86,16 +125,26 @@ pub enum ThreadStatus {
 // Stack helpers
 // ---------------------------------------------------------------------------
 
-/// Allocates a fixed-size stack using `mmap`.
+/// Allocates a stack with a guard page at the bottom using `mmap`.
 ///
 /// Returns a pointer to the **base** (lowest address) of the mapping.
-/// The caller is responsible for computing the stack top as `base + size`.
+/// The first OS page of the mapping is set to `PROT_NONE` (the guard page)
+/// so that a stack overflow triggers a clean SIGSEGV rather than silently
+/// corrupting adjacent memory.
+///
+/// The caller is responsible for:
+/// - Computing the usable stack top as `base + size`.
+/// - Passing `base` and `size` to [`free_stack`] when done.
+/// - Starting the stack pointer at `base + size` (stacks grow downward).
+///
+/// The guard page is at `base..base+page_size`; usable stack space is
+/// `base+page_size..base+size`.
 ///
 /// # Safety
 ///
 /// The returned pointer must eventually be passed to [`free_stack`] with the
 /// same `size` to avoid a memory leak.  The mapping is readable and writable
-/// but not executable.
+/// (except the guard page) but not executable.
 unsafe fn alloc_stack(size: usize) -> *mut u8 {
     // SAFETY: All arguments are valid mmap parameters.  MAP_ANONYMOUS means
     // no file descriptor is required (-1 is the conventional value).
@@ -113,6 +162,18 @@ unsafe fn alloc_stack(size: usize) -> *mut u8 {
         ptr != libc::MAP_FAILED,
         "mmap failed to allocate green thread stack"
     );
+
+    // SAFETY: Set the bottom page as a guard (PROT_NONE).  Any access to
+    // this page will raise SIGSEGV, giving a clean crash on stack overflow
+    // instead of silent corruption.  ptr is page-aligned (mmap guarantees
+    // this) and page_size() bytes is within the mapped region.
+    let guard_size = page_size();
+    let ret = unsafe { libc::mprotect(ptr, guard_size, libc::PROT_NONE) };
+    assert!(
+        ret == 0,
+        "mprotect failed to set guard page on green thread stack"
+    );
+
     ptr.cast::<u8>()
 }
 
@@ -175,9 +236,10 @@ unsafe impl Send for GreenThread {}
 impl GreenThread {
     /// Creates a new green thread that will execute `entry(arg)`.
     ///
-    /// Allocates a [`STACK_SIZE`]-byte stack via `mmap` and initialises the
-    /// CPU context so that the first [`crate::context::switch_context`] into
-    /// this thread begins executing `entry(arg)`.
+    /// Allocates a stack via `mmap` (size determined by [`get_stack_size`])
+    /// with a guard page at the bottom, and initialises the CPU context so
+    /// that the first [`crate::context::switch_context`] into this thread
+    /// begins executing `entry(arg)`.
     ///
     /// The new thread starts in the [`ThreadStatus::Ready`] state.
     ///
@@ -189,11 +251,13 @@ impl GreenThread {
     ///   scheduler context and that it is properly cleaned up (dropped) after
     ///   reaching [`ThreadStatus::Dead`].
     pub unsafe fn new(entry: crate::context::EntryFn, arg: usize) -> Self {
-        // SAFETY: alloc_stack returns a valid, writable region of `STACK_SIZE`
-        // bytes.  We compute the top as base + size (stacks grow downward).
-        let stack = unsafe { alloc_stack(STACK_SIZE) };
-        // SAFETY: stack + STACK_SIZE is within the allocated region.
-        let stack_top = unsafe { stack.add(STACK_SIZE) };
+        let stack_size = get_stack_size();
+        // SAFETY: alloc_stack returns a valid region of `stack_size` bytes
+        // with a guard page at the bottom.  We compute the top as
+        // base + size (stacks grow downward).
+        let stack = unsafe { alloc_stack(stack_size) };
+        // SAFETY: stack + stack_size is within the allocated region.
+        let stack_top = unsafe { stack.add(stack_size) };
 
         let mut ctx = Context::default();
         // SAFETY: ctx is valid, stack_top points to the end of a live region,
@@ -207,7 +271,7 @@ impl GreenThread {
             status: ThreadStatus::Ready,
             context: ctx,
             stack,
-            stack_size: STACK_SIZE,
+            stack_size,
             future_id: None,
             result: None,
         }
@@ -1183,25 +1247,47 @@ mod tests {
     fn stack_alloc_free_roundtrip() {
         // SAFETY: alloc_stack returns a valid mapping; free_stack unmaps it
         // with the same size.  No memory access occurs between the two calls.
+        let size = get_stack_size();
         unsafe {
-            let ptr = alloc_stack(STACK_SIZE);
+            let ptr = alloc_stack(size);
             assert!(!ptr.is_null(), "alloc_stack must return a non-null pointer");
-            free_stack(ptr, STACK_SIZE);
+            free_stack(ptr, size);
         }
     }
 
     #[test]
     fn stack_is_writable_after_alloc() {
-        // SAFETY: ptr is a valid PROT_READ | PROT_WRITE mapping.
+        let size = get_stack_size();
+        let guard = page_size();
+        // SAFETY: ptr is a valid mapping.  The guard page at the bottom is
+        // PROT_NONE so we write to the first byte *after* the guard and
+        // the last byte of the mapping.
         unsafe {
-            let ptr = alloc_stack(STACK_SIZE);
-            // Write to the first and last bytes to confirm accessibility.
-            ptr.write(0xAB);
-            ptr.add(STACK_SIZE - 1).write(0xCD);
-            assert_eq!(ptr.read(), 0xAB);
-            assert_eq!(ptr.add(STACK_SIZE - 1).read(), 0xCD);
-            free_stack(ptr, STACK_SIZE);
+            let ptr = alloc_stack(size);
+            // Skip guard page — writing to ptr[0] would SIGSEGV.
+            ptr.add(guard).write(0xAB);
+            ptr.add(size - 1).write(0xCD);
+            assert_eq!(ptr.add(guard).read(), 0xAB);
+            assert_eq!(ptr.add(size - 1).read(), 0xCD);
+            free_stack(ptr, size);
         }
+    }
+
+    #[test]
+    fn get_stack_size_returns_at_least_two_pages() {
+        let size = get_stack_size();
+        let ps = page_size();
+        assert!(
+            size >= ps * 2,
+            "stack size must be at least two pages (guard + usable)"
+        );
+    }
+
+    #[test]
+    fn page_size_is_positive_and_power_of_two() {
+        let ps = page_size();
+        assert!(ps > 0, "page size must be positive");
+        assert!(ps.is_power_of_two(), "page size should be a power of two");
     }
 
     // -----------------------------------------------------------------------

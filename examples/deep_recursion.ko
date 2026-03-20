@@ -1,0 +1,16 @@
+module deep_recursion {
+    meta {
+        purpose: "Test deep recursion with larger stacks (1MB default)"
+        version: "0.1.0"
+    }
+
+    fn fib(n: Int) -> Int {
+        if n <= 1 { return n }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    fn main() -> Int {
+        print_int(fib(30))
+        return 0
+    }
+}
