@@ -170,6 +170,11 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("kodo_future_await".to_string())
         .or_insert(Type::Int);
 
+    // Green thread cooperative yield — returns Unit (void).
+    fn_return_types
+        .entry("kodo_green_maybe_yield".to_string())
+        .or_insert(Type::Unit);
+
     register_sprint5_return_types(fn_return_types);
     register_test_return_types(fn_return_types);
 }

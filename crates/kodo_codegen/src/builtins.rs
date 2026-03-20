@@ -179,6 +179,15 @@ fn declare_concurrency_builtins(
         types::I64,
         types::I64
     );
+    // Cooperative yield: allows the green-thread scheduler to switch coroutines.
+    {
+        let sig = sig_void(call_conv, &[]);
+        let func_id = declare_builtin(module, "kodo_green_maybe_yield", &sig)?;
+        builtins.insert(
+            "kodo_green_maybe_yield".to_string(),
+            BuiltinInfo { func_id },
+        );
+    }
     // Future builtins for async/await.
     decl_ret!("kodo_future_new", "kodo_future_new", [], types::I64);
     decl_void!(

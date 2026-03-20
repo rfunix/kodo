@@ -254,8 +254,15 @@ pub(crate) fn translate_instruction(
             var_map,
             struct_layouts,
         ),
-        // Yield is a no-op until GT-7 wires it to kodo_green_maybe_yield().
-        Instruction::Yield => Ok(()),
+        // Emit a cooperative yield point: call kodo_green_maybe_yield() so the
+        // green-thread scheduler can switch to another ready coroutine.
+        Instruction::Yield => {
+            if let Some(bi) = builtins.get("kodo_green_maybe_yield") {
+                let func_ref = module.declare_func_in_func(bi.func_id, builder.func);
+                builder.ins().call(func_ref, &[]);
+            }
+            Ok(())
+        }
     }
 }
 
