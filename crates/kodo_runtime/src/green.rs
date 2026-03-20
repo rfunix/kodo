@@ -922,9 +922,14 @@ pub unsafe extern "C" fn kodo_future_await(handle: i64) -> i64 {
                         w.push(tid);
                     }
                 } else {
-                    // Not running inside a green thread — busy-wait fallback.
+                    // Not running inside a green thread — drain the
+                    // green thread scheduler so spawned tasks can make
+                    // progress and complete the future we're waiting on.
                     drop(t);
-                    std::thread::yield_now();
+                    // SAFETY: kodo_green_run is safe after kodo_green_init.
+                    unsafe {
+                        kodo_green_run();
+                    }
                     continue;
                 }
             } else {

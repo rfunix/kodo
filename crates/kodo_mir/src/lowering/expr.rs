@@ -149,14 +149,19 @@ impl MirBuilder {
                 ));
                 Ok(Value::Local(local_id))
             }
-            // `Await`: in v1 async functions execute synchronously and return
-            // their result directly (not a future handle), so we lower the
-            // inner expression as-is.  When async functions are wired to
-            // return real future handles (via `kodo_future_new` /
-            // `kodo_future_complete`), this should call `kodo_future_await`.
-            // The runtime builtin `kodo_future_await` is already declared in
-            // codegen and implemented in `kodo_runtime::green`.
-            Expr::Await { operand, .. } => self.lower_expr(operand),
+            // `Await`: block the current green thread until the future
+            // completes, then return the result value.  The operand must
+            // evaluate to a future handle (i64) returned by an async fn call.
+            Expr::Await { operand, .. } => {
+                let future_val = self.lower_expr(operand)?;
+                let result_local = self.alloc_local(Type::Int, false);
+                self.emit(Instruction::Call {
+                    dest: result_local,
+                    callee: "kodo_future_await".to_string(),
+                    args: vec![future_val],
+                });
+                Ok(Value::Local(result_local))
+            }
 
             // StringInterp is lowered here (not in desugar) because we need
             // type information to insert conversions for non-String expressions.
@@ -315,7 +320,8 @@ impl MirBuilder {
     }
 
     /// Lowers a function call expression, handling closures, indirect calls,
-    /// actor handler dispatch, and regular direct calls.
+    /// actor handler dispatch, async function dispatch, and regular direct calls.
+    #[allow(clippy::too_many_lines)]
     fn lower_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<Value> {
         let callee_name = match callee {
             Expr::Ident(name, _) => name.clone(),
@@ -348,6 +354,13 @@ impl MirBuilder {
         // (e.g. "Counter_increment"). If so, emit kodo_actor_send.
         if self.is_actor_handler(&callee_name) {
             return self.lower_actor_handler_call(&callee_name, args);
+        }
+
+        // Check if the callee is an async function — if so, spawn it on
+        // a green thread and return a future handle instead of calling
+        // it synchronously.
+        if self.async_fn_names.contains(&callee_name) {
+            return self.lower_async_call(&callee_name, args);
         }
 
         for arg in args {
@@ -791,6 +804,138 @@ impl MirBuilder {
             ],
         });
         Ok(Value::Local(dest))
+    }
+
+    /// Lowers an async function call by creating a future, spawning a green
+    /// thread that executes the function body and completes the future, and
+    /// returning the future handle to the caller.
+    ///
+    /// The pattern is:
+    /// 1. `future_handle = kodo_future_new()`
+    /// 2. Lambda-lift a wrapper: `__async_wrapper_N(env_ptr)` that unpacks
+    ///    `(future_handle, arg1, arg2, ...)` from env, calls the original
+    ///    function, and calls `kodo_future_complete(future_handle, result)`.
+    /// 3. Pack env: `(future_handle, arg1, arg2, ...)`
+    /// 4. `kodo_green_spawn_with_env(wrapper, env_ptr, env_size)`
+    /// 5. Return `future_handle`
+    #[allow(clippy::too_many_lines)]
+    fn lower_async_call(&mut self, callee_name: &str, args: &[Expr]) -> Result<Value> {
+        // Step 1: create the future handle.
+        let future_handle = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Call {
+            dest: future_handle,
+            callee: "kodo_future_new".to_string(),
+            args: vec![],
+        });
+
+        // Evaluate arguments in the caller's scope.
+        let mut arg_values = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_values.push(self.lower_expr(arg)?);
+        }
+
+        // Step 2: lambda-lift the async wrapper function.
+        let wrapper_name = format!("__async_wrapper_{}_{}", self.fn_name, self.closure_counter);
+        self.closure_counter += 1;
+
+        let mut wrapper_builder = super::MirBuilder::new();
+        wrapper_builder
+            .struct_registry
+            .clone_from(&self.struct_registry);
+        wrapper_builder
+            .enum_registry
+            .clone_from(&self.enum_registry);
+        wrapper_builder
+            .fn_return_types
+            .clone_from(&self.fn_return_types);
+        wrapper_builder.fn_name.clone_from(&wrapper_name);
+
+        // The wrapper receives a single env_ptr parameter.
+        let env_param = wrapper_builder.alloc_local(Type::Int, false);
+
+        // Unpack future_handle from env slot 0.
+        let w_future = wrapper_builder.alloc_local(Type::Int, false);
+        wrapper_builder.emit(Instruction::Call {
+            dest: w_future,
+            callee: "__env_load".to_string(),
+            args: vec![Value::Local(env_param), Value::IntConst(0)],
+        });
+
+        // Unpack each argument from subsequent env slots.
+        let mut forward_args = Vec::with_capacity(args.len());
+        for (idx, _) in args.iter().enumerate() {
+            let arg_local = wrapper_builder.alloc_local(Type::Int, false);
+            #[allow(clippy::cast_possible_wrap)]
+            let offset = ((idx + 1) as i64) * 8;
+            wrapper_builder.emit(Instruction::Call {
+                dest: arg_local,
+                callee: "__env_load".to_string(),
+                args: vec![Value::Local(env_param), Value::IntConst(offset)],
+            });
+            forward_args.push(Value::Local(arg_local));
+        }
+
+        // Call the original async function (which is lowered as a normal
+        // function in MIR — the async wrapper is what makes it concurrent).
+        let call_result = wrapper_builder.alloc_local(Type::Int, false);
+        wrapper_builder.emit(Instruction::Call {
+            dest: call_result,
+            callee: callee_name.to_string(),
+            args: forward_args,
+        });
+
+        // Complete the future with the result.
+        let void_dest = wrapper_builder.alloc_local(Type::Unit, false);
+        wrapper_builder.emit(Instruction::Call {
+            dest: void_dest,
+            callee: "kodo_future_complete".to_string(),
+            args: vec![Value::Local(w_future), Value::Local(call_result)],
+        });
+
+        wrapper_builder.seal_block_final(crate::Terminator::Return(Value::Unit));
+
+        let mir_func = crate::MirFunction {
+            name: wrapper_name.clone(),
+            return_type: Type::Unit,
+            param_count: 1, // env_ptr
+            locals: wrapper_builder.locals,
+            blocks: wrapper_builder.blocks,
+            entry: crate::BlockId(0),
+        };
+
+        self.generated_closures
+            .extend(wrapper_builder.generated_closures);
+        self.generated_closures.push(mir_func);
+        self.fn_return_types
+            .insert(wrapper_name.clone(), Type::Unit);
+
+        // Step 3: pack env = (future_handle, arg1, arg2, ...) in the caller.
+        let env_local = self.alloc_local(Type::Int, false);
+        let mut pack_args = Vec::with_capacity(1 + arg_values.len());
+        pack_args.push(Value::Local(future_handle));
+        pack_args.extend(arg_values);
+        self.emit(Instruction::Call {
+            dest: env_local,
+            callee: "__env_pack".to_string(),
+            args: pack_args,
+        });
+
+        // Step 4: spawn the wrapper on a green thread.
+        #[allow(clippy::cast_possible_wrap)]
+        let env_size = ((1 + args.len()) as i64) * 8;
+        let spawn_dest = self.alloc_local(Type::Unit, false);
+        self.emit(Instruction::Call {
+            dest: spawn_dest,
+            callee: "kodo_green_spawn_with_env".to_string(),
+            args: vec![
+                Value::FuncRef(wrapper_name),
+                Value::Local(env_local),
+                Value::IntConst(env_size),
+            ],
+        });
+
+        // Step 5: return the future handle.
+        Ok(Value::Local(future_handle))
     }
 
     /// Lowers an `if` expression, creating then/else/merge basic blocks.

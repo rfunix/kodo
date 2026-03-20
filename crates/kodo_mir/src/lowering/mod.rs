@@ -115,6 +115,9 @@ pub struct MirBuilder {
     /// Used during call lowering to insert `MakeDynTrait` coercions when a
     /// concrete type is passed to a `dyn Trait` parameter.
     fn_param_types: HashMap<String, Vec<kodo_types::Type>>,
+    /// Names of async functions — used during call lowering to emit
+    /// future-based spawning instead of synchronous calls.
+    async_fn_names: HashSet<String>,
 }
 
 impl MirBuilder {
@@ -143,6 +146,7 @@ impl MirBuilder {
             type_alias_registry: HashMap::new(),
             trait_registry: HashMap::new(),
             fn_param_types: HashMap::new(),
+            async_fn_names: HashSet::new(),
         }
     }
 
@@ -224,6 +228,7 @@ fn lower_function_with_registries(
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashSet::new(),
     )?;
     Ok(func)
 }
@@ -240,6 +245,7 @@ fn lower_function_with_closures(
     type_alias_registry: &HashMap<String, (Type, Option<kodo_ast::Expr>)>,
     trait_registry: &HashMap<String, Vec<(String, Vec<Type>, Type)>>,
     fn_param_types: &HashMap<String, Vec<Type>>,
+    async_fn_names: &HashSet<String>,
 ) -> Result<(MirFunction, Vec<MirFunction>)> {
     let mut builder = MirBuilder::new();
     builder.actor_names.clone_from(actor_names);
@@ -249,6 +255,7 @@ fn lower_function_with_closures(
     builder.type_alias_registry.clone_from(type_alias_registry);
     builder.trait_registry.clone_from(trait_registry);
     builder.fn_param_types.clone_from(fn_param_types);
+    builder.async_fn_names.clone_from(async_fn_names);
     builder.ensures.clone_from(&function.ensures);
     builder.fn_name.clone_from(&function.name);
 
@@ -331,7 +338,7 @@ fn lower_function_with_closures(
 /// # Errors
 ///
 /// Returns the first [`MirError`] encountered during lowering.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_lines)]
 pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     module: &Module,
     struct_registry: &HashMap<String, Vec<(String, Type)>, S>,
@@ -389,6 +396,14 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     // Collect actor names so the builder can distinguish actors from structs.
     let actor_names: HashSet<String> = module.actor_decls.iter().map(|a| a.name.clone()).collect();
 
+    // Collect async function names from the AST.
+    let async_fn_names: HashSet<String> = module
+        .functions
+        .iter()
+        .filter(|f| f.is_async)
+        .map(|f| f.name.clone())
+        .collect();
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
@@ -404,6 +419,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
             &alias_reg,
             &trait_reg,
             &fn_param_types,
+            &async_fn_names,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -431,6 +447,7 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
                 &alias_reg,
                 &trait_reg,
                 &fn_param_types,
+                &async_fn_names,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {
@@ -502,6 +519,14 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
         fn_param_types.insert(func.name.clone(), param_tys);
     }
 
+    // Collect async function names from the AST.
+    let async_fn_names: HashSet<String> = module
+        .functions
+        .iter()
+        .filter(|f| f.is_async)
+        .map(|f| f.name.clone())
+        .collect();
+
     let mut mir_functions: Vec<MirFunction> = Vec::new();
     for f in module
         .functions
@@ -517,6 +542,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
             &alias_reg,
             &trait_reg,
             &fn_param_types,
+            &async_fn_names,
         )?;
         crate::optimize::optimize_function(&mut func);
         for c in &mut closures {
@@ -544,6 +570,7 @@ pub fn lower_module(module: &Module) -> Result<Vec<MirFunction>> {
                 &alias_reg,
                 &trait_reg,
                 &fn_param_types,
+                &async_fn_names,
             )?;
             crate::optimize::optimize_function(&mut func);
             for c in &mut closures {

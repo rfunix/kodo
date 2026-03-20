@@ -154,7 +154,13 @@ pub fn resolve_type_with_enums(
                 .iter()
                 .map(|a| resolve_type_with_enums(a, span, enum_names))
                 .collect();
-            Ok(Type::Generic(name.clone(), resolved?))
+            let resolved = resolved?;
+            // `Future<T>` has a dedicated Type variant for async/await support.
+            if name == "Future" && resolved.len() == 1 {
+                let inner = resolved.into_iter().next().unwrap_or(Type::Unknown);
+                return Ok(Type::Future(Box::new(inner)));
+            }
+            Ok(Type::Generic(name.clone(), resolved))
         }
         kodo_ast::TypeExpr::Optional(inner) => {
             // T? is sugar for Option<T>

@@ -56,6 +56,10 @@ impl TypeChecker {
                     let mono_name = Self::mono_name(name, &resolved_args);
                     self.monomorphize_struct(&mono_name, &def, &resolved_args, span)?;
                     Ok(Type::Struct(mono_name))
+                } else if name == "Future" && resolved_args.len() == 1 {
+                    // `Future<T>` has a dedicated Type variant for async/await.
+                    let inner = resolved_args.into_iter().next().unwrap_or(Type::Unknown);
+                    Ok(Type::Future(Box::new(inner)))
                 } else {
                     Ok(Type::Generic(name.clone(), resolved_args))
                 }

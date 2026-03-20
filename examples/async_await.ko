@@ -1,16 +1,24 @@
 module async_demo {
     meta {
-        purpose: "Async/await demonstration"
-        version: "0.1.0"
+        purpose: "Real async/await with green threads"
+        version: "0.2.0"
     }
 
     async fn double(x: Int) -> Int {
         return x * 2
     }
 
+    async fn triple(x: Int) -> Int {
+        return x * 3
+    }
+
     async fn main() -> Int {
-        let a: Int = double(21).await
+        let f1: Future<Int> = double(21)
+        let f2: Future<Int> = triple(14)
+        let a: Int = f1.await
+        let b: Int = f2.await
         print_int(a)
+        print_int(b)
         return 0
     }
 }
