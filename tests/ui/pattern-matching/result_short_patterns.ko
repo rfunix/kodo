@@ -1,0 +1,38 @@
+//@ check-pass
+// Short variant patterns without enum prefix: Ok(v), Err(e), Some(v), None.
+
+module result_short_patterns {
+    meta {
+        purpose: "Test short variant patterns in match"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ok_val: Result<Int, String> = Result::Ok(42)
+        let err_val: Result<Int, String> = Result::Err("fail")
+        let some_val: Option<Int> = Option::Some(99)
+        let none_val: Option<Int> = Option::None
+
+        let a: Int = match ok_val {
+            Ok(v) => v,
+            Err(e) => 0
+        }
+
+        let b: Int = match err_val {
+            Ok(v) => v,
+            Err(e) => -1
+        }
+
+        let c: Int = match some_val {
+            Some(v) => v,
+            None => 0
+        }
+
+        let d: Int = match none_val {
+            Some(v) => v,
+            None => -1
+        }
+
+        return a
+    }
+}

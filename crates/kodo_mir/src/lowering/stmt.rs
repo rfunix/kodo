@@ -160,6 +160,43 @@ impl MirBuilder {
                 }
             }
         }
+        // When the type annotation fully resolves a generic enum (e.g.
+        // `Result<Int, String>`) but the initializer produced a partial
+        // monomorphization (e.g. `Result__Int_?` from `Result::Ok(42)`),
+        // propagate the concrete type to the temporary so codegen can
+        // allocate the correct stack slot layout.
+        if let Type::Generic(ref base, ref args) = resolved_ty {
+            if let Value::Local(tmp_id) = &val {
+                if let Some(Type::Enum(ref partial_name)) = self.local_types.get(tmp_id).cloned() {
+                    if partial_name.contains('?') {
+                        let arg_strs: Vec<String> = args.iter().map(ToString::to_string).collect();
+                        let concrete_name = format!("{base}__{}", arg_strs.join("_"));
+                        if self.enum_registry.contains_key(&concrete_name) {
+                            let concrete_ty = Type::Enum(concrete_name.clone());
+                            self.local_types.insert(*tmp_id, concrete_ty.clone());
+                            if let Some(local) = self.locals.iter_mut().find(|l| l.id == *tmp_id) {
+                                local.ty = concrete_ty;
+                            }
+                            // Also rewrite the EnumVariant instruction's enum_name
+                            // so codegen uses the correct layout.
+                            for inst in &mut self.current_instructions {
+                                if let Instruction::Assign(
+                                    id,
+                                    Value::EnumVariant {
+                                        ref mut enum_name, ..
+                                    },
+                                ) = inst
+                                {
+                                    if *id == *tmp_id && enum_name.contains('?') {
+                                        enum_name.clone_from(&concrete_name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Wrap the value in a MakeDynTrait if assigning a concrete value
         // to a dyn Trait variable.
         let final_val = if let Type::DynTrait(ref trait_name) = resolved_ty {

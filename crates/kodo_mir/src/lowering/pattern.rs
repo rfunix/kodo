@@ -114,7 +114,7 @@ impl MirBuilder {
             // Option__String), pick the one whose field types match the inferred
             // argument types.
             let prefix = format!("{enum_name}__");
-            let candidates: Vec<String> = self
+            let all_candidates: Vec<String> = self
                 .enum_registry
                 .keys()
                 .filter(|k| {
@@ -126,6 +126,21 @@ impl MirBuilder {
                 })
                 .cloned()
                 .collect();
+            // Prefer fully-resolved candidates (no '?' from Unknown type
+            // params) over partial ones. Partial monomorphizations like
+            // `Result__Int_?` are created when the type checker cannot
+            // infer all generic parameters from the variant constructor
+            // alone (e.g. `Result::Ok(42)` leaves E unknown).
+            let concrete: Vec<String> = all_candidates
+                .iter()
+                .filter(|c| !c.contains('?'))
+                .cloned()
+                .collect();
+            let candidates = if concrete.is_empty() {
+                all_candidates
+            } else {
+                concrete
+            };
             if candidates.len() <= 1 {
                 candidates
                     .into_iter()

@@ -79,12 +79,24 @@ impl Parser {
                 span: start_span.merge(end),
             })
         } else {
-            // Could be a unit variant without enum prefix
+            // Variant without enum prefix: `Ok(v)`, `Err(e)`, `Some(v)`, or
+            // a unit variant like `None`.
+            let mut bindings = Vec::new();
+            if self.check(&TokenKind::LParen) {
+                self.advance();
+                while !self.check(&TokenKind::RParen) {
+                    if !bindings.is_empty() {
+                        self.expect(&TokenKind::Comma)?;
+                    }
+                    bindings.push(self.parse_ident()?);
+                }
+                self.expect(&TokenKind::RParen)?;
+            }
             let end = self.prev_span();
             Ok(Pattern::Variant {
                 enum_name: None,
                 variant: first_name,
-                bindings: vec![],
+                bindings,
                 span: start_span.merge(end),
             })
         }
@@ -111,6 +123,86 @@ mod tests {
         } = &stmts[0]
         {
             assert!(matches!(&arms[0].pattern, Pattern::Wildcard(_)));
+        } else {
+            panic!("expected Let with Match");
+        }
+    }
+
+    #[test]
+    fn pattern_variant_without_prefix_with_bindings() {
+        let source = r#"module test {
+            fn main() {
+                let r = match x {
+                    Ok(v) => v,
+                    Err(e) => 0
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let {
+            value: Expr::Match { arms, .. },
+            ..
+        } = &stmts[0]
+        {
+            assert!(matches!(
+                &arms[0].pattern,
+                Pattern::Variant {
+                    enum_name: None,
+                    variant,
+                    bindings,
+                    ..
+                } if variant == "Ok" && bindings.len() == 1 && bindings[0] == "v"
+            ));
+            assert!(matches!(
+                &arms[1].pattern,
+                Pattern::Variant {
+                    enum_name: None,
+                    variant,
+                    bindings,
+                    ..
+                } if variant == "Err" && bindings.len() == 1 && bindings[0] == "e"
+            ));
+        } else {
+            panic!("expected Let with Match");
+        }
+    }
+
+    #[test]
+    fn pattern_variant_without_prefix_unit() {
+        let source = r#"module test {
+            fn main() {
+                let r = match x {
+                    Some(v) => v,
+                    None => 0
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let {
+            value: Expr::Match { arms, .. },
+            ..
+        } = &stmts[0]
+        {
+            assert!(matches!(
+                &arms[0].pattern,
+                Pattern::Variant {
+                    enum_name: None,
+                    variant,
+                    bindings,
+                    ..
+                } if variant == "Some" && bindings.len() == 1
+            ));
+            assert!(matches!(
+                &arms[1].pattern,
+                Pattern::Variant {
+                    enum_name: None,
+                    variant,
+                    bindings,
+                    ..
+                } if variant == "None" && bindings.is_empty()
+            ));
         } else {
             panic!("expected Let with Match");
         }

@@ -447,6 +447,9 @@ impl MirBuilder {
         // the return type must be String so codegen allocates a _String
         // stack slot and handles the composite string calling convention.
         let ret_ty = self.infer_list_get_return_type(&resolved_callee, &arg_values, ret_ty);
+        // Resolve polymorphic return type for unwrap/unwrap_err: extract
+        // the concrete T or E from the receiver's generic parameters.
+        let ret_ty = self.infer_unwrap_return_type(&resolved_callee, &arg_values, ret_ty);
         let dest = self.alloc_local(ret_ty, false);
         self.emit(Instruction::Call {
             dest,
@@ -606,6 +609,55 @@ impl MirBuilder {
         match list_ty {
             Type::Generic(name, params) if name == "List" && !params.is_empty() => {
                 params[0].clone()
+            }
+            _ => default_ty,
+        }
+    }
+
+    /// Resolves the polymorphic return type for `Result_unwrap`,
+    /// `Result_unwrap_err`, and `Option_unwrap` from the receiver's
+    /// generic parameters.
+    ///
+    /// `Result_unwrap` on `Result<Int, String>` returns `Int`;
+    /// `Result_unwrap_err` returns `String`; `Option_unwrap` on
+    /// `Option<Int>` returns `Int`.
+    fn infer_unwrap_return_type(
+        &self,
+        callee: &str,
+        arg_values: &[Value],
+        default_ty: Type,
+    ) -> Type {
+        let idx = match callee {
+            "Result_unwrap_err" => 1,
+            "Result_unwrap" | "Option_unwrap" | "Result_unwrap_or" | "Option_unwrap_or" => 0,
+            _ => return default_ty,
+        };
+        let receiver_local = match arg_values.first() {
+            Some(Value::Local(id)) => *id,
+            _ => return default_ty,
+        };
+        let Some(receiver_ty) = self.local_types.get(&receiver_local) else {
+            return default_ty;
+        };
+        match receiver_ty {
+            Type::Generic(_, params) if params.len() > idx => params[idx].clone(),
+            Type::Enum(name) => {
+                // Parse monomorphized name like "Result__Int_String"
+                let Some(suffix) = name.split("__").nth(1) else {
+                    return default_ty;
+                };
+                let parts: Vec<&str> = suffix.split('_').collect();
+                let resolve_part = |part: &str| -> Type {
+                    match part {
+                        "Int" => Type::Int,
+                        "String" => Type::String,
+                        "Bool" => Type::Bool,
+                        "Float32" => Type::Float32,
+                        "Float64" => Type::Float64,
+                        _ => Type::Enum(part.to_string()),
+                    }
+                };
+                parts.get(idx).map_or(default_ty, |p| resolve_part(p))
             }
             _ => default_ty,
         }

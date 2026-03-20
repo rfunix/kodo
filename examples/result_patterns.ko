@@ -1,0 +1,57 @@
+// Result pattern matching and unwrap methods.
+//
+// Demonstrates:
+// - Short variant patterns: Ok(v), Err(e) without enum prefix
+// - Long variant patterns: Result::Ok(v), Result::Err(e)
+// - unwrap(), unwrap_err(), unwrap_or() methods
+// - Option short patterns: Some(v), None
+
+module result_patterns {
+    meta {
+        purpose: "Demonstrate Result/Option pattern matching and unwrap"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        // Short form match (no enum prefix)
+        let ok_val: Result<Int, String> = Result::Ok(42)
+        let x: Int = match ok_val {
+            Ok(v) => v,
+            Err(e) => 0
+        }
+        print_int(x)
+
+        // Long form match (with enum prefix)
+        let err_val: Result<Int, String> = Result::Err("error")
+        let y: Int = match err_val {
+            Result::Ok(v) => v,
+            Result::Err(e) => -1
+        }
+        print_int(y)
+
+        // unwrap on Ok
+        let ok2: Result<Int, String> = Result::Ok(100)
+        let a: Int = ok2.unwrap()
+        print_int(a)
+
+        // unwrap_err on Err
+        let err2: Result<Int, String> = Result::Err("oops")
+        let msg: String = err2.unwrap_err()
+        print(msg)
+
+        // unwrap_or with default
+        let err3: Result<Int, String> = Result::Err("fail")
+        let b: Int = err3.unwrap_or(999)
+        print_int(b)
+
+        // Option short form
+        let some_val: Option<Int> = Option::Some(77)
+        let c: Int = match some_val {
+            Some(v) => v,
+            None => 0
+        }
+        print_int(c)
+
+        return 0
+    }
+}

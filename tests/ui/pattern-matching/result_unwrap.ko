@@ -1,0 +1,25 @@
+//@ check-pass
+// Result and Option unwrap methods work correctly.
+
+module result_unwrap {
+    meta {
+        purpose: "Test unwrap methods on Result and Option"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ok_val: Result<Int, String> = Result::Ok(42)
+        let x: Int = ok_val.unwrap()
+
+        let err_val: Result<Int, String> = Result::Err("oops")
+        let e: String = err_val.unwrap_err()
+
+        let some_val: Option<Int> = Option::Some(99)
+        let y: Int = some_val.unwrap()
+
+        let fallback: Result<Int, String> = Result::Err("nope")
+        let d: Int = fallback.unwrap_or(100)
+
+        return x
+    }
+}
