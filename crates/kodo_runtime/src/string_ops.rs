@@ -951,6 +951,268 @@ pub unsafe extern "C" fn kodo_string_chars_free(iter_ptr: i64) {
     let _ = unsafe { Box::from_raw(iter_ptr as *mut StringCharsIterator) };
 }
 
+// ---------------------------------------------------------------------------
+// Character classification free functions
+// ---------------------------------------------------------------------------
+
+/// Returns 1 if the given Unicode codepoint is an alphabetic character, 0 otherwise.
+///
+/// Covers ASCII `A-Z`, `a-z` and all Unicode alphabetic characters.
+#[no_mangle]
+pub extern "C" fn kodo_is_alpha(code: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let result = char::from_u32(code as u32).is_some_and(char::is_alphabetic);
+    i64::from(result)
+}
+
+/// Returns 1 if the given Unicode codepoint is a digit (`0-9`), 0 otherwise.
+#[no_mangle]
+pub extern "C" fn kodo_is_digit(code: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let result = char::from_u32(code as u32).is_some_and(|c| c.is_ascii_digit());
+    i64::from(result)
+}
+
+/// Returns 1 if the given Unicode codepoint is alphanumeric, 0 otherwise.
+#[no_mangle]
+pub extern "C" fn kodo_is_alphanumeric(code: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let result = char::from_u32(code as u32).is_some_and(char::is_alphanumeric);
+    i64::from(result)
+}
+
+/// Returns 1 if the given Unicode codepoint is whitespace, 0 otherwise.
+#[no_mangle]
+pub extern "C" fn kodo_is_whitespace(code: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let result = char::from_u32(code as u32).is_some_and(char::is_whitespace);
+    i64::from(result)
+}
+
+/// Converts a Unicode codepoint to a single-character string.
+///
+/// Returns the character as a heap-allocated string via out-parameters.
+/// If the codepoint is invalid, returns an empty string.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_char_from_code(
+    code: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let ch = char::from_u32(code as u32);
+    match ch {
+        Some(c) => {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+            unsafe {
+                crate::memory::alloc_string_out(s.as_bytes(), out_ptr, out_len);
+            }
+        }
+        None => {
+            // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+            unsafe {
+                crate::memory::alloc_string_out(&[], out_ptr, out_len);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StringBuilder
+// ---------------------------------------------------------------------------
+
+/// Internal state for a mutable string builder.
+struct StringBuilder {
+    /// Accumulated bytes.
+    buf: Vec<u8>,
+}
+
+/// Creates a new empty `StringBuilder`.
+///
+/// Returns an opaque handle (as i64) to a heap-allocated `StringBuilder`.
+#[no_mangle]
+pub extern "C" fn kodo_string_builder_new() -> i64 {
+    let sb = Box::new(StringBuilder {
+        buf: Vec::with_capacity(64),
+    });
+    // SAFETY: intentionally leaks so caller manages via opaque handle.
+    Box::into_raw(sb) as i64
+}
+
+/// Appends a string to the `StringBuilder`.
+///
+/// # Safety
+///
+/// `handle` must be a valid pointer returned by `kodo_string_builder_new`.
+/// `ptr` must point to `len` valid UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_builder_push(handle: i64, ptr: *const u8, len: usize) {
+    if handle == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees handle was returned by kodo_string_builder_new.
+    let sb = unsafe { &mut *(handle as *mut StringBuilder) };
+    // SAFETY: caller guarantees ptr/len form a valid byte slice.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    sb.buf.extend_from_slice(bytes);
+}
+
+/// Appends a single Unicode codepoint to the `StringBuilder`.
+///
+/// If the codepoint is invalid, nothing is appended.
+///
+/// # Safety
+///
+/// `handle` must be a valid pointer returned by `kodo_string_builder_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_builder_push_char(handle: i64, code: i64) {
+    if handle == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees handle was returned by kodo_string_builder_new.
+    let sb = unsafe { &mut *(handle as *mut StringBuilder) };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    if let Some(c) = char::from_u32(code as u32) {
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        sb.buf.extend_from_slice(s.as_bytes());
+    }
+}
+
+/// Converts the `StringBuilder` contents to a String and consumes it.
+///
+/// The builder is freed after this call. The returned string is
+/// heap-allocated via out-parameters.
+///
+/// # Safety
+///
+/// `handle` must be a valid pointer returned by `kodo_string_builder_new`.
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_builder_to_string(
+    handle: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    if handle == 0 {
+        // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+        unsafe {
+            crate::memory::alloc_string_out(&[], out_ptr, out_len);
+        }
+        return;
+    }
+    // SAFETY: caller guarantees handle was returned by kodo_string_builder_new
+    // (i.e. Box::into_raw on a Box<StringBuilder>).
+    let sb = unsafe { Box::from_raw(handle as *mut StringBuilder) };
+    // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        crate::memory::alloc_string_out(&sb.buf, out_ptr, out_len);
+    }
+}
+
+/// Returns the current length (in bytes) of the `StringBuilder`.
+///
+/// # Safety
+///
+/// `handle` must be a valid pointer returned by `kodo_string_builder_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_string_builder_len(handle: i64) -> i64 {
+    if handle == 0 {
+        return 0;
+    }
+    // SAFETY: caller guarantees handle was returned by kodo_string_builder_new.
+    let sb = unsafe { &*(handle as *const StringBuilder) };
+    #[allow(clippy::cast_possible_wrap)]
+    let result = sb.buf.len() as i64;
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Number formatting
+// ---------------------------------------------------------------------------
+
+/// Formats an integer in the given base (2-36).
+///
+/// Returns the formatted string via out-parameters. If `base` is out of
+/// range, returns `"<invalid base>"`.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_format_int(
+    value: i64,
+    base: i64,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) {
+    let s = match base {
+        2 => format!("{value:b}"),
+        8 => format!("{value:o}"),
+        10 => format!("{value}"),
+        16 => format!("{value:x}"),
+        _ if (2..=36).contains(&base) => {
+            // Manual base conversion for bases other than 2, 8, 10, 16.
+            if value == 0 {
+                "0".to_string()
+            } else {
+                const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+                let mut result = Vec::new();
+                let negative = value < 0;
+                // Use unsigned absolute value to handle i64::MIN correctly.
+                #[allow(clippy::cast_sign_loss)]
+                let mut v = if negative {
+                    (value as u64).wrapping_neg()
+                } else {
+                    value as u64
+                };
+                #[allow(clippy::cast_sign_loss)]
+                let b = base as u64;
+                while v > 0 {
+                    #[allow(clippy::cast_possible_truncation)]
+                    result.push(DIGITS[(v % b) as usize]);
+                    v /= b;
+                }
+                if negative {
+                    result.push(b'-');
+                }
+                result.reverse();
+                String::from_utf8(result).unwrap_or_default()
+            }
+        }
+        _ => "<invalid base>".to_string(),
+    };
+    // SAFETY: Caller guarantees out_ptr and out_len are valid writable pointers.
+    unsafe {
+        crate::memory::alloc_string_out(s.as_bytes(), out_ptr, out_len);
+    }
+}
+
+/// Returns the current Unix epoch timestamp in milliseconds.
+#[no_mangle]
+pub extern "C" fn kodo_timestamp() -> i64 {
+    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+    let result = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    result
+}
+
+/// Sleeps for the given number of milliseconds.
+#[no_mangle]
+pub extern "C" fn kodo_sleep(ms: i64) {
+    if ms > 0 {
+        #[allow(clippy::cast_sign_loss)]
+        std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1626,6 +1888,169 @@ mod tests {
         let bytes: [u8; 2] = [0xFF, 0xFE];
         // Should handle invalid UTF-8 gracefully without aborting.
         unsafe { kodo_contract_fail_recoverable(bytes.as_ptr(), bytes.len()) };
+    }
+
+    // -----------------------------------------------------------------------
+    // Character classification tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_alpha_letters() {
+        assert_eq!(kodo_is_alpha(65), 1); // 'A'
+        assert_eq!(kodo_is_alpha(122), 1); // 'z'
+        assert_eq!(kodo_is_alpha(48), 0); // '0'
+        assert_eq!(kodo_is_alpha(32), 0); // ' '
+        assert_eq!(kodo_is_alpha(95), 0); // '_'
+    }
+
+    #[test]
+    fn is_digit_numbers() {
+        assert_eq!(kodo_is_digit(48), 1); // '0'
+        assert_eq!(kodo_is_digit(57), 1); // '9'
+        assert_eq!(kodo_is_digit(65), 0); // 'A'
+        assert_eq!(kodo_is_digit(32), 0); // ' '
+    }
+
+    #[test]
+    fn is_alphanumeric_mixed() {
+        assert_eq!(kodo_is_alphanumeric(65), 1); // 'A'
+        assert_eq!(kodo_is_alphanumeric(48), 1); // '0'
+        assert_eq!(kodo_is_alphanumeric(32), 0); // ' '
+        assert_eq!(kodo_is_alphanumeric(95), 0); // '_'
+    }
+
+    #[test]
+    fn is_whitespace_chars() {
+        assert_eq!(kodo_is_whitespace(32), 1); // ' '
+        assert_eq!(kodo_is_whitespace(9), 1); // '\t'
+        assert_eq!(kodo_is_whitespace(10), 1); // '\n'
+        assert_eq!(kodo_is_whitespace(65), 0); // 'A'
+    }
+
+    #[test]
+    fn char_from_code_ascii() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_char_from_code(65, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "A");
+    }
+
+    #[test]
+    fn char_from_code_unicode() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_char_from_code(0xE9, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "\u{00E9}");
+    }
+
+    #[test]
+    fn char_from_code_invalid() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        // Invalid Unicode codepoint — should return empty string.
+        unsafe { kodo_char_from_code(0x110000, &mut out_ptr, &mut out_len) };
+        assert_eq!(out_len, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // StringBuilder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn string_builder_basic() {
+        let sb = kodo_string_builder_new();
+        assert_ne!(sb, 0);
+        let s1 = "hello";
+        let s2 = " world";
+        unsafe { kodo_string_builder_push(sb, s1.as_ptr(), s1.len()) };
+        unsafe { kodo_string_builder_push(sb, s2.as_ptr(), s2.len()) };
+        assert_eq!(unsafe { kodo_string_builder_len(sb) }, 11);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_string_builder_to_string(sb, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn string_builder_push_char() {
+        let sb = kodo_string_builder_new();
+        unsafe { kodo_string_builder_push_char(sb, 72) }; // 'H'
+        unsafe { kodo_string_builder_push_char(sb, 105) }; // 'i'
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_string_builder_to_string(sb, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "Hi");
+    }
+
+    #[test]
+    fn string_builder_empty() {
+        let sb = kodo_string_builder_new();
+        assert_eq!(unsafe { kodo_string_builder_len(sb) }, 0);
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_string_builder_to_string(sb, &mut out_ptr, &mut out_len) };
+        assert_eq!(out_len, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // format_int tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_int_decimal() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_format_int(42, 10, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "42");
+    }
+
+    #[test]
+    fn format_int_hex() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_format_int(255, 16, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "ff");
+    }
+
+    #[test]
+    fn format_int_binary() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_format_int(10, 2, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "1010");
+    }
+
+    #[test]
+    fn format_int_invalid_base() {
+        let mut out_ptr: *const u8 = std::ptr::null();
+        let mut out_len: usize = 0;
+        unsafe { kodo_format_int(42, 1, &mut out_ptr, &mut out_len) };
+        let result = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(std::str::from_utf8(result).unwrap(), "<invalid base>");
+    }
+
+    // -----------------------------------------------------------------------
+    // timestamp and sleep tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn timestamp_returns_nonzero() {
+        let ts = kodo_timestamp();
+        assert!(ts > 0);
+    }
+
+    #[test]
+    fn sleep_zero_does_not_block() {
+        kodo_sleep(0);
+        kodo_sleep(-1);
+        // If we reach here, no crash.
     }
 
     // -----------------------------------------------------------------------

@@ -104,6 +104,10 @@ impl TypeChecker {
         self.register_http_server_functions();
         self.register_db_functions();
 
+        self.register_char_functions();
+        self.register_string_builder_functions();
+        self.register_stdlib_extended_functions();
+
         self.register_future_builtins();
         self.register_test_builtins();
     }
@@ -1587,6 +1591,93 @@ impl TypeChecker {
         // db_close(db: Int) -> Unit
         self.env.insert(
             "db_close".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers character classification free functions.
+    ///
+    /// These are essential for self-hosting a lexer in Kodo. They operate
+    /// on Unicode codepoints (Int values).
+    fn register_char_functions(&mut self) {
+        // char_at(s: String, index: Int) -> Int
+        self.env.insert(
+            "char_at".to_string(),
+            Type::Function(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        // char_from_code(code: Int) -> String
+        self.env.insert(
+            "char_from_code".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // is_alpha(c: Int) -> Bool
+        self.env.insert(
+            "is_alpha".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+        );
+        // is_digit(c: Int) -> Bool
+        self.env.insert(
+            "is_digit".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+        );
+        // is_alphanumeric(c: Int) -> Bool
+        self.env.insert(
+            "is_alphanumeric".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+        );
+        // is_whitespace(c: Int) -> Bool
+        self.env.insert(
+            "is_whitespace".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Bool)),
+        );
+    }
+
+    /// Registers `StringBuilder` functions for efficient string building.
+    fn register_string_builder_functions(&mut self) {
+        // string_builder_new() -> Int (opaque handle)
+        self.env.insert(
+            "string_builder_new".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        // string_builder_push(sb: Int, s: String) -> ()
+        self.env.insert(
+            "string_builder_push".to_string(),
+            Type::Function(vec![Type::Int, Type::String], Box::new(Type::Unit)),
+        );
+        // string_builder_push_char(sb: Int, code: Int) -> ()
+        self.env.insert(
+            "string_builder_push_char".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        // string_builder_to_string(sb: Int) -> String
+        self.env.insert(
+            "string_builder_to_string".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // string_builder_len(sb: Int) -> Int
+        self.env.insert(
+            "string_builder_len".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+    }
+
+    /// Registers extended stdlib functions (Priority 2).
+    ///
+    /// Includes: `format_int`, `timestamp`, `sleep`.
+    fn register_stdlib_extended_functions(&mut self) {
+        // format_int(n: Int, base: Int) -> String
+        self.env.insert(
+            "format_int".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        // timestamp() -> Int (unix epoch millis)
+        self.env.insert(
+            "timestamp".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        // sleep(ms: Int) -> ()
+        self.env.insert(
+            "sleep".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
         );
     }

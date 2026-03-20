@@ -1109,6 +1109,72 @@ fn all_builtins() -> Vec<Builtin> {
             params: &["i64"],
             ret: "i64",
         },
+        // -- Stdlib expansion (Milestone 8) --
+        Builtin {
+            name: "kodo_is_alpha",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_is_digit",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_is_alphanumeric",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_is_whitespace",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_char_from_code",
+            params: &["i64", "i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_string_builder_new",
+            params: &[],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_string_builder_push",
+            params: &["i64", "i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_string_builder_push_char",
+            params: &["i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_string_builder_to_string",
+            params: &["i64", "i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_string_builder_len",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_format_int",
+            params: &["i64", "i64", "i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_timestamp",
+            params: &[],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_sleep",
+            params: &["i64"],
+            ret: "void",
+        },
     ]
 }
 

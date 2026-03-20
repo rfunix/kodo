@@ -206,8 +206,51 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("channel_generic_recv".to_string())
         .or_insert(Type::Int);
 
+    register_stdlib_expansion_return_types(fn_return_types);
+
     register_sprint5_return_types(fn_return_types);
     register_test_return_types(fn_return_types);
+}
+
+/// Registers return types for stdlib expansion builtins (Milestone 8).
+///
+/// Includes character classification, `StringBuilder`, `format_int`, `timestamp`, `sleep`.
+fn register_stdlib_expansion_return_types(fn_return_types: &mut HashMap<String, Type>) {
+    // Character classification — return Int (used as Bool: 0/1)
+    for name in &[
+        "char_at",
+        "is_alpha",
+        "is_digit",
+        "is_alphanumeric",
+        "is_whitespace",
+    ] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
+    // char_from_code returns String
+    fn_return_types
+        .entry("char_from_code".to_string())
+        .or_insert(Type::String);
+
+    // StringBuilder
+    fn_return_types
+        .entry("string_builder_new".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("string_builder_to_string".to_string())
+        .or_insert(Type::String);
+    fn_return_types
+        .entry("string_builder_len".to_string())
+        .or_insert(Type::Int);
+
+    // Extended stdlib
+    fn_return_types
+        .entry("format_int".to_string())
+        .or_insert(Type::String);
+    fn_return_types
+        .entry("timestamp".to_string())
+        .or_insert(Type::Int);
 }
 
 /// Registers return types for Sprint 5 builtins (CLI, JSON, HTTP server, math).

@@ -77,6 +77,7 @@ pub(crate) fn declare_builtins(
     declare_http_server_builtins(module, call_conv, &mut builtins)?;
     declare_db_builtins(module, call_conv, &mut builtins)?;
     declare_test_builtins(module, call_conv, &mut builtins)?;
+    declare_stdlib_expansion_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -1717,5 +1718,113 @@ fn declare_test_builtins(
         [types::I64],
         types::I64
     );
+    Ok(())
+}
+
+/// Declares stdlib expansion builtins (Milestone 8): character classification,
+/// `StringBuilder`, `format_int`, `timestamp`, `sleep`.
+fn declare_stdlib_expansion_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // char_at: uses existing kodo_string_char_at (ptr, len, index) -> i64
+    // Already declared as String_char_at, but we also need a free function key.
+    decl_ret!(
+        "kodo_string_char_at",
+        "char_at",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    // char_from_code: (code, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_char_from_code",
+        "char_from_code",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // is_alpha: (code) -> i64
+    decl_ret!("kodo_is_alpha", "is_alpha", [types::I64], types::I64);
+    // is_digit: (code) -> i64
+    decl_ret!("kodo_is_digit", "is_digit", [types::I64], types::I64);
+    // is_alphanumeric: (code) -> i64
+    decl_ret!(
+        "kodo_is_alphanumeric",
+        "is_alphanumeric",
+        [types::I64],
+        types::I64
+    );
+    // is_whitespace: (code) -> i64
+    decl_ret!(
+        "kodo_is_whitespace",
+        "is_whitespace",
+        [types::I64],
+        types::I64
+    );
+
+    // StringBuilder
+    decl_ret!(
+        "kodo_string_builder_new",
+        "string_builder_new",
+        [],
+        types::I64
+    );
+    decl_void!(
+        "kodo_string_builder_push",
+        "string_builder_push",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_string_builder_push_char",
+        "string_builder_push_char",
+        types::I64,
+        types::I64
+    );
+    decl_void!(
+        "kodo_string_builder_to_string",
+        "string_builder_to_string",
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    decl_ret!(
+        "kodo_string_builder_len",
+        "string_builder_len",
+        [types::I64],
+        types::I64
+    );
+
+    // format_int: (value, base, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_format_int",
+        "format_int",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
+    // timestamp: () -> i64
+    decl_ret!("kodo_timestamp", "timestamp", [], types::I64);
+    // sleep: (ms) -> void
+    decl_void!("kodo_sleep", "sleep", types::I64);
+
     Ok(())
 }

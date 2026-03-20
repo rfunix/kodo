@@ -104,6 +104,20 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "db_row_get_int"
             | "db_result_free"
             | "db_close"
+            | "char_at"
+            | "char_from_code"
+            | "is_alpha"
+            | "is_digit"
+            | "is_alphanumeric"
+            | "is_whitespace"
+            | "string_builder_push"
+            | "string_builder_push_char"
+            | "string_builder_to_string"
+            | "string_builder_len"
+            | "string_builder_new"
+            | "format_int"
+            | "timestamp"
+            | "sleep"
     )
 }
 
@@ -142,6 +156,9 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "http_request_path"
             | "http_request_body"
             | "db_row_get_string"
+            | "char_from_code"
+            | "format_int"
+            | "string_builder_to_string"
     )
 }
 

@@ -1,0 +1,45 @@
+module char_ops_demo {
+    meta {
+        purpose: "Demonstrates character operations and StringBuilder for self-hosting lexer support"
+        version: "1.0.0"
+    }
+
+    fn is_identifier_char(c: Int) -> Bool {
+        return is_alpha(c) || is_digit(c) || c == 95
+    }
+
+    fn kodo_main() {
+        let s: String = "hello123"
+        let c: Int = char_at(s, 0)
+        print_int(c)
+
+        if is_alpha(c) {
+            println("is alpha")
+        }
+
+        if is_digit(48) {
+            println("48 is digit")
+        }
+
+        if is_whitespace(32) {
+            println("32 is whitespace")
+        }
+
+        if is_identifier_char(95) {
+            println("underscore is identifier char")
+        }
+
+        let ch: String = char_from_code(65)
+        println(ch)
+
+        let sb: Int = string_builder_new()
+        string_builder_push(sb, "hello")
+        string_builder_push_char(sb, 32)
+        string_builder_push(sb, "world")
+        let result: String = string_builder_to_string(sb)
+        println(result)
+
+        let hex: String = format_int(255, 16)
+        println(hex)
+    }
+}
