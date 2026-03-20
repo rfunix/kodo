@@ -254,6 +254,8 @@ pub(crate) fn translate_instruction(
             var_map,
             struct_layouts,
         ),
+        // Yield is a no-op until GT-7 wires it to kodo_green_maybe_yield().
+        Instruction::Yield => Ok(()),
     }
 }
 

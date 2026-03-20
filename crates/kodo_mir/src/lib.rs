@@ -29,6 +29,7 @@
 
 pub mod lowering;
 pub mod optimize;
+pub mod yield_insertion;
 
 use kodo_types::Type;
 use thiserror::Error;
@@ -175,6 +176,9 @@ pub enum Instruction {
     IncRef(LocalId),
     /// Decrement reference count for a heap-allocated value (may free).
     DecRef(LocalId),
+    /// Yield control to another green thread.
+    /// Compiled to `kodo_green_maybe_yield()` call.
+    Yield,
 }
 
 /// A value in MIR — either a constant, a local reference, or a binary operation.
@@ -372,6 +376,7 @@ impl std::fmt::Display for Instruction {
             } => write!(f, "{dest} = <virtual_call[{vtable_index}]>({object}, ...)"),
             Self::IncRef(local) => write!(f, "inc_ref {local}"),
             Self::DecRef(local) => write!(f, "dec_ref {local}"),
+            Self::Yield => write!(f, "yield"),
         }
     }
 }

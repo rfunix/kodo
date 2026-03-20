@@ -282,6 +282,7 @@ fn remap_instruction(
         }
         Instruction::IncRef(id) => Instruction::IncRef(remap_local_id(*id, local_remap)),
         Instruction::DecRef(id) => Instruction::DecRef(remap_local_id(*id, local_remap)),
+        Instruction::Yield => Instruction::Yield,
         Instruction::VirtualCall {
             dest,
             object,
@@ -428,7 +429,7 @@ fn fold_block(block: &mut BasicBlock) {
                     *arg = fold_value(arg.clone());
                 }
             }
-            Instruction::IncRef(_) | Instruction::DecRef(_) => {}
+            Instruction::IncRef(_) | Instruction::DecRef(_) | Instruction::Yield => {}
         }
     }
     // Fold terminators too.
@@ -559,7 +560,8 @@ fn dead_code_eliminate(func: &mut MirFunction) {
             | Instruction::IndirectCall { .. }
             | Instruction::VirtualCall { .. }
             | Instruction::IncRef(_)
-            | Instruction::DecRef(_) => true,
+            | Instruction::DecRef(_)
+            | Instruction::Yield => true,
         });
     }
 }
@@ -591,6 +593,7 @@ fn collect_used_locals(func: &MirFunction) -> HashSet<LocalId> {
                 Instruction::IncRef(local) | Instruction::DecRef(local) => {
                     used.insert(*local);
                 }
+                Instruction::Yield => {}
             }
         }
         match &block.terminator {
@@ -707,7 +710,7 @@ fn copy_propagate(func: &mut MirFunction) {
                         substitute_value(arg, &resolved);
                     }
                 }
-                Instruction::IncRef(_) | Instruction::DecRef(_) => {}
+                Instruction::IncRef(_) | Instruction::DecRef(_) | Instruction::Yield => {}
             }
         }
         match &mut block.terminator {
