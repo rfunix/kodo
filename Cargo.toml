@@ -9,6 +9,7 @@ members = [
     "crates/kodo_resolver",
     "crates/kodo_mir",
     "crates/kodo_codegen",
+    "crates/kodo_codegen_llvm",
     "crates/kodo_std",
     "crates/kodo_runtime",
     "crates/kodo_desugar",
@@ -37,6 +38,7 @@ kodo_contracts = { path = "crates/kodo_contracts" }
 kodo_resolver = { path = "crates/kodo_resolver" }
 kodo_mir = { path = "crates/kodo_mir" }
 kodo_codegen = { path = "crates/kodo_codegen" }
+kodo_codegen_llvm = { path = "crates/kodo_codegen_llvm" }
 kodo_std = { path = "crates/kodo_std" }
 kodo_desugar = { path = "crates/kodo_desugar" }
 kodo_lsp = { path = "crates/kodo_lsp" }

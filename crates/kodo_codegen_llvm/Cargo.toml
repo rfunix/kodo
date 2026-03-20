@@ -1,0 +1,13 @@
+[package]
+name = "kodo_codegen_llvm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "LLVM IR code generation backend for the Kodo compiler"
+
+[dependencies]
+kodo_mir.workspace = true
+kodo_types.workspace = true
+kodo_ast.workspace = true
+thiserror.workspace = true

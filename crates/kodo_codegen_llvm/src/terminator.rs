@@ -1,0 +1,229 @@
+//! Translation of MIR terminators to LLVM IR.
+//!
+//! Each basic block in MIR ends with a `Terminator` that transfers control
+//! flow. This module translates those terminators to LLVM IR branch, return,
+//! and unreachable instructions.
+
+use std::collections::HashMap;
+
+use kodo_mir::{LocalId, Terminator};
+use kodo_types::Type;
+
+use crate::emitter::LLVMEmitter;
+use crate::instruction::fresh_reg;
+use crate::types::llvm_type;
+use crate::value::{emit_value, ValueResult};
+
+/// Emits LLVM IR for a MIR terminator.
+///
+/// # Arguments
+/// * `term` - The terminator to translate.
+/// * `emitter` - The LLVM IR string builder.
+/// * `local_regs` - Mapping from `LocalId` to LLVM SSA register names.
+/// * `local_types` - Mapping from `LocalId` to Kodo types.
+/// * `next_reg` - Counter for fresh register names.
+/// * `return_type` - The function's return type.
+/// * `struct_defs` - Struct type definitions.
+/// * `enum_defs` - Enum type definitions.
+/// * `string_constants` - String constant pool.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_terminator(
+    term: &Terminator,
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    return_type: &Type,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) {
+    match term {
+        Terminator::Return(value) => {
+            let ret_ty = llvm_type(return_type, struct_defs, enum_defs);
+            if ret_ty == "void" {
+                emitter.indent("ret void");
+            } else {
+                let vr = emit_value(
+                    value,
+                    emitter,
+                    local_regs,
+                    local_types,
+                    next_reg,
+                    struct_defs,
+                    enum_defs,
+                    string_constants,
+                );
+                match vr {
+                    ValueResult::Register(reg) => {
+                        emitter.indent(&format!("ret {ret_ty} {reg}"));
+                    }
+                    ValueResult::Constant(val) | ValueResult::FloatConstant(val) => {
+                        emitter.indent(&format!("ret {ret_ty} {val}"));
+                    }
+                    ValueResult::Void => {
+                        emitter.indent("ret void");
+                    }
+                }
+            }
+        }
+        Terminator::Goto(block_id) => {
+            emitter.indent(&format!("br label %bb{}", block_id.0));
+        }
+        Terminator::Branch {
+            condition,
+            true_block,
+            false_block,
+        } => {
+            let vr = emit_value(
+                condition,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            let cond_reg = match vr {
+                ValueResult::Register(r) => r,
+                ValueResult::Constant(v) => {
+                    let reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{reg} = add i64 {v}, 0"));
+                    reg
+                }
+                ValueResult::FloatConstant(v) => {
+                    let reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{reg} = fadd double {v}, 0.0"));
+                    reg
+                }
+                ValueResult::Void => {
+                    let reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{reg} = add i64 0, 0"));
+                    reg
+                }
+            };
+
+            // Truncate i64 to i1 for branch condition.
+            let bool_reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{bool_reg} = icmp ne i64 {cond_reg}, 0"));
+            emitter.indent(&format!(
+                "br i1 {bool_reg}, label %bb{}, label %bb{}",
+                true_block.0, false_block.0
+            ));
+        }
+        Terminator::Unreachable => {
+            emitter.indent("unreachable");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_mir::{BlockId, Value};
+
+    #[test]
+    fn emit_goto() {
+        let mut emitter = LLVMEmitter::new();
+        let mut local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let mut next_reg = 0;
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+
+        emit_terminator(
+            &Terminator::Goto(BlockId(3)),
+            &mut emitter,
+            &mut local_regs,
+            &local_types,
+            &mut next_reg,
+            &Type::Unit,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+
+        let output = emitter.finish();
+        assert!(output.contains("br label %bb3"));
+    }
+
+    #[test]
+    fn emit_return_int() {
+        let mut emitter = LLVMEmitter::new();
+        let mut local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let mut next_reg = 0;
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+
+        emit_terminator(
+            &Terminator::Return(Value::IntConst(42)),
+            &mut emitter,
+            &mut local_regs,
+            &local_types,
+            &mut next_reg,
+            &Type::Int,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+
+        let output = emitter.finish();
+        assert!(output.contains("ret i64 42"));
+    }
+
+    #[test]
+    fn emit_return_void() {
+        let mut emitter = LLVMEmitter::new();
+        let mut local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let mut next_reg = 0;
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+
+        emit_terminator(
+            &Terminator::Return(Value::Unit),
+            &mut emitter,
+            &mut local_regs,
+            &local_types,
+            &mut next_reg,
+            &Type::Unit,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+
+        let output = emitter.finish();
+        assert!(output.contains("ret void"));
+    }
+
+    #[test]
+    fn emit_unreachable() {
+        let mut emitter = LLVMEmitter::new();
+        let mut local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let mut next_reg = 0;
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+
+        emit_terminator(
+            &Terminator::Unreachable,
+            &mut emitter,
+            &mut local_regs,
+            &local_types,
+            &mut next_reg,
+            &Type::Unit,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+
+        let output = emitter.finish();
+        assert!(output.contains("unreachable"));
+    }
+}

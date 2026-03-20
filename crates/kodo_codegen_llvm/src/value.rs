@@ -1,0 +1,620 @@
+//! Translation of MIR `Value` to LLVM IR expressions.
+//!
+//! Each MIR `Value` variant is emitted as one or more LLVM IR instructions,
+//! producing either an SSA register reference or an inline constant.
+
+use std::collections::HashMap;
+
+use kodo_ast::BinOp;
+use kodo_mir::{LocalId, Value};
+use kodo_types::Type;
+
+use crate::emitter::LLVMEmitter;
+use crate::instruction::fresh_reg;
+use crate::types::llvm_type;
+
+/// The result of emitting a value: either a register name, a constant literal,
+/// a float constant, or void (for unit values).
+pub(crate) enum ValueResult {
+    /// An SSA register name (e.g., `"%3"`).
+    Register(String),
+    /// An integer constant literal (e.g., `"42"`).
+    Constant(String),
+    /// A floating-point constant literal (e.g., `"3.14"`).
+    FloatConstant(String),
+    /// The void/unit value — no result.
+    Void,
+}
+
+/// Emits LLVM IR for a MIR `Value`, returning how the result is represented.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn emit_value(
+    value: &Value,
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    match value {
+        Value::IntConst(n) => ValueResult::Constant(n.to_string()),
+        Value::FloatConst(f) => {
+            // LLVM requires hex representation for exact floats.
+            ValueResult::FloatConstant(format_float_llvm(*f))
+        }
+        Value::BoolConst(b) => ValueResult::Constant(if *b { "1" } else { "0" }.to_string()),
+        Value::StringConst(s) => emit_string_constant(s, emitter, next_reg, string_constants),
+        Value::Local(id) => {
+            if let Some(reg) = local_regs.get(id) {
+                ValueResult::Register(reg.clone())
+            } else {
+                // Uninitialized local — return zero.
+                let ty = local_types.get(id).unwrap_or(&Type::Int);
+                let ty_str = llvm_type(ty, struct_defs, enum_defs);
+                if ty_str == "void" {
+                    return ValueResult::Void;
+                }
+                let reg = fresh_reg(next_reg);
+                if ty_str == "double" {
+                    emitter.indent(&format!("{reg} = fadd double 0.0, 0.0"));
+                } else if ty_str == "{ i64, i64 }" {
+                    // Uninitialized string — zero struct.
+                    let r1 = fresh_reg(next_reg);
+                    emitter.indent(&format!(
+                        "{r1} = insertvalue {{ i64, i64 }} zeroinitializer, i64 0, 0"
+                    ));
+                    emitter.indent(&format!(
+                        "{reg} = insertvalue {{ i64, i64 }} {r1}, i64 0, 1"
+                    ));
+                } else {
+                    emitter.indent(&format!("{reg} = add {ty_str} 0, 0"));
+                }
+                ValueResult::Register(reg)
+            }
+        }
+        Value::BinOp(op, lhs, rhs) => emit_binop(
+            *op,
+            lhs,
+            rhs,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+        ),
+        Value::Not(inner) => {
+            let vr = emit_value(
+                inner,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "i64");
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{reg} = xor i64 {inner_reg}, 1"));
+            ValueResult::Register(reg)
+        }
+        Value::Neg(inner) => {
+            let inner_ty = infer_value_type_simple(inner, local_types);
+            let vr = emit_value(
+                inner,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            if matches!(inner_ty, Type::Float64 | Type::Float32) {
+                let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "double");
+                let reg = fresh_reg(next_reg);
+                emitter.indent(&format!("{reg} = fneg double {inner_reg}"));
+                ValueResult::Register(reg)
+            } else {
+                let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "i64");
+                let reg = fresh_reg(next_reg);
+                emitter.indent(&format!("{reg} = sub i64 0, {inner_reg}"));
+                ValueResult::Register(reg)
+            }
+        }
+        Value::Unit => ValueResult::Void,
+        Value::FuncRef(name) => {
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{reg} = ptrtoint ptr @{name} to i64"));
+            ValueResult::Register(reg)
+        }
+        Value::StructLit { name, fields } => emit_struct_lit(
+            name,
+            fields,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+        ),
+        Value::FieldGet {
+            object,
+            field,
+            struct_name,
+        } => emit_field_get(
+            object,
+            field,
+            struct_name,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+        ),
+        Value::EnumVariant {
+            discriminant,
+            args,
+            enum_name,
+            ..
+        } => emit_enum_variant(
+            *discriminant,
+            args,
+            enum_name,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+        ),
+        Value::EnumDiscriminant(inner) => {
+            let vr = emit_value(
+                inner,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "{ i64, [8 x i8] }");
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!(
+                "{reg} = extractvalue {{ i64, [8 x i8] }} {inner_reg}, 0"
+            ));
+            ValueResult::Register(reg)
+        }
+        Value::EnumPayload {
+            value: inner,
+            field_index,
+        } => {
+            // Extract payload from enum. Simplified: just extract the i64 at offset.
+            let vr = emit_value(
+                inner,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "{ i64, [8 x i8] }");
+            // Payload is in [8 x i8] at index 1. Extract and bitcast.
+            let payload_reg = fresh_reg(next_reg);
+            emitter.indent(&format!(
+                "{payload_reg} = extractvalue {{ i64, [8 x i8] }} {inner_reg}, 1"
+            ));
+            // For simplicity, bitcast the first 8 bytes to i64.
+            let _ = field_index; // We just grab the first i64 of the payload.
+            let result_reg = fresh_reg(next_reg);
+            // Use alloca + store + load to reinterpret bytes as i64.
+            let alloca_reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{alloca_reg} = alloca [8 x i8]"));
+            emitter.indent(&format!("store [8 x i8] {payload_reg}, ptr {alloca_reg}"));
+            emitter.indent(&format!("{result_reg} = load i64, ptr {alloca_reg}"));
+            ValueResult::Register(result_reg)
+        }
+        Value::MakeDynTrait { value: inner, .. } => {
+            // Simplified: just pass through the inner value as i64.
+            emit_value(
+                inner,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            )
+        }
+    }
+}
+
+/// Emits a string constant, adding it to the module-level constant pool.
+fn emit_string_constant(
+    s: &str,
+    emitter: &mut LLVMEmitter,
+    next_reg: &mut u32,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    let idx = string_constants.len();
+    let global_name = format!(".str.{idx}");
+    string_constants.push((global_name.clone(), s.to_string()));
+
+    let len = s.len();
+    let ptr_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{ptr_reg} = getelementptr [{len} x i8], [{len} x i8]* @{global_name}, i32 0, i32 0"
+    ));
+
+    // Build a { i64, i64 } struct from ptr and len.
+    let ptr_int_reg = fresh_reg(next_reg);
+    emitter.indent(&format!("{ptr_int_reg} = ptrtoint ptr {ptr_reg} to i64"));
+
+    let s1 = fresh_reg(next_reg);
+    let s2 = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{s1} = insertvalue {{ i64, i64 }} undef, i64 {ptr_int_reg}, 0"
+    ));
+    emitter.indent(&format!(
+        "{s2} = insertvalue {{ i64, i64 }} {s1}, i64 {len}, 1"
+    ));
+
+    ValueResult::Register(s2)
+}
+
+/// Converts a `ValueResult` to a register, materializing constants as needed.
+fn value_result_to_reg(
+    vr: &ValueResult,
+    emitter: &mut LLVMEmitter,
+    next_reg: &mut u32,
+    ty: &str,
+) -> String {
+    match vr {
+        ValueResult::Register(r) => r.clone(),
+        ValueResult::Constant(v) => {
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{reg} = add {ty} {v}, 0"));
+            reg
+        }
+        ValueResult::FloatConstant(v) => {
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{reg} = fadd double {v}, 0.0"));
+            reg
+        }
+        ValueResult::Void => {
+            let reg = fresh_reg(next_reg);
+            emitter.indent(&format!("{reg} = add i64 0, 0"));
+            reg
+        }
+    }
+}
+
+/// Emits a binary operation.
+#[allow(clippy::too_many_arguments)]
+fn emit_binop(
+    op: BinOp,
+    lhs: &Value,
+    rhs: &Value,
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    let lhs_ty = infer_value_type_simple(lhs, local_types);
+    let is_float = matches!(lhs_ty, Type::Float64 | Type::Float32);
+
+    let lhs_vr = emit_value(
+        lhs,
+        emitter,
+        local_regs,
+        local_types,
+        next_reg,
+        struct_defs,
+        enum_defs,
+        string_constants,
+    );
+    let rhs_vr = emit_value(
+        rhs,
+        emitter,
+        local_regs,
+        local_types,
+        next_reg,
+        struct_defs,
+        enum_defs,
+        string_constants,
+    );
+
+    let ty_str = if is_float { "double" } else { "i64" };
+    let l = value_result_to_reg(&lhs_vr, emitter, next_reg, ty_str);
+    let r = value_result_to_reg(&rhs_vr, emitter, next_reg, ty_str);
+
+    let reg = fresh_reg(next_reg);
+
+    if is_float {
+        let llvm_op = match op {
+            BinOp::Add => "fadd",
+            BinOp::Sub => "fsub",
+            BinOp::Mul => "fmul",
+            BinOp::Div => "fdiv",
+            BinOp::Mod => "frem",
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                let cond = match op {
+                    BinOp::Ne => "one",
+                    BinOp::Lt => "olt",
+                    BinOp::Gt => "ogt",
+                    BinOp::Le => "ole",
+                    BinOp::Ge => "oge",
+                    _ => "oeq",
+                };
+                let cmp_reg = fresh_reg(next_reg);
+                emitter.indent(&format!("{cmp_reg} = fcmp {cond} double {l}, {r}"));
+                emitter.indent(&format!("{reg} = zext i1 {cmp_reg} to i64"));
+                return ValueResult::Register(reg);
+            }
+            BinOp::And | BinOp::Or => {
+                // Logical ops on floats: treat as truthy (nonzero).
+                let llvm_op = if matches!(op, BinOp::And) {
+                    "and"
+                } else {
+                    "or"
+                };
+                emitter.indent(&format!(
+                    "{reg} = {llvm_op} i64 0, 0 ; float logical op stub"
+                ));
+                return ValueResult::Register(reg);
+            }
+        };
+        emitter.indent(&format!("{reg} = {llvm_op} double {l}, {r}"));
+    } else {
+        let llvm_op = match op {
+            BinOp::Add => "add",
+            BinOp::Sub => "sub",
+            BinOp::Mul => "mul",
+            BinOp::Div => "sdiv",
+            BinOp::Mod => "srem",
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                let cond = match op {
+                    BinOp::Ne => "ne",
+                    BinOp::Lt => "slt",
+                    BinOp::Gt => "sgt",
+                    BinOp::Le => "sle",
+                    BinOp::Ge => "sge",
+                    _ => "eq",
+                };
+                let cmp_reg = fresh_reg(next_reg);
+                emitter.indent(&format!("{cmp_reg} = icmp {cond} i64 {l}, {r}"));
+                emitter.indent(&format!("{reg} = zext i1 {cmp_reg} to i64"));
+                return ValueResult::Register(reg);
+            }
+            BinOp::And => "and",
+            BinOp::Or => "or",
+        };
+        emitter.indent(&format!("{reg} = {llvm_op} i64 {l}, {r}"));
+    }
+
+    ValueResult::Register(reg)
+}
+
+/// Emits a struct literal value.
+#[allow(clippy::too_many_arguments)]
+fn emit_struct_lit(
+    name: &str,
+    fields: &[(String, Value)],
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    let struct_ty = format!("%{name}");
+
+    // Start with undef.
+    let mut current = "undef".to_string();
+    let field_order: Vec<String> = struct_defs
+        .get(name)
+        .map(|fs| fs.iter().map(|(n, _)| n.clone()).collect())
+        .unwrap_or_default();
+
+    for (idx, field_name) in field_order.iter().enumerate() {
+        if let Some((_, val)) = fields.iter().find(|(n, _)| n == field_name) {
+            let vr = emit_value(
+                val,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                string_constants,
+            );
+            let field_ty = struct_defs
+                .get(name)
+                .and_then(|fs| fs.get(idx))
+                .map_or(Type::Int, |(_, t)| t.clone());
+            let field_ty_str = llvm_type(&field_ty, struct_defs, enum_defs);
+            let val_reg = value_result_to_reg(&vr, emitter, next_reg, &field_ty_str);
+            let new_reg = fresh_reg(next_reg);
+            emitter.indent(&format!(
+                "{new_reg} = insertvalue {struct_ty} {current}, {field_ty_str} {val_reg}, {idx}"
+            ));
+            current = new_reg;
+        }
+    }
+
+    if current == "undef" {
+        ValueResult::Void
+    } else {
+        ValueResult::Register(current)
+    }
+}
+
+/// Emits a field get from a struct value.
+#[allow(clippy::too_many_arguments)]
+fn emit_field_get(
+    object: &Value,
+    field: &str,
+    struct_name: &str,
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    let vr = emit_value(
+        object,
+        emitter,
+        local_regs,
+        local_types,
+        next_reg,
+        struct_defs,
+        enum_defs,
+        string_constants,
+    );
+    let struct_ty = format!("%{struct_name}");
+    let obj_reg = value_result_to_reg(&vr, emitter, next_reg, &struct_ty);
+
+    let field_idx = struct_defs
+        .get(struct_name)
+        .and_then(|fs| fs.iter().position(|(n, _)| n == field))
+        .unwrap_or(0);
+
+    let reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{reg} = extractvalue {struct_ty} {obj_reg}, {field_idx}"
+    ));
+    ValueResult::Register(reg)
+}
+
+/// Emits an enum variant construction.
+#[allow(clippy::too_many_arguments)]
+fn emit_enum_variant(
+    discriminant: u8,
+    args: &[Value],
+    enum_name: &str,
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+) -> ValueResult {
+    let enum_ty = llvm_type(&Type::Enum(enum_name.to_string()), struct_defs, enum_defs);
+
+    // Start with zeroinitializer and set discriminant.
+    let d_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{d_reg} = insertvalue {enum_ty} zeroinitializer, i64 {discriminant}, 0"
+    ));
+
+    if args.is_empty() {
+        return ValueResult::Register(d_reg);
+    }
+
+    // For the first payload arg, store into the payload bytes.
+    let vr = emit_value(
+        &args[0],
+        emitter,
+        local_regs,
+        local_types,
+        next_reg,
+        struct_defs,
+        enum_defs,
+        string_constants,
+    );
+    let val_reg = value_result_to_reg(&vr, emitter, next_reg, "i64");
+
+    // Use alloca to bitcast i64 to [8 x i8], then insertvalue.
+    let alloca_reg = fresh_reg(next_reg);
+    emitter.indent(&format!("{alloca_reg} = alloca i64"));
+    emitter.indent(&format!("store i64 {val_reg}, ptr {alloca_reg}"));
+    let bytes_reg = fresh_reg(next_reg);
+    emitter.indent(&format!("{bytes_reg} = load [8 x i8], ptr {alloca_reg}"));
+    let result = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{result} = insertvalue {enum_ty} {d_reg}, [8 x i8] {bytes_reg}, 1"
+    ));
+
+    ValueResult::Register(result)
+}
+
+/// Simple type inference for deciding between integer and float operations.
+fn infer_value_type_simple(value: &Value, local_types: &HashMap<LocalId, Type>) -> Type {
+    match value {
+        Value::FloatConst(_) => Type::Float64,
+        Value::BoolConst(_) | Value::Not(_) => Type::Bool,
+        Value::StringConst(_) => Type::String,
+        Value::Local(id) => local_types.get(id).cloned().unwrap_or(Type::Int),
+        Value::BinOp(_, lhs, _) => infer_value_type_simple(lhs, local_types),
+        Value::Neg(inner) => infer_value_type_simple(inner, local_types),
+        Value::Unit => Type::Unit,
+        Value::StructLit { name, .. } => Type::Struct(name.clone()),
+        Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
+        Value::IntConst(_)
+        | Value::FieldGet { .. }
+        | Value::EnumDiscriminant(_)
+        | Value::EnumPayload { .. }
+        | Value::FuncRef(_)
+        | Value::MakeDynTrait { .. } => Type::Int,
+    }
+}
+
+/// Formats a float for LLVM IR (uses hex representation for exactness).
+fn format_float_llvm(f: f64) -> String {
+    // LLVM accepts decimal notation for common values and hex for exact representation.
+    // Use hex format for exact bit representation.
+    let bits = f.to_bits();
+    format!("0x{bits:016X}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_float_zero() {
+        assert_eq!(format_float_llvm(0.0), "0x0000000000000000");
+    }
+
+    #[test]
+    fn format_float_pi() {
+        let s = format_float_llvm(std::f64::consts::PI);
+        assert!(s.starts_with("0x"));
+    }
+
+    #[test]
+    fn infer_types() {
+        let types = HashMap::new();
+        assert_eq!(
+            infer_value_type_simple(&Value::IntConst(42), &types),
+            Type::Int
+        );
+        assert_eq!(
+            infer_value_type_simple(&Value::FloatConst(1.0), &types),
+            Type::Float64
+        );
+        assert_eq!(
+            infer_value_type_simple(&Value::BoolConst(true), &types),
+            Type::Bool
+        );
+    }
+}
