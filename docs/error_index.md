@@ -677,6 +677,36 @@ error[E0704]: test name must be a string literal
    |          ^^^^ expected a string literal, e.g., test "my test" { ... }
 ```
 
+## Fix Patch Coverage
+
+Every type error variant (42 of 43) now includes a machine-applicable `fix_patch` that AI agents can apply automatically. The only exception is `E0350 PolicyViolation`, which is too generic to auto-fix.
+
+| Category | Variants | Coverage |
+|----------|----------|----------|
+| Meta & policy (E0210-E0212, E0260-E0262) | 6 | 6/6 (100%) |
+| Name resolution with similar (E0201, E0215, E0217, E0219, E0235) | 5 | 5/5 (100%) |
+| Name resolution without similar | 5 | 5/5 (100%) |
+| Struct/enum/trait definitions (E0213, E0218, E0222, E0230, E0232) | 5 | 5/5 (100%) |
+| Struct fields & match (E0214, E0216, E0220, E0231, E0202) | 5 | 5/5 (100%) |
+| Type mismatches & annotations (E0200, E0224-E0227, E0221, E0223, E0233-E0234) | 9 | 9/9 (100%) |
+| Ownership & borrowing (E0240-E0248) | 7 | 7/7 (100%) |
+| Closures (E0281-E0283) | 3 | 3/3 (100%) |
+| Concurrency & control flow (E0250-E0253, E0280) | 5 | 5/5 (100%) |
+| Other (E0203, E0270, E0310) | 3 | 3/3 (100%) |
+| Policy (E0350) | 1 | 0/1 (manual) |
+| **Total** | **43** | **42/43 (98%)** |
+
+### Repair Plans
+
+For complex errors requiring multiple steps, `repair_plan()` returns a sequence of ordered patches:
+
+- `E0200` (Mismatch with Result) — wrap in `Result::Ok()` + verify return type
+- `E0201` (Undefined) — add `let` binding
+- `E0220` (Non-exhaustive match) — add missing arms + implement handler logic
+- `E0231` (Missing trait method) — add method stub + implement body
+- `E0232` (Trait bound not satisfied) — add impl block + implement methods
+- `E0262` (Security-sensitive without contract) — add contract blocks + specify invariants
+
 ## JSON Error Format
 
 All errors can be emitted as JSON with `--json-errors`:
@@ -693,11 +723,12 @@ All errors can be emitted as JSON with `--json-errors`:
     "length": 12
   },
   "suggestion": "convert the String to Int using `Int.parse(value)`",
+  "fixability": "auto",
   "fix_patch": {
-    "description": "wrap value in Int.parse()",
+    "description": "change type to `Int`",
     "start_offset": 120,
     "end_offset": 132,
-    "replacement": "Int.parse(value)"
+    "replacement": "Int"
   },
   "repair_plan": [
     {
@@ -705,10 +736,11 @@ All errors can be emitted as JSON with `--json-errors`:
       "patches": [{ "start_offset": 120, "end_offset": 132, "replacement": "Result::Ok(value)" }]
     }
   ],
-  "spec_reference": "§3.1 Type System"
+  "see_also": "docs/error_index.md#E0200"
 }
 ```
 
 The `fix_patch` field contains a single machine-applicable patch. For complex errors requiring
 multiple steps, `repair_plan` provides a sequence of named steps that agents should apply in order.
-Both fields are optional and omitted when not applicable.
+The `fixability` field classifies the error: `"auto"` (has a fix patch), `"assisted"` (has a suggestion), or `"manual"` (requires human judgment).
+Both `fix_patch` and `repair_plan` are optional and omitted when not applicable.

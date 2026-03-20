@@ -676,7 +676,16 @@ impl kodo_ast::Diagnostic for TypeError {
 /// Currently handles:
 /// - `Mismatch` where `expected` contains `Result` — suggests wrapping in `Result::Ok()`
 /// - `Undefined` — suggests adding a `let` binding for the undefined variable
+/// - `NonExhaustiveMatch` — add missing arms and verify handler logic
+/// - `MissingTraitMethod` — add method stub and implement the body
+/// - `SecuritySensitiveWithoutContract` — add contracts and review the logic
+/// - `TraitBoundNotSatisfied` — add impl block for the required trait
 fn repair_plan_for_error(err: &TypeError) -> Option<Vec<(String, Vec<kodo_ast::FixPatch>)>> {
+    repair_plan_type_and_name(err).or_else(|| repair_plan_trait_and_contract(err))
+}
+
+/// Repair plans for type mismatch, undefined variable, and non-exhaustive match.
+fn repair_plan_type_and_name(err: &TypeError) -> Option<Vec<(String, Vec<kodo_ast::FixPatch>)>> {
     match err {
         TypeError::Mismatch {
             expected,
@@ -720,14 +729,139 @@ fn repair_plan_for_error(err: &TypeError) -> Option<Vec<(String, Vec<kodo_ast::F
             );
             Some(vec![step1])
         }
+        TypeError::NonExhaustiveMatch {
+            enum_name,
+            missing,
+            span,
+        } => {
+            use std::fmt::Write;
+            let mut arms = String::new();
+            for v in missing {
+                let _ = writeln!(arms, "        {v} => {{ TODO }},");
+            }
+            let step1 = (
+                format!("add missing match arms for `{enum_name}`"),
+                vec![kodo_ast::FixPatch {
+                    description: format!("add arms for: {}", missing.join(", ")),
+                    file: String::new(),
+                    start_offset: span.end as usize,
+                    end_offset: span.end as usize,
+                    replacement: format!("\n{arms}"),
+                }],
+            );
+            let step2 = (
+                "implement handler logic in each new arm".to_string(),
+                vec![kodo_ast::FixPatch {
+                    description: "replace TODO with actual logic in each arm".to_string(),
+                    file: String::new(),
+                    start_offset: span.end as usize,
+                    end_offset: span.end as usize,
+                    replacement: String::new(),
+                }],
+            );
+            Some(vec![step1, step2])
+        }
+        _ => None,
+    }
+}
+
+/// Repair plans for trait methods, security contracts, and trait bounds.
+fn repair_plan_trait_and_contract(
+    err: &TypeError,
+) -> Option<Vec<(String, Vec<kodo_ast::FixPatch>)>> {
+    match err {
+        TypeError::MissingTraitMethod {
+            method,
+            trait_name,
+            span,
+        } => {
+            let step1 = (
+                format!("add stub for `{method}`"),
+                vec![kodo_ast::FixPatch {
+                    description: format!("add method `{method}` for trait `{trait_name}`"),
+                    file: String::new(),
+                    start_offset: span.end as usize,
+                    end_offset: span.end as usize,
+                    replacement: format!("\n    fn {method}() {{\n        TODO\n    }}\n"),
+                }],
+            );
+            let step2 = (
+                format!("implement `{method}` body"),
+                vec![kodo_ast::FixPatch {
+                    description: "replace TODO with actual implementation".to_string(),
+                    file: String::new(),
+                    start_offset: span.end as usize,
+                    end_offset: span.end as usize,
+                    replacement: String::new(),
+                }],
+            );
+            Some(vec![step1, step2])
+        }
+        TypeError::SecuritySensitiveWithoutContract { name, span } => {
+            let step1 = (
+                format!("add contract clauses to `{name}`"),
+                vec![kodo_ast::FixPatch {
+                    description: "add requires/ensures blocks".to_string(),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: "    requires { true }\n    ensures { true }\n".to_string(),
+                }],
+            );
+            let step2 = (
+                "replace placeholder contracts with real invariants".to_string(),
+                vec![kodo_ast::FixPatch {
+                    description: "specify actual security preconditions and postconditions"
+                        .to_string(),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: String::new(),
+                }],
+            );
+            Some(vec![step1, step2])
+        }
+        TypeError::TraitBoundNotSatisfied {
+            concrete_type,
+            trait_name,
+            span,
+            ..
+        } => {
+            let step1 = (
+                format!("add `impl {trait_name} for {concrete_type}`"),
+                vec![kodo_ast::FixPatch {
+                    description: format!(
+                        "create impl block for trait `{trait_name}` on type `{concrete_type}`"
+                    ),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: format!(
+                        "impl {trait_name} for {concrete_type} {{\n        TODO\n    }}\n\n    "
+                    ),
+                }],
+            );
+            let step2 = (
+                "implement required trait methods".to_string(),
+                vec![kodo_ast::FixPatch {
+                    description: "fill in the trait method implementations".to_string(),
+                    file: String::new(),
+                    start_offset: span.start as usize,
+                    end_offset: span.start as usize,
+                    replacement: String::new(),
+                }],
+            );
+            Some(vec![step1, step2])
+        }
         _ => None,
     }
 }
 
 /// Returns a machine-applicable fix patch for the given type error.
 ///
-/// Covers ~30 error variants with auto-applicable patches that AI agents
-/// can use to fix code without human interpretation.
+/// Covers all 43 error variants with auto-applicable patches that AI agents
+/// can use to fix code without human interpretation. The only variant without
+/// a patch is `PolicyViolation`, which is too generic to auto-fix.
 fn fix_patch_for_error(err: &TypeError) -> Option<kodo_ast::FixPatch> {
     fix_patch_meta_and_policy(err)
         .or_else(|| fix_patch_names_and_fields(err))
@@ -773,12 +907,33 @@ fn fix_patch_meta_and_policy(err: &TypeError) -> Option<kodo_ast::FixPatch> {
             end_offset: span.start as usize,
             replacement: "    requires { true }\n    ensures { true }\n".to_string(),
         }),
+        TypeError::ConfidenceThreshold {
+            weakest_fn,
+            threshold,
+            span,
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("increase @confidence of `{weakest_fn}` to at least {threshold}"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("@confidence({threshold})\n    "),
+        }),
         _ => None,
     }
 }
 
 /// Fix patches for name resolution, struct/enum fields, and trait methods.
+///
+/// Delegates to [`fix_patch_names_with_similar`] for errors that have a
+/// Levenshtein-based suggestion, then falls back to
+/// [`fix_patch_names_without_similar`] for the remaining name-like errors.
 fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    fix_patch_names_with_similar(err).or_else(|| fix_patch_names_without_similar(err))
+}
+
+/// Fix patches for errors that carry a similar-name suggestion.
+fn fix_patch_names_with_similar(err: &TypeError) -> Option<kodo_ast::FixPatch> {
     match err {
         TypeError::Undefined {
             span,
@@ -811,6 +966,19 @@ fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
             end_offset: span.end as usize,
             replacement: suggestion.clone(),
         }),
+        _ => None,
+    }
+}
+
+/// Fix patches for name-like errors without a Levenshtein suggestion, plus
+/// struct/enum/trait definition and arity patches.
+fn fix_patch_names_without_similar(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    fix_patch_struct_match_arity(err).or_else(|| fix_patch_definition_stubs(err))
+}
+
+/// Fix patches for struct fields, match arms, trait methods, and arity.
+fn fix_patch_struct_match_arity(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
         TypeError::MissingStructField { field, span, .. } => Some(kodo_ast::FixPatch {
             description: format!("add missing field `{field}`"),
             file: String::new(),
@@ -860,6 +1028,116 @@ fn fix_patch_names_and_fields(err: &TypeError) -> Option<kodo_ast::FixPatch> {
                 replacement: format!("({params})"),
             })
         }
+        _ => None,
+    }
+}
+
+/// Fix patches for undefined names (no similar), unknown structs/enums/traits,
+/// and trait bound violations — generates definition stubs.
+#[allow(clippy::too_many_lines)]
+fn fix_patch_definition_stubs(err: &TypeError) -> Option<kodo_ast::FixPatch> {
+    match err {
+        TypeError::Undefined {
+            name,
+            span,
+            similar: None,
+        } => Some(kodo_ast::FixPatch {
+            description: format!("declare `{name}` before use"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("let {name}: TODO = TODO\n    "),
+        }),
+        TypeError::ExtraStructField {
+            field,
+            span,
+            similar: None,
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("remove unknown field `{field}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::NoSuchField {
+            field,
+            span,
+            similar: None,
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("remove field access `.{field}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::MethodNotFound {
+            method,
+            span,
+            similar: None,
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("remove call to undefined method `.{method}()`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: String::new(),
+        }),
+        TypeError::UnknownVariant {
+            variant,
+            enum_name,
+            span,
+            similar: None,
+        } => Some(kodo_ast::FixPatch {
+            description: format!("check variants of `{enum_name}` — `{variant}` does not exist"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: "TODO".to_string(),
+        }),
+        TypeError::UnknownStruct { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("define struct `{name}` or fix the typo"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("struct {name} {{\n        TODO: TODO,\n    }}\n\n    "),
+        }),
+        TypeError::UnknownEnum { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("define enum `{name}` or fix the typo"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("enum {name} {{\n        TODO,\n    }}\n\n    "),
+        }),
+        TypeError::UndefinedTypeParam { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("add type parameter `{name}` to the generic parameters list"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: "TODO".to_string(),
+        }),
+        TypeError::UnknownTrait { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("define trait `{name}` or fix the typo"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!("trait {name} {{\n        fn TODO() -> TODO\n    }}\n\n    "),
+        }),
+        TypeError::TraitBoundNotSatisfied {
+            concrete_type,
+            trait_name,
+            span,
+            ..
+        } => Some(kodo_ast::FixPatch {
+            description: format!("add `impl {trait_name} for {concrete_type}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.start as usize,
+            replacement: format!(
+                "impl {trait_name} for {concrete_type} {{\n        TODO\n    }}\n\n    "
+            ),
+        }),
         _ => None,
     }
 }
@@ -926,6 +1204,41 @@ fn fix_patch_concurrency_and_control(err: &TypeError) -> Option<kodo_ast::FixPat
                 replacement: format!(".{max_idx}"),
             })
         }
+        TypeError::SpawnCaptureNonSend { name, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("use `own {name}` instead of `ref {name}` for spawn"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("own {name}"),
+        }),
+        TypeError::ActorDirectFieldAccess { field, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!("use a handler method to access `{field}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("get_{field}()"),
+        }),
+        TypeError::MutBorrowWhileRefBorrowed { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("change `mut {name}` to `ref {name}` to avoid conflict"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::RefBorrowWhileMutBorrowed { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("drop the `mut` borrow of `{name}` before borrowing as `ref`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
+        TypeError::DoubleMutBorrow { name, span } => Some(kodo_ast::FixPatch {
+            description: format!("change one `mut {name}` to `ref {name}`"),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("ref {name}"),
+        }),
         _ => None,
     }
 }
@@ -969,7 +1282,8 @@ fn fix_patch_types_and_ownership(err: &TypeError) -> Option<kodo_ast::FixPatch> 
             end_offset: span.end as usize,
             replacement: "-> Result<TODO, String>".to_string(),
         }),
-        TypeError::OptionalChainOnNonOption { found, span } => Some(kodo_ast::FixPatch {
+        TypeError::OptionalChainOnNonOption { found, span }
+        | TypeError::CoalesceTypeMismatch { found, span } => Some(kodo_ast::FixPatch {
             description: format!("wrap `{found}` in Option"),
             file: String::new(),
             start_offset: span.start as usize,

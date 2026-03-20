@@ -120,16 +120,17 @@ fn fix_patch_undefined_with_similar() {
 }
 
 #[test]
-fn fix_patch_undefined_without_similar_returns_none_for_name_patch() {
-    // Without a similar suggestion, the names-and-fields pass returns None,
-    // but there is no type-level patch either, so the overall result is None.
+fn fix_patch_undefined_without_similar_returns_declaration_stub() {
+    // Without a similar suggestion, a declaration stub is generated.
     let span = Span::new(40, 46);
     let err = TypeError::Undefined {
         name: "xyzzy".to_string(),
         span,
         similar: None,
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("let xyzzy"));
 }
 
 #[test]
@@ -157,7 +158,10 @@ fn fix_patch_extra_struct_field_without_similar() {
         span,
         similar: None,
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    // Deletion: removes the unknown field.
+    assert_valid_patch(&patch, true);
+    assert!(patch.replacement.is_empty());
 }
 
 #[test]
@@ -185,7 +189,10 @@ fn fix_patch_no_such_field_without_similar() {
         span,
         similar: None,
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    // Deletion: removes the field access.
+    assert_valid_patch(&patch, true);
+    assert!(patch.replacement.is_empty());
 }
 
 #[test]
@@ -213,7 +220,10 @@ fn fix_patch_method_not_found_without_similar() {
         span,
         similar: None,
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    // Deletion: removes the method call.
+    assert_valid_patch(&patch, true);
+    assert!(patch.replacement.is_empty());
 }
 
 #[test]
@@ -241,7 +251,9 @@ fn fix_patch_unknown_variant_without_similar() {
         span,
         similar: None,
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.description.contains("Option"));
 }
 
 // ===========================================================================
@@ -539,7 +551,7 @@ fn fix_patch_invariant_not_bool() {
 }
 
 // ===========================================================================
-// Variants that must return None
+// Variants that now return Some (previously None, enhanced with patches)
 // ===========================================================================
 
 #[test]
@@ -554,6 +566,7 @@ fn fix_patch_not_callable_returns_some() {
 
 #[test]
 fn fix_patch_policy_violation_returns_none() {
+    // PolicyViolation is the only variant without a fix patch — it's too generic.
     let err = TypeError::PolicyViolation {
         message: "policy broken".to_string(),
         span: Span::new(0, 10),
@@ -562,59 +575,71 @@ fn fix_patch_policy_violation_returns_none() {
 }
 
 #[test]
-fn fix_patch_unknown_struct_returns_none() {
+fn fix_patch_unknown_struct_returns_definition_stub() {
     let err = TypeError::UnknownStruct {
         name: "Foo".to_string(),
         span: Span::new(0, 3),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("struct Foo"));
 }
 
 #[test]
-fn fix_patch_unknown_enum_returns_none() {
+fn fix_patch_unknown_enum_returns_definition_stub() {
     let err = TypeError::UnknownEnum {
         name: "Bar".to_string(),
         span: Span::new(0, 3),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("enum Bar"));
 }
 
 #[test]
-fn fix_patch_unknown_trait_returns_none() {
+fn fix_patch_unknown_trait_returns_definition_stub() {
     let err = TypeError::UnknownTrait {
         name: "Baz".to_string(),
         span: Span::new(0, 3),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("trait Baz"));
 }
 
 #[test]
-fn fix_patch_undefined_type_param_returns_none() {
+fn fix_patch_undefined_type_param_returns_some() {
     let err = TypeError::UndefinedTypeParam {
         name: "T".to_string(),
         span: Span::new(0, 1),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.description.contains("T"));
 }
 
 #[test]
-fn fix_patch_coalesce_type_mismatch_returns_none() {
+fn fix_patch_coalesce_type_mismatch_returns_option_wrap() {
     let err = TypeError::CoalesceTypeMismatch {
         found: "Int".to_string(),
         span: Span::new(0, 5),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("Option<Int>"));
 }
 
 #[test]
-fn fix_patch_trait_bound_not_satisfied_returns_none() {
+fn fix_patch_trait_bound_not_satisfied_returns_impl_stub() {
     let err = TypeError::TraitBoundNotSatisfied {
         concrete_type: "MyType".to_string(),
         trait_name: "Ord".to_string(),
         param: "T".to_string(),
         span: Span::new(0, 10),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("impl Ord for MyType"));
 }
 
 #[test]
@@ -639,27 +664,31 @@ fn fix_patch_spawn_capture_mutable_ref_returns_some() {
 }
 
 #[test]
-fn fix_patch_spawn_capture_non_send_returns_none() {
+fn fix_patch_spawn_capture_non_send_returns_own() {
     let err = TypeError::SpawnCaptureNonSend {
         name: "data".to_string(),
         type_name: "ref String".to_string(),
         span: Span::new(0, 10),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("own data"));
 }
 
 #[test]
-fn fix_patch_actor_direct_field_access_returns_none() {
+fn fix_patch_actor_direct_field_access_returns_handler() {
     let err = TypeError::ActorDirectFieldAccess {
         field: "count".to_string(),
         actor_name: "Counter".to_string(),
         span: Span::new(0, 10),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("get_count()"));
 }
 
 #[test]
-fn fix_patch_confidence_threshold_returns_none() {
+fn fix_patch_confidence_threshold_returns_annotation() {
     let err = TypeError::ConfidenceThreshold {
         computed: "0.6".to_string(),
         threshold: "0.8".to_string(),
@@ -667,34 +696,42 @@ fn fix_patch_confidence_threshold_returns_none() {
         weakest_confidence: "0.6".to_string(),
         span: Span::new(0, 10),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("@confidence(0.8)"));
 }
 
 #[test]
-fn fix_patch_mut_borrow_while_ref_borrowed_returns_none() {
+fn fix_patch_mut_borrow_while_ref_borrowed_returns_ref() {
     let err = TypeError::MutBorrowWhileRefBorrowed {
         name: "x".to_string(),
         span: Span::new(0, 5),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("ref x"));
 }
 
 #[test]
-fn fix_patch_ref_borrow_while_mut_borrowed_returns_none() {
+fn fix_patch_ref_borrow_while_mut_borrowed_returns_ref() {
     let err = TypeError::RefBorrowWhileMutBorrowed {
         name: "x".to_string(),
         span: Span::new(0, 5),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("ref x"));
 }
 
 #[test]
-fn fix_patch_double_mut_borrow_returns_none() {
+fn fix_patch_double_mut_borrow_returns_ref() {
     let err = TypeError::DoubleMutBorrow {
         name: "x".to_string(),
         span: Span::new(0, 5),
     };
-    assert!(err.fix_patch().is_none());
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("ref x"));
 }
 
 #[test]
