@@ -103,6 +103,12 @@ pub enum Type {
     /// At runtime, a `dyn Trait` value is a fat pointer: `(data_ptr: i64, vtable_ptr: i64)`.
     /// Method calls on `dyn Trait` values are dispatched through the vtable.
     DynTrait(std::string::String),
+    /// A future value that will be available when an async operation completes.
+    ///
+    /// At runtime, a `Future<T>` is an opaque `i64` handle into the future table
+    /// managed by the green thread scheduler. Awaiting a future blocks the current
+    /// green thread until the result is available.
+    Future(Box<Type>),
     /// An unresolved type (used during type checking).
     Unknown,
 }
@@ -208,6 +214,7 @@ impl std::fmt::Display for Type {
                 write!(f, ")")
             }
             Self::DynTrait(name) => write!(f, "dyn {name}"),
+            Self::Future(inner) => write!(f, "Future<{inner}>"),
             Self::Unknown => write!(f, "?"),
         }
     }

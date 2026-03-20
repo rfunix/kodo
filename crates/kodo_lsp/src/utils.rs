@@ -196,6 +196,7 @@ pub(crate) fn format_type(ty: &kodo_types::Type) -> String {
             format!("({})", elem_strs.join(", "))
         }
         kodo_types::Type::DynTrait(name) => format!("dyn {name}"),
+        kodo_types::Type::Future(inner) => format!("Future<{}>", format_type(inner)),
         kodo_types::Type::Unknown => "TODO".to_string(),
     }
 }

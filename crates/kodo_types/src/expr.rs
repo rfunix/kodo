@@ -343,7 +343,13 @@ impl TypeChecker {
                 if !self.in_async_fn {
                     return Err(TypeError::AwaitOutsideAsync { span: *span });
                 }
-                self.infer_expr(operand)
+                let operand_ty = self.infer_expr(operand)?;
+                match operand_ty {
+                    Type::Future(inner) => Ok(*inner),
+                    // Allow await on non-Future for backward compatibility —
+                    // existing code may have `.await` that passes through.
+                    other => Ok(other),
+                }
             }
 
             Expr::StringInterp { parts, .. } => {
@@ -1644,7 +1650,17 @@ impl TypeChecker {
                 for name in &temp_mut_borrows {
                     self.active_mut_borrows.remove(name);
                 }
-                Ok(*ret_type)
+                // If the callee is an async function, wrap its return type
+                // in Future<T> so the caller must `await` it.
+                let final_ret = if callee_name
+                    .as_ref()
+                    .is_some_and(|n| self.async_fn_names.contains(n))
+                {
+                    Type::Future(ret_type)
+                } else {
+                    *ret_type
+                };
+                Ok(final_ret)
             }
             _ => Err(TypeError::NotCallable {
                 found: callee_ty.to_string(),

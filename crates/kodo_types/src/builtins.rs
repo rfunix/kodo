@@ -104,7 +104,31 @@ impl TypeChecker {
         self.register_http_server_functions();
         self.register_db_functions();
 
+        self.register_future_builtins();
         self.register_test_builtins();
+    }
+
+    /// Registers builtin functions for Future/async operations.
+    ///
+    /// These are low-level runtime functions used by the codegen to implement
+    /// `async fn` and `await` expressions. User code interacts with them
+    /// indirectly through the `async`/`await` syntax.
+    fn register_future_builtins(&mut self) {
+        // kodo_future_new() -> Int (opaque future handle)
+        self.env.insert(
+            "kodo_future_new".to_string(),
+            Type::Function(vec![], Box::new(Type::Int)),
+        );
+        // kodo_future_complete(handle: Int, result: Int) -> ()
+        self.env.insert(
+            "kodo_future_complete".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        // kodo_future_await(handle: Int) -> Int
+        self.env.insert(
+            "kodo_future_await".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
     }
 
     /// Registers test assertion, harness, property, timeout, and isolation builtins.

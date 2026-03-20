@@ -35,6 +35,169 @@ fn type_display() {
 }
 
 #[test]
+fn future_type_display() {
+    assert_eq!(Type::Future(Box::new(Type::Int)).to_string(), "Future<Int>");
+    assert_eq!(
+        Type::Future(Box::new(Type::String)).to_string(),
+        "Future<String>"
+    );
+    assert_eq!(
+        Type::Future(Box::new(Type::Future(Box::new(Type::Bool)))).to_string(),
+        "Future<Future<Bool>>"
+    );
+}
+
+#[test]
+fn future_type_is_not_copy() {
+    assert!(
+        !Type::Future(Box::new(Type::Int)).is_copy(),
+        "Future<T> should not have Copy semantics"
+    );
+}
+
+#[test]
+fn future_type_equality() {
+    let a = Type::Future(Box::new(Type::Int));
+    let b = Type::Future(Box::new(Type::Int));
+    assert_eq!(a, b);
+    let c = Type::Future(Box::new(Type::String));
+    assert_ne!(a, c);
+}
+
+#[test]
+fn await_on_future_returns_inner_type() {
+    // Build a module with an async function and a caller that awaits it.
+    let async_fn = Function {
+        id: NodeId(1),
+        span: Span::new(0, 50),
+        name: "compute".to_string(),
+        visibility: Visibility::Private,
+        is_async: true,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("Int".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span: Span::new(0, 50),
+            stmts: vec![Stmt::Return {
+                span: Span::new(10, 30),
+                value: Some(Expr::IntLit(42, Span::new(20, 22))),
+            }],
+        },
+    };
+
+    // Caller is also async so it can use .await
+    let caller_fn = Function {
+        id: NodeId(2),
+        span: Span::new(60, 160),
+        name: "caller".to_string(),
+        visibility: Visibility::Private,
+        is_async: true,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("Int".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span: Span::new(60, 160),
+            stmts: vec![
+                Stmt::Let {
+                    name: "result".to_string(),
+                    ty: Some(TypeExpr::Named("Int".to_string())),
+                    value: Expr::Await {
+                        operand: Box::new(Expr::Call {
+                            callee: Box::new(Expr::Ident("compute".to_string(), Span::new(70, 77))),
+                            args: vec![],
+                            span: Span::new(70, 79),
+                        }),
+                        span: Span::new(70, 85),
+                    },
+                    span: Span::new(65, 90),
+                    mutable: false,
+                },
+                Stmt::Return {
+                    span: Span::new(100, 120),
+                    value: Some(Expr::Ident("result".to_string(), Span::new(110, 116))),
+                },
+            ],
+        },
+    };
+
+    let module = make_module(vec![async_fn, caller_fn]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "await on Future<Int> should produce Int: {result:?}"
+    );
+}
+
+#[test]
+fn async_fn_call_returns_future_type() {
+    // An async function that returns Int, when called, should produce Future<Int>.
+    let async_fn = Function {
+        id: NodeId(1),
+        span: Span::new(0, 50),
+        name: "compute".to_string(),
+        visibility: Visibility::Private,
+        is_async: true,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("Int".to_string()),
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span: Span::new(0, 50),
+            stmts: vec![Stmt::Return {
+                span: Span::new(10, 30),
+                value: Some(Expr::IntLit(42, Span::new(20, 22))),
+            }],
+        },
+    };
+
+    // A non-async caller that tries to assign Future<Int> to Int should fail.
+    let caller_fn = Function {
+        id: NodeId(2),
+        span: Span::new(60, 160),
+        name: "caller".to_string(),
+        visibility: Visibility::Private,
+        is_async: false,
+        generic_params: vec![],
+        annotations: vec![],
+        params: vec![],
+        return_type: TypeExpr::Unit,
+        requires: vec![],
+        ensures: vec![],
+        body: Block {
+            span: Span::new(60, 160),
+            stmts: vec![Stmt::Let {
+                name: "result".to_string(),
+                ty: Some(TypeExpr::Named("Int".to_string())),
+                value: Expr::Call {
+                    callee: Box::new(Expr::Ident("compute".to_string(), Span::new(70, 77))),
+                    args: vec![],
+                    span: Span::new(70, 79),
+                },
+                span: Span::new(65, 90),
+                mutable: false,
+            }],
+        },
+    };
+
+    let module = make_module(vec![async_fn, caller_fn]);
+    let mut checker = TypeChecker::new();
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "assigning Future<Int> to Int should be a type error"
+    );
+}
+
+#[test]
 fn type_env_lookup() {
     let mut env = TypeEnv::new();
     env.insert("x".to_string(), Type::Int);

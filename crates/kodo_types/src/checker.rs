@@ -134,6 +134,11 @@ pub struct TypeChecker {
     /// Used to rewrite the iterable to `Map_keys(iterable)` before desugaring,
     /// since the desugar pass operates without type information.
     pub(crate) map_for_in_spans: Vec<Span>,
+    /// Set of function names declared as `async`.
+    ///
+    /// When calling an async function, the return type is automatically wrapped
+    /// in `Future<T>` so that `await` can unwrap it.
+    pub(crate) async_fn_names: std::collections::HashSet<String>,
 }
 
 impl TypeChecker {
@@ -178,6 +183,7 @@ impl TypeChecker {
             loop_depth: 0,
             private_symbols: std::collections::HashMap::new(),
             map_for_in_spans: Vec::new(),
+            async_fn_names: std::collections::HashSet::new(),
         };
         checker.register_builtins();
         checker
@@ -1392,6 +1398,9 @@ impl TypeChecker {
         self.current_return_type = ret_type.clone();
         let prev_async = self.in_async_fn;
         self.in_async_fn = func.is_async;
+        if func.is_async {
+            self.async_fn_names.insert(func.name.clone());
+        }
 
         // Record declared confidence for transitive confidence propagation.
         if let Some(ann) = func.annotations.iter().find(|a| a.name == "confidence") {

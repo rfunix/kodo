@@ -162,6 +162,14 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("kodo_closure_env".to_string())
         .or_insert(Type::Int);
 
+    // Future runtime builtins.
+    fn_return_types
+        .entry("kodo_future_new".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("kodo_future_await".to_string())
+        .or_insert(Type::Int);
+
     register_sprint5_return_types(fn_return_types);
     register_test_return_types(fn_return_types);
 }

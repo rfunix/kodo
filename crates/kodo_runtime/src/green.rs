@@ -777,6 +777,197 @@ fn try_steal_from(
 }
 
 // ===========================================================================
+// Future table — backing storage for `Future<T>`
+// ===========================================================================
+
+/// Entry in the global future table.
+///
+/// Each future has a completion flag, an optional result value, and a list of
+/// green threads waiting for it. When the future is completed, all waiters are
+/// moved from Blocked to Ready and pushed to the global run queue.
+struct FutureEntry {
+    /// Whether the future has been completed.
+    completed: AtomicBool,
+    /// The result value, set once when the future is completed.
+    result: Mutex<Option<i64>>,
+    /// Green thread IDs blocked waiting for this future.
+    waiters: Mutex<Vec<GreenThreadId>>,
+}
+
+/// Global future table: maps future handles to their entries.
+static FUTURE_TABLE: OnceLock<Mutex<HashMap<u64, FutureEntry>>> = OnceLock::new();
+
+/// Monotonic counter for allocating unique future handles.
+static FUTURE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Returns a reference to the global future table.
+fn get_future_table() -> &'static Mutex<HashMap<u64, FutureEntry>> {
+    FUTURE_TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Creates a new pending future and returns its handle.
+///
+/// The returned handle is an opaque `i64` that can be passed to
+/// [`kodo_future_complete`] and [`kodo_future_await`].
+///
+/// # Safety
+///
+/// Safe to call from any context (green thread or main thread).
+#[no_mangle]
+pub unsafe extern "C" fn kodo_future_new() -> i64 {
+    let id = FUTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let entry = FutureEntry {
+        completed: AtomicBool::new(false),
+        result: Mutex::new(None),
+        waiters: Mutex::new(Vec::new()),
+    };
+    let table = get_future_table();
+    if let Ok(mut t) = table.lock() {
+        t.insert(id, entry);
+    }
+    #[allow(clippy::cast_possible_wrap)]
+    {
+        id as i64
+    }
+}
+
+/// Completes a future with the given result value.
+///
+/// All green threads waiting on this future are moved from
+/// [`ThreadStatus::Blocked`] to [`ThreadStatus::Ready`] and pushed
+/// into the global run queue so workers can pick them up.
+///
+/// # Safety
+///
+/// `handle` must be a valid future handle returned by [`kodo_future_new`].
+/// Must only be called once per future; subsequent calls are no-ops.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_future_complete(handle: i64, result: i64) {
+    #[allow(clippy::cast_sign_loss)]
+    let id = handle as u64;
+    let table = get_future_table();
+    let Ok(t) = table.lock() else { return };
+    let Some(entry) = t.get(&id) else { return };
+
+    // Store the result and mark completed.
+    if let Ok(mut r) = entry.result.lock() {
+        *r = Some(result);
+    }
+    entry.completed.store(true, Ordering::Release);
+
+    // Wake all waiting green threads.
+    let waiters = if let Ok(mut w) = entry.waiters.lock() {
+        std::mem::take(&mut *w)
+    } else {
+        Vec::new()
+    };
+    drop(t); // release future table lock before touching scheduler
+
+    if !waiters.is_empty() {
+        let sched = get_scheduler();
+        if let Ok(mut threads) = sched.threads.lock() {
+            for wid in &waiters {
+                if let Some(thread) = threads.get_mut(wid) {
+                    thread.status = ThreadStatus::Ready;
+                }
+            }
+        }
+        if let Ok(mut queue) = sched.global_queue.lock() {
+            for wid in waiters {
+                queue.push_back(wid);
+            }
+        }
+        sched.park_condvar.notify_all();
+    }
+}
+
+/// Awaits a future, blocking the current green thread if not yet complete.
+///
+/// If the future is already completed, returns the result immediately.
+/// Otherwise, adds the current green thread to the future's waiter list,
+/// marks it as [`ThreadStatus::Blocked`], and switches back to the scheduler.
+/// When the future is completed, the thread is woken and returns the result.
+///
+/// # Safety
+///
+/// Must be called from within a green thread context (i.e., the scheduler
+/// has switched to a green thread). `handle` must be a valid future handle.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_future_await(handle: i64) -> i64 {
+    #[allow(clippy::cast_sign_loss)]
+    let id = handle as u64;
+
+    loop {
+        // Check if the future is already completed.
+        let table = get_future_table();
+        if let Ok(t) = table.lock() {
+            if let Some(entry) = t.get(&id) {
+                if entry.completed.load(Ordering::Acquire) {
+                    // Future is done — return the result.
+                    if let Ok(r) = entry.result.lock() {
+                        return r.unwrap_or(0);
+                    }
+                    return 0;
+                }
+                // Not completed — register ourselves as a waiter.
+                let current = CURRENT_THREAD.get();
+                if let Some(tid) = current {
+                    if let Ok(mut w) = entry.waiters.lock() {
+                        w.push(tid);
+                    }
+                } else {
+                    // Not running inside a green thread — busy-wait fallback.
+                    drop(t);
+                    std::thread::yield_now();
+                    continue;
+                }
+            } else {
+                // Unknown future handle — return 0.
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+
+        // Block the current green thread.
+        let current_id = CURRENT_THREAD.get();
+        let Some(tid) = current_id else { return 0 };
+        let sched = get_scheduler();
+
+        // Mark ourselves as Blocked.
+        if let Ok(mut threads) = sched.threads.lock() {
+            if let Some(thread) = threads.get_mut(&tid) {
+                thread.status = ThreadStatus::Blocked;
+            }
+        }
+
+        // Get our context pointer and switch back to the scheduler.
+        let ctx_ptr: *mut crate::context::Context = {
+            let Ok(mut threads) = sched.threads.lock() else {
+                return 0;
+            };
+            let Some(t) = threads.get_mut(&tid) else {
+                return 0;
+            };
+            &raw mut t.context
+        };
+
+        SCHEDULER_CONTEXT.with(|sched_ctx| {
+            // SAFETY: Both contexts are valid. The green thread's context lives
+            // in the HashMap (stable address). The scheduler context is on
+            // thread-local storage. Cooperative scheduling ensures single access.
+            unsafe {
+                switch_context(ctx_ptr, sched_ctx.get());
+            }
+        });
+
+        // We've been woken up — reset yield flag and check result.
+        SHOULD_YIELD.set(true);
+        // Loop back to check if the future is now completed.
+    }
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -999,5 +1190,48 @@ mod tests {
             DONE.load(Ordering::SeqCst),
             "scheduler should complete after all threads finish"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Future table tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn future_new_returns_positive_handle() {
+        // SAFETY: kodo_future_new is safe to call from any context.
+        let handle = unsafe { kodo_future_new() };
+        assert!(handle > 0, "future handle should be a positive integer");
+    }
+
+    #[test]
+    fn future_complete_then_await_returns_result() {
+        // Create a future, complete it immediately, then await should return
+        // the result without blocking (since we're not in a green thread).
+        // SAFETY: calling the extern "C" API from a test context.
+        unsafe {
+            let handle = kodo_future_new();
+            kodo_future_complete(handle, 42);
+            let result = kodo_future_await(handle);
+            assert_eq!(result, 42, "awaiting a completed future should return 42");
+        }
+    }
+
+    #[test]
+    fn future_handles_are_unique() {
+        // Each call to kodo_future_new should return a distinct handle.
+        // SAFETY: calling the extern "C" API from a test context.
+        let handles: Vec<i64> = (0..100).map(|_| unsafe { kodo_future_new() }).collect();
+        let unique: HashSet<i64> = handles.iter().copied().collect();
+        assert_eq!(unique.len(), 100, "every future handle should be unique");
+    }
+
+    #[test]
+    fn future_await_unknown_handle_returns_zero() {
+        // Awaiting a handle that was never created should return 0.
+        // SAFETY: calling the extern "C" API from a test context.
+        unsafe {
+            let result = kodo_future_await(999_999);
+            assert_eq!(result, 0, "unknown future should return 0");
+        }
     }
 }
