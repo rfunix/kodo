@@ -1,18 +1,15 @@
 ---
 source: crates/kodo_lsp/src/hover.rs
+assertion_line: 356
 expression: hover.unwrap()
 ---
-**fn divide**
+```kodo
+fn divide(a: Int, b: Int) -> Int
+    requires { b > 0 }
+    ensures { result >= 0 }
+```
 
-Parameters:
-- `a: Named("Int")`
-- `b: Named("Int")`
+---
 
-Returns: `Named("Int")`
-
-**Contracts:**
-- `requires { b Gt 0 }`
-- `ensures { result Ge 0 }`
-
-@confidence(0.95)
-@authored_by(agent: "claude")
+`@confidence(0.95)`
+`@authored_by(agent: "claude")`

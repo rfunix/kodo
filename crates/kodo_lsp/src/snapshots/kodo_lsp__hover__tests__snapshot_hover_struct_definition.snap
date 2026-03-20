@@ -1,0 +1,12 @@
+---
+source: crates/kodo_lsp/src/hover.rs
+assertion_line: 531
+expression: hover.unwrap()
+---
+```kodo
+struct Person {
+    name: String,
+    age: Int,
+    active: Bool,
+}
+```

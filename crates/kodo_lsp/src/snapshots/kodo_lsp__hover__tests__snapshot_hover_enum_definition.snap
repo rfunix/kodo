@@ -1,0 +1,12 @@
+---
+source: crates/kodo_lsp/src/hover.rs
+assertion_line: 554
+expression: hover.unwrap()
+---
+```kodo
+enum Shape {
+    Circle(Float64),
+    Rectangle(Float64, Float64),
+    Point,
+}
+```

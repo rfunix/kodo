@@ -741,9 +741,10 @@ mod tests {
         let hover = hover_at_position(source, Position::new(7, 10));
         assert!(hover.is_some(), "should find hover info");
         let info = hover.unwrap();
-        assert!(info.contains("fn greet"), "should contain function name");
-        assert!(info.contains("name"), "should contain parameter name");
-        assert!(info.contains("Returns:"), "should contain return type");
+        assert!(
+            info.contains("fn greet(name: String, count: Int) -> String"),
+            "should contain full function signature"
+        );
     }
 
     #[test]
@@ -1880,7 +1881,7 @@ mod tests {
         assert!(hover.is_some(), "should find hover info");
         let info = hover.unwrap();
         assert!(
-            info.contains("b Gt 0"),
+            info.contains("b > 0"),
             "hover should contain the real contract expression, got: {info}"
         );
         assert!(
@@ -1908,7 +1909,7 @@ mod tests {
         assert!(hover.is_some(), "should find hover info");
         let info = hover.unwrap();
         assert!(
-            info.contains("result Gt 0"),
+            info.contains("result > 0"),
             "hover should contain the real ensures expression, got: {info}"
         );
     }
@@ -1975,7 +1976,7 @@ mod tests {
             span,
         };
         let result = format_expr(&expr);
-        assert_eq!(result, "Neg5", "UnaryOp Neg should format as Neg<operand>");
+        assert_eq!(result, "-5", "UnaryOp Neg should format as -<operand>");
 
         let expr_not = kodo_ast::Expr::UnaryOp {
             op: kodo_ast::UnaryOp::Not,
@@ -1984,7 +1985,7 @@ mod tests {
         };
         let result_not = format_expr(&expr_not);
         assert_eq!(
-            result_not, "Nottrue",
+            result_not, "!true",
             "UnaryOp Not should format as Not<operand>"
         );
     }
