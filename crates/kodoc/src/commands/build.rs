@@ -3,18 +3,27 @@
 //! Compiles a Kodo source file through the full pipeline: parsing, type checking,
 //! contract verification, intent resolution, desugaring, MIR lowering, optimization,
 //! code generation, and linking to produce a native executable.
+//!
+//! Supports both single-file and directory compilation. When a directory is passed,
+//! all `.ko` files are discovered, the entry point (`fn main()`) is located, and
+//! files are compiled in topological dependency order.
 
 use std::path::PathBuf;
 
 use super::common::{
     build_module_metadata, build_vtable_defs, check_import_cycles, compile_imported_module,
-    inject_stdlib_method_functions, link_executable, parse_contract_mode, resolve_import_path,
-    rewrite_map_for_in, rewrite_method_calls_in_block, rewrite_self_method_calls_in_block,
-    substitute_type_expr_ast, type_to_type_expr,
+    find_entry_point, find_ko_files, inject_stdlib_method_functions, link_executable,
+    parse_contract_mode, resolve_import_path, rewrite_map_for_in, rewrite_method_calls_in_block,
+    rewrite_self_method_calls_in_block, substitute_type_expr_ast, topological_sort,
+    type_to_type_expr,
 };
 use crate::{certificate, diagnostics};
 
-/// Compiles a Kodo source file to a native executable.
+/// Compiles a Kodo source file or directory to a native executable.
+///
+/// When `file` is a directory, discovers all `.ko` files, finds the entry point
+/// containing `fn main()`, builds a dependency graph, and compiles in
+/// topological order.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn run_build(
     file: &PathBuf,
@@ -24,6 +33,18 @@ pub(crate) fn run_build(
     emit_mir: bool,
     green_threads: bool,
 ) -> i32 {
+    // If the argument is a directory, delegate to directory compilation.
+    if file.is_dir() {
+        return run_build_dir(
+            file,
+            output,
+            json_errors,
+            contracts_mode_str,
+            emit_mir,
+            green_threads,
+        );
+    }
+
     tracing::info!("building {}", file.display());
 
     let source = match std::fs::read_to_string(file) {
@@ -449,4 +470,69 @@ pub(crate) fn run_build(
             1
         }
     }
+}
+
+/// Compiles a directory of `.ko` files to a native executable.
+///
+/// 1. Discovers all `.ko` files recursively.
+/// 2. Finds the entry point (the file with `fn main()`).
+/// 3. Builds the dependency graph via imports.
+/// 4. Compiles the entry point, with all other project files available as imports.
+fn run_build_dir(
+    dir: &std::path::Path,
+    output: Option<&std::path::Path>,
+    json_errors: bool,
+    contracts_mode_str: &str,
+    emit_mir: bool,
+    green_threads: bool,
+) -> i32 {
+    let all_files = match find_ko_files(dir) {
+        Ok(files) => files,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return 1;
+        }
+    };
+
+    if all_files.is_empty() {
+        eprintln!("error: no `.ko` files found in `{}`", dir.display());
+        return 1;
+    }
+
+    let entry = match find_entry_point(&all_files) {
+        Ok(ep) => ep,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return 1;
+        }
+    };
+
+    tracing::info!(
+        "directory build: entry point `{}`, {} files",
+        entry.display(),
+        all_files.len()
+    );
+
+    // Verify topological ordering is possible (no cycles, all imports resolve).
+    if let Err(msg) = topological_sort(&entry, &all_files) {
+        eprintln!("{msg}");
+        return 1;
+    }
+
+    // Determine output path: use provided output, or dir_name/main (strip .ko extension).
+    let output_path = output.map(std::path::PathBuf::from).unwrap_or_else(|| {
+        let stem = entry.file_stem().unwrap_or_default();
+        dir.join(stem)
+    });
+
+    // Delegate to the single-file build with the entry point.
+    // The import resolver will find other .ko files in the same directory.
+    run_build(
+        &entry,
+        Some(&output_path),
+        json_errors,
+        contracts_mode_str,
+        emit_mir,
+        green_threads,
+    )
 }

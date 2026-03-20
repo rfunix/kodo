@@ -6,6 +6,145 @@
 
 use std::path::PathBuf;
 
+/// Recursively finds all `.ko` files in a directory.
+///
+/// Returns a sorted list of paths for deterministic ordering.
+pub(crate) fn find_ko_files(dir: &std::path::Path) -> std::result::Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    collect_ko_files_recursive(dir, &mut files)
+        .map_err(|e| format!("error: could not read directory `{}`: {e}", dir.display()))?;
+    files.sort();
+    Ok(files)
+}
+
+/// Recursive helper for [`find_ko_files`].
+fn collect_ko_files_recursive(
+    dir: &std::path::Path,
+    files: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_ko_files_recursive(&path, files)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("ko") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Finds the entry point file (the one containing `fn main()`) among a list of `.ko` files.
+///
+/// Parses each file and checks for a function named `main`. Returns the path
+/// to the entry point, or an error if none or multiple are found.
+pub(crate) fn find_entry_point(files: &[PathBuf]) -> std::result::Result<PathBuf, String> {
+    let mut entry_points = Vec::new();
+    for file in files {
+        let source = std::fs::read_to_string(file)
+            .map_err(|e| format!("error: could not read `{}`: {e}", file.display()))?;
+        if let Ok(module) = kodo_parser::parse(&source) {
+            if module.functions.iter().any(|f| f.name == "main") {
+                entry_points.push(file.clone());
+            }
+        }
+    }
+    match entry_points.len() {
+        0 => Err("error: no entry point found — no file contains `fn main()`".to_string()),
+        1 => Ok(entry_points.into_iter().next().unwrap_or_default()),
+        _ => {
+            let mut msg =
+                "error: multiple entry points found — only one file may contain `fn main()`:\n"
+                    .to_string();
+            for ep in &entry_points {
+                msg.push_str(&format!("  - {}\n", ep.display()));
+            }
+            Err(msg)
+        }
+    }
+}
+
+/// Builds a dependency graph from imports and returns files in topological order.
+///
+/// Starting from the entry point, follows imports to discover all dependency files.
+/// Returns files in reverse dependency order (dependencies first, entry point last).
+pub(crate) fn topological_sort(
+    entry: &std::path::Path,
+    all_files: &[PathBuf],
+) -> std::result::Result<Vec<PathBuf>, String> {
+    let base_dir = entry.parent().unwrap_or_else(|| std::path::Path::new("."));
+
+    // Build a map from module name -> file path for all known files.
+    let mut module_map: std::collections::HashMap<String, PathBuf> =
+        std::collections::HashMap::new();
+    for file in all_files {
+        let source = std::fs::read_to_string(file)
+            .map_err(|e| format!("error: could not read `{}`: {e}", file.display()))?;
+        if let Ok(module) = kodo_parser::parse(&source) {
+            module_map.insert(module.name.clone(), file.clone());
+        }
+    }
+
+    // BFS/DFS from entry to discover dependencies in order.
+    let mut ordered = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![entry.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let canonical = current.canonicalize().unwrap_or_else(|_| current.clone());
+        if !visited.insert(canonical) {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(&current)
+            .map_err(|e| format!("error: could not read `{}`: {e}", current.display()))?;
+        let module = kodo_parser::parse(&source)
+            .map_err(|e| format!("parse error in `{}`: {e}", current.display()))?;
+
+        // Discover imports.
+        for import in &module.imports {
+            // Skip stdlib imports.
+            if kodo_std::resolve_stdlib_module(&import.path).is_some() {
+                continue;
+            }
+            // Try module_map first (by module name = last segment of path).
+            let module_name = import.path.last().cloned().unwrap_or_default();
+            if let Some(dep_path) = module_map.get(&module_name) {
+                stack.push(dep_path.clone());
+            } else {
+                // Fall back to file-based resolution.
+                let resolved = resolve_import_path(base_dir, &import.path);
+                if resolved.exists() {
+                    stack.push(resolved);
+                }
+            }
+        }
+
+        ordered.push(current);
+    }
+
+    // Reverse so dependencies come first.
+    ordered.reverse();
+    Ok(ordered)
+}
+
+/// Finds all `.ko` files containing test declarations in a directory.
+///
+/// Returns a list of files that have at least one `test` or `describe` block.
+pub(crate) fn find_test_files(files: &[PathBuf]) -> std::result::Result<Vec<PathBuf>, String> {
+    let mut test_files = Vec::new();
+    for file in files {
+        let source = std::fs::read_to_string(file)
+            .map_err(|e| format!("error: could not read `{}`: {e}", file.display()))?;
+        if let Ok(module) = kodo_parser::parse(&source) {
+            if !module.test_decls.is_empty() || !module.describe_decls.is_empty() {
+                test_files.push(file.clone());
+            }
+        }
+    }
+    Ok(test_files)
+}
+
 /// Parses a `--contracts` flag value into a [`kodo_contracts::ContractMode`].
 pub(crate) fn parse_contract_mode(value: &str) -> kodo_contracts::ContractMode {
     match value.to_lowercase().as_str() {
@@ -1731,5 +1870,87 @@ pub(crate) fn substitute_type_expr_ast(
                 .collect(),
         ),
         kodo_ast::TypeExpr::DynTrait(name) => kodo_ast::TypeExpr::DynTrait(name.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_ko_files_returns_sorted_list() {
+        let dir = std::path::Path::new("../../examples/multifile");
+        let files = find_ko_files(dir).unwrap();
+        assert!(files.len() >= 2, "expected at least 2 .ko files");
+        // Verify all files have .ko extension.
+        for f in &files {
+            assert_eq!(f.extension().and_then(|e| e.to_str()), Some("ko"));
+        }
+    }
+
+    #[test]
+    fn find_ko_files_empty_dir() {
+        let tmp = std::env::temp_dir().join("kodo_test_empty_dir");
+        let _ = std::fs::create_dir_all(&tmp);
+        let files = find_ko_files(&tmp).unwrap();
+        assert!(files.is_empty());
+        let _ = std::fs::remove_dir(&tmp);
+    }
+
+    #[test]
+    fn find_entry_point_single_main() {
+        let dir = std::path::Path::new("../../examples/multifile");
+        let files = find_ko_files(dir).unwrap();
+        let entry = find_entry_point(&files).unwrap();
+        assert!(
+            entry.to_str().unwrap_or("").contains("main.ko"),
+            "entry point should be main.ko, got: {}",
+            entry.display()
+        );
+    }
+
+    #[test]
+    fn find_entry_point_no_main() {
+        // Create a temp directory with a .ko file that has no main function.
+        let tmp = std::env::temp_dir().join("kodo_test_no_main");
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(
+            tmp.join("lib.ko"),
+            "module lib {\n    fn helper() -> Int { return 1 }\n}\n",
+        )
+        .unwrap();
+        let files = find_ko_files(&tmp).unwrap();
+        let result = find_entry_point(&files);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no entry point"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn find_test_files_returns_files_with_tests() {
+        let dir = std::path::Path::new("../../examples/multifile");
+        let files = find_ko_files(dir).unwrap();
+        let test_files = find_test_files(&files).unwrap();
+        assert!(
+            !test_files.is_empty(),
+            "expected at least one test file in multifile"
+        );
+        // All test files should contain "test" in their content.
+        for f in &test_files {
+            let source = std::fs::read_to_string(f).unwrap();
+            assert!(source.contains("test "));
+        }
+    }
+
+    #[test]
+    fn topological_sort_includes_entry() {
+        let dir = std::path::Path::new("../../examples/multifile");
+        let files = find_ko_files(dir).unwrap();
+        let entry = find_entry_point(&files).unwrap();
+        let sorted = topological_sort(&entry, &files).unwrap();
+        assert!(
+            !sorted.is_empty(),
+            "topological sort should return at least one file"
+        );
     }
 }

@@ -21,9 +21,10 @@
 use std::path::PathBuf;
 
 use super::common::{
-    build_vtable_defs, compile_imported_module, inject_stdlib_method_functions, link_executable,
-    parse_contract_mode, resolve_import_path, rewrite_map_for_in, rewrite_method_calls_in_block,
-    rewrite_self_method_calls_in_block, substitute_type_expr_ast, type_to_type_expr,
+    build_vtable_defs, compile_imported_module, find_ko_files, find_test_files,
+    inject_stdlib_method_functions, link_executable, parse_contract_mode, resolve_import_path,
+    rewrite_map_for_in, rewrite_method_calls_in_block, rewrite_self_method_calls_in_block,
+    substitute_type_expr_ast, type_to_type_expr,
 };
 use crate::diagnostics;
 
@@ -444,11 +445,15 @@ fn apply_timeout(body: &mut kodo_ast::Block, timeout_ms: i64) {
     }));
 }
 
-/// Runs tests in a Kodo source file.
+/// Runs tests in a Kodo source file or directory.
 ///
-/// Desugars `test` declarations and `describe` blocks into regular functions,
-/// generates a synthetic `main` function as the test runner, compiles, executes,
-/// and reports results. Handles `@skip`, `@todo`, and `@timeout` annotations.
+/// When `file` is a directory, discovers all `.ko` files containing test blocks,
+/// runs each file's tests, and aggregates results.
+///
+/// For single files, desugars `test` declarations and `describe` blocks into
+/// regular functions, generates a synthetic `main` function as the test runner,
+/// compiles, executes, and reports results. Handles `@skip`, `@todo`, and
+/// `@timeout` annotations.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn run_test(
     file: &PathBuf,
@@ -456,6 +461,11 @@ pub(crate) fn run_test(
     json: bool,
     contracts_mode_str: &str,
 ) -> i32 {
+    // If the argument is a directory, run tests from all .ko files with tests.
+    if file.is_dir() {
+        return run_test_dir(file, filter, json, contracts_mode_str);
+    }
+
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -1028,6 +1038,78 @@ pub(crate) fn run_test(
             1
         }
     }
+}
+
+/// Runs tests from all `.ko` files in a directory that contain test declarations.
+///
+/// Each file with tests is compiled and run independently. The exit code is
+/// non-zero if any file's tests fail.
+fn run_test_dir(
+    dir: &std::path::Path,
+    filter: Option<&str>,
+    json: bool,
+    contracts_mode_str: &str,
+) -> i32 {
+    let all_files = match find_ko_files(dir) {
+        Ok(files) => files,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return 1;
+        }
+    };
+
+    if all_files.is_empty() {
+        eprintln!("error: no `.ko` files found in `{}`", dir.display());
+        return 1;
+    }
+
+    let test_files = match find_test_files(&all_files) {
+        Ok(files) => files,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return 1;
+        }
+    };
+
+    if test_files.is_empty() {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "event": "summary",
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "todo": 0,
+                })
+            );
+        } else {
+            println!("no tests found in `{}`", dir.display());
+        }
+        return 0;
+    }
+
+    if !json {
+        println!(
+            "Running tests from {} file(s) in `{}`\n",
+            test_files.len(),
+            dir.display()
+        );
+    }
+
+    let mut exit_code = 0;
+    for test_file in &test_files {
+        if !json {
+            println!("--- {} ---", test_file.display());
+        }
+        let result = run_test(test_file, filter, json, contracts_mode_str);
+        if result != 0 {
+            exit_code = result;
+        }
+    }
+
+    exit_code
 }
 
 #[cfg(test)]
