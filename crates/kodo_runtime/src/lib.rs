@@ -21,6 +21,7 @@
 //! - [`test_ops`] — Test framework assertions and lifecycle
 //! - [`prop_ops`] — Property testing engine (generators and shrinking)
 //! - [`context`] — CPU context switch primitives for green threads
+//! - [`green`] — Green thread data structures and stack allocation
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -30,6 +31,7 @@
 pub mod collections;
 pub mod context;
 pub mod db;
+pub mod green;
 mod helpers;
 pub mod http;
 pub mod io_ops;
