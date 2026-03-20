@@ -1,0 +1,27 @@
+//@ check-pass
+// Basic describe block with setup and teardown.
+
+module describe_basic {
+    meta {
+        purpose: "Test describe block parsing and type checking"
+        version: "0.1.0"
+    }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    describe "arithmetic" {
+        setup {
+            let base: Int = 100
+        }
+
+        test "addition" {
+            assert_eq(add(base, 1), 101)
+        }
+
+        test "subtraction" {
+            assert_eq(base - 50, 50)
+        }
+    }
+}

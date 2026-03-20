@@ -1,0 +1,23 @@
+//@ check-pass
+// Skip and todo annotations on tests.
+
+module skip_todo {
+    meta {
+        purpose: "Test skip and todo annotations"
+        version: "0.1.0"
+    }
+
+    @skip("not implemented")
+    test "future feature" {
+        assert(false)
+    }
+
+    @todo("implement later")
+    test "pending work" {
+        assert(false)
+    }
+
+    test "regular test" {
+        assert(true)
+    }
+}

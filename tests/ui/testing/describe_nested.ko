@@ -1,0 +1,17 @@
+//@ check-pass
+// Nested describe blocks.
+
+module describe_nested {
+    meta {
+        purpose: "Test nested describe blocks"
+        version: "0.1.0"
+    }
+
+    describe "outer" {
+        describe "inner" {
+            test "nested test" {
+                assert(true)
+            }
+        }
+    }
+}

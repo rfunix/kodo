@@ -1,0 +1,16 @@
+//@ check-pass
+// Property-based test with forall.
+
+module property_basic {
+    meta {
+        purpose: "Test property-based testing syntax"
+        version: "0.1.0"
+    }
+
+    @property(iterations: 50)
+    test "addition is commutative" {
+        forall a: Int, b: Int {
+            assert_eq(a + b, b + a)
+        }
+    }
+}
