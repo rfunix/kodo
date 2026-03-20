@@ -15,6 +15,7 @@ mod invariants;
 mod iterators;
 mod methods;
 mod ownership;
+mod property_testing;
 mod traits;
 mod tuples;
 mod visibility;

@@ -20,6 +20,9 @@ impl TypeChecker {
     /// - Float64 methods: `to_string`, `to_int`
     /// - Test assertion builtins: `assert`, `assert_true`, `assert_false`
     ///   (`assert_eq` and `assert_ne` are handled specially in `check_call`)
+    /// - Property testing builtins: `kodo_prop_start`, `kodo_prop_gen_int`, etc.
+    /// - Timeout builtins: `kodo_test_set_timeout`, `kodo_test_clear_timeout`
+    /// - Isolation builtins: `kodo_test_isolate_start`, `kodo_test_isolate_end`
     pub(crate) fn register_builtins(&mut self) {
         self.env.insert(
             "println".to_string(),
@@ -101,6 +104,18 @@ impl TypeChecker {
         self.register_http_server_functions();
         self.register_db_functions();
 
+        self.register_test_builtins();
+    }
+
+    /// Registers test assertion, harness, property, timeout, and isolation builtins.
+    ///
+    /// - `assert`, `assert_true`, `assert_false` — standard assertion builtins
+    ///   (`assert_eq`/`assert_ne` are polymorphic and handled in `check_call`)
+    /// - `kodo_test_start`, `kodo_test_end`, `kodo_test_summary` — test harness runtime
+    /// - `kodo_prop_start`, `kodo_prop_gen_*` — property testing generators
+    /// - `kodo_test_set_timeout`, `kodo_test_clear_timeout` — timeout support
+    /// - `kodo_test_isolate_start`, `kodo_test_isolate_end` — test isolation support
+    fn register_test_builtins(&mut self) {
         // Test assertion builtins — assert_eq/assert_ne are polymorphic and
         // handled as special cases in `check_call`.
         self.env.insert(
@@ -128,6 +143,61 @@ impl TypeChecker {
         self.env.insert(
             "kodo_test_summary".to_string(),
             Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+
+        self.register_property_testing_builtins();
+    }
+
+    /// Registers property testing, timeout, and isolation builtins.
+    ///
+    /// These builtins are emitted by the `forall` desugaring pass and by
+    /// `@timeout`/`@isolate` annotation desugaring. They must be resolvable
+    /// in the type environment so that generated code type-checks.
+    fn register_property_testing_builtins(&mut self) {
+        // kodo_prop_start(seed: Int, iterations: Int) -> ()
+        self.env.insert(
+            "kodo_prop_start".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Unit)),
+        );
+        // kodo_prop_gen_int(min: Int, max: Int) -> Int
+        self.env.insert(
+            "kodo_prop_gen_int".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        // kodo_prop_gen_bool() -> Bool
+        self.env.insert(
+            "kodo_prop_gen_bool".to_string(),
+            Type::Function(vec![], Box::new(Type::Bool)),
+        );
+        // kodo_prop_gen_float(min: Float64, max: Float64) -> Float64
+        self.env.insert(
+            "kodo_prop_gen_float".to_string(),
+            Type::Function(vec![Type::Float64, Type::Float64], Box::new(Type::Float64)),
+        );
+        // kodo_prop_gen_string(max_len: Int) -> String
+        self.env.insert(
+            "kodo_prop_gen_string".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::String)),
+        );
+        // kodo_test_set_timeout(ms: Int) -> ()
+        self.env.insert(
+            "kodo_test_set_timeout".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+        // kodo_test_clear_timeout() -> ()
+        self.env.insert(
+            "kodo_test_clear_timeout".to_string(),
+            Type::Function(vec![], Box::new(Type::Unit)),
+        );
+        // kodo_test_isolate_start() -> ()
+        self.env.insert(
+            "kodo_test_isolate_start".to_string(),
+            Type::Function(vec![], Box::new(Type::Unit)),
+        );
+        // kodo_test_isolate_end() -> ()
+        self.env.insert(
+            "kodo_test_isolate_end".to_string(),
+            Type::Function(vec![], Box::new(Type::Unit)),
         );
     }
 
