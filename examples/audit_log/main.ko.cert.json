@@ -1,0 +1,118 @@
+{
+  "module": "main",
+  "purpose": "Audit log system showcasing 15+ Kodo features",
+  "version": "1.0.0",
+  "compiled_at": "2026-03-19T17:19:03Z",
+  "compiler_version": "0.5.0",
+  "contracts": {
+    "requires_count": 0,
+    "ensures_count": 0,
+    "mode": "runtime",
+    "static_verified": 0,
+    "runtime_checks_needed": 0,
+    "failures": 0
+  },
+  "functions": [
+    "create_severity_levels",
+    "create_confidence_scores",
+    "main",
+    "Option_is_some",
+    "Option_is_none",
+    "Option_unwrap_or",
+    "Result_is_ok",
+    "Result_is_err",
+    "Result_unwrap_or",
+    "List_map",
+    "List_filter",
+    "List_fold",
+    "List_count",
+    "List_any",
+    "List_all"
+  ],
+  "function_details": [
+    {
+      "name": "create_severity_levels",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.95
+      }
+    },
+    {
+      "name": "create_confidence_scores",
+      "annotations": {
+        "confidence": 0.95,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    }
+  ],
+  "type_check": "passed",
+  "source_hash": "sha256:3794f54cfff1e261e1613708e22fe63be77f9258e1a09971ec67130eacf2c8eb",
+  "binary_hash": "sha256:40bb554d1fe243ae87d007f30346e40e42b3218d69065388b8d51ff13db2b48a",
+  "certificate_hash": "sha256:b8303e05bcca40efbec23023afc49ca91869d509c423fd7e72588646669ef81b",
+  "function_contracts": [
+    {
+      "name": "create_severity_levels",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "create_confidence_scores",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "main",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_is_some",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_is_none",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_ok",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_err",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_map",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_filter",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_fold",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_count",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_any",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_all",
+      "contracts": "no_contracts"
+    }
+  ]
+}

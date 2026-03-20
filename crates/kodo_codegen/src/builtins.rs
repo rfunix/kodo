@@ -1043,7 +1043,8 @@ fn declare_channel_builtins(
     );
     decl_void!("kodo_channel_free", "channel_free", types::I64);
 
-    // Channel select — wait on multiple channels, return index of first ready.
+    // Channel select builtins — poll multiple channels and return the index
+    // of the first one with data available.
     decl_ret!(
         "kodo_channel_select_2",
         "channel_select_2",

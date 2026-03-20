@@ -1359,17 +1359,17 @@ impl TypeChecker {
         );
 
         // channel_select_2(ch1: Channel<Int>, ch2: Channel<Int>) -> Int
-        // Waits on 2 channels, returns 0 or 1 indicating which has data.
+        // Returns 0 or 1 indicating which channel has data ready.
         self.env.insert(
             "channel_select_2".to_string(),
             Type::Function(vec![ch_int.clone(), ch_int.clone()], Box::new(Type::Int)),
         );
         // channel_select_3(ch1: Channel<Int>, ch2: Channel<Int>, ch3: Channel<Int>) -> Int
-        // Waits on 3 channels, returns 0, 1, or 2 indicating which has data.
+        // Returns 0, 1, or 2 indicating which channel has data ready.
         self.env.insert(
             "channel_select_3".to_string(),
             Type::Function(
-                vec![ch_int.clone(), ch_int.clone(), ch_int],
+                vec![ch_int.clone(), ch_int.clone(), ch_int.clone()],
                 Box::new(Type::Int),
             ),
         );

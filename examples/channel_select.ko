@@ -1,40 +1,23 @@
-// Channel Select -- Demonstrates waiting on multiple channels simultaneously.
-
 module channel_select {
     meta {
-        purpose: "Demonstrate channel_select_2 for multiplexing channels",
-        version: "1.0.0",
-        author: "Kodo Team"
-    }
-
-    fn producer(ch: Channel<Int>, value: Int) {
-        channel_send(ch, value)
+        purpose: "Demonstrates channel_select_2 for multiplexing channels"
+        version: "0.1.0"
     }
 
     fn main() -> Int {
         let ch1: Channel<Int> = channel_new()
         let ch2: Channel<Int> = channel_new()
 
-        // Send a value on ch2 so select will find it.
-        channel_send(ch2, 99)
+        spawn { channel_send(ch2, 99) }
 
-        // Wait for the first channel with data.
         let idx: Int = channel_select_2(ch1, ch2)
-
         if idx == 0 {
-            let val: Int = channel_recv(ch1)
-            print("received from ch1: ")
-            print_int(val)
+            let v: Int = channel_recv(ch1)
+            print_int(v)
         } else {
-            let val: Int = channel_recv(ch2)
-            print("received from ch2: ")
-            print_int(val)
+            let v: Int = channel_recv(ch2)
+            print_int(v)
         }
-
-        channel_free(ch1)
-        channel_free(ch2)
-
-        println("channel select demo complete")
         return 0
     }
 }
