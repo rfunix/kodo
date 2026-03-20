@@ -7,10 +7,13 @@
 mod audit;
 mod certificate;
 mod commands;
+mod dep_resolver;
 mod diagnostics;
 mod embedded_runtime;
 mod explanations;
 mod formatter;
+mod lockfile;
+mod manifest;
 mod repl;
 
 use clap::{Parser, Subcommand};
@@ -210,6 +213,42 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Initialize a new Kodo project with kodo.toml and src/main.ko.
+    Init {
+        /// Project name (creates a new directory). If omitted, initializes the current directory.
+        #[arg()]
+        name: Option<String>,
+    },
+    /// Add a dependency to the current project.
+    Add {
+        /// Git repository URL or local path.
+        #[arg()]
+        source: String,
+
+        /// Git tag to checkout (required for git deps).
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Override the dependency name (derived from URL/path by default).
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Add as a path dependency instead of a git dependency.
+        #[arg(long, default_value_t = false)]
+        path: bool,
+    },
+    /// Remove a dependency from the current project.
+    Remove {
+        /// The name of the dependency to remove.
+        #[arg()]
+        name: String,
+    },
+    /// Re-resolve dependencies and update kodo.lock.
+    Update {
+        /// Specific dependency to update. If omitted, updates all.
+        #[arg()]
+        name: Option<String>,
+    },
     /// Generate a consolidated audit report (confidence + contracts + annotations).
     Audit {
         /// The source file to audit.
@@ -309,6 +348,25 @@ fn main() {
             stdout,
             json,
         } => commands::generate_tests::run_generate_tests(&file, inline, stdout, json),
+        Command::Init { name } => commands::init::run_init(name.as_deref()),
+        Command::Add {
+            source,
+            tag,
+            name,
+            path,
+        } => {
+            if path {
+                commands::deps::run_add_path(&source, name.as_deref())
+            } else {
+                let tag = tag.unwrap_or_else(|| {
+                    eprintln!("error: --tag is required for git dependencies");
+                    std::process::exit(1);
+                });
+                commands::deps::run_add(&source, &tag, name.as_deref())
+            }
+        }
+        Command::Remove { name } => commands::deps::run_remove(&name),
+        Command::Update { name } => commands::deps::run_update(name.as_deref()),
         Command::Audit {
             file,
             json,
