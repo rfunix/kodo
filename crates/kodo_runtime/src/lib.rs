@@ -19,6 +19,7 @@
 //! - [`http`] — HTTP client builtins
 //! - [`server`] — HTTP server builtins (`tiny_http`)
 //! - [`test_ops`] — Test framework assertions and lifecycle
+//! - [`prop_ops`] — Property testing engine (generators and shrinking)
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -32,6 +33,7 @@ pub mod http;
 pub mod io_ops;
 pub mod math_ops;
 pub mod memory;
+pub mod prop_ops;
 pub mod scheduler;
 pub mod server;
 pub mod string_ops;
