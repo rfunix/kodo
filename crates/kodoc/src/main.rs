@@ -184,6 +184,24 @@ enum Command {
         #[arg(long, default_value = "runtime")]
         contracts: String,
     },
+    /// Generate test stubs from function contracts in a Kodo source file.
+    GenerateTests {
+        /// The source file to analyze.
+        #[arg()]
+        file: PathBuf,
+
+        /// Append generated tests inline into the source file.
+        #[arg(long, default_value_t = false)]
+        inline: bool,
+
+        /// Print generated tests to stdout instead of writing a file.
+        #[arg(long, default_value_t = false)]
+        stdout: bool,
+
+        /// Output as JSON (includes test count and generated source).
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Generate a consolidated audit report (confidence + contracts + annotations).
     Audit {
         /// The source file to audit.
@@ -264,6 +282,12 @@ fn main() {
             contracts,
         } => commands::test::run_test(&file, filter.as_deref(), json, &contracts),
         Command::Describe { binary, json } => commands::misc::run_describe(&binary, json),
+        Command::GenerateTests {
+            file,
+            inline,
+            stdout,
+            json,
+        } => commands::generate_tests::run_generate_tests(&file, inline, stdout, json),
         Command::Audit {
             file,
             json,

@@ -6,5 +6,6 @@
 pub(crate) mod build;
 pub(crate) mod check;
 pub(crate) mod common;
+pub(crate) mod generate_tests;
 pub(crate) mod misc;
 pub(crate) mod test;
