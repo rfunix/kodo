@@ -27,6 +27,281 @@ use super::common::{
 };
 use crate::diagnostics;
 
+/// Parameters extracted from a `@property(...)` annotation.
+struct PropertyParams {
+    /// Number of iterations (default 100).
+    iterations: i64,
+    /// Minimum value for `Int` generators (default -1_000_000).
+    int_min: i64,
+    /// Maximum value for `Int` generators (default 1_000_000).
+    int_max: i64,
+    /// Minimum value for `Float64` generators (default -1_000_000.0).
+    float_min: f64,
+    /// Maximum value for `Float64` generators (default 1_000_000.0).
+    float_max: f64,
+    /// Maximum length for `String` generators (default 100).
+    max_string_len: i64,
+    /// Seed for the RNG (default 0 = random).
+    seed: i64,
+}
+
+impl Default for PropertyParams {
+    fn default() -> Self {
+        Self {
+            iterations: 100,
+            int_min: -1_000_000,
+            int_max: 1_000_000,
+            float_min: -1_000_000.0,
+            float_max: 1_000_000.0,
+            max_string_len: 100,
+            seed: 0,
+        }
+    }
+}
+
+/// Extracts a named integer argument from an annotation, handling both positive
+/// and negative literals (the parser produces `UnaryOp::Neg(IntLit(n))` for `-n`).
+fn extract_named_int(ann: &kodo_ast::Annotation, name: &str) -> Option<i64> {
+    ann.args.iter().find_map(|arg| match arg {
+        kodo_ast::AnnotationArg::Named(n, kodo_ast::Expr::IntLit(v, _)) if n == name => Some(*v),
+        kodo_ast::AnnotationArg::Named(
+            n,
+            kodo_ast::Expr::UnaryOp {
+                op: kodo_ast::UnaryOp::Neg,
+                operand,
+                ..
+            },
+        ) if n == name => {
+            if let kodo_ast::Expr::IntLit(v, _) = operand.as_ref() {
+                Some(-v)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
+}
+
+/// Extracts a named float argument from an annotation, handling negation.
+fn extract_named_float(ann: &kodo_ast::Annotation, name: &str) -> Option<f64> {
+    ann.args.iter().find_map(|arg| match arg {
+        kodo_ast::AnnotationArg::Named(n, kodo_ast::Expr::FloatLit(v, _)) if n == name => Some(*v),
+        kodo_ast::AnnotationArg::Named(
+            n,
+            kodo_ast::Expr::UnaryOp {
+                op: kodo_ast::UnaryOp::Neg,
+                operand,
+                ..
+            },
+        ) if n == name => {
+            if let kodo_ast::Expr::FloatLit(v, _) = operand.as_ref() {
+                Some(-v)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
+}
+
+/// Extracts `@property(...)` parameters from a list of annotations.
+///
+/// Supported named arguments:
+/// - `iterations: 50` — number of random inputs to generate
+/// - `int_min: -100`, `int_max: 100` — range for Int generators
+/// - `float_min: -1.0`, `float_max: 1.0` — range for Float64 generators
+/// - `max_string_len: 50` — maximum string length
+/// - `seed: 42` — deterministic seed for reproducibility
+fn extract_property_params(annotations: &[kodo_ast::Annotation]) -> Option<PropertyParams> {
+    let ann = annotations.iter().find(|a| a.name == "property")?;
+    let mut params = PropertyParams::default();
+    if let Some(v) = extract_named_int(ann, "iterations") {
+        params.iterations = v;
+    }
+    if let Some(v) = extract_named_int(ann, "int_min") {
+        params.int_min = v;
+    }
+    if let Some(v) = extract_named_int(ann, "int_max") {
+        params.int_max = v;
+    }
+    if let Some(v) = extract_named_float(ann, "float_min") {
+        params.float_min = v;
+    }
+    if let Some(v) = extract_named_float(ann, "float_max") {
+        params.float_max = v;
+    }
+    if let Some(v) = extract_named_int(ann, "max_string_len") {
+        params.max_string_len = v;
+    }
+    if let Some(v) = extract_named_int(ann, "seed") {
+        params.seed = v;
+    }
+    Some(params)
+}
+
+/// Generates a call expression to a runtime function with the given arguments.
+fn make_call(name: &str, args: Vec<kodo_ast::Expr>, s: kodo_ast::Span) -> kodo_ast::Expr {
+    kodo_ast::Expr::Call {
+        callee: Box::new(kodo_ast::Expr::Ident(name.to_string(), s)),
+        args,
+        span: s,
+    }
+}
+
+/// Returns the appropriate generator call expression for a given type binding.
+fn gen_call_for_type(
+    ty: &kodo_ast::TypeExpr,
+    params: &PropertyParams,
+    s: kodo_ast::Span,
+) -> kodo_ast::Expr {
+    match ty {
+        kodo_ast::TypeExpr::Named(name) => match name.as_str() {
+            "Int" => make_call(
+                "kodo_prop_gen_int",
+                vec![
+                    kodo_ast::Expr::IntLit(params.int_min, s),
+                    kodo_ast::Expr::IntLit(params.int_max, s),
+                ],
+                s,
+            ),
+            "Bool" => make_call("kodo_prop_gen_bool", vec![], s),
+            "Float64" => make_call(
+                "kodo_prop_gen_float",
+                vec![
+                    kodo_ast::Expr::FloatLit(params.float_min, s),
+                    kodo_ast::Expr::FloatLit(params.float_max, s),
+                ],
+                s,
+            ),
+            "String" => make_call(
+                "kodo_prop_gen_string",
+                vec![kodo_ast::Expr::IntLit(params.max_string_len, s)],
+                s,
+            ),
+            // Fallback: generate an Int in [0, 100] for unknown types.
+            _ => make_call(
+                "kodo_prop_gen_int",
+                vec![kodo_ast::Expr::IntLit(0, s), kodo_ast::Expr::IntLit(100, s)],
+                s,
+            ),
+        },
+        // For any complex types, fall back to Int generation.
+        _ => make_call(
+            "kodo_prop_gen_int",
+            vec![kodo_ast::Expr::IntLit(0, s), kodo_ast::Expr::IntLit(100, s)],
+            s,
+        ),
+    }
+}
+
+/// Desugars a `ForAll` statement into a `kodo_prop_start` call followed by a
+/// `while` loop that generates random inputs and executes the body.
+///
+/// Transforms:
+/// ```text
+/// forall a: Int, b: Int { assert_eq(a + b, b + a) }
+/// ```
+/// Into:
+/// ```text
+/// kodo_prop_start(iterations, seed)
+/// let __prop_iter: Int = 0
+/// while __prop_iter < iterations {
+///     let a: Int = kodo_prop_gen_int(min, max)
+///     let b: Int = kodo_prop_gen_int(min, max)
+///     assert_eq(a + b, b + a)
+///     __prop_iter = __prop_iter + 1
+/// }
+/// ```
+fn desugar_forall(stmt: &kodo_ast::Stmt, params: &PropertyParams) -> Vec<kodo_ast::Stmt> {
+    let (span, bindings, body) = match stmt {
+        kodo_ast::Stmt::ForAll {
+            span,
+            bindings,
+            body,
+        } => (*span, bindings, body),
+        _ => return vec![stmt.clone()],
+    };
+    let s = kodo_ast::Span::new(0, 0);
+
+    let mut result = Vec::new();
+
+    // kodo_prop_start(iterations, seed)
+    result.push(kodo_ast::Stmt::Expr(make_call(
+        "kodo_prop_start",
+        vec![
+            kodo_ast::Expr::IntLit(params.iterations, s),
+            kodo_ast::Expr::IntLit(params.seed, s),
+        ],
+        s,
+    )));
+
+    // let __prop_iter: Int = 0
+    result.push(kodo_ast::Stmt::Let {
+        span: s,
+        mutable: true,
+        name: "__prop_iter".to_string(),
+        ty: Some(kodo_ast::TypeExpr::Named("Int".to_string())),
+        value: kodo_ast::Expr::IntLit(0, s),
+    });
+
+    // Build while-loop body: generator bindings + forall body + increment.
+    let mut loop_stmts = Vec::new();
+    for (name, ty) in bindings {
+        loop_stmts.push(kodo_ast::Stmt::Let {
+            span,
+            mutable: false,
+            name: name.clone(),
+            ty: Some(ty.clone()),
+            value: gen_call_for_type(ty, params, s),
+        });
+    }
+    loop_stmts.extend(body.stmts.iter().cloned());
+    // __prop_iter = __prop_iter + 1
+    loop_stmts.push(kodo_ast::Stmt::Assign {
+        span: s,
+        name: "__prop_iter".to_string(),
+        value: kodo_ast::Expr::BinaryOp {
+            left: Box::new(kodo_ast::Expr::Ident("__prop_iter".to_string(), s)),
+            op: kodo_ast::BinOp::Add,
+            right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+            span: s,
+        },
+    });
+
+    // while __prop_iter < iterations { ... }
+    result.push(kodo_ast::Stmt::While {
+        span: s,
+        condition: kodo_ast::Expr::BinaryOp {
+            left: Box::new(kodo_ast::Expr::Ident("__prop_iter".to_string(), s)),
+            op: kodo_ast::BinOp::Lt,
+            right: Box::new(kodo_ast::Expr::IntLit(params.iterations, s)),
+            span: s,
+        },
+        body: kodo_ast::Block {
+            span: s,
+            stmts: loop_stmts,
+        },
+    });
+
+    result
+}
+
+/// Applies `@property` + `forall` desugaring to a test body.
+///
+/// Walks the body statements looking for `ForAll` nodes and replaces each one
+/// with the desugared while-loop form that calls runtime generators.
+fn apply_property_desugaring(body: &mut kodo_ast::Block, params: &PropertyParams) {
+    let mut new_stmts = Vec::new();
+    for stmt in &body.stmts {
+        if matches!(stmt, kodo_ast::Stmt::ForAll { .. }) {
+            new_stmts.extend(desugar_forall(stmt, params));
+        } else {
+            new_stmts.push(stmt.clone());
+        }
+    }
+    body.stmts = new_stmts;
+}
+
 /// Classification of a test based on its annotations.
 enum TestKind {
     /// Normal test that should be compiled and executed.
@@ -208,8 +483,12 @@ pub(crate) fn run_test(
     for test_decl in &module.test_decls {
         let (kind, timeout_ms) = classify_test(&test_decl.annotations);
         let mut body = test_decl.body.clone();
-        if let Some(ms) = timeout_ms {
-            if matches!(kind, TestKind::Run) {
+        if matches!(kind, TestKind::Run) {
+            // Desugar @property + forall before timeout wrapping.
+            if let Some(ref params) = extract_property_params(&test_decl.annotations) {
+                apply_property_desugaring(&mut body, params);
+            }
+            if let Some(ms) = timeout_ms {
                 apply_timeout(&mut body, ms);
             }
         }
@@ -223,8 +502,12 @@ pub(crate) fn run_test(
     for (name, annotations, block) in flattened {
         let (kind, timeout_ms) = classify_test(&annotations);
         let mut body = block;
-        if let Some(ms) = timeout_ms {
-            if matches!(kind, TestKind::Run) {
+        if matches!(kind, TestKind::Run) {
+            // Desugar @property + forall before timeout wrapping.
+            if let Some(ref params) = extract_property_params(&annotations) {
+                apply_property_desugaring(&mut body, params);
+            }
+            if let Some(ms) = timeout_ms {
                 apply_timeout(&mut body, ms);
             }
         }
@@ -741,5 +1024,137 @@ pub(crate) fn run_test(
             eprintln!("link error: {e}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{Annotation, AnnotationArg, Expr, Span, Stmt, TypeExpr};
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_property_ann(args: Vec<AnnotationArg>) -> Annotation {
+        Annotation {
+            name: "property".to_string(),
+            args,
+            span: s(),
+        }
+    }
+
+    #[test]
+    fn extract_property_params_defaults() {
+        let ann = make_property_ann(vec![]);
+        let params = extract_property_params(&[ann]).unwrap();
+        assert_eq!(params.iterations, 100);
+        assert_eq!(params.int_min, -1_000_000);
+        assert_eq!(params.int_max, 1_000_000);
+        assert_eq!(params.seed, 0);
+        assert_eq!(params.max_string_len, 100);
+    }
+
+    #[test]
+    fn extract_property_params_custom_iterations() {
+        let ann = make_property_ann(vec![AnnotationArg::Named(
+            "iterations".to_string(),
+            Expr::IntLit(50, s()),
+        )]);
+        let params = extract_property_params(&[ann]).unwrap();
+        assert_eq!(params.iterations, 50);
+    }
+
+    #[test]
+    fn extract_property_params_custom_seed() {
+        let ann = make_property_ann(vec![AnnotationArg::Named(
+            "seed".to_string(),
+            Expr::IntLit(42, s()),
+        )]);
+        let params = extract_property_params(&[ann]).unwrap();
+        assert_eq!(params.seed, 42);
+    }
+
+    #[test]
+    fn extract_property_params_negative_int_min() {
+        let ann = make_property_ann(vec![AnnotationArg::Named(
+            "int_min".to_string(),
+            Expr::UnaryOp {
+                op: kodo_ast::UnaryOp::Neg,
+                operand: Box::new(Expr::IntLit(100, s())),
+                span: s(),
+            },
+        )]);
+        let params = extract_property_params(&[ann]).unwrap();
+        assert_eq!(params.int_min, -100);
+    }
+
+    #[test]
+    fn extract_property_params_returns_none_without_annotation() {
+        let ann = Annotation {
+            name: "skip".to_string(),
+            args: vec![],
+            span: s(),
+        };
+        assert!(extract_property_params(&[ann]).is_none());
+    }
+
+    #[test]
+    fn desugar_forall_produces_while_loop() {
+        let forall = Stmt::ForAll {
+            span: s(),
+            bindings: vec![
+                ("a".to_string(), TypeExpr::Named("Int".to_string())),
+                ("b".to_string(), TypeExpr::Named("Int".to_string())),
+            ],
+            body: kodo_ast::Block {
+                span: s(),
+                stmts: vec![Stmt::Expr(Expr::IntLit(1, s()))],
+            },
+        };
+        let params = PropertyParams {
+            iterations: 50,
+            seed: 42,
+            ..PropertyParams::default()
+        };
+        let result = desugar_forall(&forall, &params);
+        // Should produce: kodo_prop_start call, let __prop_iter, while loop = 3 statements
+        assert_eq!(result.len(), 3);
+        // First is the kodo_prop_start call
+        assert!(matches!(result[0], Stmt::Expr(Expr::Call { .. })));
+        // Second is the let __prop_iter
+        assert!(matches!(result[1], Stmt::Let { ref name, .. } if name == "__prop_iter"));
+        // Third is the while loop
+        assert!(matches!(result[2], Stmt::While { .. }));
+    }
+
+    #[test]
+    fn desugar_forall_passthrough_non_forall() {
+        let stmt = Stmt::Expr(Expr::IntLit(42, s()));
+        let params = PropertyParams::default();
+        let result = desugar_forall(&stmt, &params);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn apply_property_desugaring_replaces_forall() {
+        let mut body = kodo_ast::Block {
+            span: s(),
+            stmts: vec![
+                Stmt::Expr(Expr::IntLit(1, s())),
+                Stmt::ForAll {
+                    span: s(),
+                    bindings: vec![("x".to_string(), TypeExpr::Named("Int".to_string()))],
+                    body: kodo_ast::Block {
+                        span: s(),
+                        stmts: vec![Stmt::Expr(Expr::IntLit(2, s()))],
+                    },
+                },
+            ],
+        };
+        let params = PropertyParams::default();
+        apply_property_desugaring(&mut body, &params);
+        // Original 1 stmt + 3 desugared stmts = 4
+        assert_eq!(body.stmts.len(), 4);
     }
 }

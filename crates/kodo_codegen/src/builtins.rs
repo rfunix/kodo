@@ -1502,7 +1502,8 @@ fn declare_http_server_builtins(
     Ok(())
 }
 
-/// Declares test framework builtins (assertions and test lifecycle).
+/// Declares test framework builtins (assertions, test lifecycle, and property testing).
+#[allow(clippy::too_many_lines)]
 fn declare_test_builtins(
     module: &mut ObjectModule,
     call_conv: CallConv,
@@ -1606,5 +1607,27 @@ fn declare_test_builtins(
     decl_void!("kodo_test_clear_timeout", "kodo_test_clear_timeout");
     decl_void!("kodo_test_isolate_start", "kodo_test_isolate_start");
     decl_void!("kodo_test_isolate_end", "kodo_test_isolate_end");
+
+    // Property testing builtins.
+    decl_void!("kodo_prop_start", "kodo_prop_start", types::I64, types::I64);
+    decl_ret!(
+        "kodo_prop_gen_int",
+        "kodo_prop_gen_int",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!("kodo_prop_gen_bool", "kodo_prop_gen_bool", [], types::I64);
+    decl_ret!(
+        "kodo_prop_gen_float",
+        "kodo_prop_gen_float",
+        [types::F64, types::F64],
+        types::F64
+    );
+    decl_ret!(
+        "kodo_prop_gen_string",
+        "kodo_prop_gen_string",
+        [types::I64],
+        types::I64
+    );
     Ok(())
 }

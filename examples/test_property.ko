@@ -1,0 +1,29 @@
+module test_property {
+    meta {
+        purpose: "Property-based tests"
+        version: "0.1.0"
+    }
+
+    fn abs_val(x: Int) -> Int {
+        if x < 0 { return 0 - x }
+        return x
+    }
+
+    @property(iterations: 50)
+    test "abs is non-negative" {
+        forall x: Int {
+            assert(abs_val(x) >= 0)
+        }
+    }
+
+    @property(iterations: 100, seed: 42)
+    test "addition is commutative" {
+        forall a: Int, b: Int {
+            assert_eq(a + b, b + a)
+        }
+    }
+
+    test "regular test still works" {
+        assert_eq(1 + 1, 2)
+    }
+}
