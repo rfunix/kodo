@@ -1327,7 +1327,7 @@ impl TypeChecker {
         // channel_recv(ch: Channel<Int>) -> Int
         self.env.insert(
             "channel_recv".to_string(),
-            Type::Function(vec![ch_int], Box::new(Type::Int)),
+            Type::Function(vec![ch_int.clone()], Box::new(Type::Int)),
         );
 
         // Bool channel: channel_send_bool(ch: Channel<Bool>, value: Bool) -> ()
@@ -1356,6 +1356,22 @@ impl TypeChecker {
         self.env.insert(
             "channel_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+
+        // channel_select_2(ch1: Channel<Int>, ch2: Channel<Int>) -> Int
+        // Waits on 2 channels, returns 0 or 1 indicating which has data.
+        self.env.insert(
+            "channel_select_2".to_string(),
+            Type::Function(vec![ch_int.clone(), ch_int.clone()], Box::new(Type::Int)),
+        );
+        // channel_select_3(ch1: Channel<Int>, ch2: Channel<Int>, ch3: Channel<Int>) -> Int
+        // Waits on 3 channels, returns 0, 1, or 2 indicating which has data.
+        self.env.insert(
+            "channel_select_3".to_string(),
+            Type::Function(
+                vec![ch_int.clone(), ch_int.clone(), ch_int],
+                Box::new(Type::Int),
+            ),
         );
 
         // Generic channel functions — type-erased channels for any type T.

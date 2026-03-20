@@ -108,6 +108,12 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
     fn_return_types
         .entry("channel_recv_string".to_string())
         .or_insert(Type::String);
+    fn_return_types
+        .entry("channel_select_2".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("channel_select_3".to_string())
+        .or_insert(Type::Int);
 
     // Iterator builtins — all return Int (opaque handles or 0/1 flags).
     for name in &[

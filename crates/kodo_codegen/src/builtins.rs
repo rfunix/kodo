@@ -1043,6 +1043,20 @@ fn declare_channel_builtins(
     );
     decl_void!("kodo_channel_free", "channel_free", types::I64);
 
+    // Channel select — wait on multiple channels, return index of first ready.
+    decl_ret!(
+        "kodo_channel_select_2",
+        "channel_select_2",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_channel_select_3",
+        "channel_select_3",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+
     // Generic type-erased channel builtins.
     decl_ret!(
         "kodo_channel_generic_new",

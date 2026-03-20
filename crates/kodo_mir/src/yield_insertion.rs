@@ -415,6 +415,8 @@ mod tests {
             "file_read",
             "file_write",
             "channel_recv",
+            "channel_select_2",
+            "channel_select_3",
         ];
         for callee_name in io_calls {
             assert!(
