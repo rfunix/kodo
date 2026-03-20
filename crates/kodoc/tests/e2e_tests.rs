@@ -1636,6 +1636,7 @@ e2e_example_test!(run: e2e_iterator_list, "iterator_list.ko", contains: ["22"]);
 e2e_example_test!(run: e2e_iterator_map, "iterator_map.ko", contains: ["6"]);
 e2e_example_test!(run: e2e_iterator_map_filter, "iterator_map_filter.ko", contains: ["30"]);
 e2e_example_test!(run: e2e_list_demo, "list_demo.ko", contains: ["3", "10", "list contains 20"]);
+e2e_example_test!(run: e2e_list_functional, "list_functional.ko", contains: ["15", "120", "has_big: true", "all_pos: true"]);
 e2e_example_test!(run: e2e_map_demo, "map_demo.ko", contains: ["3", "200", "map contains key 1"]);
 e2e_example_test!(run: e2e_memory_management, "memory_management.ko", contains: ["Hello World"]);
 e2e_example_test!(run: e2e_methods, "methods.ko", contains: ["10"]);

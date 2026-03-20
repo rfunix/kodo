@@ -1,0 +1,59 @@
+// Higher-order collection methods on List<Int>.
+// Demonstrates: map, filter, fold, reduce, count, any, all, find.
+
+module list_functional {
+    meta {
+        version: "1.0.0"
+        purpose: "Demonstrates all higher-order methods on List<Int>"
+        author: "Kodo Team"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        // map: double each element -> [2, 4, 6, 8, 10]
+        let doubled: List<Int> = nums.map(|x: Int| -> Int { x * 2 })
+        let first: Int = list_get(doubled, 0)
+        print_int(first)
+
+        // filter: keep evens -> [2, 4]
+        let evens: List<Int> = nums.filter(|x: Int| -> Bool { x % 2 == 0 })
+        let evens_len: Int = list_length(evens)
+        print_int(evens_len)
+
+        // fold: sum all -> 15
+        let total: Int = nums.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        print_int(total)
+
+        // reduce: same as fold, product -> 120
+        let product: Int = nums.reduce(1, |acc: Int, x: Int| -> Int { acc * x })
+        print_int(product)
+
+        // count: elements greater than 3 -> 2
+        let big_count: Int = nums.count(|x: Int| -> Bool { x > 3 })
+        print_int(big_count)
+
+        // any: is there an element > 4? -> true
+        let has_big: Bool = nums.any(|x: Int| -> Bool { x > 4 })
+        if has_big {
+            println("has_big: true")
+        } else {
+            println("has_big: false")
+        }
+
+        // all: are all elements positive? -> true
+        let all_pos: Bool = nums.all(|x: Int| -> Bool { x > 0 })
+        if all_pos {
+            println("all_pos: true")
+        } else {
+            println("all_pos: false")
+        }
+
+        return 0
+    }
+}
