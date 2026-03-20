@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.0] — 2026-03-20
+
+### Added
+
+- **LLVM backend** — new crate `kodo_codegen_llvm` emits textual LLVM IR (`.ll` files). No LLVM library dependency. Uses `llc` for compilation to object files. Complete MIR coverage including functions, control flow, structs, enums, strings, closures, green thread builtins
+- **`--backend=llvm|cranelift`** — choose codegen backend (default: cranelift for fast dev builds)
+- **`--emit-llvm`** — write `.ll` file without compiling (for inspection/debugging)
+- **`--release`** — alias for `--backend=llvm`, optimized builds via LLVM
+- 160+ runtime function declarations in LLVM IR
+- 38 unit tests in kodo_codegen_llvm
+
+### Changed
+
+- New crate: `kodo_codegen_llvm` (17th crate in workspace)
+
 ## [0.14.0] — 2026-03-20
 
 ### Added
