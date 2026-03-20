@@ -796,25 +796,154 @@ pub(crate) fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
         });
     }
 
-    // List_count(self: List<Int>) -> Int
+    // List_reduce(self: List<Int>, init: Int, f: (Int, Int) -> Int) -> Int
+    // Alias for fold — identical implementation.
     {
-        // Simply calls list_length(self)
+        let acc_var = "__reduce_acc";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: acc_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::Ident("init".to_string(), s),
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                kodo_ast::Stmt::Assign {
+                    span: s,
+                    name: acc_var.to_string(),
+                    value: kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![
+                            kodo_ast::Expr::Ident(acc_var.to_string(), s),
+                            kodo_ast::Expr::Ident(elem_var.to_string(), s),
+                        ],
+                        span: s,
+                    },
+                },
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(acc_var.to_string(), s)),
+        });
+
+        module.functions.push(kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: "List_reduce".to_string(),
+            visibility: kodo_ast::Visibility::Private,
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "init".to_string(),
+                    ty: kodo_ast::TypeExpr::Named("Int".to_string()),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: kodo_ast::TypeExpr::Function(
+                        vec![
+                            kodo_ast::TypeExpr::Named("Int".to_string()),
+                            kodo_ast::TypeExpr::Named("Int".to_string()),
+                        ],
+                        Box::new(kodo_ast::TypeExpr::Named("Int".to_string())),
+                    ),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
+            return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: body_stmts,
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        });
+    }
+
+    // List_count(self: List<Int>, f: (Int) -> Bool) -> Int
+    // Count elements satisfying predicate.
+    {
+        let count_var = "__count_result";
+        let mut body_stmts = vec![kodo_ast::Stmt::Let {
+            span: s,
+            mutable: true,
+            name: count_var.to_string(),
+            ty: None,
+            value: kodo_ast::Expr::IntLit(0, s),
+        }];
+        body_stmts.extend(make_iter_setup());
+        let while_body = kodo_ast::Block {
+            span: s,
+            stmts: vec![
+                make_elem_let(),
+                kodo_ast::Stmt::Expr(kodo_ast::Expr::If {
+                    span: s,
+                    condition: Box::new(kodo_ast::Expr::Call {
+                        callee: Box::new(kodo_ast::Expr::Ident("f".to_string(), s)),
+                        args: vec![kodo_ast::Expr::Ident(elem_var.to_string(), s)],
+                        span: s,
+                    }),
+                    then_branch: kodo_ast::Block {
+                        span: s,
+                        stmts: vec![kodo_ast::Stmt::Assign {
+                            span: s,
+                            name: count_var.to_string(),
+                            value: kodo_ast::Expr::BinaryOp {
+                                left: Box::new(kodo_ast::Expr::Ident(count_var.to_string(), s)),
+                                op: kodo_ast::BinOp::Add,
+                                right: Box::new(kodo_ast::Expr::IntLit(1, s)),
+                                span: s,
+                            },
+                        }],
+                    },
+                    else_branch: None,
+                }),
+            ],
+        };
+        body_stmts.push(kodo_ast::Stmt::While {
+            span: s,
+            condition: make_iter_condition(),
+            body: while_body,
+        });
+        body_stmts.push(make_iter_free());
+        body_stmts.push(kodo_ast::Stmt::Return {
+            span: s,
+            value: Some(kodo_ast::Expr::Ident(count_var.to_string(), s)),
+        });
+
         module.functions.push(kodo_ast::Function {
             id: kodo_ast::NodeId(0),
             name: "List_count".to_string(),
             visibility: kodo_ast::Visibility::Private,
-            params: vec![list_param.clone()],
+            params: vec![
+                list_param.clone(),
+                kodo_ast::Param {
+                    name: "f".to_string(),
+                    ty: fn_int_bool_ty.clone(),
+                    span: s,
+                    ownership: kodo_ast::Ownership::Owned,
+                },
+            ],
             return_type: kodo_ast::TypeExpr::Named("Int".to_string()),
             body: kodo_ast::Block {
                 span: s,
-                stmts: vec![kodo_ast::Stmt::Return {
-                    span: s,
-                    value: Some(kodo_ast::Expr::Call {
-                        callee: Box::new(kodo_ast::Expr::Ident("list_length".to_string(), s)),
-                        args: vec![kodo_ast::Expr::Ident("self".to_string(), s)],
-                        span: s,
-                    }),
-                }],
+                stmts: body_stmts,
             },
             span: s,
             is_async: false,

@@ -142,6 +142,9 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("List_fold".to_string())
         .or_insert(Type::Int);
     fn_return_types
+        .entry("List_reduce".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
         .entry("List_count".to_string())
         .or_insert(Type::Int);
     fn_return_types
