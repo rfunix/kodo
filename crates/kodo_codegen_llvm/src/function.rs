@@ -84,7 +84,7 @@ pub(crate) fn emit_function(
                         continue;
                     }
                     let alloca_reg = fresh_reg(&mut next_reg);
-                    emitter.indent(&format!("{alloca_reg} = alloca {ty_str}"));
+                    emitter.indent(&format!("{alloca_reg} = alloca {ty_str}, align 8"));
                     stack_locals.insert(local.id, alloca_reg);
                 }
             }

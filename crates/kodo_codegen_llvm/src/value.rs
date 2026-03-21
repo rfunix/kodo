@@ -246,12 +246,16 @@ pub(crate) fn emit_value(
                                  // Use alloca + store + load to reinterpret bytes as i64.
                                  // Alloca must be allocated before the load register to maintain SSA order.
             let alloca_reg = fresh_reg(next_reg);
-            emitter.indent(&format!("{alloca_reg} = alloca [{payload_size} x i8]"));
             emitter.indent(&format!(
-                "store [{payload_size} x i8] {payload_reg}, ptr {alloca_reg}"
+                "{alloca_reg} = alloca [{payload_size} x i8], align 8"
+            ));
+            emitter.indent(&format!(
+                "store [{payload_size} x i8] {payload_reg}, ptr {alloca_reg}, align 8"
             ));
             let result_reg = fresh_reg(next_reg);
-            emitter.indent(&format!("{result_reg} = load i64, ptr {alloca_reg}"));
+            emitter.indent(&format!(
+                "{result_reg} = load i64, ptr {alloca_reg}, align 8"
+            ));
             ValueResult::Register(result_reg)
         }
         Value::MakeDynTrait { value: inner, .. } => {
@@ -391,8 +395,8 @@ fn emit_binop(
         // Allocate output space for the result string (ptr + len via out params).
         let out_ptr = fresh_reg(next_reg);
         let out_len = fresh_reg(next_reg);
-        emitter.indent(&format!("{out_ptr} = alloca i64"));
-        emitter.indent(&format!("{out_len} = alloca i64"));
+        emitter.indent(&format!("{out_ptr} = alloca i64, align 8"));
+        emitter.indent(&format!("{out_len} = alloca i64, align 8"));
         // Convert alloca ptrs to i64 for the runtime call.
         let out_ptr_i64 = fresh_reg(next_reg);
         let out_len_i64 = fresh_reg(next_reg);
@@ -674,8 +678,12 @@ fn emit_enum_variant(
 
     // Use alloca to store the payload value as bytes, then insertvalue.
     let alloca_reg = fresh_reg(next_reg);
-    emitter.indent(&format!("{alloca_reg} = alloca [{payload_size} x i8]"));
-    emitter.indent(&format!("store {arg_ty_str} {val_reg}, ptr {alloca_reg}"));
+    emitter.indent(&format!(
+        "{alloca_reg} = alloca [{payload_size} x i8], align 8"
+    ));
+    emitter.indent(&format!(
+        "store {arg_ty_str} {val_reg}, ptr {alloca_reg}, align 8"
+    ));
     let bytes_reg = fresh_reg(next_reg);
     emitter.indent(&format!(
         "{bytes_reg} = load [{payload_size} x i8], ptr {alloca_reg}"

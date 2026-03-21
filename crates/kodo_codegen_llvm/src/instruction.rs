@@ -542,6 +542,47 @@ fn resolve_runtime_name(callee: &str) -> &str {
     }
 }
 
+/// Returns `true` if the runtime builtin returns a `String` via
+/// out-parameters `(out_ptr, out_len)` appended to the argument list
+/// and has a `void` return type.
+///
+/// These functions are declared as `void @fn(args..., i64, i64)` in the
+/// runtime, where the last two `i64` arguments are pointers to output
+/// locations for the resulting string's pointer and length.
+///
+/// The Cranelift backend handles these in `emit_string_returning_call`;
+/// the LLVM backend must do the same.
+fn is_string_returning_builtin(callee: &str) -> bool {
+    matches!(
+        callee,
+        "String_trim"
+            | "String_to_upper"
+            | "String_to_lower"
+            | "String_substring"
+            | "String_concat"
+            | "String_replace"
+            | "String_repeat"
+            | "Int_to_string"
+            | "Float64_to_string"
+            | "Bool_to_string"
+            | "json_get_string"
+            | "json_stringify"
+            | "time_format"
+            | "env_get"
+            | "env_set"
+            | "channel_recv_string"
+            | "list_join"
+            | "readln"
+            | "http_request_method"
+            | "http_request_path"
+            | "http_request_body"
+            | "db_row_get_string"
+            | "char_from_code"
+            | "format_int"
+            | "string_builder_to_string"
+    )
+}
+
 /// Emits LLVM IR for a function call instruction.
 #[allow(clippy::too_many_arguments)]
 fn emit_call(
@@ -567,6 +608,46 @@ fn emit_call(
     } else {
         resolve_runtime_name(callee)
     };
+
+    // -- Handle string-returning builtins via out-parameters --
+    // These runtime functions are declared as `void @fn(args..., i64, i64)`
+    // where the last two i64s are pointers to write (string_ptr, string_len).
+    // The LLVM codegen must NOT call them as if they return `{ i64, i64 }`.
+    if !is_user_fn && is_string_returning_builtin(callee) {
+        emit_string_returning_call(
+            dest,
+            callee,
+            args,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+            stack_locals,
+        );
+        return;
+    }
+
+    // -- Handle list_get / map_get / map_get_sk via out-parameters --
+    // These runtime functions are `void(args..., out_value, out_is_some)`.
+    if !is_user_fn && is_outparam_get_builtin(callee) {
+        emit_outparam_get_call(
+            dest,
+            callee,
+            args,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+            stack_locals,
+        );
+        return;
+    }
 
     // Emit argument values.
     let mut arg_strs = Vec::new();
@@ -627,6 +708,104 @@ fn emit_call(
         // Use the actual return type for store (may differ from local's declared type).
         store_typed_to_stack_or_alias(dest, &reg, &ret_ty, emitter, local_regs, stack_locals);
     }
+}
+
+/// Emits a call to a runtime builtin that returns a `String` via
+/// out-parameters rather than a return value.
+///
+/// Allocates two `alloca i64, align 8` slots for `out_ptr` and `out_len`,
+/// passes their addresses as the last two arguments, calls the function as
+/// `void`, then loads the results and constructs a `{ i64, i64 }` aggregate.
+#[allow(clippy::too_many_arguments)]
+fn emit_string_returning_call(
+    dest: LocalId,
+    callee: &str,
+    args: &[Value],
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
+) {
+    let runtime_name = resolve_runtime_name(callee);
+
+    // Emit the normal arguments first.
+    let mut arg_strs = Vec::new();
+    for arg in args {
+        let vr = emit_value(
+            arg,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+            stack_locals,
+        );
+        match vr {
+            ValueResult::Register(r) => {
+                let arg_ty = infer_value_type(arg, local_types);
+                if is_composite(&arg_ty) && arg_ty == Type::String {
+                    let ptr_reg = fresh_reg(next_reg);
+                    let len_reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
+                    emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
+                    arg_strs.push(format!("i64 {ptr_reg}"));
+                    arg_strs.push(format!("i64 {len_reg}"));
+                } else {
+                    let ty_str = llvm_type(&arg_ty, struct_defs, enum_defs);
+                    arg_strs.push(format!("{ty_str} {r}"));
+                }
+            }
+            ValueResult::Constant(val) => {
+                arg_strs.push(format!("i64 {val}"));
+            }
+            ValueResult::FloatConstant(val) => {
+                arg_strs.push(format!("double {val}"));
+            }
+            ValueResult::Void => {}
+        }
+    }
+
+    // Allocate out-parameter slots with proper alignment for i64.
+    let out_ptr = fresh_reg(next_reg);
+    let out_len = fresh_reg(next_reg);
+    emitter.indent(&format!("{out_ptr} = alloca i64, align 8"));
+    emitter.indent(&format!("{out_len} = alloca i64, align 8"));
+
+    // Pass the out-parameter addresses as i64 (ptrtoint).
+    let out_ptr_i64 = fresh_reg(next_reg);
+    let out_len_i64 = fresh_reg(next_reg);
+    emitter.indent(&format!("{out_ptr_i64} = ptrtoint ptr {out_ptr} to i64"));
+    emitter.indent(&format!("{out_len_i64} = ptrtoint ptr {out_len} to i64"));
+
+    arg_strs.push(format!("i64 {out_ptr_i64}"));
+    arg_strs.push(format!("i64 {out_len_i64}"));
+
+    let args_str = arg_strs.join(", ");
+    emitter.indent(&format!("call void @{runtime_name}({args_str})"));
+
+    // Load the results from the out-parameter slots.
+    let res_ptr = fresh_reg(next_reg);
+    let res_len = fresh_reg(next_reg);
+    emitter.indent(&format!("{res_ptr} = load i64, ptr {out_ptr}, align 8"));
+    emitter.indent(&format!("{res_len} = load i64, ptr {out_len}, align 8"));
+
+    // Construct the { i64, i64 } aggregate for the String result.
+    let s1 = fresh_reg(next_reg);
+    let s2 = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{s1} = insertvalue {{ i64, i64 }} undef, i64 {res_ptr}, 0"
+    ));
+    emitter.indent(&format!(
+        "{s2} = insertvalue {{ i64, i64 }} {s1}, i64 {res_len}, 1"
+    ));
+
+    store_typed_to_stack_or_alias(dest, &s2, "{ i64, i64 }", emitter, local_regs, stack_locals);
 }
 
 /// Emits LLVM IR for an indirect call instruction.
@@ -718,6 +897,105 @@ fn emit_indirect_call(
         emitter.indent(&format!("{reg} = call {fn_ty} {fn_ptr_reg}({args_str})"));
         store_typed_to_stack_or_alias(dest, &reg, &ret_str, emitter, local_regs, stack_locals);
     }
+}
+
+/// Returns `true` if the builtin uses out-parameters for its return value
+/// in the pattern `void fn(args..., out_value, out_is_some)`.
+///
+/// These functions are declared as `void @fn(args..., i64, i64)` in the
+/// runtime and return their result via out-parameter pointers.
+fn is_outparam_get_builtin(callee: &str) -> bool {
+    matches!(callee, "list_get" | "map_get" | "map_get_sk")
+}
+
+/// Emits a call to a runtime builtin that returns a value via out-parameters
+/// `(out_value, out_is_some)`.
+///
+/// The runtime function is `void(args..., out_value_ptr, out_is_some_ptr)`.
+/// We allocate two `i64` out-param slots, pass them, then load the value.
+#[allow(clippy::too_many_arguments)]
+fn emit_outparam_get_call(
+    dest: LocalId,
+    callee: &str,
+    args: &[Value],
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
+) {
+    let runtime_name = resolve_runtime_name(callee);
+
+    // Emit the normal arguments.
+    let mut arg_strs = Vec::new();
+    for arg in args {
+        let vr = emit_value(
+            arg,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+            stack_locals,
+        );
+        match vr {
+            ValueResult::Register(r) => {
+                let arg_ty = infer_value_type(arg, local_types);
+                if is_composite(&arg_ty) && arg_ty == Type::String {
+                    let ptr_reg = fresh_reg(next_reg);
+                    let len_reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
+                    emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
+                    arg_strs.push(format!("i64 {ptr_reg}"));
+                    arg_strs.push(format!("i64 {len_reg}"));
+                } else {
+                    let ty_str = llvm_type(&arg_ty, struct_defs, enum_defs);
+                    arg_strs.push(format!("{ty_str} {r}"));
+                }
+            }
+            ValueResult::Constant(val) => {
+                arg_strs.push(format!("i64 {val}"));
+            }
+            ValueResult::FloatConstant(val) => {
+                arg_strs.push(format!("double {val}"));
+            }
+            ValueResult::Void => {}
+        }
+    }
+
+    // Allocate out-parameter slots.
+    let out_value = fresh_reg(next_reg);
+    let out_is_some = fresh_reg(next_reg);
+    emitter.indent(&format!("{out_value} = alloca i64, align 8"));
+    emitter.indent(&format!("{out_is_some} = alloca i64, align 8"));
+
+    // Pass addresses as i64.
+    let out_value_i64 = fresh_reg(next_reg);
+    let out_is_some_i64 = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{out_value_i64} = ptrtoint ptr {out_value} to i64"
+    ));
+    emitter.indent(&format!(
+        "{out_is_some_i64} = ptrtoint ptr {out_is_some} to i64"
+    ));
+    arg_strs.push(format!("i64 {out_value_i64}"));
+    arg_strs.push(format!("i64 {out_is_some_i64}"));
+
+    let args_str = arg_strs.join(", ");
+    emitter.indent(&format!("call void @{runtime_name}({args_str})"));
+
+    // Load the result value from the out-parameter.
+    let result_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{result_reg} = load i64, ptr {out_value}, align 8"
+    ));
+
+    store_typed_to_stack_or_alias(dest, &result_reg, "i64", emitter, local_regs, stack_locals);
 }
 
 /// Infers the Kodo type of a MIR `Value` from context.
