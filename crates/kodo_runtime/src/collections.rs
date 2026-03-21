@@ -498,6 +498,35 @@ pub unsafe extern "C" fn kodo_list_any(list_ptr: i64, closure_handle: i64) -> i6
     0
 }
 
+/// Returns 1 if all elements satisfy the predicate closure, 0 otherwise.
+///
+/// The closure receives `(env_ptr, element)` and returns nonzero for true.
+/// Returns 1 for an empty list (vacuous truth).
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_all(list_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        if func(env_ptr, elem) == 0 {
+            return 0;
+        }
+    }
+    1
+}
+
 /// Joins a `List<String>` into a single string with the given separator.
 ///
 /// Each element in the list is an opaque pointer to a heap-allocated `[i64; 2]`

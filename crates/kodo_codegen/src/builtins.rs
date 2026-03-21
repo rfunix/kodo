@@ -630,6 +630,12 @@ fn declare_list_builtins(
         [types::I64, types::I64],
         types::I64
     );
+    decl_ret!(
+        "kodo_list_all",
+        "List_all",
+        [types::I64, types::I64],
+        types::I64
+    );
     decl_void!(
         "kodo_list_join",
         "list_join",
