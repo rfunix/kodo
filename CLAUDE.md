@@ -295,7 +295,7 @@ When implementing features, be honest about current limitations in error message
 - **Channels**: only `Int`, `Bool`, `String` — not generic
 - **Result<T, E>**: `E` is always `String` in practice — custom error enums don't work end-to-end yet
 - **String**: `substring` is byte-based, not Unicode-aware
-- **Contract violation**: calls `abort()` — no recovery mechanism yet
+- **Contract violation**: calls `abort()` by default — use `--contracts=recoverable` for graceful handling
 
 ## Task Completion Checklist — MANDATORY
 
