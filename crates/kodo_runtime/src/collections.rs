@@ -338,6 +338,166 @@ pub unsafe extern "C" fn kodo_list_sort(list_ptr: i64) {
     slice.sort_unstable();
 }
 
+/// Applies a closure to each element of a list, returning a new list with the results.
+///
+/// The closure receives `(env_ptr, element)` and returns the transformed value.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_map(list_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    let result = kodo_list_new();
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        let mapped = func(env_ptr, elem);
+        // SAFETY: result is valid, just created above.
+        unsafe { kodo_list_push(result, mapped) };
+    }
+    result
+}
+
+/// Filters a list by a predicate closure, returning a new list with matching elements.
+///
+/// The closure receives `(env_ptr, element)` and returns nonzero to keep the element.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_filter(list_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    let result = kodo_list_new();
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        if func(env_ptr, elem) != 0 {
+            // SAFETY: result is valid, just created above.
+            unsafe { kodo_list_push(result, elem) };
+        }
+    }
+    result
+}
+
+/// Folds a list left with an accumulator, returning the final accumulated value.
+///
+/// The closure receives `(env_ptr, accumulator, element)` and returns the new accumulator.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_fold(list_ptr: i64, init: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    let mut acc = init;
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        acc = func(env_ptr, acc, elem);
+    }
+    acc
+}
+
+/// Reduces a list left with an accumulator, returning the final accumulated value.
+///
+/// This is an alias for [`kodo_list_fold`] — the closure receives
+/// `(env_ptr, accumulator, element)` and returns the new accumulator.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_reduce(list_ptr: i64, init: i64, closure_handle: i64) -> i64 {
+    // SAFETY: same preconditions as kodo_list_fold.
+    unsafe { kodo_list_fold(list_ptr, init, closure_handle) }
+}
+
+/// Counts the number of elements in a list that satisfy a predicate closure.
+///
+/// The closure receives `(env_ptr, element)` and returns nonzero if the element
+/// should be counted.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_count(list_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    let mut count: i64 = 0;
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        if func(env_ptr, elem) != 0 {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Returns 1 if any element in the list satisfies the predicate closure, 0 otherwise.
+///
+/// Short-circuits on the first match. The closure receives `(env_ptr, element)`
+/// and returns nonzero if the element satisfies the predicate.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_any(list_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &*(list_ptr as *const KodoList) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    for i in 0..list.len {
+        // SAFETY: i < list.len, data is valid.
+        let elem = unsafe { *list.data.add(i) };
+        if func(env_ptr, elem) != 0 {
+            return 1;
+        }
+    }
+    0
+}
+
 /// Joins a `List<String>` into a single string with the given separator.
 ///
 /// Each element in the list is an opaque pointer to a heap-allocated `[i64; 2]`
@@ -2663,5 +2823,209 @@ mod tests {
     #[test]
     fn list_iterator_free_null() {
         kodo_list_iterator_free(0);
+    }
+
+    // --- Helper functions for higher-order method tests ---
+
+    /// A simple map function that doubles a value. Ignores env_ptr.
+    extern "C" fn double_fn(_env: i64, x: i64) -> i64 {
+        x * 2
+    }
+
+    /// A predicate that returns 1 for even numbers, 0 for odd. Ignores env_ptr.
+    extern "C" fn is_even_fn(_env: i64, x: i64) -> i64 {
+        if x % 2 == 0 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// An accumulator function that sums. Ignores env_ptr.
+    extern "C" fn sum_fn(_env: i64, acc: i64, x: i64) -> i64 {
+        acc + x
+    }
+
+    /// A predicate that returns 1 for values > 10. Ignores env_ptr.
+    extern "C" fn gt_ten_fn(_env: i64, x: i64) -> i64 {
+        if x > 10 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Helper to create a closure handle from a function pointer (no env).
+    fn make_closure(func: usize) -> i64 {
+        crate::memory::kodo_closure_new(func as i64, 0)
+    }
+
+    #[test]
+    fn list_map_doubles() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 3);
+        }
+        let closure = make_closure(double_fn as usize);
+        let result = unsafe { kodo_list_map(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(result) }, 3);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(result, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 2);
+        unsafe { kodo_list_get(result, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 4);
+        unsafe { kodo_list_get(result, 2, &mut val, &mut is_some) };
+        assert_eq!(val, 6);
+    }
+
+    #[test]
+    fn list_map_empty() {
+        let list = kodo_list_new();
+        let closure = make_closure(double_fn as usize);
+        let result = unsafe { kodo_list_map(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(result) }, 0);
+    }
+
+    #[test]
+    fn list_filter_even() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 4);
+        }
+        let closure = make_closure(is_even_fn as usize);
+        let result = unsafe { kodo_list_filter(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(result) }, 2);
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(result, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 2);
+        unsafe { kodo_list_get(result, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 4);
+    }
+
+    #[test]
+    fn list_filter_none_match() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 5);
+        }
+        let closure = make_closure(is_even_fn as usize);
+        let result = unsafe { kodo_list_filter(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(result) }, 0);
+    }
+
+    #[test]
+    fn list_fold_sum() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 3);
+        }
+        let closure = make_closure(sum_fn as usize);
+        let result = unsafe { kodo_list_fold(list, 0, closure) };
+        assert_eq!(result, 6);
+    }
+
+    #[test]
+    fn list_fold_with_init() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 20);
+        }
+        let closure = make_closure(sum_fn as usize);
+        let result = unsafe { kodo_list_fold(list, 100, closure) };
+        assert_eq!(result, 130);
+    }
+
+    #[test]
+    fn list_fold_empty() {
+        let list = kodo_list_new();
+        let closure = make_closure(sum_fn as usize);
+        let result = unsafe { kodo_list_fold(list, 42, closure) };
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn list_reduce_is_fold_alias() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 5);
+            kodo_list_push(list, 10);
+            kodo_list_push(list, 15);
+        }
+        let closure = make_closure(sum_fn as usize);
+        let result = unsafe { kodo_list_reduce(list, 0, closure) };
+        assert_eq!(result, 30);
+    }
+
+    #[test]
+    fn list_count_even() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 4);
+            kodo_list_push(list, 5);
+        }
+        let closure = make_closure(is_even_fn as usize);
+        let result = unsafe { kodo_list_count(list, closure) };
+        assert_eq!(result, 2);
+    }
+
+    #[test]
+    fn list_count_none() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 3);
+        }
+        let closure = make_closure(is_even_fn as usize);
+        let result = unsafe { kodo_list_count(list, closure) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn list_any_found() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 20);
+            kodo_list_push(list, 3);
+        }
+        let closure = make_closure(gt_ten_fn as usize);
+        let result = unsafe { kodo_list_any(list, closure) };
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn list_any_not_found() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 5);
+            kodo_list_push(list, 9);
+        }
+        let closure = make_closure(gt_ten_fn as usize);
+        let result = unsafe { kodo_list_any(list, closure) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn list_any_empty() {
+        let list = kodo_list_new();
+        let closure = make_closure(gt_ten_fn as usize);
+        let result = unsafe { kodo_list_any(list, closure) };
+        assert_eq!(result, 0);
     }
 }

@@ -1269,7 +1269,7 @@ fn all_builtins() -> Vec<Builtin> {
         },
         Builtin {
             name: "kodo_list_reduce",
-            params: &["i64", "i64"],
+            params: &["i64", "i64", "i64"],
             ret: "i64",
         },
         Builtin {

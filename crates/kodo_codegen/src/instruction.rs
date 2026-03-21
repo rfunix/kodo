@@ -166,7 +166,14 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
 pub(crate) fn is_list_allocating_builtin(callee: &str) -> bool {
     matches!(
         callee,
-        "list_new" | "String_split" | "String_lines" | "list_slice" | "args" | "dir_list"
+        "list_new"
+            | "String_split"
+            | "String_lines"
+            | "list_slice"
+            | "args"
+            | "dir_list"
+            | "List_map"
+            | "List_filter"
     )
 }
 

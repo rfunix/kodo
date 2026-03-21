@@ -528,6 +528,7 @@ fn declare_collection_builtins(
 }
 
 /// Declares list builtins (new, push, get, length, slice, sort, join, etc.).
+#[allow(clippy::too_many_lines)]
 fn declare_list_builtins(
     module: &mut ObjectModule,
     call_conv: CallConv,
@@ -592,6 +593,42 @@ fn declare_list_builtins(
         types::I64
     );
     decl_void!("kodo_list_sort", "list_sort", types::I64);
+    decl_ret!(
+        "kodo_list_map",
+        "List_map",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_filter",
+        "List_filter",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_fold",
+        "List_fold",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_reduce",
+        "List_reduce",
+        [types::I64, types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_count",
+        "List_count",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_list_any",
+        "List_any",
+        [types::I64, types::I64],
+        types::I64
+    );
     decl_void!(
         "kodo_list_join",
         "list_join",
