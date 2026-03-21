@@ -383,6 +383,16 @@ fn add_map_method_completions(items: &mut Vec<CompletionItem>) {
             "Returns a list of all key-value pairs",
             "() -> List<(K, V)>",
         ),
+        (
+            "merge",
+            "Creates a new map with entries from both maps (other overwrites on conflict)",
+            "(other: Map<K, V>) -> Map<K, V>",
+        ),
+        (
+            "filter",
+            "Creates a new map with entries matching the predicate",
+            "(f: (K, V) -> Bool) -> Map<K, V>",
+        ),
     ];
     for (name, doc, signature) in &map_methods {
         items.push(CompletionItem {

@@ -475,6 +475,16 @@ fn all_builtins() -> Vec<Builtin> {
             ret: "i64",
         },
         Builtin {
+            name: "kodo_map_merge",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_map_filter",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
             name: "kodo_map_insert_sk",
             params: &["i64", "i64", "i64", "i64"],
             ret: "void",

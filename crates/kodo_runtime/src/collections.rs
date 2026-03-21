@@ -972,6 +972,69 @@ pub unsafe extern "C" fn kodo_map_free(map_ptr: i64) {
     // map is dropped here, freeing the KodoMap struct itself.
 }
 
+/// Creates a new map containing all entries from both input maps.
+///
+/// Entries from `map_b` overwrite entries from `map_a` on key conflict.
+/// Returns a new map; the original maps are not modified.
+///
+/// # Safety
+///
+/// Both `map_a` and `map_b` must be valid pointers returned by `kodo_map_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_merge(map_a: i64, map_b: i64) -> i64 {
+    let result = kodo_map_new();
+    // SAFETY: caller guarantees both pointers are valid.
+    let a = unsafe { &*(map_a as *const KodoMap) };
+    let b = unsafe { &*(map_b as *const KodoMap) };
+    // Copy all entries from map_a.
+    for i in 0..a.capacity {
+        // SAFETY: i < a.capacity.
+        let entry = unsafe { &*a.entries.add(i) };
+        if entry.occupied {
+            unsafe { kodo_map_insert(result, entry.key, entry.value) };
+        }
+    }
+    // Copy all entries from map_b (overwrites on conflict).
+    for i in 0..b.capacity {
+        // SAFETY: i < b.capacity.
+        let entry = unsafe { &*b.entries.add(i) };
+        if entry.occupied {
+            unsafe { kodo_map_insert(result, entry.key, entry.value) };
+        }
+    }
+    result
+}
+
+/// Filters a map by a predicate closure, returning a new map with matching entries.
+///
+/// The closure receives `(env_ptr, key, value)` and returns nonzero to keep the entry.
+///
+/// # Safety
+///
+/// `map_ptr` must be a valid pointer returned by `kodo_map_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_map_filter(map_ptr: i64, closure_handle: i64) -> i64 {
+    // SAFETY: caller guarantees map_ptr was returned by kodo_map_new.
+    let map = unsafe { &*(map_ptr as *const KodoMap) };
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    // The closure signature is fn(env_ptr: i64, key: i64, value: i64) -> i64.
+    let func: fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    let result = kodo_map_new();
+    for i in 0..map.capacity {
+        // SAFETY: i < map.capacity.
+        let entry = unsafe { &*map.entries.add(i) };
+        if entry.occupied && func(env_ptr, entry.key, entry.value) != 0 {
+            unsafe { kodo_map_insert(result, entry.key, entry.value) };
+        }
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Map with String keys/values (monomorphized variants)
 // ---------------------------------------------------------------------------
@@ -3507,5 +3570,182 @@ mod tests {
     fn set_free_null() {
         // Freeing a null handle should be a no-op.
         unsafe { kodo_set_free(0) };
+    }
+
+    // -- Map merge tests --
+
+    #[test]
+    fn map_merge_basic() {
+        let a = kodo_map_new();
+        let b = kodo_map_new();
+        unsafe {
+            kodo_map_insert(a, 1, 10);
+            kodo_map_insert(a, 2, 20);
+            kodo_map_insert(b, 3, 30);
+            kodo_map_insert(b, 4, 40);
+        }
+        let merged = unsafe { kodo_map_merge(a, b) };
+        assert_eq!(unsafe { kodo_map_length(merged) }, 4);
+        let mut val = 0i64;
+        let mut is_some = 0i64;
+        unsafe { kodo_map_get(merged, 1, &mut val, &mut is_some) };
+        assert_eq!((val, is_some), (10, 1));
+        unsafe { kodo_map_get(merged, 3, &mut val, &mut is_some) };
+        assert_eq!((val, is_some), (30, 1));
+        unsafe { kodo_map_free(a) };
+        unsafe { kodo_map_free(b) };
+        unsafe { kodo_map_free(merged) };
+    }
+
+    #[test]
+    fn map_merge_overwrite_on_conflict() {
+        let a = kodo_map_new();
+        let b = kodo_map_new();
+        unsafe {
+            kodo_map_insert(a, 1, 10);
+            kodo_map_insert(a, 2, 20);
+            kodo_map_insert(b, 2, 99); // conflict: key 2
+            kodo_map_insert(b, 3, 30);
+        }
+        let merged = unsafe { kodo_map_merge(a, b) };
+        assert_eq!(unsafe { kodo_map_length(merged) }, 3);
+        let mut val = 0i64;
+        let mut is_some = 0i64;
+        // Key 2 should have b's value (99), not a's (20).
+        unsafe { kodo_map_get(merged, 2, &mut val, &mut is_some) };
+        assert_eq!((val, is_some), (99, 1));
+        unsafe { kodo_map_free(a) };
+        unsafe { kodo_map_free(b) };
+        unsafe { kodo_map_free(merged) };
+    }
+
+    #[test]
+    fn map_merge_empty_maps() {
+        let a = kodo_map_new();
+        let b = kodo_map_new();
+        let merged = unsafe { kodo_map_merge(a, b) };
+        assert_eq!(unsafe { kodo_map_length(merged) }, 0);
+        assert_eq!(unsafe { kodo_map_is_empty(merged) }, 1);
+        unsafe { kodo_map_free(a) };
+        unsafe { kodo_map_free(b) };
+        unsafe { kodo_map_free(merged) };
+    }
+
+    #[test]
+    fn map_merge_one_empty() {
+        let a = kodo_map_new();
+        let b = kodo_map_new();
+        unsafe {
+            kodo_map_insert(a, 1, 10);
+            kodo_map_insert(a, 2, 20);
+        }
+        let merged = unsafe { kodo_map_merge(a, b) };
+        assert_eq!(unsafe { kodo_map_length(merged) }, 2);
+        unsafe { kodo_map_free(a) };
+        unsafe { kodo_map_free(b) };
+        unsafe { kodo_map_free(merged) };
+    }
+
+    // -- Map filter tests --
+
+    #[test]
+    fn map_filter_keep_even_values() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 10);
+            kodo_map_insert(map, 2, 15);
+            kodo_map_insert(map, 3, 20);
+            kodo_map_insert(map, 4, 25);
+        }
+        // Closure that keeps entries where value is even.
+        extern "C" fn keep_even_values(_env: i64, _key: i64, value: i64) -> i64 {
+            if value % 2 == 0 {
+                1
+            } else {
+                0
+            }
+        }
+        let closure = crate::memory::kodo_closure_new(keep_even_values as i64, 0);
+        let filtered = unsafe { kodo_map_filter(map, closure) };
+        assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 1) }, 1); // value 10 is even
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 2) }, 0); // value 15 is odd
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 3) }, 1); // value 20 is even
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 4) }, 0); // value 25 is odd
+        unsafe { kodo_map_free(map) };
+        unsafe { kodo_map_free(filtered) };
+    }
+
+    #[test]
+    fn map_filter_keep_all() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 10);
+            kodo_map_insert(map, 2, 20);
+        }
+        extern "C" fn keep_all(_env: i64, _key: i64, _value: i64) -> i64 {
+            1
+        }
+        let closure = crate::memory::kodo_closure_new(keep_all as i64, 0);
+        let filtered = unsafe { kodo_map_filter(map, closure) };
+        assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
+        unsafe { kodo_map_free(map) };
+        unsafe { kodo_map_free(filtered) };
+    }
+
+    #[test]
+    fn map_filter_keep_none() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 1, 10);
+            kodo_map_insert(map, 2, 20);
+        }
+        extern "C" fn keep_none(_env: i64, _key: i64, _value: i64) -> i64 {
+            0
+        }
+        let closure = crate::memory::kodo_closure_new(keep_none as i64, 0);
+        let filtered = unsafe { kodo_map_filter(map, closure) };
+        assert_eq!(unsafe { kodo_map_length(filtered) }, 0);
+        unsafe { kodo_map_free(map) };
+        unsafe { kodo_map_free(filtered) };
+    }
+
+    #[test]
+    fn map_filter_empty_map() {
+        let map = kodo_map_new();
+        extern "C" fn keep_all(_env: i64, _key: i64, _value: i64) -> i64 {
+            1
+        }
+        let closure = crate::memory::kodo_closure_new(keep_all as i64, 0);
+        let filtered = unsafe { kodo_map_filter(map, closure) };
+        assert_eq!(unsafe { kodo_map_length(filtered) }, 0);
+        unsafe { kodo_map_free(map) };
+        unsafe { kodo_map_free(filtered) };
+    }
+
+    #[test]
+    fn map_filter_by_key() {
+        let map = kodo_map_new();
+        unsafe {
+            kodo_map_insert(map, 10, 100);
+            kodo_map_insert(map, 20, 200);
+            kodo_map_insert(map, 30, 300);
+        }
+        // Keep only entries where key > 15.
+        extern "C" fn key_gt_15(_env: i64, key: i64, _value: i64) -> i64 {
+            if key > 15 {
+                1
+            } else {
+                0
+            }
+        }
+        let closure = crate::memory::kodo_closure_new(key_gt_15 as i64, 0);
+        let filtered = unsafe { kodo_map_filter(map, closure) };
+        assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 10) }, 0);
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 20) }, 1);
+        assert_eq!(unsafe { kodo_map_contains_key(filtered, 30) }, 1);
+        unsafe { kodo_map_free(map) };
+        unsafe { kodo_map_free(filtered) };
     }
 }

@@ -45,6 +45,7 @@ expression: "labels.join(\"\\n\")"
 [method] difference
 [method] ends_with
 [method] entries
+[method] filter
 [method] get
 [method] get
 [method] insert
@@ -57,6 +58,7 @@ expression: "labels.join(\"\\n\")"
 [method] length
 [method] length
 [method] length
+[method] merge
 [method] pop
 [method] push
 [method] remove

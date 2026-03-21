@@ -179,7 +179,7 @@ pub(crate) fn is_list_allocating_builtin(callee: &str) -> bool {
 
 /// Returns true if the builtin allocates a new map on the heap.
 pub(crate) fn is_map_allocating_builtin(callee: &str) -> bool {
-    matches!(callee, "map_new")
+    matches!(callee, "map_new" | "map_merge" | "map_filter")
 }
 
 /// Returns true if the builtin allocates a new set on the heap.

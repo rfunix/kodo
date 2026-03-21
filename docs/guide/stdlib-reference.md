@@ -563,6 +563,37 @@ Returns `true` if the map has no entries.
 let empty: Bool = map_is_empty(scores)
 ```
 
+### `map.merge(other: Map<K, V>) -> Map<K, V>`
+
+Creates a new map containing all entries from both maps. Entries from `other` overwrite entries in the original map on key conflict.
+
+```rust
+let a: Map<Int, Int> = map_new()
+map_insert(a, 1, 10)
+map_insert(a, 2, 20)
+
+let b: Map<Int, Int> = map_new()
+map_insert(b, 2, 99)
+map_insert(b, 3, 30)
+
+let merged: Map<Int, Int> = a.merge(b)
+// merged contains {1: 10, 2: 99, 3: 30}
+```
+
+### `map.filter(f: (K, V) -> Bool) -> Map<K, V>`
+
+Creates a new map containing only the entries for which the predicate returns `true`.
+
+```rust
+let m: Map<Int, Int> = map_new()
+map_insert(m, 1, 10)
+map_insert(m, 2, 15)
+map_insert(m, 3, 20)
+
+let evens: Map<Int, Int> = m.filter(fn(k: Int, v: Int) -> Bool { return v % 2 == 0 })
+// evens contains {1: 10, 3: 20}
+```
+
 ### Map Iteration
 
 Use `.keys()` and `.values()` with `for-in` to iterate:

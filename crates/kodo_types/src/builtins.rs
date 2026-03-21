@@ -1102,6 +1102,7 @@ impl TypeChecker {
     ///
     /// Maps use integer keys and values at the runtime level. All values
     /// are represented as i64 (pointers or values).
+    #[allow(clippy::too_many_lines)]
     fn register_map_functions(&mut self) {
         self.env.insert(
             "map_new".to_string(),
@@ -1186,6 +1187,40 @@ impl TypeChecker {
                 Box::new(Type::Bool),
             ),
         );
+
+        let map_ty = Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]);
+
+        // Map.merge(other: Map<Int, Int>) -> Map<Int, Int>
+        self.method_lookup.insert(
+            ("Map".to_string(), "merge".to_string()),
+            (
+                "map_merge".to_string(),
+                vec![map_ty.clone(), map_ty.clone()],
+                map_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "map_merge".to_string(),
+            Type::Function(
+                vec![map_ty.clone(), map_ty.clone()],
+                Box::new(map_ty.clone()),
+            ),
+        );
+
+        // Map.filter(f: (Int, Int) -> Bool) -> Map<Int, Int>
+        let fn_kv_to_bool = Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Bool));
+        self.method_lookup.insert(
+            ("Map".to_string(), "filter".to_string()),
+            (
+                "map_filter".to_string(),
+                vec![map_ty.clone(), fn_kv_to_bool.clone()],
+                map_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "map_filter".to_string(),
+            Type::Function(vec![map_ty.clone(), fn_kv_to_bool], Box::new(map_ty)),
+        );
     }
 
     /// Registers builtin functions and methods for `Set<T>` operations.
@@ -1197,7 +1232,7 @@ impl TypeChecker {
     fn register_set_functions(&mut self) {
         let set_ty = Type::Generic("Set".to_string(), vec![Type::Int]);
 
-        // set_new() -> Set<Int>
+        // set_new() -> Set<Int>  (lowercase alias, like map_new/list_new)
         self.env.insert(
             "set_new".to_string(),
             Type::Function(vec![], Box::new(set_ty.clone())),

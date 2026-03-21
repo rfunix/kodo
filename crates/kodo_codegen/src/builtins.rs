@@ -699,6 +699,18 @@ fn declare_map_builtins_impl(
         [types::I64],
         types::I64
     );
+    decl_ret!(
+        "kodo_map_merge",
+        "map_merge",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_map_filter",
+        "map_filter",
+        [types::I64, types::I64],
+        types::I64
+    );
 
     // -- String Key variants (Map<String, Int> and Map<String, String>) --
     decl_void!(

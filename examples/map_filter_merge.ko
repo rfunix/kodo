@@ -1,0 +1,25 @@
+module map_filter_merge {
+    meta {
+        purpose: "Demonstrate Map.merge and Map.filter operations"
+        version: "1.0.0"
+    }
+
+    fn main() -> Int {
+        let a: Map<Int, Int> = map_new()
+        map_insert(a, 1, 10)
+        map_insert(a, 2, 20)
+        map_insert(a, 3, 30)
+
+        let b: Map<Int, Int> = map_new()
+        map_insert(b, 2, 99)
+        map_insert(b, 4, 40)
+
+        let merged: Map<Int, Int> = a.merge(b)
+        print_int(map_length(merged))
+
+        let big: Map<Int, Int> = merged.filter(|k: Int, v: Int| -> Bool { v > 25 })
+        print_int(map_length(big))
+
+        return 0
+    }
+}

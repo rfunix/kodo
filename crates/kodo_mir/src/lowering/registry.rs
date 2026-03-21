@@ -231,6 +231,14 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
             .or_insert(set_int.clone());
     }
 
+    // Map higher-order builtins — merge and filter both return Map<Int, Int>.
+    let map_int_int = Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]);
+    for name in &["map_merge", "map_filter"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(map_int_int.clone());
+    }
+
     register_stdlib_expansion_return_types(fn_return_types);
 
     register_sprint5_return_types(fn_return_types);

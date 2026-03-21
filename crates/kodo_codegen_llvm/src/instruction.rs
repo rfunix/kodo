@@ -402,6 +402,8 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "map_length" => "kodo_map_length",
         "map_remove" => "kodo_map_remove",
         "map_is_empty" => "kodo_map_is_empty",
+        "map_merge" => "kodo_map_merge",
+        "map_filter" => "kodo_map_filter",
         "map_insert_sk" => "kodo_map_insert_sk",
         "map_get_sk" => "kodo_map_get_sk",
         "map_contains_key_sk" => "kodo_map_contains_key_sk",
