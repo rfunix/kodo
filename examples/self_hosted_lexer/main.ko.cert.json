@@ -1,0 +1,176 @@
+{
+  "module": "self_hosted_lexer",
+  "purpose": "Self-hosted lexer: tokenize Kodo source code in Kodo itself",
+  "version": "1.0.0",
+  "compiled_at": "2026-03-21T01:41:29Z",
+  "compiler_version": "1.0.0",
+  "contracts": {
+    "requires_count": 0,
+    "ensures_count": 0,
+    "mode": "runtime",
+    "static_verified": 0,
+    "runtime_checks_needed": 0,
+    "failures": 0
+  },
+  "functions": [
+    "is_whitespace",
+    "is_digit",
+    "is_alpha",
+    "is_alnum",
+    "skip_whitespace_and_comments",
+    "read_number",
+    "keyword_or_ident",
+    "read_word",
+    "read_string",
+    "next_token",
+    "token_name",
+    "print_token",
+    "tokenize",
+    "main",
+    "Option_is_some",
+    "Option_is_none",
+    "Option_unwrap_or",
+    "Result_is_ok",
+    "Result_is_err",
+    "Result_unwrap_or",
+    "List_map",
+    "List_filter",
+    "List_fold",
+    "List_reduce",
+    "List_count",
+    "List_any",
+    "List_all"
+  ],
+  "function_details": [
+    {
+      "name": "main",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.92
+      }
+    }
+  ],
+  "type_check": "passed",
+  "source_hash": "sha256:4d880f0a21859e30985b92994fd5a111522088ae8b66386f7c73855b54dd334c",
+  "binary_hash": "sha256:1a7b2484eb671f54b22b4cf2ceb80ee5093cd49826c9b408f411379d102a3daf",
+  "certificate_hash": "sha256:a39045c669f1ee5dcc66df1531c76e3827d31d3e040547b1b72a9a8f790f3d77",
+  "parent_certificate": "sha256:4911db4f617180d97bc902f6a15ad42836fb79f434ecf110ea8ee57d7196bc55",
+  "diff_from_parent": {
+    "functions_added": [],
+    "functions_removed": [],
+    "contracts_changed": false,
+    "source_hash_changed": false
+  },
+  "function_contracts": [
+    {
+      "name": "is_whitespace",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "is_digit",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "is_alpha",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "is_alnum",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "skip_whitespace_and_comments",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "read_number",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "keyword_or_ident",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "read_word",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "read_string",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "next_token",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "token_name",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "print_token",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "tokenize",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "main",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_is_some",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_is_none",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_ok",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_err",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_map",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_filter",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_fold",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_reduce",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_count",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_any",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_all",
+      "contracts": "no_contracts"
+    }
+  ]
+}
