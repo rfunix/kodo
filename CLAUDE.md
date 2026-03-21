@@ -277,7 +277,7 @@ Collections are fully wired through type checker → codegen as of v0.3.0:
 
 Next priorities for collections:
 - **List**: sort, filter, map, fold, reduce, count, any (higher-order collection methods) -- DONE
-- **Map**: merge, filter
+- **Map**: merge, filter -- DONE
 - **Set<T>**: new collection type
 
 ### 6. LSP Is the Agent's Eyes
