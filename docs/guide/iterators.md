@@ -101,6 +101,72 @@ while i < 10 {
 }
 ```
 
+## List Higher-Order Methods
+
+In addition to the iterator protocol used by `for-in`, `List<T>` provides direct higher-order methods that accept closures. These methods do not require `.iter()` — they are called directly on the list value.
+
+### `list.map(fn)` — Transform Each Element
+
+Applies a closure to each element and returns a new list with the results:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let doubled: List<Int> = numbers.map(fn(x: Int) -> Int { return x * 2 })
+// doubled contains [2, 4, 6, 8, 10]
+```
+
+### `list.filter(fn)` — Keep Matching Elements
+
+Returns a new list containing only elements where the predicate returns `true`:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let evens: List<Int> = numbers.filter(fn(x: Int) -> Bool { return x % 2 == 0 })
+// evens contains [2, 4]
+```
+
+### `list.fold(init, fn)` — Reduce to a Single Value
+
+Folds the list into a single value using an accumulator and a combining closure:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let sum: Int = numbers.fold(0, fn(acc: Int, x: Int) -> Int { return acc + x })
+// sum is 15
+```
+
+### `list.reduce(init, fn)` — Alias for fold
+
+`reduce` behaves identically to `fold` — it takes an initial value and a combining closure:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let product: Int = numbers.reduce(1, fn(acc: Int, x: Int) -> Int { return acc * x })
+// product is 120
+```
+
+### `list.count(fn)` — Count Matching Elements
+
+Returns the number of elements that satisfy the predicate:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let even_count: Int = numbers.count(fn(x: Int) -> Bool { return x % 2 == 0 })
+// even_count is 2
+```
+
+### `list.any(fn)` — Check If Any Element Matches
+
+Returns `true` if at least one element satisfies the predicate:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+let has_big: Bool = numbers.any(fn(x: Int) -> Bool { return x > 3 })
+// has_big is true
+```
+
+These methods complement the iterator-based combinators documented in [Functional Combinators](functional.md). Use List methods when you want a concise, direct transformation without creating an explicit iterator.
+
 ## Examples
 
 - [`for_in.ko`](../../examples/for_in.ko) — for-in loops over collections

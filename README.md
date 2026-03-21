@@ -551,6 +551,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 cargo fmt --all          # Format
 cargo clippy --workspace -- -D warnings  # Lint
 cargo test --workspace   # Test
+make ui-test             # Run UI tests
+make validate-docs       # Validate documentation examples
+make validate-everything # Run ALL validation phases (fmt, clippy, test, ui-test, docs, examples, CLI)
 ```
 
 ## License

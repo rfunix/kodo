@@ -276,7 +276,7 @@ Collections are fully wired through type checker → codegen as of v0.3.0:
 - **JSON**: parse, stringify, get_string, get_int, get_bool, get_array, get_float ✓
 
 Next priorities for collections:
-- **List**: sort, filter, map, reduce (higher-order collection methods)
+- **List**: sort, filter, map, fold, reduce, count, any (higher-order collection methods) -- DONE
 - **Map**: merge, filter
 - **Set<T>**: new collection type
 

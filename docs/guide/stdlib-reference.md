@@ -498,7 +498,8 @@ These are called as methods on list values:
 | `list.map(f)` | `((T) -> U) -> List<U>` | Transform each element |
 | `list.filter(f)` | `((T) -> Bool) -> List<T>` | Keep elements matching predicate |
 | `list.fold(init, f)` | `(U, (U, T) -> U) -> U` | Reduce to a single value |
-| `list.count()` | `() -> Int` | Count elements |
+| `list.reduce(init, f)` | `(U, (U, T) -> U) -> U` | Alias for `fold` |
+| `list.count(f)` | `((T) -> Bool) -> Int` | Count elements satisfying predicate |
 | `list.any(f)` | `((T) -> Bool) -> Bool` | True if any element matches |
 | `list.all(f)` | `((T) -> Bool) -> Bool` | True if all elements match |
 

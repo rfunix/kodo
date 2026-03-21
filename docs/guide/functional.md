@@ -102,6 +102,23 @@ let sum: Int = numbers.iter().reduce(fn(acc: Int, x: Int) -> Int { return acc + 
 // sum is 6
 ```
 
+## Direct List Methods vs Iterator Combinators
+
+The combinators above (`map`, `filter`, `fold`, `count`, `any`, `all`, `reduce`) are also available as **direct methods on `List<T>`** without calling `.iter()` first. These direct methods accept closures and return results immediately:
+
+```rust
+let numbers: List<Int> = [1, 2, 3, 4, 5]
+
+// Direct List methods — no .iter() needed
+let doubled: List<Int> = numbers.map(fn(x: Int) -> Int { return x * 2 })
+let evens: List<Int> = numbers.filter(fn(x: Int) -> Bool { return x % 2 == 0 })
+let sum: Int = numbers.fold(0, fn(acc: Int, x: Int) -> Int { return acc + x })
+let has_big: Bool = numbers.any(fn(x: Int) -> Bool { return x > 3 })
+let even_count: Int = numbers.count(fn(x: Int) -> Bool { return x % 2 == 0 })
+```
+
+Use direct List methods for simple one-step operations. Use iterator-based pipelines (with `.iter()`) when chaining multiple transformations.
+
 ## Composing Pipelines
 
 Combinators chain naturally to form data processing pipelines:
