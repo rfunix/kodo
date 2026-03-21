@@ -54,23 +54,26 @@ pub(crate) fn llvm_type(
         Type::Generic(name, args) => {
             if name == "Option" || name == "Result" {
                 // Option/Result are enum-like at runtime.
+                // Use a uniform 16-byte payload for consistency with
+                // `Type::Enum("Option")` / `Type::Enum("Result")` which the MIR
+                // may emit interchangeably with the Generic form.
                 if name == "Option" {
-                    // Option<T>: discriminant + max(sizeof(T), 8)
                     let inner_size = if let Some(inner) = args.first() {
                         type_byte_size(inner, struct_defs, enum_defs).max(8)
                     } else {
                         8
                     };
-                    format!("{{ i64, [{inner_size} x i8] }}")
+                    // Use at least 16 to match the Enum("Option") default.
+                    let payload = inner_size.max(16);
+                    format!("{{ i64, [{payload} x i8] }}")
                 } else {
-                    // Result<T, E>: discriminant + max payload
                     let ok_size = args
                         .first()
                         .map_or(8, |t| type_byte_size(t, struct_defs, enum_defs).max(8));
                     let err_size = args
                         .get(1)
                         .map_or(16, |t| type_byte_size(t, struct_defs, enum_defs).max(8));
-                    let max_size = ok_size.max(err_size);
+                    let max_size = ok_size.max(err_size).max(16);
                     format!("{{ i64, [{max_size} x i8] }}")
                 }
             } else {
@@ -174,6 +177,35 @@ pub(crate) fn type_byte_size(
     }
 }
 
+/// Returns the payload byte count for an enum type, suitable for LLVM IR
+/// `[N x i8]` payload arrays. Returns 0 for payload-less enums.
+pub(crate) fn enum_payload_bytes(
+    ty: &Type,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+) -> usize {
+    match ty {
+        Type::Enum(name) => enum_payload_size(name, enum_defs, struct_defs),
+        Type::Generic(name, args) => {
+            if name == "Option" {
+                args.first()
+                    .map_or(8, |t| type_byte_size(t, struct_defs, enum_defs).max(8))
+            } else if name == "Result" {
+                let ok_size = args
+                    .first()
+                    .map_or(8, |t| type_byte_size(t, struct_defs, enum_defs).max(8));
+                let err_size = args
+                    .get(1)
+                    .map_or(16, |t| type_byte_size(t, struct_defs, enum_defs).max(8));
+                ok_size.max(err_size)
+            } else {
+                8
+            }
+        }
+        _ => 8,
+    }
+}
+
 /// Returns the maximum payload byte size across all variants of an enum.
 fn enum_payload_size(
     name: &str,
@@ -193,7 +225,9 @@ fn enum_payload_size(
             .max()
             .unwrap_or(0)
     } else {
-        8
+        // Unknown enum (e.g., unresolved "Option", "Result") — must match
+        // the default layout in `llvm_type` which uses 16 bytes payload.
+        16
     }
 }
 

@@ -10,6 +10,7 @@ use kodo_mir::{LocalId, Terminator};
 use kodo_types::Type;
 
 use crate::emitter::LLVMEmitter;
+use crate::function::StackLocals;
 use crate::instruction::fresh_reg;
 use crate::types::llvm_type;
 use crate::value::{emit_value, ValueResult};
@@ -26,6 +27,7 @@ use crate::value::{emit_value, ValueResult};
 /// * `struct_defs` - Struct type definitions.
 /// * `enum_defs` - Enum type definitions.
 /// * `string_constants` - String constant pool.
+/// * `stack_locals` - Locals with alloca stack slots (for multi-block functions).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_terminator(
     term: &Terminator,
@@ -37,6 +39,7 @@ pub(crate) fn emit_terminator(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) {
     match term {
         Terminator::Return(value) => {
@@ -53,6 +56,7 @@ pub(crate) fn emit_terminator(
                     struct_defs,
                     enum_defs,
                     string_constants,
+                    stack_locals,
                 );
                 match vr {
                     ValueResult::Register(reg) => {
@@ -88,6 +92,7 @@ pub(crate) fn emit_terminator(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
             let cond_reg = match vr {
                 ValueResult::Register(r) => r,
@@ -135,6 +140,7 @@ mod tests {
         let mut next_reg = 0;
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
 
         emit_terminator(
@@ -147,6 +153,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
 
         let output = emitter.finish();
@@ -161,6 +168,7 @@ mod tests {
         let mut next_reg = 0;
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
 
         emit_terminator(
@@ -173,6 +181,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
 
         let output = emitter.finish();
@@ -187,6 +196,7 @@ mod tests {
         let mut next_reg = 0;
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
 
         emit_terminator(
@@ -199,6 +209,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
 
         let output = emitter.finish();
@@ -213,6 +224,7 @@ mod tests {
         let mut next_reg = 0;
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
 
         emit_terminator(
@@ -225,6 +237,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
 
         let output = emitter.finish();

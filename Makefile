@@ -35,6 +35,10 @@ ui-test:
 ui-bless:
 	cargo run -p kotest -- tests/ui/ --bless
 
+# Test LLVM backend against all examples
+llvm-test:
+	./scripts/test-llvm-backend.sh
+
 # All checks (CI-equivalent)
 ci: fmt-check clippy test ui-test doc
 

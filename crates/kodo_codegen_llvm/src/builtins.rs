@@ -20,13 +20,16 @@ struct Builtin {
 /// Generates all `declare` statements for runtime builtins.
 pub(crate) fn emit_runtime_declarations() -> Vec<String> {
     let builtins = all_builtins();
-    builtins
+    let mut decls: Vec<String> = builtins
         .iter()
         .map(|b| {
             let params = b.params.join(", ");
             format!("declare {} @{}({})", b.ret, b.name, params)
         })
-        .collect()
+        .collect();
+    // __env_pack is variadic (0–N i64 args) — declared separately.
+    decls.push("declare i64 @__env_pack(...)".to_string());
+    decls
 }
 
 /// Returns the complete list of runtime builtins.
@@ -1108,6 +1111,28 @@ fn all_builtins() -> Vec<Builtin> {
             name: "kodo_prop_gen_string",
             params: &["i64"],
             ret: "i64",
+        },
+        // -- Async string helpers --
+        Builtin {
+            name: "__future_await_string",
+            params: &["i64"],
+            ret: "{ i64, i64 }",
+        },
+        Builtin {
+            name: "__future_complete_string",
+            params: &["i64", "i64", "i64"],
+            ret: "void",
+        },
+        // -- Closure environment helpers --
+        Builtin {
+            name: "__env_load",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "__env_load_string",
+            params: &["i64", "i64", "i64"],
+            ret: "void",
         },
         // -- Stdlib expansion (Milestone 8) --
         Builtin {

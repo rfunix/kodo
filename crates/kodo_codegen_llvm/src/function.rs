@@ -13,6 +13,9 @@ use crate::instruction::{emit_instruction, fresh_reg};
 use crate::terminator::emit_terminator;
 use crate::types::{llvm_return_type, llvm_type};
 
+/// Set of `LocalId`s that have stack slots (alloca) for cross-block SSA safety.
+pub(crate) type StackLocals = HashMap<LocalId, String>;
+
 /// Emits LLVM IR for a single MIR function.
 ///
 /// Returns the function definition lines (including `define` and closing `}`).
@@ -61,11 +64,30 @@ pub(crate) fn emit_function(
     let params_str = param_strs.join(", ");
     emitter.line(&format!("define {ret_ty} @{fn_name}({params_str}) {{"));
 
+    // For multi-block functions, allocate stack slots for non-parameter locals
+    // to avoid SSA domination issues when a value defined in one block is used
+    // in another block that it doesn't dominate.
+    let mut stack_locals: StackLocals = HashMap::new();
+    let needs_stack = func.blocks.len() > 1;
+
     // Emit basic blocks.
     for (block_idx, block) in func.blocks.iter().enumerate() {
         // Block label (entry block is special in LLVM — first block has no explicit label).
         if block_idx == 0 {
             emitter.line("entry:");
+
+            // Emit allocas for non-parameter locals in the entry block.
+            if needs_stack {
+                for local in func.locals.iter().skip(func.param_count) {
+                    let ty_str = llvm_type(&local.ty, struct_defs, enum_defs);
+                    if ty_str == "void" {
+                        continue;
+                    }
+                    let alloca_reg = fresh_reg(&mut next_reg);
+                    emitter.indent(&format!("{alloca_reg} = alloca {ty_str}"));
+                    stack_locals.insert(local.id, alloca_reg);
+                }
+            }
         } else {
             emitter.line(&format!("bb{}:", block.id.0));
         }
@@ -82,11 +104,11 @@ pub(crate) fn emit_function(
                 enum_defs,
                 string_constants,
                 user_functions,
+                &stack_locals,
             );
         }
 
         // Emit terminator.
-        // If this is the entry block, adjust Goto/Branch to use `entry` label mapping.
         emit_terminator(
             &block.terminator,
             &mut emitter,
@@ -97,6 +119,7 @@ pub(crate) fn emit_function(
             struct_defs,
             enum_defs,
             string_constants,
+            &stack_locals,
         );
     }
 

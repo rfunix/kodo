@@ -10,6 +10,7 @@ use kodo_mir::{Instruction, LocalId, Value};
 use kodo_types::Type;
 
 use crate::emitter::LLVMEmitter;
+use crate::function::StackLocals;
 use crate::types::{is_composite, llvm_type};
 use crate::value::{emit_value, ValueResult};
 
@@ -25,6 +26,7 @@ use crate::value::{emit_value, ValueResult};
 /// * `enum_defs` - Enum type definitions.
 /// * `string_constants` - Accumulated string constants to emit at module level.
 /// * `user_functions` - Set of user-defined function names (for dispatch).
+/// * `stack_locals` - Locals with alloca stack slots (for multi-block functions).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_instruction(
     instr: &Instruction,
@@ -36,6 +38,7 @@ pub(crate) fn emit_instruction(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
     user_functions: &[String],
+    stack_locals: &StackLocals,
 ) {
     match instr {
         Instruction::Assign(dest, value) => {
@@ -49,6 +52,7 @@ pub(crate) fn emit_instruction(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
         }
         Instruction::Call { dest, callee, args } => {
@@ -64,6 +68,7 @@ pub(crate) fn emit_instruction(
                 enum_defs,
                 string_constants,
                 user_functions,
+                stack_locals,
             );
         }
         Instruction::IndirectCall {
@@ -86,27 +91,135 @@ pub(crate) fn emit_instruction(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
         }
         Instruction::VirtualCall { dest, .. } => {
             // Virtual calls are complex; for now emit a placeholder.
             let reg = fresh_reg(next_reg);
-            local_regs.insert(*dest, reg.clone());
+            store_to_stack_or_alias(*dest, &reg, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
             emitter.indent(&format!("{reg} = add i64 0, 0 ; TODO: virtual call"));
         }
         Instruction::IncRef(local) => {
-            if let Some(reg) = local_regs.get(local) {
-                emitter.indent(&format!("call void @kodo_rc_inc(i64 {reg})"));
+            let local_ty = local_types.get(local).cloned().unwrap_or(Type::Int);
+            // Skip IncRef for composite types that aren't simple pointers.
+            if !is_composite(&local_ty) {
+                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                if let Some(r) = reg {
+                    emitter.indent(&format!("call void @kodo_rc_inc(i64 {r})"));
+                }
+            } else if local_ty == Type::String {
+                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                if let Some(r) = reg {
+                    let ptr_reg = fresh_reg(next_reg);
+                    let len_reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
+                    emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
+                    emitter.indent(&format!("call void @kodo_rc_inc_string(i64 {ptr_reg}, i64 {len_reg})"));
+                }
             }
+            // For enums, structs, Option, Result — skip IncRef (no heap alloc to refcount).
         }
         Instruction::DecRef(local) => {
-            if let Some(reg) = local_regs.get(local) {
-                emitter.indent(&format!("call void @kodo_rc_dec(i64 {reg})"));
+            let local_ty = local_types.get(local).cloned().unwrap_or(Type::Int);
+            // Skip DecRef for composite types that aren't simple pointers.
+            if !is_composite(&local_ty) {
+                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                if let Some(r) = reg {
+                    emitter.indent(&format!("call void @kodo_rc_dec(i64 {r})"));
+                }
+            } else if local_ty == Type::String {
+                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                if let Some(r) = reg {
+                    let ptr_reg = fresh_reg(next_reg);
+                    let len_reg = fresh_reg(next_reg);
+                    emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
+                    emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
+                    emitter.indent(&format!("call void @kodo_rc_dec_string(i64 {ptr_reg}, i64 {len_reg})"));
+                }
             }
+            // For enums, structs, Option, Result — skip DecRef (no heap alloc to refcount).
         }
         Instruction::Yield => {
             emitter.indent("call void @kodo_green_maybe_yield()");
         }
+    }
+}
+
+/// Loads a local from its stack slot (if it has one) or returns the register alias.
+/// Returns `None` if the local has never been assigned.
+#[allow(clippy::too_many_arguments)]
+fn load_local_reg(
+    local: LocalId,
+    emitter: &mut LLVMEmitter,
+    local_regs: &HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    stack_locals: &StackLocals,
+) -> Option<String> {
+    if let Some(alloca_reg) = stack_locals.get(&local) {
+        let ty = local_types.get(&local).cloned().unwrap_or(Type::Int);
+        let ty_str = llvm_type(&ty, struct_defs, enum_defs);
+        if ty_str == "void" {
+            return None;
+        }
+        let reg = fresh_reg(next_reg);
+        emitter.indent(&format!("{reg} = load {ty_str}, ptr {alloca_reg}"));
+        Some(reg)
+    } else {
+        local_regs.get(&local).cloned()
+    }
+}
+
+/// Stores a value to the stack slot for a local, or aliases it in the register map.
+///
+/// When the value type may not match the declared local type (e.g., an `i64`
+/// extracted from an enum payload being stored into a `{ i64, i64 }` String
+/// slot), we store through `i64` type to avoid LLVM type mismatches.
+/// The `alloca` slot is always at least 8 bytes, so this is safe.
+#[allow(clippy::too_many_arguments)]
+fn store_to_stack_or_alias(
+    dest: LocalId,
+    reg: &str,
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    _next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    stack_locals: &StackLocals,
+) {
+    if let Some(alloca_reg) = stack_locals.get(&dest) {
+        let ty = local_types.get(&dest).cloned().unwrap_or(Type::Int);
+        let ty_str = llvm_type(&ty, struct_defs, enum_defs);
+        if ty_str != "void" {
+            emitter.indent(&format!("store {ty_str} {reg}, ptr {alloca_reg}"));
+        }
+    } else {
+        local_regs.insert(dest, reg.to_string());
+    }
+}
+
+/// Stores a value to the stack slot using a known value type, or aliases in the register map.
+///
+/// Use this variant when the value's LLVM type may differ from the local's declared type.
+#[allow(clippy::too_many_arguments)]
+fn store_typed_to_stack_or_alias(
+    dest: LocalId,
+    reg: &str,
+    value_ty_str: &str,
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    stack_locals: &StackLocals,
+) {
+    if let Some(alloca_reg) = stack_locals.get(&dest) {
+        if value_ty_str != "void" {
+            emitter.indent(&format!("store {value_ty_str} {reg}, ptr {alloca_reg}"));
+        }
+    } else {
+        local_regs.insert(dest, reg.to_string());
     }
 }
 
@@ -129,8 +242,11 @@ fn emit_assign(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) {
     let dest_ty = local_types.get(&dest).cloned().unwrap_or(Type::Int);
+    // Infer the value's type to handle type mismatches between value and dest.
+    let value_ty = crate::value::infer_value_type_ext(value, local_types, struct_defs);
     let vr = emit_value(
         value,
         emitter,
@@ -140,13 +256,20 @@ fn emit_assign(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
 
     match vr {
         ValueResult::Register(reg) => {
-            // If the dest type differs from what the value produced, we may
-            // need a type-appropriate move. For simplicity, just alias.
-            local_regs.insert(dest, reg);
+            // Use the value's inferred type for the store when we have a stack slot.
+            // This handles type mismatches (e.g., i64 from EnumPayload into a String slot,
+            // or { i64, i64 } from FieldGet into what infer_value_type_simple calls Int).
+            if stack_locals.contains_key(&dest) {
+                let value_ty_str = llvm_type(&value_ty, struct_defs, enum_defs);
+                store_typed_to_stack_or_alias(dest, &reg, &value_ty_str, emitter, local_regs, stack_locals);
+            } else {
+                local_regs.insert(dest, reg);
+            }
         }
         ValueResult::Constant(val) => {
             let ty_str = llvm_type(&dest_ty, struct_defs, enum_defs);
@@ -154,14 +277,16 @@ fn emit_assign(
                 // Unit assignment - no register needed.
                 return;
             }
+            // For integer constants, use i64 for the store (which is the actual
+            // type of the constant, regardless of dest_ty).
             let reg = fresh_reg(next_reg);
-            emitter.indent(&format!("{reg} = add {ty_str} {val}, 0"));
-            local_regs.insert(dest, reg);
+            emitter.indent(&format!("{reg} = add i64 {val}, 0"));
+            store_typed_to_stack_or_alias(dest, &reg, "i64", emitter, local_regs, stack_locals);
         }
         ValueResult::FloatConstant(val) => {
             let reg = fresh_reg(next_reg);
             emitter.indent(&format!("{reg} = fadd double {val}, 0.0"));
-            local_regs.insert(dest, reg);
+            store_typed_to_stack_or_alias(dest, &reg, "double", emitter, local_regs, stack_locals);
         }
         ValueResult::Void => {
             // Unit type, nothing to assign.
@@ -263,6 +388,8 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "channel_generic_send" => "kodo_channel_generic_send",
         "channel_generic_recv" => "kodo_channel_generic_recv",
         "channel_generic_free" => "kodo_channel_generic_free",
+        "env_get" => "kodo_env_get",
+        "env_set" => "kodo_env_set",
         "args" => "kodo_args",
         "readln" => "kodo_readln",
         "exit" => "kodo_exit",
@@ -297,6 +424,12 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "String_split" => "kodo_string_split",
         "String_lines" => "kodo_string_lines",
         "String_parse_int" => "kodo_string_parse_int",
+        "char_at" => "kodo_string_char_at",
+        "char_from_code" => "kodo_char_from_code",
+        "is_alpha" => "kodo_is_alpha",
+        "is_digit" => "kodo_is_digit",
+        "is_alphanumeric" => "kodo_is_alphanumeric",
+        "is_whitespace" => "kodo_is_whitespace",
         "String_char_at" => "kodo_string_char_at",
         "String_trim" => "kodo_string_trim",
         "String_to_upper" => "kodo_string_to_upper",
@@ -367,6 +500,7 @@ fn emit_call(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
     user_functions: &[String],
+    stack_locals: &StackLocals,
 ) {
     let dest_ty = local_types.get(&dest).cloned().unwrap_or(Type::Unit);
 
@@ -390,6 +524,7 @@ fn emit_call(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         );
         match vr {
             ValueResult::Register(r) => {
@@ -428,7 +563,8 @@ fn emit_call(
         emitter.indent(&format!(
             "{reg} = call {ret_ty} @{runtime_name}({args_str})"
         ));
-        local_regs.insert(dest, reg);
+        // Use the actual return type for store (may differ from local's declared type).
+        store_typed_to_stack_or_alias(dest, &reg, &ret_ty, emitter, local_regs, stack_locals);
     }
 }
 
@@ -447,6 +583,7 @@ fn emit_indirect_call(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) {
     // Emit the callee value (a function pointer).
     let callee_vr = emit_value(
@@ -458,6 +595,7 @@ fn emit_indirect_call(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
     let callee_reg = match callee_vr {
         ValueResult::Register(r) => r,
@@ -493,6 +631,7 @@ fn emit_indirect_call(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         );
         let ty_str = param_types
             .get(i)
@@ -516,29 +655,16 @@ fn emit_indirect_call(
     } else {
         let reg = fresh_reg(next_reg);
         emitter.indent(&format!("{reg} = call {fn_ty} {fn_ptr_reg}({args_str})"));
-        local_regs.insert(dest, reg);
+        store_typed_to_stack_or_alias(dest, &reg, &ret_str, emitter, local_regs, stack_locals);
     }
 }
 
 /// Infers the Kodo type of a MIR `Value` from context.
+///
+/// Delegates to `infer_value_type_simple` which recursively handles
+/// `BinOp` and `Neg` to correctly propagate String/Float types.
 fn infer_value_type(value: &Value, local_types: &HashMap<LocalId, Type>) -> Type {
-    match value {
-        Value::FloatConst(_) => Type::Float64,
-        Value::BoolConst(_) | Value::Not(_) => Type::Bool,
-        Value::StringConst(_) => Type::String,
-        Value::Local(id) => local_types.get(id).cloned().unwrap_or(Type::Int),
-        Value::StructLit { name, .. } => Type::Struct(name.clone()),
-        Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
-        Value::Unit => Type::Unit,
-        Value::IntConst(_)
-        | Value::BinOp(_, _, _)
-        | Value::Neg(_)
-        | Value::FieldGet { .. }
-        | Value::EnumDiscriminant(_)
-        | Value::EnumPayload { .. }
-        | Value::FuncRef(_)
-        | Value::MakeDynTrait { .. } => Type::Int,
-    }
+    crate::value::infer_value_type_simple(value, local_types)
 }
 
 #[cfg(test)]

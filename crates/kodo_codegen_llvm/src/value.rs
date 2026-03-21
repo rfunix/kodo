@@ -10,8 +10,9 @@ use kodo_mir::{LocalId, Value};
 use kodo_types::Type;
 
 use crate::emitter::LLVMEmitter;
+use crate::function::StackLocals;
 use crate::instruction::fresh_reg;
-use crate::types::llvm_type;
+use crate::types::{enum_payload_bytes, llvm_type};
 
 /// The result of emitting a value: either a register name, a constant literal,
 /// a float constant, or void (for unit values).
@@ -37,6 +38,7 @@ pub(crate) fn emit_value(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) -> ValueResult {
     match value {
         Value::IntConst(n) => ValueResult::Constant(n.to_string()),
@@ -47,6 +49,17 @@ pub(crate) fn emit_value(
         Value::BoolConst(b) => ValueResult::Constant(if *b { "1" } else { "0" }.to_string()),
         Value::StringConst(s) => emit_string_constant(s, emitter, next_reg, string_constants),
         Value::Local(id) => {
+            // If this local has a stack slot, load from it.
+            if let Some(alloca_reg) = stack_locals.get(id) {
+                let ty = local_types.get(id).unwrap_or(&Type::Int);
+                let ty_str = llvm_type(ty, struct_defs, enum_defs);
+                if ty_str == "void" {
+                    return ValueResult::Void;
+                }
+                let reg = fresh_reg(next_reg);
+                emitter.indent(&format!("{reg} = load {ty_str}, ptr {alloca_reg}"));
+                return ValueResult::Register(reg);
+            }
             if let Some(reg) = local_regs.get(id) {
                 ValueResult::Register(reg.clone())
             } else {
@@ -85,6 +98,7 @@ pub(crate) fn emit_value(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         ),
         Value::Not(inner) => {
             let vr = emit_value(
@@ -96,6 +110,7 @@ pub(crate) fn emit_value(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
             let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "i64");
             let reg = fresh_reg(next_reg);
@@ -113,6 +128,7 @@ pub(crate) fn emit_value(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
             if matches!(inner_ty, Type::Float64 | Type::Float32) {
                 let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "double");
@@ -142,6 +158,7 @@ pub(crate) fn emit_value(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         ),
         Value::FieldGet {
             object,
@@ -158,6 +175,7 @@ pub(crate) fn emit_value(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         ),
         Value::EnumVariant {
             discriminant,
@@ -175,8 +193,11 @@ pub(crate) fn emit_value(
             struct_defs,
             enum_defs,
             string_constants,
+            stack_locals,
         ),
         Value::EnumDiscriminant(inner) => {
+            let inner_ty = infer_value_type_simple(inner, local_types);
+            let enum_ty_str = llvm_type(&inner_ty, struct_defs, enum_defs);
             let vr = emit_value(
                 inner,
                 emitter,
@@ -186,11 +207,12 @@ pub(crate) fn emit_value(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
-            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "{ i64, [8 x i8] }");
+            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, &enum_ty_str);
             let reg = fresh_reg(next_reg);
             emitter.indent(&format!(
-                "{reg} = extractvalue {{ i64, [8 x i8] }} {inner_reg}, 0"
+                "{reg} = extractvalue {enum_ty_str} {inner_reg}, 0"
             ));
             ValueResult::Register(reg)
         }
@@ -198,7 +220,10 @@ pub(crate) fn emit_value(
             value: inner,
             field_index,
         } => {
-            // Extract payload from enum. Simplified: just extract the i64 at offset.
+            let inner_ty = infer_value_type_simple(inner, local_types);
+            let enum_ty_str = llvm_type(&inner_ty, struct_defs, enum_defs);
+            let payload_size = enum_payload_bytes(&inner_ty, struct_defs, enum_defs);
+            // Extract payload from enum.
             let vr = emit_value(
                 inner,
                 emitter,
@@ -208,20 +233,24 @@ pub(crate) fn emit_value(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
-            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, "{ i64, [8 x i8] }");
-            // Payload is in [8 x i8] at index 1. Extract and bitcast.
+            let inner_reg = value_result_to_reg(&vr, emitter, next_reg, &enum_ty_str);
+            // Payload is in [N x i8] at index 1. Extract and bitcast.
             let payload_reg = fresh_reg(next_reg);
             emitter.indent(&format!(
-                "{payload_reg} = extractvalue {{ i64, [8 x i8] }} {inner_reg}, 1"
+                "{payload_reg} = extractvalue {enum_ty_str} {inner_reg}, 1"
             ));
             // For simplicity, bitcast the first 8 bytes to i64.
             let _ = field_index; // We just grab the first i64 of the payload.
-            let result_reg = fresh_reg(next_reg);
             // Use alloca + store + load to reinterpret bytes as i64.
+            // Alloca must be allocated before the load register to maintain SSA order.
             let alloca_reg = fresh_reg(next_reg);
-            emitter.indent(&format!("{alloca_reg} = alloca [8 x i8]"));
-            emitter.indent(&format!("store [8 x i8] {payload_reg}, ptr {alloca_reg}"));
+            emitter.indent(&format!("{alloca_reg} = alloca [{payload_size} x i8]"));
+            emitter.indent(&format!(
+                "store [{payload_size} x i8] {payload_reg}, ptr {alloca_reg}"
+            ));
+            let result_reg = fresh_reg(next_reg);
             emitter.indent(&format!("{result_reg} = load i64, ptr {alloca_reg}"));
             ValueResult::Register(result_reg)
         }
@@ -236,6 +265,7 @@ pub(crate) fn emit_value(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             )
         }
     }
@@ -314,6 +344,7 @@ fn emit_binop(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) -> ValueResult {
     let lhs_ty = infer_value_type_simple(lhs, local_types);
     let is_float = matches!(lhs_ty, Type::Float64 | Type::Float32);
@@ -328,6 +359,7 @@ fn emit_binop(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
     let rhs_vr = emit_value(
         rhs,
@@ -338,7 +370,51 @@ fn emit_binop(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
+
+    // String concatenation: emit runtime call.
+    if is_string && matches!(op, BinOp::Add) {
+        let str_ty = "{ i64, i64 }";
+        let l = value_result_to_reg(&lhs_vr, emitter, next_reg, str_ty);
+        let r = value_result_to_reg(&rhs_vr, emitter, next_reg, str_ty);
+        // Extract ptr and len from both strings.
+        let l_ptr = fresh_reg(next_reg);
+        let l_len = fresh_reg(next_reg);
+        let r_ptr = fresh_reg(next_reg);
+        let r_len = fresh_reg(next_reg);
+        emitter.indent(&format!("{l_ptr} = extractvalue {{ i64, i64 }} {l}, 0"));
+        emitter.indent(&format!("{l_len} = extractvalue {{ i64, i64 }} {l}, 1"));
+        emitter.indent(&format!("{r_ptr} = extractvalue {{ i64, i64 }} {r}, 0"));
+        emitter.indent(&format!("{r_len} = extractvalue {{ i64, i64 }} {r}, 1"));
+        // Allocate output space for the result string (ptr + len via out params).
+        let out_ptr = fresh_reg(next_reg);
+        let out_len = fresh_reg(next_reg);
+        emitter.indent(&format!("{out_ptr} = alloca i64"));
+        emitter.indent(&format!("{out_len} = alloca i64"));
+        // Convert alloca ptrs to i64 for the runtime call.
+        let out_ptr_i64 = fresh_reg(next_reg);
+        let out_len_i64 = fresh_reg(next_reg);
+        emitter.indent(&format!("{out_ptr_i64} = ptrtoint ptr {out_ptr} to i64"));
+        emitter.indent(&format!("{out_len_i64} = ptrtoint ptr {out_len} to i64"));
+        emitter.indent(&format!(
+            "call void @kodo_string_concat(i64 {l_ptr}, i64 {l_len}, i64 {r_ptr}, i64 {r_len}, i64 {out_ptr_i64}, i64 {out_len_i64})"
+        ));
+        // Load the result string.
+        let res_ptr = fresh_reg(next_reg);
+        let res_len = fresh_reg(next_reg);
+        emitter.indent(&format!("{res_ptr} = load i64, ptr {out_ptr}"));
+        emitter.indent(&format!("{res_len} = load i64, ptr {out_len}"));
+        let s1 = fresh_reg(next_reg);
+        let s2 = fresh_reg(next_reg);
+        emitter.indent(&format!(
+            "{s1} = insertvalue {{ i64, i64 }} undef, i64 {res_ptr}, 0"
+        ));
+        emitter.indent(&format!(
+            "{s2} = insertvalue {{ i64, i64 }} {s1}, i64 {res_len}, 1"
+        ));
+        return ValueResult::Register(s2);
+    }
 
     // String comparison: emit runtime call instead of icmp.
     if is_string && matches!(op, BinOp::Eq | BinOp::Ne) {
@@ -462,6 +538,7 @@ fn emit_struct_lit(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) -> ValueResult {
     let struct_ty = format!("%{name}");
 
@@ -483,6 +560,7 @@ fn emit_struct_lit(
                 struct_defs,
                 enum_defs,
                 string_constants,
+                stack_locals,
             );
             let field_ty = struct_defs
                 .get(name)
@@ -518,6 +596,7 @@ fn emit_field_get(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) -> ValueResult {
     let vr = emit_value(
         object,
@@ -528,6 +607,7 @@ fn emit_field_get(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
     let struct_ty = format!("%{struct_name}");
     let obj_reg = value_result_to_reg(&vr, emitter, next_reg, &struct_ty);
@@ -557,6 +637,7 @@ fn emit_enum_variant(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
 ) -> ValueResult {
     let enum_ty = llvm_type(&Type::Enum(enum_name.to_string()), struct_defs, enum_defs);
 
@@ -570,7 +651,16 @@ fn emit_enum_variant(
         return ValueResult::Register(d_reg);
     }
 
+    // Determine the payload byte size for this enum.
+    let payload_size = enum_payload_bytes(
+        &Type::Enum(enum_name.to_string()),
+        struct_defs,
+        enum_defs,
+    );
+
     // For the first payload arg, store into the payload bytes.
+    let arg_ty = infer_value_type_simple(&args[0], local_types);
+    let arg_ty_str = llvm_type(&arg_ty, struct_defs, enum_defs);
     let vr = emit_value(
         &args[0],
         emitter,
@@ -580,25 +670,28 @@ fn emit_enum_variant(
         struct_defs,
         enum_defs,
         string_constants,
+        stack_locals,
     );
-    let val_reg = value_result_to_reg(&vr, emitter, next_reg, "i64");
+    let val_reg = value_result_to_reg(&vr, emitter, next_reg, &arg_ty_str);
 
-    // Use alloca to bitcast i64 to [8 x i8], then insertvalue.
+    // Use alloca to store the payload value as bytes, then insertvalue.
     let alloca_reg = fresh_reg(next_reg);
-    emitter.indent(&format!("{alloca_reg} = alloca i64"));
-    emitter.indent(&format!("store i64 {val_reg}, ptr {alloca_reg}"));
+    emitter.indent(&format!("{alloca_reg} = alloca [{payload_size} x i8]"));
+    emitter.indent(&format!("store {arg_ty_str} {val_reg}, ptr {alloca_reg}"));
     let bytes_reg = fresh_reg(next_reg);
-    emitter.indent(&format!("{bytes_reg} = load [8 x i8], ptr {alloca_reg}"));
+    emitter.indent(&format!(
+        "{bytes_reg} = load [{payload_size} x i8], ptr {alloca_reg}"
+    ));
     let result = fresh_reg(next_reg);
     emitter.indent(&format!(
-        "{result} = insertvalue {enum_ty} {d_reg}, [8 x i8] {bytes_reg}, 1"
+        "{result} = insertvalue {enum_ty} {d_reg}, [{payload_size} x i8] {bytes_reg}, 1"
     ));
 
     ValueResult::Register(result)
 }
 
 /// Simple type inference for deciding between integer and float operations.
-fn infer_value_type_simple(value: &Value, local_types: &HashMap<LocalId, Type>) -> Type {
+pub(crate) fn infer_value_type_simple(value: &Value, local_types: &HashMap<LocalId, Type>) -> Type {
     match value {
         Value::FloatConst(_) => Type::Float64,
         Value::BoolConst(_) | Value::Not(_) => Type::Bool,
@@ -610,11 +703,33 @@ fn infer_value_type_simple(value: &Value, local_types: &HashMap<LocalId, Type>) 
         Value::StructLit { name, .. } => Type::Struct(name.clone()),
         Value::EnumVariant { enum_name, .. } => Type::Enum(enum_name.clone()),
         Value::IntConst(_)
-        | Value::FieldGet { .. }
         | Value::EnumDiscriminant(_)
         | Value::EnumPayload { .. }
         | Value::FuncRef(_)
-        | Value::MakeDynTrait { .. } => Type::Int,
+        | Value::MakeDynTrait { .. }
+        | Value::FieldGet { .. } => Type::Int,
+    }
+}
+
+/// Extended type inference that uses struct definitions to resolve `FieldGet` types.
+pub(crate) fn infer_value_type_ext(
+    value: &Value,
+    local_types: &HashMap<LocalId, Type>,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+) -> Type {
+    match value {
+        Value::FieldGet {
+            object,
+            field,
+            struct_name,
+        } => {
+            let _ = object; // struct_name already tells us the struct type.
+            struct_defs
+                .get(struct_name)
+                .and_then(|fields| fields.iter().find(|(n, _)| n == field))
+                .map_or(Type::Int, |(_, t)| t.clone())
+        }
+        _ => infer_value_type_simple(value, local_types),
     }
 }
 
@@ -650,6 +765,7 @@ mod tests {
         let local_types = HashMap::new();
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
         let mut next_reg: u32 = 0;
 
@@ -667,6 +783,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
         let output = emitter.finish();
 
@@ -689,6 +806,7 @@ mod tests {
         let local_types = HashMap::new();
         let struct_defs = HashMap::new();
         let enum_defs = HashMap::new();
+        let stack_locals = HashMap::new();
         let mut string_constants = Vec::new();
         let mut next_reg: u32 = 0;
 
@@ -706,6 +824,7 @@ mod tests {
             &struct_defs,
             &enum_defs,
             &mut string_constants,
+            &stack_locals,
         );
         let output = emitter.finish();
 
