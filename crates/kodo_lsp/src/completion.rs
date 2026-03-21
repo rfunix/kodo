@@ -83,10 +83,10 @@ fn add_module_completions(module: &kodo_ast::Module, items: &mut Vec<CompletionI
 
         let mut doc_parts = Vec::new();
         for req in &func.requires {
-            doc_parts.push(format!("requires {{ {req:?} }}"));
+            doc_parts.push(format!("requires {{ {} }}", crate::utils::format_expr(req)));
         }
         for ens in &func.ensures {
-            doc_parts.push(format!("ensures {{ {ens:?} }}"));
+            doc_parts.push(format!("ensures {{ {} }}", crate::utils::format_expr(ens)));
         }
         for ann in &func.annotations {
             doc_parts.push(format_annotation(ann));
