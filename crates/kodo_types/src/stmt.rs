@@ -268,6 +268,9 @@ impl TypeChecker {
                 args[0].clone()
             }
             Type::Generic(name_str, args) if name_str == "Set" && args.len() == 1 => {
+                // Record this span so the build pipeline can rewrite
+                // the iterable to set_to_list(iterable) before desugaring.
+                self.set_for_in_spans.push(span);
                 // Iterating over Set yields elements (T).
                 args[0].clone()
             }

@@ -167,6 +167,7 @@ pub(crate) fn is_list_allocating_builtin(callee: &str) -> bool {
     matches!(
         callee,
         "list_new"
+            | "set_to_list"
             | "String_split"
             | "String_lines"
             | "list_slice"

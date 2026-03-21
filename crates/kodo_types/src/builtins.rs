@@ -1345,7 +1345,18 @@ impl TypeChecker {
         );
         self.env.insert(
             "set_difference".to_string(),
-            Type::Function(vec![set_ty.clone(), set_ty.clone()], Box::new(set_ty)),
+            Type::Function(
+                vec![set_ty.clone(), set_ty.clone()],
+                Box::new(set_ty.clone()),
+            ),
+        );
+
+        // set_to_list(set: Set<Int>) -> List<Int>
+        // Used internally to convert a Set to a List for for-in iteration.
+        let list_int = Type::Generic("List".to_string(), vec![Type::Int]);
+        self.env.insert(
+            "set_to_list".to_string(),
+            Type::Function(vec![set_ty], Box::new(list_int)),
         );
     }
 

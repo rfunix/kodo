@@ -24,7 +24,7 @@ use super::common::{
     build_vtable_defs, compile_imported_module, find_ko_files, find_test_files,
     inject_stdlib_method_functions, link_executable, parse_contract_mode, resolve_import_path,
     rewrite_map_for_in, rewrite_method_calls_in_block, rewrite_self_method_calls_in_block,
-    substitute_type_expr_ast, type_to_type_expr,
+    rewrite_set_for_in, substitute_type_expr_ast, type_to_type_expr,
 };
 use crate::diagnostics;
 
@@ -847,6 +847,7 @@ pub(crate) fn run_test(
     }
 
     rewrite_map_for_in(&mut module, checker.map_for_in_spans());
+    rewrite_set_for_in(&mut module, checker.set_for_in_spans());
     kodo_desugar::desugar_module(&mut module);
 
     // Impl blocks -> top-level functions.

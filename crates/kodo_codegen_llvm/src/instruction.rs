@@ -425,6 +425,7 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "set_union" => "kodo_set_union",
         "set_intersection" => "kodo_set_intersection",
         "set_difference" => "kodo_set_difference",
+        "set_to_list" => "kodo_set_to_list",
         "file_exists" => "kodo_file_exists",
         "file_read" => "kodo_file_read",
         "file_write" => "kodo_file_write",

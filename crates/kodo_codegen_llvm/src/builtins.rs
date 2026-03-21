@@ -590,6 +590,11 @@ fn all_builtins() -> Vec<Builtin> {
             params: &["i64"],
             ret: "void",
         },
+        Builtin {
+            name: "kodo_set_to_list",
+            params: &["i64"],
+            ret: "i64",
+        },
         // -- Network / JSON --
         Builtin {
             name: "kodo_http_get",

@@ -230,6 +230,11 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
             .entry((*name).to_string())
             .or_insert(set_int.clone());
     }
+    // set_to_list converts a Set<Int> to a List<Int> for iteration.
+    let list_int = Type::Generic("List".to_string(), vec![Type::Int]);
+    fn_return_types
+        .entry("set_to_list".to_string())
+        .or_insert(list_int);
 
     // Map higher-order builtins — merge and filter both return Map<Int, Int>.
     let map_int_int = Type::Generic("Map".to_string(), vec![Type::Int, Type::Int]);

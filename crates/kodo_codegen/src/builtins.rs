@@ -851,6 +851,7 @@ fn declare_set_builtins(
         types::I64
     );
     decl_void!("kodo_set_free", "kodo_set_free", types::I64);
+    decl_ret!("kodo_set_to_list", "set_to_list", [types::I64], types::I64);
 
     Ok(())
 }

@@ -14,8 +14,8 @@ use super::common::{
     build_module_metadata, build_vtable_defs, check_import_cycles, compile_imported_module,
     find_entry_point, find_ko_files, inject_stdlib_method_functions, link_executable,
     parse_contract_mode, resolve_import_path, rewrite_map_for_in, rewrite_method_calls_in_block,
-    rewrite_self_method_calls_in_block, substitute_type_expr_ast, topological_sort,
-    type_to_type_expr,
+    rewrite_self_method_calls_in_block, rewrite_set_for_in, substitute_type_expr_ast,
+    topological_sort, type_to_type_expr,
 };
 use crate::{certificate, diagnostics};
 
@@ -204,6 +204,8 @@ pub(crate) fn run_build(
 
     // Rewrite for-in over Maps to use Map_keys() before desugaring.
     rewrite_map_for_in(&mut module, checker.map_for_in_spans());
+    // Rewrite for-in over Sets to use set_to_list() before desugaring.
+    rewrite_set_for_in(&mut module, checker.set_for_in_spans());
 
     // Desugar pass -- simplify syntactic sugar (e.g. for loops) before MIR lowering.
     kodo_desugar::desugar_module(&mut module);

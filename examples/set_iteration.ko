@@ -1,0 +1,22 @@
+module main {
+    meta {
+        purpose: "Demonstrate for-in iteration over Set<Int>"
+        version: "1.0.0"
+    }
+
+    fn main() -> Int {
+        let s: Set<Int> = set_new()
+        s.add(10)
+        s.add(20)
+        s.add(30)
+
+        let total: Int = 0
+        for x in s {
+            total = total + x
+        }
+        // Sum should be 10 + 20 + 30 = 60
+        print_int(total)
+
+        return 0
+    }
+}

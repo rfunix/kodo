@@ -1,0 +1,17 @@
+//@ check-pass
+module set_iter {
+    meta { purpose: "Set for-in iteration" }
+
+    fn main() {
+        let s: Set<Int> = set_new()
+        s.add(10)
+        s.add(20)
+        s.add(30)
+
+        let total: Int = 0
+        for x in s {
+            total = total + x
+        }
+        print_int(total)
+    }
+}

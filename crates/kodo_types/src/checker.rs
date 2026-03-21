@@ -134,6 +134,11 @@ pub struct TypeChecker {
     /// Used to rewrite the iterable to `Map_keys(iterable)` before desugaring,
     /// since the desugar pass operates without type information.
     pub(crate) map_for_in_spans: Vec<Span>,
+    /// Spans of `ForIn` statements that iterate over a `Set<T>`.
+    ///
+    /// Used to rewrite the iterable to `set_to_list(iterable)` before desugaring,
+    /// since the desugar pass operates without type information.
+    pub(crate) set_for_in_spans: Vec<Span>,
     /// Set of function names declared as `async`.
     ///
     /// When calling an async function, the return type is automatically wrapped
@@ -183,6 +188,7 @@ impl TypeChecker {
             loop_depth: 0,
             private_symbols: std::collections::HashMap::new(),
             map_for_in_spans: Vec::new(),
+            set_for_in_spans: Vec::new(),
             async_fn_names: std::collections::HashSet::new(),
         };
         checker.register_builtins();
@@ -306,6 +312,13 @@ impl TypeChecker {
     #[must_use]
     pub fn map_for_in_spans(&self) -> &[Span] {
         &self.map_for_in_spans
+    }
+
+    /// Returns the spans of `ForIn` statements that iterate over Sets.
+    /// Used to rewrite iterables to `set_to_list(...)` before desugaring.
+    #[must_use]
+    pub fn set_for_in_spans(&self) -> &[Span] {
+        &self.set_for_in_spans
     }
 
     /// Returns the list of monomorphized function instances.

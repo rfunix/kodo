@@ -2176,6 +2176,31 @@ pub unsafe extern "C" fn kodo_set_free(set_ptr: i64) {
     // set is dropped here, freeing the KodoSet struct itself.
 }
 
+/// Converts a `KodoSet` to a `KodoList` containing all elements.
+///
+/// Returns a pointer (as i64) to a new heap-allocated `KodoList`.
+/// The order of elements is not guaranteed (hash set iteration order).
+/// The original set is NOT consumed — the caller still owns it.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_to_list(set_ptr: i64) -> i64 {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    let set = unsafe { &*(set_ptr as *const KodoSet) };
+    let list_ptr = kodo_list_new();
+    for i in 0..set.capacity {
+        // SAFETY: entries array has capacity elements, all valid.
+        let entry = unsafe { &*set.entries.add(i) };
+        if entry.occupied {
+            // SAFETY: list_ptr was just returned by kodo_list_new.
+            unsafe { kodo_list_push(list_ptr, entry.value) };
+        }
+    }
+    list_ptr
+}
+
 // ---------------------------------------------------------------------------
 // Actor runtime builtins
 // ---------------------------------------------------------------------------
@@ -3570,6 +3595,60 @@ mod tests {
     fn set_free_null() {
         // Freeing a null handle should be a no-op.
         unsafe { kodo_set_free(0) };
+    }
+
+    #[test]
+    fn set_to_list_empty() {
+        let set = kodo_set_new();
+        let list = unsafe { kodo_set_to_list(set) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 0);
+        unsafe {
+            kodo_list_free(list);
+            kodo_set_free(set);
+        }
+    }
+
+    #[test]
+    fn set_to_list_preserves_elements() {
+        let set = kodo_set_new();
+        unsafe {
+            kodo_set_add(set, 10);
+            kodo_set_add(set, 20);
+            kodo_set_add(set, 30);
+        }
+        let list = unsafe { kodo_set_to_list(set) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 3);
+        // Collect list elements and sort (set order is not guaranteed).
+        let mut elems = Vec::new();
+        for i in 0..3 {
+            let mut val: i64 = 0;
+            let mut is_some: i64 = 0;
+            unsafe { kodo_list_get(list, i, &mut val, &mut is_some) };
+            assert_eq!(is_some, 1);
+            elems.push(val);
+        }
+        elems.sort();
+        assert_eq!(elems, vec![10, 20, 30]);
+        unsafe {
+            kodo_list_free(list);
+            kodo_set_free(set);
+        }
+    }
+
+    #[test]
+    fn set_to_list_does_not_consume_set() {
+        let set = kodo_set_new();
+        unsafe {
+            kodo_set_add(set, 42);
+        }
+        let _list = unsafe { kodo_set_to_list(set) };
+        // Original set should still be usable.
+        assert_eq!(unsafe { kodo_set_contains(set, 42) }, 1);
+        assert_eq!(unsafe { kodo_set_length(set) }, 1);
+        unsafe {
+            kodo_list_free(_list);
+            kodo_set_free(set);
+        }
     }
 
     // -- Map merge tests --
