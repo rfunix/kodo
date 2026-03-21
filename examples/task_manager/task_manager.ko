@@ -415,6 +415,14 @@ module task_manager {
         let prio: Int = json_get_int(parsed, "priority")
         json_free(parsed)
 
+        // Validate before calling contracted functions (contracts abort on violation)
+        if title == "" {
+            return make_error("title must not be empty")
+        }
+        if prio < 1 || prio > 5 {
+            return make_error("priority must be between 1 and 5")
+        }
+
         let result: Result<Int, String> = create_task(ids, titles, descriptions, priorities, statuses, timestamps, next_id, title, desc, prio)
         match result {
             Result::Ok(id) => {
