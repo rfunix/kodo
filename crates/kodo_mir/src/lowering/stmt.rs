@@ -250,7 +250,7 @@ impl MirBuilder {
             None => Value::Unit,
         };
         // Inject ensures checks before returning.
-        self.inject_ensures_checks(&ret_val)?;
+        self.inject_ensures_checks(&ret_val, self.returns_result)?;
         // Emit DecRef for heap-allocated locals before returning.
         let return_local = if let Value::Local(lid) = &ret_val {
             Some(*lid)

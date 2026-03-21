@@ -126,6 +126,10 @@ pub struct MirBuilder {
     /// `kodo_future_await` (for `Int`) or `kodo_future_await_bytes` (for
     /// composite types like `String`).
     future_inner_types: HashMap<String, kodo_types::Type>,
+    /// Whether the current function returns `Result<T, E>`. When true,
+    /// contract violations (`requires`/`ensures`) return `Result::Err`
+    /// instead of aborting.
+    returns_result: bool,
 }
 
 impl MirBuilder {
@@ -156,6 +160,7 @@ impl MirBuilder {
             fn_param_types: HashMap::new(),
             async_fn_names: HashSet::new(),
             future_inner_types: HashMap::new(),
+            returns_result: false,
         }
     }
 
@@ -290,6 +295,14 @@ fn lower_function_with_closures(
     let param_count = function.params.len();
     builder.param_count = param_count;
 
+    // Check if the function returns Result<T, E> — if so, contract violations
+    // return Result::Err instead of aborting, enabling graceful error handling.
+    let returns_result = matches!(
+        &function.return_type,
+        kodo_ast::TypeExpr::Generic(name, _) if name == "Result"
+    );
+    builder.returns_result = returns_result;
+
     // Inject `requires` contract checks before the function body.
     for (i, req_expr) in function.requires.iter().enumerate() {
         let cond = builder.lower_expr(req_expr)?;
@@ -303,26 +316,32 @@ fn lower_function_with_closures(
             },
             fail_block,
         );
-        // In the fail block, call kodo_contract_fail with the message.
         let msg = format!(
-            "requires clause {} failed in function `{}`",
+            "contract violation: requires clause {} failed in function `{}`",
             i + 1,
             function.name
         );
-        let dest = builder.alloc_local(Type::Unit, false);
-        builder.emit(Instruction::Call {
-            dest,
-            callee: "kodo_contract_fail".to_string(),
-            args: vec![Value::StringConst(msg)],
-        });
-        builder.seal_block(Terminator::Unreachable, continue_block);
+        if returns_result {
+            // Emit Result::Err(msg) and return gracefully.
+            let err_local = build_result_err(&mut builder, &msg);
+            builder.seal_block(Terminator::Return(Value::Local(err_local)), continue_block);
+        } else {
+            // Non-Result functions: abort on contract violation.
+            let dest = builder.alloc_local(Type::Unit, false);
+            builder.emit(Instruction::Call {
+                dest,
+                callee: "kodo_contract_fail".to_string(),
+                args: vec![Value::StringConst(msg)],
+            });
+            builder.seal_block(Terminator::Unreachable, continue_block);
+        }
     }
 
     // Lower the function body.
     builder.lower_block(&function.body)?;
 
     // Inject ensures checks before the implicit Return(Unit).
-    builder.inject_ensures_checks(&Value::Unit)?;
+    builder.inject_ensures_checks(&Value::Unit, returns_result)?;
 
     // Emit DecRef for heap-allocated locals before the implicit return.
     builder.emit_decref_for_heap_locals(param_count, None);
@@ -487,6 +506,44 @@ pub fn lower_module_with_type_info<S: std::hash::BuildHasher>(
     }
 
     Ok(mir_functions)
+}
+
+/// Constructs a `Result::Err(message)` value in the current block and returns
+/// its [`LocalId`]. Used by contract checks when the enclosing function returns
+/// `Result<T, E>` — the caller emits the `Return` terminator.
+fn build_result_err(builder: &mut MirBuilder, msg: &str) -> LocalId {
+    // Find the monomorphized Result enum that has an Err(String) variant.
+    // Convention: Result__*_String (e.g. Result__Int_String).
+    let result_enum = builder
+        .enum_registry
+        .keys()
+        .find(|k| k.starts_with("Result__") && k.ends_with("_String"))
+        .cloned()
+        .unwrap_or_else(|| "Result__Int_String".to_string());
+
+    // Look up the Err discriminant.
+    let variants = builder
+        .enum_registry
+        .get(&result_enum)
+        .cloned()
+        .unwrap_or_default();
+    let discriminant = variants.iter().position(|(n, _)| n == "Err").unwrap_or(1);
+
+    // Construct Result::Err(msg) as an EnumVariant value.
+    #[allow(clippy::cast_possible_truncation)]
+    let disc_u8 = discriminant as u8;
+    let err_local = builder.alloc_local(Type::Enum(result_enum.clone()), false);
+    builder.emit(Instruction::Assign(
+        err_local,
+        Value::EnumVariant {
+            enum_name: result_enum,
+            variant: "Err".to_string(),
+            discriminant: disc_u8,
+            args: vec![Value::StringConst(msg.to_string())],
+        },
+    ));
+
+    err_local
 }
 
 /// Lowers all functions in a [`Module`] into a `Vec` of [`MirFunction`].

@@ -315,7 +315,11 @@ impl MirBuilder {
     /// in the name map (so the ensures expression can reference it), evaluates
     /// the condition, and generates a branch to a fail block if the condition
     /// is false.
-    pub(super) fn inject_ensures_checks(&mut self, ret_val: &Value) -> Result<()> {
+    pub(super) fn inject_ensures_checks(
+        &mut self,
+        ret_val: &Value,
+        returns_result: bool,
+    ) -> Result<()> {
         if self.ensures.is_empty() {
             return Ok(());
         }
@@ -340,19 +344,23 @@ impl MirBuilder {
                 },
                 fail_block,
             );
-            // In the fail block, call kodo_contract_fail with the message.
             let msg = format!(
-                "ensures clause {} failed in function `{}`",
+                "contract violation: ensures clause {} failed in function `{}`",
                 i + 1,
                 self.fn_name
             );
-            let dest = self.alloc_local(Type::Unit, false);
-            self.emit(Instruction::Call {
-                dest,
-                callee: "kodo_contract_fail".to_string(),
-                args: vec![Value::StringConst(msg)],
-            });
-            self.seal_block(Terminator::Unreachable, continue_block);
+            if returns_result {
+                let err_local = super::build_result_err(self, &msg);
+                self.seal_block(Terminator::Return(Value::Local(err_local)), continue_block);
+            } else {
+                let dest = self.alloc_local(Type::Unit, false);
+                self.emit(Instruction::Call {
+                    dest,
+                    callee: "kodo_contract_fail".to_string(),
+                    args: vec![Value::StringConst(msg)],
+                });
+                self.seal_block(Terminator::Unreachable, continue_block);
+            }
         }
 
         // Restore previous "result" binding.
