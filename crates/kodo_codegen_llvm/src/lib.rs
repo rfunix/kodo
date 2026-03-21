@@ -25,7 +25,7 @@
 //!     &struct_defs,
 //!     &enum_defs,
 //!     &vtable_defs,
-//!     &LLVMCodegenOptions::default(),
+//!     &LLVMCodegenOptions::default(), None,
 //! )?;
 //! std::fs::write("output.ll", &ir)?;
 //! ```
@@ -119,6 +119,7 @@ pub fn compile_module_to_llvm_ir(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     _vtable_defs: &HashMap<(String, String), VtableDef>,
     options: &LLVMCodegenOptions,
+    metadata_json: Option<&str>,
 ) -> Result<String> {
     let mut emitter = emitter::LLVMEmitter::new();
 
@@ -203,6 +204,18 @@ pub fn compile_module_to_llvm_ir(
         }
         emitter.blank();
     }
+
+    // -- Module metadata (kodo_meta + kodo_meta_len) --
+    // The runtime expects these globals for the --describe flag.
+    let meta_json = metadata_json.unwrap_or("{}");
+    let meta_len = meta_json.len();
+    let meta_escaped = escape_llvm_string(meta_json);
+    emitter.comment("Module metadata");
+    emitter.line(&format!(
+        "@kodo_meta = global [{meta_len} x i8] c\"{meta_escaped}\""
+    ));
+    emitter.line(&format!("@kodo_meta_len = global i64 {meta_len}"));
+    emitter.blank();
 
     // -- Emit function definitions --
     emitter.comment("Function definitions");
@@ -311,6 +324,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -339,6 +353,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -374,6 +389,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -421,6 +437,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -463,6 +480,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -495,6 +513,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -525,6 +544,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -579,6 +599,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -634,6 +655,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -679,6 +701,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();
@@ -734,6 +757,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &LLVMCodegenOptions::default(),
+            None,
         );
         assert!(result.is_ok());
         let ir = result.ok().unwrap_or_default();

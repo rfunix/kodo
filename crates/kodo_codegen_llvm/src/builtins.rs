@@ -27,8 +27,13 @@ pub(crate) fn emit_runtime_declarations() -> Vec<String> {
             format!("declare {} @{}({})", b.ret, b.name, params)
         })
         .collect();
-    // __env_pack is variadic (0–N i64 args) — declared separately.
-    decls.push("declare i64 @__env_pack(...)".to_string());
+    // __env_pack_N: fixed-arity variants for closure environment packing.
+    // Each variant takes N i64 captures and returns a pointer (i64) to the
+    // heap-allocated environment buffer.
+    for n in 0..=8 {
+        let params = (0..n).map(|_| "i64").collect::<Vec<_>>().join(", ");
+        decls.push(format!("declare i64 @__env_pack_{n}({params})"));
+    }
     decls
 }
 

@@ -27,7 +27,7 @@ use crate::value::{emit_value, ValueResult};
 /// * `string_constants` - Accumulated string constants to emit at module level.
 /// * `user_functions` - Set of user-defined function names (for dispatch).
 /// * `stack_locals` - Locals with alloca stack slots (for multi-block functions).
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn emit_instruction(
     instr: &Instruction,
     emitter: &mut LLVMEmitter,
@@ -97,25 +97,55 @@ pub(crate) fn emit_instruction(
         Instruction::VirtualCall { dest, .. } => {
             // Virtual calls are complex; for now emit a placeholder.
             let reg = fresh_reg(next_reg);
-            store_to_stack_or_alias(*dest, &reg, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+            store_to_stack_or_alias(
+                *dest,
+                &reg,
+                emitter,
+                local_regs,
+                local_types,
+                next_reg,
+                struct_defs,
+                enum_defs,
+                stack_locals,
+            );
             emitter.indent(&format!("{reg} = add i64 0, 0 ; TODO: virtual call"));
         }
         Instruction::IncRef(local) => {
             let local_ty = local_types.get(local).cloned().unwrap_or(Type::Int);
             // Skip IncRef for composite types that aren't simple pointers.
             if !is_composite(&local_ty) {
-                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                let reg = load_local_reg(
+                    *local,
+                    emitter,
+                    local_regs,
+                    local_types,
+                    next_reg,
+                    struct_defs,
+                    enum_defs,
+                    stack_locals,
+                );
                 if let Some(r) = reg {
                     emitter.indent(&format!("call void @kodo_rc_inc(i64 {r})"));
                 }
             } else if local_ty == Type::String {
-                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                let reg = load_local_reg(
+                    *local,
+                    emitter,
+                    local_regs,
+                    local_types,
+                    next_reg,
+                    struct_defs,
+                    enum_defs,
+                    stack_locals,
+                );
                 if let Some(r) = reg {
                     let ptr_reg = fresh_reg(next_reg);
                     let len_reg = fresh_reg(next_reg);
                     emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
                     emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
-                    emitter.indent(&format!("call void @kodo_rc_inc_string(i64 {ptr_reg}, i64 {len_reg})"));
+                    emitter.indent(&format!(
+                        "call void @kodo_rc_inc_string(i64 {ptr_reg}, i64 {len_reg})"
+                    ));
                 }
             }
             // For enums, structs, Option, Result — skip IncRef (no heap alloc to refcount).
@@ -124,18 +154,38 @@ pub(crate) fn emit_instruction(
             let local_ty = local_types.get(local).cloned().unwrap_or(Type::Int);
             // Skip DecRef for composite types that aren't simple pointers.
             if !is_composite(&local_ty) {
-                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                let reg = load_local_reg(
+                    *local,
+                    emitter,
+                    local_regs,
+                    local_types,
+                    next_reg,
+                    struct_defs,
+                    enum_defs,
+                    stack_locals,
+                );
                 if let Some(r) = reg {
                     emitter.indent(&format!("call void @kodo_rc_dec(i64 {r})"));
                 }
             } else if local_ty == Type::String {
-                let reg = load_local_reg(*local, emitter, local_regs, local_types, next_reg, struct_defs, enum_defs, stack_locals);
+                let reg = load_local_reg(
+                    *local,
+                    emitter,
+                    local_regs,
+                    local_types,
+                    next_reg,
+                    struct_defs,
+                    enum_defs,
+                    stack_locals,
+                );
                 if let Some(r) = reg {
                     let ptr_reg = fresh_reg(next_reg);
                     let len_reg = fresh_reg(next_reg);
                     emitter.indent(&format!("{ptr_reg} = extractvalue {{ i64, i64 }} {r}, 0"));
                     emitter.indent(&format!("{len_reg} = extractvalue {{ i64, i64 }} {r}, 1"));
-                    emitter.indent(&format!("call void @kodo_rc_dec_string(i64 {ptr_reg}, i64 {len_reg})"));
+                    emitter.indent(&format!(
+                        "call void @kodo_rc_dec_string(i64 {ptr_reg}, i64 {len_reg})"
+                    ));
                 }
             }
             // For enums, structs, Option, Result — skip DecRef (no heap alloc to refcount).
@@ -266,7 +316,14 @@ fn emit_assign(
             // or { i64, i64 } from FieldGet into what infer_value_type_simple calls Int).
             if stack_locals.contains_key(&dest) {
                 let value_ty_str = llvm_type(&value_ty, struct_defs, enum_defs);
-                store_typed_to_stack_or_alias(dest, &reg, &value_ty_str, emitter, local_regs, stack_locals);
+                store_typed_to_stack_or_alias(
+                    dest,
+                    &reg,
+                    &value_ty_str,
+                    emitter,
+                    local_regs,
+                    stack_locals,
+                );
             } else {
                 local_regs.insert(dest, reg);
             }
@@ -424,13 +481,12 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "String_split" => "kodo_string_split",
         "String_lines" => "kodo_string_lines",
         "String_parse_int" => "kodo_string_parse_int",
-        "char_at" => "kodo_string_char_at",
+        "char_at" | "String_char_at" => "kodo_string_char_at",
         "char_from_code" => "kodo_char_from_code",
         "is_alpha" => "kodo_is_alpha",
         "is_digit" => "kodo_is_digit",
         "is_alphanumeric" => "kodo_is_alphanumeric",
         "is_whitespace" => "kodo_is_whitespace",
-        "String_char_at" => "kodo_string_char_at",
         "String_trim" => "kodo_string_trim",
         "String_to_upper" => "kodo_string_to_upper",
         "String_to_lower" => "kodo_string_to_lower",
@@ -556,13 +612,18 @@ fn emit_call(
     let args_str = arg_strs.join(", ");
     let ret_ty = llvm_type(&dest_ty, struct_defs, enum_defs);
 
+    // Rewrite variadic __env_pack to fixed-arity __env_pack_N.
+    let final_name = if runtime_name == "__env_pack" {
+        format!("__env_pack_{}", args.len())
+    } else {
+        runtime_name.to_string()
+    };
+
     if ret_ty == "void" {
-        emitter.indent(&format!("call void @{runtime_name}({args_str})"));
+        emitter.indent(&format!("call void @{final_name}({args_str})"));
     } else {
         let reg = fresh_reg(next_reg);
-        emitter.indent(&format!(
-            "{reg} = call {ret_ty} @{runtime_name}({args_str})"
-        ));
+        emitter.indent(&format!("{reg} = call {ret_ty} @{final_name}({args_str})"));
         // Use the actual return type for store (may differ from local's declared type).
         store_typed_to_stack_or_alias(dest, &reg, &ret_ty, emitter, local_regs, stack_locals);
     }

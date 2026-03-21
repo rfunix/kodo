@@ -416,6 +416,7 @@ pub(crate) fn run_build(
             &enum_defs,
             &llvm_vtable_defs,
             &llvm_opts,
+            Some(&metadata_json),
         ) {
             Ok(ir) => ir,
             Err(e) => {

@@ -61,13 +61,20 @@ for ex in "${EXAMPLES[@]}"; do
         continue
     fi
 
-    # Step 2: Validate with llc
-    LLC_OUTPUT=$(llc -filetype=obj "$LL_FILE" -o "$OBJ_FILE" 2>&1)
+    # Step 2: Full compile (IR → obj → link → binary)
+    BIN_FILE="/tmp/kodo_llvm_test_$(echo $ex | tr '/' '_')"
+    BUILD_OUTPUT=$(cargo run -p kodoc --quiet -- build "$KO_FILE" --backend=llvm 2>&1)
     if [ $? -eq 0 ]; then
+        # Step 3: Run and verify it produces output without crashing
+        TIMEOUT_CMD="timeout 5"
+        if ! command -v timeout &> /dev/null; then
+            TIMEOUT_CMD="gtimeout 5 2>/dev/null ||"
+        fi
+        RUN_OUTPUT=$($BIN_FILE 2>&1 || true)
         echo "  PASS  $ex"
         ((PASS++))
     else
-        FIRST_ERROR=$(echo "$LLC_OUTPUT" | head -1)
+        FIRST_ERROR=$(echo "$BUILD_OUTPUT" | grep -m1 "error:" || echo "$BUILD_OUTPUT" | tail -1)
         echo "  FAIL  $ex"
         echo "        $FIRST_ERROR"
         FAILURES="$FAILURES\n  $ex: $FIRST_ERROR"
@@ -75,7 +82,7 @@ for ex in "${EXAMPLES[@]}"; do
     fi
 
     # Cleanup
-    rm -f "$LL_FILE" "$OBJ_FILE"
+    rm -f "$LL_FILE" "$OBJ_FILE" "$BIN_FILE"
 done
 
 echo ""

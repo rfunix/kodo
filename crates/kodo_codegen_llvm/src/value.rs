@@ -243,8 +243,8 @@ pub(crate) fn emit_value(
             ));
             // For simplicity, bitcast the first 8 bytes to i64.
             let _ = field_index; // We just grab the first i64 of the payload.
-            // Use alloca + store + load to reinterpret bytes as i64.
-            // Alloca must be allocated before the load register to maintain SSA order.
+                                 // Use alloca + store + load to reinterpret bytes as i64.
+                                 // Alloca must be allocated before the load register to maintain SSA order.
             let alloca_reg = fresh_reg(next_reg);
             emitter.indent(&format!("{alloca_reg} = alloca [{payload_size} x i8]"));
             emitter.indent(&format!(
@@ -333,6 +333,7 @@ fn value_result_to_reg(
 
 /// Emits a binary operation.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn emit_binop(
     op: BinOp,
     lhs: &Value,
@@ -652,11 +653,8 @@ fn emit_enum_variant(
     }
 
     // Determine the payload byte size for this enum.
-    let payload_size = enum_payload_bytes(
-        &Type::Enum(enum_name.to_string()),
-        struct_defs,
-        enum_defs,
-    );
+    let payload_size =
+        enum_payload_bytes(&Type::Enum(enum_name.to_string()), struct_defs, enum_defs);
 
     // For the first payload arg, store into the payload bytes.
     let arg_ty = infer_value_type_simple(&args[0], local_types);

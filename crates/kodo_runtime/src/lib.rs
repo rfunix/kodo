@@ -23,6 +23,8 @@
 //! - [`prop_ops`] — Property testing engine (generators and shrinking)
 //! - [`context`] — CPU context switch primitives for green threads
 //! - [`green`] — Green thread data structures and stack allocation
+//! - [`enum_ops`] — Option/Result runtime helpers for LLVM backend
+//! - [`closure_ops`] — Closure environment pack/load for LLVM backend
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -30,9 +32,11 @@
 #![warn(clippy::pedantic)]
 
 pub mod channel_generic;
+pub mod closure_ops;
 pub mod collections;
 pub mod context;
 pub mod db;
+pub mod enum_ops;
 pub mod green;
 mod helpers;
 pub mod http;
