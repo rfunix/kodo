@@ -3665,7 +3665,7 @@ mod tests {
                 0
             }
         }
-        let closure = crate::memory::kodo_closure_new(keep_even_values as i64, 0);
+        let closure = crate::memory::kodo_closure_new((keep_even_values as *const ()) as i64, 0);
         let filtered = unsafe { kodo_map_filter(map, closure) };
         assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
         assert_eq!(unsafe { kodo_map_contains_key(filtered, 1) }, 1); // value 10 is even
@@ -3686,7 +3686,7 @@ mod tests {
         extern "C" fn keep_all(_env: i64, _key: i64, _value: i64) -> i64 {
             1
         }
-        let closure = crate::memory::kodo_closure_new(keep_all as i64, 0);
+        let closure = crate::memory::kodo_closure_new((keep_all as *const ()) as i64, 0);
         let filtered = unsafe { kodo_map_filter(map, closure) };
         assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
         unsafe { kodo_map_free(map) };
@@ -3703,7 +3703,7 @@ mod tests {
         extern "C" fn keep_none(_env: i64, _key: i64, _value: i64) -> i64 {
             0
         }
-        let closure = crate::memory::kodo_closure_new(keep_none as i64, 0);
+        let closure = crate::memory::kodo_closure_new((keep_none as *const ()) as i64, 0);
         let filtered = unsafe { kodo_map_filter(map, closure) };
         assert_eq!(unsafe { kodo_map_length(filtered) }, 0);
         unsafe { kodo_map_free(map) };
@@ -3716,7 +3716,7 @@ mod tests {
         extern "C" fn keep_all(_env: i64, _key: i64, _value: i64) -> i64 {
             1
         }
-        let closure = crate::memory::kodo_closure_new(keep_all as i64, 0);
+        let closure = crate::memory::kodo_closure_new((keep_all as *const ()) as i64, 0);
         let filtered = unsafe { kodo_map_filter(map, closure) };
         assert_eq!(unsafe { kodo_map_length(filtered) }, 0);
         unsafe { kodo_map_free(map) };
@@ -3739,7 +3739,7 @@ mod tests {
                 0
             }
         }
-        let closure = crate::memory::kodo_closure_new(key_gt_15 as i64, 0);
+        let closure = crate::memory::kodo_closure_new((key_gt_15 as *const ()) as i64, 0);
         let filtered = unsafe { kodo_map_filter(map, closure) };
         assert_eq!(unsafe { kodo_map_length(filtered) }, 2);
         assert_eq!(unsafe { kodo_map_contains_key(filtered, 10) }, 0);
