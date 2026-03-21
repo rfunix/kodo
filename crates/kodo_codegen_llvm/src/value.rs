@@ -343,15 +343,8 @@ fn emit_binop(
     let l = value_result_to_reg(&lhs_vr, emitter, next_reg, ty_str);
     let r = value_result_to_reg(&rhs_vr, emitter, next_reg, ty_str);
 
-    let reg = fresh_reg(next_reg);
-
     if is_float {
-        let llvm_op = match op {
-            BinOp::Add => "fadd",
-            BinOp::Sub => "fsub",
-            BinOp::Mul => "fmul",
-            BinOp::Div => "fdiv",
-            BinOp::Mod => "frem",
+        match op {
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
                 let cond = match op {
                     BinOp::Ne => "one",
@@ -361,10 +354,12 @@ fn emit_binop(
                     BinOp::Ge => "oge",
                     _ => "oeq",
                 };
+                // Allocate cmp_reg first, then result_reg, to maintain SSA order.
                 let cmp_reg = fresh_reg(next_reg);
+                let result_reg = fresh_reg(next_reg);
                 emitter.indent(&format!("{cmp_reg} = fcmp {cond} double {l}, {r}"));
-                emitter.indent(&format!("{reg} = zext i1 {cmp_reg} to i64"));
-                return ValueResult::Register(reg);
+                emitter.indent(&format!("{result_reg} = zext i1 {cmp_reg} to i64"));
+                return ValueResult::Register(result_reg);
             }
             BinOp::And | BinOp::Or => {
                 // Logical ops on floats: treat as truthy (nonzero).
@@ -373,20 +368,27 @@ fn emit_binop(
                 } else {
                     "or"
                 };
+                let reg = fresh_reg(next_reg);
                 emitter.indent(&format!(
                     "{reg} = {llvm_op} i64 0, 0 ; float logical op stub"
                 ));
                 return ValueResult::Register(reg);
             }
-        };
-        emitter.indent(&format!("{reg} = {llvm_op} double {l}, {r}"));
-    } else {
+            _ => {}
+        }
         let llvm_op = match op {
-            BinOp::Add => "add",
-            BinOp::Sub => "sub",
-            BinOp::Mul => "mul",
-            BinOp::Div => "sdiv",
-            BinOp::Mod => "srem",
+            BinOp::Add => "fadd",
+            BinOp::Sub => "fsub",
+            BinOp::Mul => "fmul",
+            BinOp::Div => "fdiv",
+            BinOp::Mod => "frem",
+            _ => unreachable!("comparison and logical ops handled above"),
+        };
+        let reg = fresh_reg(next_reg);
+        emitter.indent(&format!("{reg} = {llvm_op} double {l}, {r}"));
+        ValueResult::Register(reg)
+    } else {
+        match op {
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
                 let cond = match op {
                     BinOp::Ne => "ne",
@@ -396,18 +398,29 @@ fn emit_binop(
                     BinOp::Ge => "sge",
                     _ => "eq",
                 };
+                // Allocate cmp_reg first, then result_reg, to maintain SSA order.
                 let cmp_reg = fresh_reg(next_reg);
+                let result_reg = fresh_reg(next_reg);
                 emitter.indent(&format!("{cmp_reg} = icmp {cond} i64 {l}, {r}"));
-                emitter.indent(&format!("{reg} = zext i1 {cmp_reg} to i64"));
-                return ValueResult::Register(reg);
+                emitter.indent(&format!("{result_reg} = zext i1 {cmp_reg} to i64"));
+                return ValueResult::Register(result_reg);
             }
+            _ => {}
+        }
+        let llvm_op = match op {
+            BinOp::Add => "add",
+            BinOp::Sub => "sub",
+            BinOp::Mul => "mul",
+            BinOp::Div => "sdiv",
+            BinOp::Mod => "srem",
             BinOp::And => "and",
             BinOp::Or => "or",
+            _ => unreachable!("comparison ops handled above"),
         };
+        let reg = fresh_reg(next_reg);
         emitter.indent(&format!("{reg} = {llvm_op} i64 {l}, {r}"));
+        ValueResult::Register(reg)
     }
-
-    ValueResult::Register(reg)
 }
 
 /// Emits a struct literal value.
@@ -599,6 +612,101 @@ mod tests {
     fn format_float_pi() {
         let s = format_float_llvm(std::f64::consts::PI);
         assert!(s.starts_with("0x"));
+    }
+
+    /// Verifies that comparison operations allocate SSA registers in sequential
+    /// order: icmp gets the lower register, zext gets the next one.
+    #[test]
+    fn comparison_ssa_register_ordering() {
+        let mut emitter = crate::emitter::LLVMEmitter::new();
+        let local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+        let mut next_reg: u32 = 0;
+
+        let value = Value::BinOp(
+            BinOp::Eq,
+            Box::new(Value::IntConst(1)),
+            Box::new(Value::IntConst(2)),
+        );
+        let _ = emit_value(
+            &value,
+            &mut emitter,
+            &local_regs,
+            &local_types,
+            &mut next_reg,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+        let output = emitter.finish();
+
+        // icmp must get register N and zext must get register N+1.
+        assert!(
+            output.contains("%2 = icmp eq i64"),
+            "icmp should use %2, got: {output}"
+        );
+        assert!(
+            output.contains("%3 = zext i1 %2 to i64"),
+            "zext should use %3 and reference %2, got: {output}"
+        );
+    }
+
+    /// Verifies SSA ordering for float comparison operations.
+    #[test]
+    fn float_comparison_ssa_register_ordering() {
+        let mut emitter = crate::emitter::LLVMEmitter::new();
+        let local_regs = HashMap::new();
+        let local_types = HashMap::new();
+        let struct_defs = HashMap::new();
+        let enum_defs = HashMap::new();
+        let mut string_constants = Vec::new();
+        let mut next_reg: u32 = 0;
+
+        let value = Value::BinOp(
+            BinOp::Lt,
+            Box::new(Value::FloatConst(1.0)),
+            Box::new(Value::FloatConst(2.0)),
+        );
+        let _ = emit_value(
+            &value,
+            &mut emitter,
+            &local_regs,
+            &local_types,
+            &mut next_reg,
+            &struct_defs,
+            &enum_defs,
+            &mut string_constants,
+        );
+        let output = emitter.finish();
+
+        // fcmp must get register N and zext must get register N+1.
+        assert!(
+            output.contains("fcmp olt double"),
+            "should contain fcmp olt, got: {output}"
+        );
+        // Verify sequential numbering.
+        let icmp_line = output.lines().find(|l| l.contains("fcmp")).unwrap_or("");
+        let zext_line = output.lines().find(|l| l.contains("zext")).unwrap_or("");
+        let icmp_reg: u32 = icmp_line
+            .trim()
+            .strip_prefix('%')
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(999);
+        let zext_reg: u32 = zext_line
+            .trim()
+            .strip_prefix('%')
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            zext_reg,
+            icmp_reg + 1,
+            "zext reg ({zext_reg}) should be icmp reg ({icmp_reg}) + 1"
+        );
     }
 
     #[test]

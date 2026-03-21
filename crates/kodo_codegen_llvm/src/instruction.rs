@@ -313,6 +313,41 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "Bool_to_string" => "kodo_bool_to_string",
         "Map_keys" => "kodo_map_keys",
         "Map_values" => "kodo_map_values",
+        // List iterators
+        "list_iter" => "kodo_list_iter",
+        "list_iterator_advance" => "kodo_list_iterator_advance",
+        "list_iterator_value" => "kodo_list_iterator_value",
+        "list_iterator_free" => "kodo_list_iterator_free",
+        // String chars iterators
+        "string_chars_advance" => "kodo_string_chars_advance",
+        "string_chars_value" => "kodo_string_chars_value",
+        "string_chars_free" => "kodo_string_chars_free",
+        // Map keys iterators
+        "map_keys_advance" => "kodo_map_keys_advance",
+        "map_keys_value" => "kodo_map_keys_value",
+        "map_keys_free" => "kodo_map_keys_free",
+        // Map values iterators
+        "map_values_advance" => "kodo_map_values_advance",
+        "map_values_value" => "kodo_map_values_value",
+        "map_values_free" => "kodo_map_values_free",
+        // Option/Result synthetic builtins — mapped to runtime helpers.
+        "Option_is_some" => "kodo_option_is_some",
+        "Option_is_none" => "kodo_option_is_none",
+        "Option_unwrap" => "kodo_option_unwrap",
+        "Option_unwrap_or" => "kodo_option_unwrap_or",
+        "Result_is_ok" => "kodo_result_is_ok",
+        "Result_is_err" => "kodo_result_is_err",
+        "Result_unwrap" => "kodo_result_unwrap",
+        "Result_unwrap_err" => "kodo_result_unwrap_err",
+        "Result_unwrap_or" => "kodo_result_unwrap_or",
+        // List higher-order methods — mapped to runtime helpers.
+        "List_map" => "kodo_list_map",
+        "List_filter" => "kodo_list_filter",
+        "List_fold" => "kodo_list_fold",
+        "List_reduce" => "kodo_list_reduce",
+        "List_any" => "kodo_list_any",
+        "List_all" => "kodo_list_all",
+        "List_count" => "kodo_list_count",
         // Pass-through for already-qualified names.
         other => other,
     }
@@ -532,5 +567,52 @@ mod tests {
             "kodo_contract_fail"
         );
         assert_eq!(resolve_runtime_name("my_function"), "my_function");
+    }
+
+    /// Verifies that all iterator function names are correctly mapped.
+    #[test]
+    fn resolve_runtime_name_iterators() {
+        assert_eq!(resolve_runtime_name("list_iter"), "kodo_list_iter");
+        assert_eq!(
+            resolve_runtime_name("list_iterator_advance"),
+            "kodo_list_iterator_advance"
+        );
+        assert_eq!(
+            resolve_runtime_name("list_iterator_value"),
+            "kodo_list_iterator_value"
+        );
+        assert_eq!(
+            resolve_runtime_name("list_iterator_free"),
+            "kodo_list_iterator_free"
+        );
+        assert_eq!(
+            resolve_runtime_name("string_chars_advance"),
+            "kodo_string_chars_advance"
+        );
+        assert_eq!(
+            resolve_runtime_name("map_keys_advance"),
+            "kodo_map_keys_advance"
+        );
+        assert_eq!(
+            resolve_runtime_name("map_values_advance"),
+            "kodo_map_values_advance"
+        );
+    }
+
+    /// Verifies that Option/Result/List synthetic builtins are correctly mapped.
+    #[test]
+    fn resolve_runtime_name_synthetic_builtins() {
+        assert_eq!(
+            resolve_runtime_name("Option_is_some"),
+            "kodo_option_is_some"
+        );
+        assert_eq!(
+            resolve_runtime_name("Option_is_none"),
+            "kodo_option_is_none"
+        );
+        assert_eq!(resolve_runtime_name("Result_is_ok"), "kodo_result_is_ok");
+        assert_eq!(resolve_runtime_name("Result_is_err"), "kodo_result_is_err");
+        assert_eq!(resolve_runtime_name("List_map"), "kodo_list_map");
+        assert_eq!(resolve_runtime_name("List_filter"), "kodo_list_filter");
     }
 }

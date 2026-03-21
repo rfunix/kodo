@@ -1175,6 +1175,88 @@ fn all_builtins() -> Vec<Builtin> {
             params: &["i64"],
             ret: "void",
         },
+        // -- Option/Result synthetic builtins --
+        Builtin {
+            name: "kodo_option_is_some",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_option_is_none",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_option_unwrap",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_option_unwrap_or",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_result_is_ok",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_result_is_err",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_result_unwrap",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_result_unwrap_err",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_result_unwrap_or",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        // -- List higher-order builtins --
+        Builtin {
+            name: "kodo_list_map",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_filter",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_fold",
+            params: &["i64", "i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_reduce",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_any",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_all",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_list_count",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
     ]
 }
 

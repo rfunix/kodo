@@ -147,9 +147,10 @@ pub fn compile_module_to_llvm_ir(
     }
     emitter.blank();
 
-    // -- Collect user function names --
+    // -- Collect user function names (excluding synthetic builtins) --
     let user_functions: Vec<String> = mir_functions
         .iter()
+        .filter(|f| !is_synthetic_builtin(&f.name))
         .map(|f| {
             if f.name == "main" {
                 "kodo_main".to_string()
@@ -172,6 +173,14 @@ pub fn compile_module_to_llvm_ir(
     let mut function_irs: Vec<String> = Vec::new();
 
     for func in mir_functions {
+        // Skip synthetic stdlib functions whose MIR parameter types are
+        // incompatible with the actual LLVM layout.  The Cranelift backend
+        // handles Option/Result/List helpers as inline builtins; we do the
+        // same by omitting their definitions (calls resolve to runtime or
+        // are dead code eliminated).
+        if is_synthetic_builtin(&func.name) {
+            continue;
+        }
         let ir = function::emit_function(
             func,
             struct_defs,
@@ -203,6 +212,19 @@ pub fn compile_module_to_llvm_ir(
     }
 
     Ok(emitter.finish())
+}
+
+/// Returns `true` for synthetic stdlib functions that should not be emitted as
+/// LLVM function definitions.  These are Option/Result/List higher-order helpers
+/// whose MIR parameter types are incorrect for LLVM (e.g., `Type::Struct("Option")`
+/// instead of the actual enum layout).  The runtime C library provides their
+/// implementations.
+fn is_synthetic_builtin(name: &str) -> bool {
+    // Option/Result helpers
+    name.starts_with("Option_")
+        || name.starts_with("Result_")
+        // List higher-order methods (map, filter, fold, etc.)
+        || name.starts_with("List_")
 }
 
 /// Detects the target triple for the current platform.
@@ -617,5 +639,111 @@ mod tests {
         let ir = result.ok().unwrap_or_default();
         assert!(ir.contains("declare void @kodo_println(i64, i64)"));
         assert!(ir.contains("declare i64 @kodo_list_new()"));
+    }
+
+    /// Verifies that synthetic builtins (Option_*, Result_*, List_*) are
+    /// skipped during function emission — they use incompatible MIR types.
+    #[test]
+    fn synthetic_builtins_skipped() {
+        let option_fn = MirFunction {
+            name: "Option_is_some".to_string(),
+            return_type: Type::Bool,
+            param_count: 1,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Struct("Option".to_string()),
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::IntConst(1)),
+            }],
+            entry: BlockId(0),
+        };
+        let main_fn = MirFunction {
+            name: "main".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module_to_llvm_ir(
+            &[option_fn, main_fn],
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &LLVMCodegenOptions::default(),
+        );
+        assert!(result.is_ok());
+        let ir = result.ok().unwrap_or_default();
+        assert!(
+            !ir.contains("define i64 @Option_is_some"),
+            "Option_is_some should not be defined, IR:\n{ir}"
+        );
+        assert!(ir.contains("@kodo_main"), "main should still be defined");
+    }
+
+    /// Verifies that `is_synthetic_builtin` correctly identifies synthetic
+    /// builtin function names.
+    #[test]
+    fn synthetic_builtin_detection() {
+        assert!(is_synthetic_builtin("Option_is_some"));
+        assert!(is_synthetic_builtin("Option_unwrap_or"));
+        assert!(is_synthetic_builtin("Result_is_ok"));
+        assert!(is_synthetic_builtin("Result_unwrap"));
+        assert!(is_synthetic_builtin("List_map"));
+        assert!(is_synthetic_builtin("List_filter"));
+        assert!(!is_synthetic_builtin("main"));
+        assert!(!is_synthetic_builtin("fib"));
+        assert!(!is_synthetic_builtin("println"));
+    }
+
+    /// Verifies that dead blocks with Unit return in a non-void function
+    /// emit `unreachable` instead of `ret void`.
+    #[test]
+    fn dead_block_emits_unreachable() {
+        let func = MirFunction {
+            name: "with_dead_block".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::IntConst(42)),
+                },
+                // Unreachable dead block with Unit return.
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::Unit),
+                },
+            ],
+            entry: BlockId(0),
+        };
+        let result = compile_module_to_llvm_ir(
+            &[func],
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &LLVMCodegenOptions::default(),
+        );
+        assert!(result.is_ok());
+        let ir = result.ok().unwrap_or_default();
+        assert!(
+            ir.contains("unreachable"),
+            "dead block should emit 'unreachable', got:\n{ir}"
+        );
+        assert!(
+            !ir.contains("ret void"),
+            "should not contain 'ret void' in non-void function, got:\n{ir}"
+        );
     }
 }
