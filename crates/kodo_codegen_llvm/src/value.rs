@@ -317,6 +317,7 @@ fn emit_binop(
 ) -> ValueResult {
     let lhs_ty = infer_value_type_simple(lhs, local_types);
     let is_float = matches!(lhs_ty, Type::Float64 | Type::Float32);
+    let is_string = matches!(lhs_ty, Type::String);
 
     let lhs_vr = emit_value(
         lhs,
@@ -338,6 +339,32 @@ fn emit_binop(
         enum_defs,
         string_constants,
     );
+
+    // String comparison: emit runtime call instead of icmp.
+    if is_string && matches!(op, BinOp::Eq | BinOp::Ne) {
+        let str_ty = "{ i64, i64 }";
+        let l = value_result_to_reg(&lhs_vr, emitter, next_reg, str_ty);
+        let r = value_result_to_reg(&rhs_vr, emitter, next_reg, str_ty);
+        // Extract ptr and len from both strings.
+        let l_ptr = fresh_reg(next_reg);
+        let l_len = fresh_reg(next_reg);
+        let r_ptr = fresh_reg(next_reg);
+        let r_len = fresh_reg(next_reg);
+        emitter.indent(&format!("{l_ptr} = extractvalue {{ i64, i64 }} {l}, 0"));
+        emitter.indent(&format!("{l_len} = extractvalue {{ i64, i64 }} {l}, 1"));
+        emitter.indent(&format!("{r_ptr} = extractvalue {{ i64, i64 }} {r}, 0"));
+        emitter.indent(&format!("{r_len} = extractvalue {{ i64, i64 }} {r}, 1"));
+        let result = fresh_reg(next_reg);
+        emitter.indent(&format!(
+            "{result} = call i64 @kodo_string_eq(i64 {l_ptr}, i64 {l_len}, i64 {r_ptr}, i64 {r_len})"
+        ));
+        if matches!(op, BinOp::Ne) {
+            let neg = fresh_reg(next_reg);
+            emitter.indent(&format!("{neg} = xor i64 {result}, 1"));
+            return ValueResult::Register(neg);
+        }
+        return ValueResult::Register(result);
+    }
 
     let ty_str = if is_float { "double" } else { "i64" };
     let l = value_result_to_reg(&lhs_vr, emitter, next_reg, ty_str);
