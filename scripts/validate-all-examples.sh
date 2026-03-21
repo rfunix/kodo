@@ -44,18 +44,23 @@ ERRORS=""
 
 # ── Skip list ────────────────────────────────────────────────────────────────
 # Files that intentionally fail or need special handling.
-SKIP_FILES=(
-    "type_errors.ko"
-    "http_api.ko"
-    "http_client.ko"
-    "url_shortener.ko"
-    "intent_http_server.ko"
-    "intent_http.ko"
-    "cli_args.ko"
-    "async_real.ko"
-    "send_sync_demo.ko"
-    "channel_select.ko"
-    "crud_api.ko"
+# Files to skip entirely (intentionally broken)
+SKIP_ALL=(
+    "type_errors.ko"     # Intentionally has type errors
+)
+
+# Files to check but NOT run (block on I/O, need infrastructure, etc.)
+SKIP_RUN=(
+    "http_api.ko"            # Starts HTTP server (blocks)
+    "http_client.ko"         # Needs running HTTP server
+    "url_shortener.ko"       # Starts HTTP server (blocks)
+    "intent_http_server.ko"  # Starts HTTP server (blocks)
+    "intent_http.ko"         # Starts HTTP server (blocks)
+    "crud_api.ko"            # Starts HTTP server (blocks)
+    "cli_args.ko"            # Needs command line arguments
+    "async_real.ko"          # Timing-sensitive concurrency
+    "send_sync_demo.ko"      # May have threading race conditions
+    "channel_select.ko"      # Infinite loop on channel select
 )
 
 # Subdirectories to skip (intentionally broken or need special setup)
@@ -64,13 +69,20 @@ SKIP_DIRS=(
     "with_deps"          # Requires dependency resolution (kodo.toml)
 )
 
-should_skip() {
+should_skip_all() {
     local filename
     filename="$(basename "$1")"
-    for skip in "${SKIP_FILES[@]}"; do
-        if [[ "$filename" == "$skip" ]]; then
-            return 0
-        fi
+    for skip in "${SKIP_ALL[@]}"; do
+        [[ "$filename" == "$skip" ]] && return 0
+    done
+    return 1
+}
+
+should_skip_run() {
+    local filename
+    filename="$(basename "$1")"
+    for skip in "${SKIP_RUN[@]}"; do
+        [[ "$filename" == "$skip" ]] && return 0
     done
     return 1
 }
@@ -104,13 +116,14 @@ validate_file() {
     name="$(basename "$file" .ko)"
     TOTAL=$((TOTAL + 1))
 
-    if should_skip "$file"; then
-        printf "  ${YELLOW}⊘${RESET} %-45s skipped\n" "$(basename "$file")"
+    # Fully skipped (intentionally broken)
+    if should_skip_all "$file"; then
+        printf "  ${YELLOW}⊘${RESET} %-45s skipped (intentionally broken)\n" "$(basename "$file")"
         SKIPPED=$((SKIPPED + 1))
         return
     fi
 
-    # Step 1: kodoc check
+    # Step 1: kodoc check (always runs, even for skip-run files)
     if ! "$KODOC" check "$file" >/dev/null 2>&1; then
         printf "  ${RED}✗${RESET} %-45s check failed\n" "$(basename "$file")"
         FAILED=$((FAILED + 1))
@@ -118,6 +131,12 @@ validate_file() {
         return
     fi
     CHECKED=$((CHECKED + 1))
+
+    # Check-only files (block on I/O, need infra, etc.)
+    if should_skip_run "$file"; then
+        printf "  ${GREEN}✓${RESET} %-45s check only (skip run)\n" "$(basename "$file")"
+        return
+    fi
 
     # Step 2: if file has fn main(), build and run it
     if grep -q 'fn main()' "$file" 2>/dev/null; then
