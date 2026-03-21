@@ -160,6 +160,11 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("List_all".to_string())
         .or_insert(Type::Bool);
 
+    // List.sort_by — sorts in place with a comparator, returns Unit.
+    fn_return_types
+        .entry("List_sort_by".to_string())
+        .or_insert(Type::Unit);
+
     // Closure handle builtins.
     fn_return_types
         .entry("kodo_closure_new".to_string())

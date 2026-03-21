@@ -54,6 +54,17 @@ module list_functional {
             println("all_pos: false")
         }
 
+        // sort_by: sort descending using a custom comparator
+        let to_sort: List<Int> = list_new()
+        list_push(to_sort, 3)
+        list_push(to_sort, 1)
+        list_push(to_sort, 4)
+        list_push(to_sort, 1)
+        list_push(to_sort, 5)
+        to_sort.sort_by(|a: Int, b: Int| -> Int { b - a })
+        let sorted_first: Int = list_get(to_sort, 0)
+        print_int(sorted_first)
+
         return 0
     }
 }

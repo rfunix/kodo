@@ -493,6 +493,7 @@ These are called as methods on list values:
 |--------|-----------|-------------|
 | `list.slice(start, end)` | `(Int, Int) -> List<T>` | Extract a sub-list |
 | `list.sort()` | `() -> Unit` | Sort in place (ascending) |
+| `list.sort_by(f)` | `((Int, Int) -> Int) -> Unit` | Sort in place with custom comparator |
 | `list.join(sep)` | `(String) -> String` | Join elements with separator (for `List<String>`) |
 | `list.iter()` | `() -> Iterator` | Create an iterator for `for-in` or combinators |
 | `list.map(f)` | `((T) -> U) -> List<U>` | Transform each element |

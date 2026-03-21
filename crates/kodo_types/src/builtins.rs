@@ -829,6 +829,26 @@ impl TypeChecker {
                 Box::new(Type::Unit),
             ),
         );
+        // list_sort_by(List<Int>, (Int, Int) -> Int) -> ()  (sorts in place with comparator)
+        let fn_cmp = Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int));
+        self.method_lookup.insert(
+            ("List".to_string(), "sort_by".to_string()),
+            (
+                "List_sort_by".to_string(),
+                vec![
+                    Type::Generic("List".to_string(), vec![Type::Int]),
+                    fn_cmp.clone(),
+                ],
+                Type::Unit,
+            ),
+        );
+        self.env.insert(
+            "List_sort_by".to_string(),
+            Type::Function(
+                vec![Type::Generic("List".to_string(), vec![Type::Int]), fn_cmp],
+                Box::new(Type::Unit),
+            ),
+        );
         // list_join(List<String>, String) -> String
         self.method_lookup.insert(
             ("List".to_string(), "join".to_string()),

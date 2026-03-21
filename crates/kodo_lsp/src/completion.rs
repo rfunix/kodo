@@ -318,6 +318,11 @@ fn add_list_method_completions(items: &mut Vec<CompletionItem>) {
         ),
         ("reverse", "Reverses the list in place", "() -> Unit"),
         (
+            "sort_by",
+            "Sorts the list in place using a custom comparator",
+            "(f: (Int, Int) -> Int) -> Unit",
+        ),
+        (
             "is_empty",
             "Returns true if the list has no elements",
             "() -> Bool",

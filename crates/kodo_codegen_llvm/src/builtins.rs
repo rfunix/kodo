@@ -434,6 +434,11 @@ fn all_builtins() -> Vec<Builtin> {
             ret: "void",
         },
         Builtin {
+            name: "kodo_list_sort_by",
+            params: &["i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
             name: "kodo_list_join",
             params: &["i64", "i64", "i64", "i64", "i64"],
             ret: "void",

@@ -594,6 +594,7 @@ fn declare_list_builtins(
         types::I64
     );
     decl_void!("kodo_list_sort", "list_sort", types::I64);
+    decl_void!("kodo_list_sort_by", "List_sort_by", types::I64, types::I64);
     decl_ret!(
         "kodo_list_map",
         "List_map",

@@ -338,6 +338,36 @@ pub unsafe extern "C" fn kodo_list_sort(list_ptr: i64) {
     slice.sort_unstable();
 }
 
+/// Sorts the elements of a list in place using a custom comparator closure.
+///
+/// The closure receives `(env_ptr, a, b)` and returns a negative value if `a < b`,
+/// zero if `a == b`, or a positive value if `a > b`.
+///
+/// # Safety
+///
+/// `list_ptr` must be a valid pointer returned by `kodo_list_new`.
+/// `closure_handle` must be a valid closure handle returned by `kodo_closure_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_list_sort_by(list_ptr: i64, closure_handle: i64) {
+    // SAFETY: caller guarantees list_ptr was returned by kodo_list_new.
+    let list = unsafe { &mut *(list_ptr as *mut KodoList) };
+    if list.len <= 1 || list.data.is_null() {
+        return;
+    }
+    let func_ptr = crate::memory::kodo_closure_func(closure_handle);
+    let env_ptr = crate::memory::kodo_closure_env(closure_handle);
+
+    // SAFETY: func_ptr is a valid function pointer from Kōdo codegen.
+    let func: fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(func_ptr) };
+
+    // SAFETY: list.data points to list.len valid i64 elements.
+    let slice = unsafe { std::slice::from_raw_parts_mut(list.data, list.len) };
+    slice.sort_by(|a, b| {
+        let cmp = func(env_ptr, *a, *b);
+        cmp.cmp(&0)
+    });
+}
+
 /// Applies a closure to each element of a list, returning a new list with the results.
 ///
 /// The closure receives `(env_ptr, element)` and returns the transformed value.
@@ -500,7 +530,7 @@ pub unsafe extern "C" fn kodo_list_any(list_ptr: i64, closure_handle: i64) -> i6
 
 /// Returns 1 if all elements satisfy the predicate closure, 0 otherwise.
 ///
-/// The closure receives `(env_ptr, element)` and returns nonzero for true.
+/// Short-circuits on the first element that does not match.
 /// Returns 1 for an empty list (vacuous truth).
 ///
 /// # Safety
@@ -3475,6 +3505,78 @@ mod tests {
         let closure = make_closure((gt_ten_fn as *const ()) as usize);
         let result = unsafe { kodo_list_any(list, closure) };
         assert_eq!(result, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // sort_by tests (closure-based sorting)
+    // -----------------------------------------------------------------------
+
+    /// Comparator that sorts in descending order: returns positive if a < b.
+    extern "C" fn descending_cmp(_env: i64, a: i64, b: i64) -> i64 {
+        b - a
+    }
+
+    /// Comparator that sorts in ascending order: returns negative if a < b.
+    extern "C" fn ascending_cmp(_env: i64, a: i64, b: i64) -> i64 {
+        a - b
+    }
+
+    #[test]
+    fn list_sort_by_descending() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 5);
+            kodo_list_push(list, 3);
+            kodo_list_push(list, 2);
+            kodo_list_push(list, 4);
+        }
+        let closure = make_closure((descending_cmp as *const ()) as usize);
+        unsafe { kodo_list_sort_by(list, closure) };
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        for i in 0..5 {
+            unsafe { kodo_list_get(list, i, &mut val, &mut is_some) };
+            assert_eq!(val, 5 - i);
+        }
+    }
+
+    #[test]
+    fn list_sort_by_ascending() {
+        let list = kodo_list_new();
+        unsafe {
+            kodo_list_push(list, 5);
+            kodo_list_push(list, 1);
+            kodo_list_push(list, 3);
+        }
+        let closure = make_closure((ascending_cmp as *const ()) as usize);
+        unsafe { kodo_list_sort_by(list, closure) };
+        let mut val: i64 = 0;
+        let mut is_some: i64 = 0;
+        unsafe { kodo_list_get(list, 0, &mut val, &mut is_some) };
+        assert_eq!(val, 1);
+        unsafe { kodo_list_get(list, 1, &mut val, &mut is_some) };
+        assert_eq!(val, 3);
+        unsafe { kodo_list_get(list, 2, &mut val, &mut is_some) };
+        assert_eq!(val, 5);
+    }
+
+    #[test]
+    fn list_sort_by_empty() {
+        let list = kodo_list_new();
+        let closure = make_closure((descending_cmp as *const ()) as usize);
+        // Should not crash on empty list.
+        unsafe { kodo_list_sort_by(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 0);
+    }
+
+    #[test]
+    fn list_sort_by_single_element() {
+        let list = kodo_list_new();
+        unsafe { kodo_list_push(list, 42) };
+        let closure = make_closure((descending_cmp as *const ()) as usize);
+        unsafe { kodo_list_sort_by(list, closure) };
+        assert_eq!(unsafe { kodo_list_length(list) }, 1);
     }
 
     // -----------------------------------------------------------------------

@@ -67,6 +67,7 @@ expression: "labels.join(\"\\n\")"
 [method] reverse
 [method] set
 [method] slice
+[method] sort_by
 [method] starts_with
 [method] substring
 [method] to_lower

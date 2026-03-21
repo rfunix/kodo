@@ -559,6 +559,7 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "List_any" => "kodo_list_any",
         "List_all" => "kodo_list_all",
         "List_count" => "kodo_list_count",
+        "List_sort_by" => "kodo_list_sort_by",
         // Pass-through for already-qualified names.
         other => other,
     }
