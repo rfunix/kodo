@@ -1031,6 +1031,10 @@ mod tests {
                                 "describe", "setup", "teardown", "forall"];
                 for kw in &keywords {
                     let name = format!("{kw}{suffix}");
+                    // Skip if the concatenation itself is a keyword (e.g. "for" + "all" = "forall")
+                    if keywords.contains(&name.as_str()) {
+                        continue;
+                    }
                     let tokens = tokenize(&name).unwrap();
                     assert_eq!(tokens.len(), 1);
                     assert!(
