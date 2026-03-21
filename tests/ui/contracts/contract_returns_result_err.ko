@@ -1,0 +1,57 @@
+//@ run-pass
+// Tests that contract violations in Result-returning functions return
+// Result::Err instead of aborting the process.
+
+module contract_returns_result_err {
+    meta {
+        purpose: "Test graceful contract violation via Result::Err"
+        version: "1.0.0"
+    }
+
+    fn guarded(x: Int) -> Result<Int, String>
+        requires { x > 0 }
+    {
+        return Result::Ok(x * 2)
+    }
+
+    fn main() -> Int {
+        // Valid call — should return Ok(10)
+        let ok_result: Result<Int, String> = guarded(5)
+        match ok_result {
+            Result::Ok(v) => {
+                print_int(v)
+            }
+            Result::Err(e) => {
+                println("unexpected error")
+                return 1
+            }
+        }
+
+        // Invalid call — requires x > 0, passing 0
+        // Should return Err, NOT abort
+        let err_result: Result<Int, String> = guarded(0)
+        match err_result {
+            Result::Ok(v) => {
+                println("unexpected ok")
+                return 1
+            }
+            Result::Err(e) => {
+                println("caught contract violation")
+            }
+        }
+
+        // Negative value — also violates requires
+        let err2: Result<Int, String> = guarded(-5)
+        match err2 {
+            Result::Ok(v) => {
+                println("unexpected ok")
+                return 1
+            }
+            Result::Err(e) => {
+                println("caught second violation")
+            }
+        }
+
+        return 0
+    }
+}
