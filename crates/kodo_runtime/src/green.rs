@@ -1384,6 +1384,16 @@ mod tests {
             kodo_green_run();
         }
 
+        // The work-stealing scheduler may return slightly before the
+        // last stolen task commits its counter increment.  Allow a
+        // brief spin to avoid flaky failures on CI.
+        for _ in 0..100 {
+            if COUNTER.load(Ordering::SeqCst) == 10 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
         assert_eq!(
             COUNTER.load(Ordering::SeqCst),
             10,
