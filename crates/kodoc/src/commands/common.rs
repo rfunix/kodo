@@ -1877,10 +1877,17 @@ pub(crate) fn substitute_type_expr_ast(
 mod tests {
     use super::*;
 
+    /// Returns the path to the workspace root's `examples/multifile` directory,
+    /// independent of the working directory used by `cargo test`.
+    fn multifile_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/multifile")
+    }
+
     #[test]
     fn find_ko_files_returns_sorted_list() {
-        let dir = std::path::Path::new("../../examples/multifile");
-        let files = find_ko_files(dir).unwrap();
+        let dir = multifile_dir();
+        let files = find_ko_files(&dir).unwrap();
         assert!(files.len() >= 2, "expected at least 2 .ko files");
         // Verify all files have .ko extension.
         for f in &files {
@@ -1899,8 +1906,8 @@ mod tests {
 
     #[test]
     fn find_entry_point_single_main() {
-        let dir = std::path::Path::new("../../examples/multifile");
-        let files = find_ko_files(dir).unwrap();
+        let dir = multifile_dir();
+        let files = find_ko_files(&dir).unwrap();
         let entry = find_entry_point(&files).unwrap();
         assert!(
             entry.to_str().unwrap_or("").contains("main.ko"),
@@ -1928,8 +1935,8 @@ mod tests {
 
     #[test]
     fn find_test_files_returns_files_with_tests() {
-        let dir = std::path::Path::new("../../examples/multifile");
-        let files = find_ko_files(dir).unwrap();
+        let dir = multifile_dir();
+        let files = find_ko_files(&dir).unwrap();
         let test_files = find_test_files(&files).unwrap();
         assert!(
             !test_files.is_empty(),
@@ -1944,8 +1951,8 @@ mod tests {
 
     #[test]
     fn topological_sort_includes_entry() {
-        let dir = std::path::Path::new("../../examples/multifile");
-        let files = find_ko_files(dir).unwrap();
+        let dir = multifile_dir();
+        let files = find_ko_files(&dir).unwrap();
         let entry = find_entry_point(&files).unwrap();
         let sorted = topological_sort(&entry, &files).unwrap();
         assert!(
