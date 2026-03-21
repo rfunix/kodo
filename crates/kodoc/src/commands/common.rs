@@ -1880,8 +1880,7 @@ mod tests {
     /// Returns the path to the workspace root's `examples/multifile` directory,
     /// independent of the working directory used by `cargo test`.
     fn multifile_dir() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/multifile")
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/multifile")
     }
 
     #[test]
