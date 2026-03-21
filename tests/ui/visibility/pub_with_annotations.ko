@@ -1,4 +1,5 @@
 //@ check-pass
+//@ compile-flags: --contracts=runtime
 // Tests that `pub` works correctly after annotation attributes.
 
 module pub_with_annotations {
