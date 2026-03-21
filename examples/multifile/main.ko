@@ -1,0 +1,16 @@
+module main {
+    import math
+
+    meta {
+        purpose: "Demonstrate directory compilation with kodoc build dir/"
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let sum: Int = add(10, 20)
+        let product: Int = multiply(5, 6)
+        print_int(sum)
+        print_int(product)
+        return 0
+    }
+}

@@ -448,13 +448,18 @@ pub unsafe extern "C" fn kodo_test_isolate_end() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes tests that read/write the global `TEST_FAILED` flag,
+    /// preventing race conditions when cargo runs tests in parallel.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Helper: reset the global TEST_FAILED flag before each test that
     /// inspects it, to avoid cross-test contamination.
     ///
     /// # Safety
     ///
-    /// Must only be called from single-threaded test code.
+    /// Must only be called while holding `TEST_LOCK`.
     unsafe fn reset_test_failed() {
         unsafe {
             TEST_FAILED = false;
@@ -465,6 +470,7 @@ mod tests {
 
     #[test]
     fn assert_passes_on_nonzero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert(1);
@@ -474,6 +480,7 @@ mod tests {
 
     #[test]
     fn assert_fails_on_zero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert(0);
@@ -485,6 +492,7 @@ mod tests {
 
     #[test]
     fn assert_true_passes_on_nonzero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_true(1);
@@ -494,6 +502,7 @@ mod tests {
 
     #[test]
     fn assert_true_fails_on_zero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_true(0);
@@ -505,6 +514,7 @@ mod tests {
 
     #[test]
     fn assert_false_passes_on_zero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_false(0);
@@ -514,6 +524,7 @@ mod tests {
 
     #[test]
     fn assert_false_fails_on_nonzero() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_false(1);
@@ -525,6 +536,7 @@ mod tests {
 
     #[test]
     fn assert_eq_int_passes_on_equal() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_int(42, 42);
@@ -534,6 +546,7 @@ mod tests {
 
     #[test]
     fn assert_eq_int_fails_on_different() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_int(42, 99);
@@ -543,6 +556,7 @@ mod tests {
 
     #[test]
     fn assert_eq_int_negative_values() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_int(-10, -10);
@@ -554,6 +568,7 @@ mod tests {
 
     #[test]
     fn assert_eq_bool_passes_both_true() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_bool(1, 1);
@@ -563,6 +578,7 @@ mod tests {
 
     #[test]
     fn assert_eq_bool_passes_both_false() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_bool(0, 0);
@@ -572,6 +588,7 @@ mod tests {
 
     #[test]
     fn assert_eq_bool_fails_true_vs_false() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_bool(1, 0);
@@ -581,6 +598,7 @@ mod tests {
 
     #[test]
     fn assert_eq_bool_nonzero_is_true() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             // Any non-zero value is truthy, so 5 == 1 as booleans.
@@ -593,6 +611,7 @@ mod tests {
 
     #[test]
     fn assert_eq_float_passes_on_equal() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_float(3.14, 3.14);
@@ -602,6 +621,7 @@ mod tests {
 
     #[test]
     fn assert_eq_float_fails_on_different() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_float(3.14, 2.71);
@@ -613,6 +633,7 @@ mod tests {
 
     #[test]
     fn assert_ne_int_passes_on_different() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_int(1, 2);
@@ -622,6 +643,7 @@ mod tests {
 
     #[test]
     fn assert_ne_int_fails_on_equal() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_int(5, 5);
@@ -633,6 +655,7 @@ mod tests {
 
     #[test]
     fn assert_ne_bool_passes_on_different() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_bool(1, 0);
@@ -642,6 +665,7 @@ mod tests {
 
     #[test]
     fn assert_ne_bool_fails_on_same() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_bool(1, 1);
@@ -653,6 +677,7 @@ mod tests {
 
     #[test]
     fn assert_ne_float_passes_on_different() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_float(1.0, 2.0);
@@ -662,6 +687,7 @@ mod tests {
 
     #[test]
     fn assert_ne_float_fails_on_equal() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_float(1.0, 1.0);
@@ -678,6 +704,7 @@ mod tests {
         // Build 16-byte string slots: [ptr: i64, len: i64].
         let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
         let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
@@ -691,6 +718,7 @@ mod tests {
         let b = "world";
         let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
         let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_eq_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
@@ -704,6 +732,7 @@ mod tests {
         let b = "bar";
         let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
         let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
@@ -717,6 +746,7 @@ mod tests {
         let b = "same";
         let slot_a: [i64; 2] = [a.as_ptr() as i64, a.len() as i64];
         let slot_b: [i64; 2] = [b.as_ptr() as i64, b.len() as i64];
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert_ne_string(slot_a.as_ptr() as i64, slot_b.as_ptr() as i64);
@@ -731,6 +761,7 @@ mod tests {
 
     #[test]
     fn test_failed_flag_starts_false() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             assert!(!TEST_FAILED);
@@ -739,6 +770,7 @@ mod tests {
 
     #[test]
     fn test_failed_flag_set_by_assertion() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             reset_test_failed();
             kodo_assert(0); // triggers failure
@@ -753,8 +785,6 @@ mod tests {
     // concurrently with each other.  We use a process-wide Mutex as a
     // serialisation token — holding the lock for the entire test body ensures
     // that two timeout tests can never interleave.
-
-    use std::sync::Mutex;
 
     /// Mutex used to serialise timeout tests that share the global
     /// `TIMEOUT_ACTIVE` flag.  The `bool` payload is unused; only the lock

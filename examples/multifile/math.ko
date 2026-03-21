@@ -1,0 +1,14 @@
+module math {
+    meta {
+        purpose: "Basic math utilities for multi-file demo"
+        version: "0.1.0"
+    }
+
+    pub fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    pub fn multiply(a: Int, b: Int) -> Int {
+        return a * b
+    }
+}

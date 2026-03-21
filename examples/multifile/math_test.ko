@@ -1,0 +1,28 @@
+module math_test {
+    import math
+
+    meta {
+        purpose: "Tests for the math module"
+        version: "0.1.0"
+    }
+
+    test "add returns correct sum" {
+        let result: Int = add(2, 3)
+        let expected: Int = 5
+        assert(result == expected)
+    }
+
+    test "multiply returns correct product" {
+        let result: Int = multiply(4, 5)
+        let expected: Int = 20
+        assert(result == expected)
+    }
+
+    test "add with zero" {
+        assert(add(0, 42) == 42)
+    }
+
+    test "multiply with zero" {
+        assert(multiply(0, 100) == 0)
+    }
+}

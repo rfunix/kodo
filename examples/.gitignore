@@ -5,6 +5,8 @@
 !.gitignore
 !multi_file/
 !multi_file/**
+!multifile/
+!multifile/**
 !audit_log/
 !audit_log/**
 !self_hosted_lexer/
