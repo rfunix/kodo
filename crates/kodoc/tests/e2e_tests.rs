@@ -1931,6 +1931,40 @@ module map_sv_contains_test {
 // Sprint 10: WI-3 — Contract recovery mode E2E
 // ---------------------------------------------------------------------------
 
+/// Compiles a `.ko` file from the examples directory with the given contract mode.
+///
+/// Panics if compilation fails.
+fn compile_ko_with_contracts(
+    source_path: &Path,
+    output_name: &str,
+    mode: &str,
+) -> std::path::PathBuf {
+    let kodoc = get_kodoc_path();
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
+    let output_path = output_dir.join(output_name);
+
+    let result = Command::new(&kodoc)
+        .arg("build")
+        .arg(source_path)
+        .arg("--contracts")
+        .arg(mode)
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("failed to run kodoc");
+
+    assert!(
+        result.status.success(),
+        "kodoc build --contracts {mode} failed for {}:\nstdout: {}\nstderr: {}",
+        source_path.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    output_path
+}
+
 /// Compiles a `.ko` source with the given contract mode and returns the binary path.
 fn compile_source_with_contracts(source: &str, test_name: &str, mode: &str) -> std::path::PathBuf {
     let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
@@ -2939,5 +2973,45 @@ fn test_audit_log_example() {
     assert!(
         stdout.contains("=== End of Report ==="),
         "should contain report footer, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Recoverable contracts example E2E test
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_recoverable_contracts_example() {
+    let root = workspace_root();
+    let binary = compile_ko_with_contracts(
+        &root.join("examples/recoverable_contracts.ko"),
+        "test_recoverable_contracts_example",
+        "recoverable",
+    );
+    let (exit_code, stdout, stderr) = run_binary(&binary);
+
+    assert_eq!(
+        exit_code, 0,
+        "recoverable contracts example should exit 0, got: {exit_code}"
+    );
+    assert!(
+        stdout.contains("10"),
+        "valid call positive_double(5) should print 10, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("-6"),
+        "violation call positive_double(-3) should still compute -6, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("execution continued after violation"),
+        "execution should continue after recoverable violation, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("WARNING: contract violation (recoverable):"),
+        "should emit recoverable warning on stderr, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("positive_double"),
+        "warning should mention the function name, got: {stderr}"
     );
 }

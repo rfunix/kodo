@@ -1,0 +1,21 @@
+module main {
+    meta {
+        purpose: "Demonstrate recoverable contract mode"
+        version: "0.1.0"
+    }
+
+    fn positive_double(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        let result1: Int = positive_double(5)
+        print_int(result1)
+        let result2: Int = positive_double(-3)
+        print_int(result2)
+        println("execution continued after violation")
+        return 0
+    }
+}

@@ -1,0 +1,23 @@
+//@ run-pass
+//@ compile-flags: --contracts=recoverable
+module recoverable_basic {
+    meta {
+        purpose: "Test basic recoverable contract mode"
+        version: "1.0.0"
+    }
+
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        let valid: Int = positive_only(5)
+        print_int(valid)
+        let invalid: Int = positive_only(-1)
+        print_int(invalid)
+        println("recovered")
+        return 0
+    }
+}

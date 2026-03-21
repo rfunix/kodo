@@ -368,6 +368,7 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 | [`contracts_verified.ko`](examples/contracts_verified.ko) | Statically verified contracts via Z3 |
 | [`contracts_smt_demo.ko`](examples/contracts_smt_demo.ko) | SMT solver contract verification demo |
 | [`smt_verified.ko`](examples/smt_verified.ko) | SMT contract verification |
+| [`recoverable_contracts.ko`](examples/recoverable_contracts.ko) | Recoverable contract mode (`--contracts=recoverable`) |
 | [`ownership.ko`](examples/ownership.ko) | Linear ownership with `own`/`ref`, move semantics for structs |
 | [`borrow_rules.ko`](examples/borrow_rules.ko) | Borrow rules: multiple `ref` borrows, `mut` exclusivity |
 | [`move_semantics.ko`](examples/move_semantics.ko) | Move semantics, Copy vs non-Copy types |
