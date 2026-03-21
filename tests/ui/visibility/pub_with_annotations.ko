@@ -1,0 +1,36 @@
+//@ check-pass
+// Tests that `pub` works correctly after annotation attributes.
+
+module pub_with_annotations {
+    meta {
+        purpose: "Test pub visibility combined with annotations"
+        version: "1.0.0"
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    pub fn annotated_public(x: Int) -> Int {
+        return x + 1
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.5)
+    @reviewed_by(human: "rafael")
+    pub fn low_confidence_public(x: Int) -> Int {
+        return x * 2
+    }
+
+    @security_sensitive
+    pub fn secure_public(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x
+    }
+
+    fn main() -> Int {
+        let a: Int = annotated_public(1)
+        let b: Int = low_confidence_public(2)
+        let c: Int = secure_public(3)
+        return a + b + c
+    }
+}

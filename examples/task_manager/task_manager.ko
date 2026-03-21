@@ -365,15 +365,8 @@ module task_manager {
         timestamps: Map<Int, String>
     ) -> Result<Int, String> {
         let data: String = tasks_to_json_array(ids, titles, descriptions, priorities, statuses, timestamps)
-        let write_result: Result<String, String> = file_write("tasks.json", data)
-        match write_result {
-            Result::Ok(v) => {
-                return Result::Ok(1)
-            }
-            Result::Err(e) => {
-                return Result::Err(f"failed to save: {e}")
-            }
-        }
+        file_write("tasks.json", data)
+        return Result::Ok(1)
     }
 
     // ── Error Response Helper ────────────────────────────────────────
@@ -533,10 +526,13 @@ module task_manager {
 
             println(f"{method} {path}")
 
+            // Check before route() consumes method
+            let is_post_tasks: Bool = method == "POST" && path == "/tasks"
+
             let resp: String = route(method, path, body, ids, titles, descriptions, priorities, statuses, timestamps, next_id)
 
             // Increment next_id on successful POST
-            if method == "POST" && path == "/tasks" {
+            if is_post_tasks {
                 let check: Bool = resp.contains("error")
                 if !check {
                     next_id = next_id + 1

@@ -140,8 +140,16 @@ impl Parser {
                 } else if self.check(&TokenKind::Describe) {
                     describe_decls.push(self.parse_describe_decl(annotations)?);
                 } else {
+                    // Support `pub` after annotations: @foo pub fn ...
+                    let is_pub = self.check(&TokenKind::Pub);
+                    if is_pub {
+                        self.advance();
+                    }
                     let mut func = self.parse_function()?;
                     func.annotations = annotations;
+                    if is_pub {
+                        func.visibility = Visibility::Public;
+                    }
                     functions.push(func);
                 }
             }
