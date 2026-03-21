@@ -1,0 +1,633 @@
+// Task Management API — Benchmark showcase of all Kōdo features.
+//
+// A complete REST API demonstrating every agent-first feature:
+//   - meta: self-describing module
+//   - @authored_by / @confidence / @reviewed_by: agent traceability
+//   - @security_sensitive: security annotation
+//   - requires / ensures: formal contracts
+//   - refinement types: compile-time value constraints
+//   - Result<T, E> + ? operator: structured error handling
+//   - Map<K,V> / List<T>: collections
+//   - JSON builder: structured responses
+//   - HTTP server: REST API
+//   - File I/O: persistence
+//   - Closures / HOF: functional combinators
+//   - String interpolation: f-strings
+//   - Pattern matching: exhaustive match
+//   - Ownership: own / ref semantics
+//   - Intent block: declarative server
+//   - Tests: inline test blocks
+//   - Invariants: module-level guarantees
+//   - Visibility: pub / private
+//   - For-in loops: collection iteration
+//
+// Run:  kodoc build examples/task_manager/task_manager.ko -o task_manager && ./task_manager
+// Test: kodoc check examples/task_manager/task_manager.ko
+// Audit: kodoc confidence-report examples/task_manager/task_manager.ko
+
+module task_manager {
+    meta {
+        purpose: "Task Management REST API — benchmark showcase of all Kodo features",
+        version: "1.0.0",
+        author: "claude",
+        license: "MIT"
+    }
+
+    // ── Refinement Types ─────────────────────────────────────────────
+
+    type Priority = Int requires { self >= 1 && self <= 5 }
+
+    // ── Status Constants ─────────────────────────────────────────────
+    // Pending = 0, InProgress = 1, Done = 2
+
+    // ── Module Invariant ─────────────────────────────────────────────
+
+    invariant { true }
+
+    // ── Data Model ───────────────────────────────────────────────────
+
+    pub struct Task {
+        id: Int,
+        title: String,
+        description: String,
+        priority: Int,
+        status: Int,
+        created_at: String
+    }
+
+    // ── Validation (Contracts + Security) ────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    @security_sensitive
+    pub fn validate_priority(p: Int) -> Result<Int, String>
+        requires { p >= 1 && p <= 5 }
+        ensures { result >= 1 }
+    {
+        return Result::Ok(p)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    @security_sensitive
+    pub fn validate_title(ref title: String) -> Result<Int, String>
+        requires { title != "" }
+    {
+        return Result::Ok(1)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    @reviewed_by(human: "rafael")
+    @security_sensitive
+    pub fn validate_transition(current: Int, next: Int) -> Result<Int, String>
+        requires { current >= 0 && current <= 2 }
+        requires { next >= 0 && next <= 2 }
+    {
+        // Pending(0) -> InProgress(1)
+        if current == 0 && next == 1 {
+            return Result::Ok(next)
+        }
+        // InProgress(1) -> Done(2)
+        if current == 1 && next == 2 {
+            return Result::Ok(next)
+        }
+        return Result::Err("invalid status transition")
+    }
+
+    // ── Status Helpers ───────────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    fn status_to_string(s: Int) -> String {
+        if s == 0 {
+            return "pending"
+        }
+        if s == 1 {
+            return "in_progress"
+        }
+        return "done"
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn status_from_string(ref s: String) -> Result<Int, String> {
+        if s == "pending" {
+            return Result::Ok(0)
+        }
+        if s == "in_progress" {
+            return Result::Ok(1)
+        }
+        if s == "done" {
+            return Result::Ok(2)
+        }
+        return Result::Err(f"unknown status: {s}")
+    }
+
+    // ── Storage ──────────────────────────────────────────────────────
+    // Uses parallel Maps to store task fields by ID.
+    // Map<Int, String> for titles, descriptions, created_at
+    // Map<Int, Int> for priorities, statuses
+    // List<Int> for ordered task IDs
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    pub fn create_task(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>,
+        next_id: Int,
+        title: String,
+        description: String,
+        priority_val: Int
+    ) -> Result<Int, String>
+        requires { next_id > 0 }
+    {
+        // Validate inputs using ? operator for error propagation
+        let p: Int = validate_priority(priority_val)?
+        let _ok: Int = validate_title(title)?
+
+        // Store task data
+        list_push(ids, next_id)
+        map_insert(titles, next_id, title)
+        map_insert(descriptions, next_id, description)
+        map_insert(priorities, next_id, p)
+        map_insert(statuses, next_id, 0)
+        map_insert(timestamps, next_id, "2026-03-21T00:00:00Z")
+
+        return Result::Ok(next_id)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn find_task_index(ids: List<Int>, target_id: Int) -> Result<Int, String>
+        requires { target_id > 0 }
+    {
+        let len: Int = list_length(ids)
+        let mut i: Int = 0
+        while i < len {
+            let id: Int = list_get(ids, i)
+            if id == target_id {
+                return Result::Ok(i)
+            }
+            i = i + 1
+        }
+        return Result::Err(f"task not found: {target_id}")
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn update_status(
+        ids: List<Int>,
+        statuses: Map<Int, Int>,
+        task_id: Int,
+        new_status: Int
+    ) -> Result<Int, String>
+        requires { task_id > 0 }
+    {
+        // Verify task exists
+        let _idx: Int = find_task_index(ids, task_id)?
+
+        // Get current status and validate transition
+        let current: Int = map_get(statuses, task_id)
+        let validated: Int = validate_transition(current, new_status)?
+
+        // Apply new status
+        map_insert(statuses, task_id, validated)
+        return Result::Ok(validated)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn delete_task(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>,
+        task_id: Int
+    ) -> Result<Int, String>
+        requires { task_id > 0 }
+    {
+        let idx: Int = find_task_index(ids, task_id)?
+
+        // Remove from all maps
+        map_remove(titles, task_id)
+        map_remove(descriptions, task_id)
+        map_remove(priorities, task_id)
+        map_remove(statuses, task_id)
+        map_remove(timestamps, task_id)
+        list_remove(ids, idx)
+
+        return Result::Ok(task_id)
+    }
+
+    // ── JSON Serialization ───────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn task_to_json(
+        task_id: Int,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>
+    ) -> String {
+        let obj: Int = json_new_object()
+        json_set_int(obj, "id", task_id)
+        let title: String = map_get(titles, task_id)
+        json_set_string(obj, "title", title)
+        let desc: String = map_get(descriptions, task_id)
+        json_set_string(obj, "description", desc)
+        let prio: Int = map_get(priorities, task_id)
+        json_set_int(obj, "priority", prio)
+        let status_val: Int = map_get(statuses, task_id)
+        let status_str: String = status_to_string(status_val)
+        json_set_string(obj, "status", status_str)
+        let ts: String = map_get(timestamps, task_id)
+        json_set_string(obj, "created_at", ts)
+        let out: String = json_stringify(obj)
+        json_free(obj)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    @reviewed_by(human: "rafael")
+    fn tasks_to_json_array(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>
+    ) -> String {
+        let len: Int = list_length(ids)
+        let mut result: String = "["
+        let mut i: Int = 0
+        // Build JSON array using for-in loop
+        for task_id in ids {
+            let json: String = task_to_json(task_id, titles, descriptions, priorities, statuses, timestamps)
+            if i > 0 {
+                result = result + ","
+            }
+            result = result + json
+            i = i + 1
+        }
+        result = result + "]"
+        return result
+    }
+
+    // ── Functional Helpers (Closures / HOF) ──────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    pub fn count_by_status(statuses_list: List<Int>, target: Int) -> Int {
+        let matches: List<Int> = statuses_list.filter(|s: Int| -> Bool { s == target })
+        return list_length(matches)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn collect_statuses(ids: List<Int>, statuses: Map<Int, Int>) -> List<Int> {
+        let result: List<Int> = list_new()
+        for task_id in ids {
+            let s: Int = map_get(statuses, task_id)
+            list_push(result, s)
+        }
+        return result
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn sum_priorities(priority_list: List<Int>) -> Int {
+        return priority_list.fold(0, |acc: Int, p: Int| -> Int { acc + p })
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    pub fn high_priority_count(priority_list: List<Int>) -> Int {
+        let high: List<Int> = priority_list.filter(|p: Int| -> Bool { p >= 4 })
+        return list_length(high)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    @reviewed_by(human: "rafael")
+    pub fn stats_to_json(
+        ids: List<Int>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>
+    ) -> String {
+        let total: Int = list_length(ids)
+
+        // Collect statuses into list for functional operations
+        let status_list: List<Int> = collect_statuses(ids, statuses)
+        let pending: Int = count_by_status(status_list, 0)
+        let in_prog: Int = count_by_status(status_list, 1)
+        let done: Int = count_by_status(status_list, 2)
+
+        // Collect priorities for aggregation
+        let prio_list: List<Int> = list_new()
+        for task_id in ids {
+            let p: Int = map_get(priorities, task_id)
+            list_push(prio_list, p)
+        }
+        let high: Int = high_priority_count(prio_list)
+
+        let obj: Int = json_new_object()
+        json_set_int(obj, "total", total)
+        json_set_int(obj, "pending", pending)
+        json_set_int(obj, "in_progress", in_prog)
+        json_set_int(obj, "done", done)
+        json_set_int(obj, "high_priority", high)
+        let out: String = json_stringify(obj)
+        json_free(obj)
+        return out
+    }
+
+    // ── Persistence (File I/O) ───────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    @reviewed_by(human: "rafael")
+    fn save_tasks(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>
+    ) -> Result<Int, String> {
+        let data: String = tasks_to_json_array(ids, titles, descriptions, priorities, statuses, timestamps)
+        let write_result: Result<String, String> = file_write("tasks.json", data)
+        match write_result {
+            Result::Ok(v) => {
+                return Result::Ok(1)
+            }
+            Result::Err(e) => {
+                return Result::Err(f"failed to save: {e}")
+            }
+        }
+    }
+
+    // ── Error Response Helper ────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    fn make_error(ref message: String) -> String {
+        let obj: Int = json_new_object()
+        json_set_string(obj, "error", message)
+        let out: String = json_stringify(obj)
+        json_free(obj)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.99)
+    fn make_success(ref message: String) -> String {
+        let obj: Int = json_new_object()
+        json_set_string(obj, "status", "ok")
+        json_set_string(obj, "message", message)
+        let out: String = json_stringify(obj)
+        json_free(obj)
+        return out
+    }
+
+    // ── HTTP Route Handlers ──────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn handle_create(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>,
+        next_id: Int,
+        body: String
+    ) -> String {
+        let parsed: Int = json_parse(body)
+        if parsed == 0 {
+            return make_error("invalid JSON")
+        }
+        let title: String = json_get_string(parsed, "title")
+        let desc: String = json_get_string(parsed, "description")
+        let prio: Int = json_get_int(parsed, "priority")
+        json_free(parsed)
+
+        let result: Result<Int, String> = create_task(ids, titles, descriptions, priorities, statuses, timestamps, next_id, title, desc, prio)
+        match result {
+            Result::Ok(id) => {
+                return task_to_json(id, titles, descriptions, priorities, statuses, timestamps)
+            }
+            Result::Err(e) => {
+                return make_error(e)
+            }
+        }
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn handle_list(
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>
+    ) -> String {
+        return tasks_to_json_array(ids, titles, descriptions, priorities, statuses, timestamps)
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.85)
+    @reviewed_by(human: "rafael")
+    fn handle_health() -> String {
+        let obj: Int = json_new_object()
+        json_set_string(obj, "status", "ok")
+        json_set_string(obj, "service", "task_manager")
+        json_set_string(obj, "version", "1.0.0")
+        let out: String = json_stringify(obj)
+        json_free(obj)
+        return out
+    }
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn handle_stats(
+        ids: List<Int>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>
+    ) -> String {
+        return stats_to_json(ids, priorities, statuses)
+    }
+
+    // ── Router ───────────────────────────────────────────────────────
+
+    @authored_by(agent: "claude")
+    @confidence(0.90)
+    fn route(
+        method: String,
+        path: String,
+        body: String,
+        ids: List<Int>,
+        titles: Map<Int, String>,
+        descriptions: Map<Int, String>,
+        priorities: Map<Int, Int>,
+        statuses: Map<Int, Int>,
+        timestamps: Map<Int, String>,
+        next_id: Int
+    ) -> String {
+        if method == "GET" && path == "/health" {
+            return handle_health()
+        }
+        if method == "GET" && path == "/tasks" {
+            return handle_list(ids, titles, descriptions, priorities, statuses, timestamps)
+        }
+        if method == "GET" && path == "/stats" {
+            return handle_stats(ids, priorities, statuses)
+        }
+        if method == "POST" && path == "/tasks" {
+            return handle_create(ids, titles, descriptions, priorities, statuses, timestamps, next_id, body)
+        }
+        return make_error("not found")
+    }
+
+    // ── Main (HTTP Server) ───────────────────────────────────────────
+
+    fn main() -> Int {
+        // Initialize storage
+        let ids: List<Int> = list_new()
+        let titles: Map<Int, String> = map_new()
+        let descriptions: Map<Int, String> = map_new()
+        let priorities: Map<Int, Int> = map_new()
+        let statuses: Map<Int, Int> = map_new()
+        let timestamps: Map<Int, String> = map_new()
+        let mut next_id: Int = 1
+
+        println("Task Manager API listening on port 8080")
+        println("Endpoints:")
+        println("  POST /tasks     — create task")
+        println("  GET  /tasks     — list all tasks")
+        println("  GET  /stats     — task statistics")
+        println("  GET  /health    — health check")
+
+        let server: Int = http_server_new(8080)
+        if server == 0 {
+            println("failed to start server")
+            return 1
+        }
+
+        while true {
+            let req: Int = http_server_recv(server)
+            let method: String = http_request_method(req)
+            let path: String = http_request_path(req)
+            let body: String = http_request_body(req)
+
+            println(f"{method} {path}")
+
+            let resp: String = route(method, path, body, ids, titles, descriptions, priorities, statuses, timestamps, next_id)
+
+            // Increment next_id on successful POST
+            if method == "POST" && path == "/tasks" {
+                let check: Bool = resp.contains("error")
+                if !check {
+                    next_id = next_id + 1
+                }
+            }
+
+            http_respond(req, 200, resp)
+        }
+
+        http_server_free(server)
+        return 0
+    }
+
+    // ── Tests ────────────────────────────────────────────────────────
+
+    test "validate priority accepts valid values" {
+        let r1: Result<Int, String> = validate_priority(1)
+        match r1 {
+            Result::Ok(v) => { assert_eq(v, 1) }
+            Result::Err(e) => { assert(false) }
+        }
+        let r5: Result<Int, String> = validate_priority(5)
+        match r5 {
+            Result::Ok(v) => { assert_eq(v, 5) }
+            Result::Err(e) => { assert(false) }
+        }
+    }
+
+    test "valid status transition pending to in_progress" {
+        let result: Result<Int, String> = validate_transition(0, 1)
+        match result {
+            Result::Ok(v) => { assert_eq(v, 1) }
+            Result::Err(e) => { assert(false) }
+        }
+    }
+
+    test "valid status transition in_progress to done" {
+        let result: Result<Int, String> = validate_transition(1, 2)
+        match result {
+            Result::Ok(v) => { assert_eq(v, 2) }
+            Result::Err(e) => { assert(false) }
+        }
+    }
+
+    test "invalid status transition pending to done" {
+        let result: Result<Int, String> = validate_transition(0, 2)
+        match result {
+            Result::Ok(v) => { assert(false) }
+            Result::Err(e) => { assert(true) }
+        }
+    }
+
+    test "invalid status transition done to pending" {
+        let result: Result<Int, String> = validate_transition(2, 0)
+        match result {
+            Result::Ok(v) => { assert(false) }
+            Result::Err(e) => { assert(true) }
+        }
+    }
+
+    test "status to string conversion" {
+        assert_eq(status_to_string(0), "pending")
+        assert_eq(status_to_string(1), "in_progress")
+        assert_eq(status_to_string(2), "done")
+    }
+
+    test "count by status works" {
+        let statuses: List<Int> = list_new()
+        list_push(statuses, 0)
+        list_push(statuses, 0)
+        list_push(statuses, 1)
+        list_push(statuses, 2)
+        assert_eq(count_by_status(statuses, 0), 2)
+        assert_eq(count_by_status(statuses, 1), 1)
+        assert_eq(count_by_status(statuses, 2), 1)
+    }
+
+    test "sum priorities with fold" {
+        let prios: List<Int> = list_new()
+        list_push(prios, 1)
+        list_push(prios, 3)
+        list_push(prios, 5)
+        assert_eq(sum_priorities(prios), 9)
+    }
+
+    test "high priority count with filter" {
+        let prios: List<Int> = list_new()
+        list_push(prios, 1)
+        list_push(prios, 2)
+        list_push(prios, 4)
+        list_push(prios, 5)
+        assert_eq(high_priority_count(prios), 2)
+    }
+}

@@ -1,0 +1,72 @@
+{
+  "Kōdo": {
+    "tokens": 5053,
+    "loc": {
+      "total": 635,
+      "empty": 73,
+      "comments": 59,
+      "code": 503
+    },
+    "files": 1,
+    "safety_score": 7,
+    "safety_total": 7,
+    "error_readability": 5,
+    "agent_features": 9
+  },
+  "Python": {
+    "tokens": 2230,
+    "loc": {
+      "total": 342,
+      "empty": 113,
+      "comments": 9,
+      "code": 220
+    },
+    "files": 7,
+    "safety_score": 0,
+    "safety_total": 7,
+    "error_readability": 1,
+    "agent_features": 0
+  },
+  "TypeScript": {
+    "tokens": 4467,
+    "loc": {
+      "total": 586,
+      "empty": 88,
+      "comments": 3,
+      "code": 495
+    },
+    "files": 6,
+    "safety_score": 2,
+    "safety_total": 7,
+    "error_readability": 2,
+    "agent_features": 0
+  },
+  "Rust": {
+    "tokens": 4819,
+    "loc": {
+      "total": 652,
+      "empty": 90,
+      "comments": 10,
+      "code": 552
+    },
+    "files": 6,
+    "safety_score": 4,
+    "safety_total": 7,
+    "error_readability": 3,
+    "agent_features": 0
+  },
+  "Go": {
+    "tokens": 4655,
+    "loc": {
+      "total": 768,
+      "empty": 117,
+      "comments": 12,
+      "code": 639
+    },
+    "files": 6,
+    "safety_score": 2,
+    "safety_total": 7,
+    "error_readability": 1,
+    "agent_features": 0
+  }
+}

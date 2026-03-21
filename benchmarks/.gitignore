@@ -1,0 +1,15 @@
+# Compiled binaries
+go/kodo-benchmark-go
+
+# Python cache
+python/task_manager/__pycache__/
+python/**/__pycache__/
+*.pyc
+
+# Node modules and lockfiles
+typescript/node_modules/
+typescript/package-lock.json
+
+# Rust build artifacts and lockfile
+rust/target/
+rust/Cargo.lock

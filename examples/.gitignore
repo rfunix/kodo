@@ -11,3 +11,5 @@
 !audit_log/**
 !self_hosted_lexer/
 !self_hosted_lexer/**
+!task_manager/
+!task_manager/**
