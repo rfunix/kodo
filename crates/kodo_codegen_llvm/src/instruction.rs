@@ -94,21 +94,30 @@ pub(crate) fn emit_instruction(
                 stack_locals,
             );
         }
-        Instruction::VirtualCall { dest, .. } => {
-            // Virtual calls are complex; for now emit a placeholder.
-            let reg = fresh_reg(next_reg);
-            store_to_stack_or_alias(
+        Instruction::VirtualCall {
+            dest,
+            object,
+            vtable_index,
+            args,
+            return_type,
+            param_types,
+        } => {
+            emit_virtual_call(
                 *dest,
-                &reg,
+                *object,
+                *vtable_index,
+                args,
+                return_type,
+                param_types,
                 emitter,
                 local_regs,
                 local_types,
                 next_reg,
                 struct_defs,
                 enum_defs,
+                string_constants,
                 stack_locals,
             );
-            emitter.indent(&format!("{reg} = add i64 0, 0 ; TODO: virtual call"));
         }
         Instruction::IncRef(local) => {
             let local_ty = local_types.get(local).cloned().unwrap_or(Type::Int);
@@ -896,6 +905,149 @@ fn emit_indirect_call(
         let reg = fresh_reg(next_reg);
         emitter.indent(&format!("{reg} = call {fn_ty} {fn_ptr_reg}({args_str})"));
         store_typed_to_stack_or_alias(dest, &reg, &ret_str, emitter, local_regs, stack_locals);
+    }
+}
+
+/// Emits LLVM IR for a virtual method call through a vtable (dynamic dispatch).
+///
+/// The object local holds a fat pointer consisting of two consecutive `i64`
+/// values on the stack: `(data_ptr, vtable_ptr)`. This function:
+/// 1. Loads `data_ptr` and `vtable_ptr` from the fat pointer.
+/// 2. Indexes into the vtable at `vtable_index` to get the function pointer.
+/// 3. Calls the function with `self` (`data_ptr`) as the first argument,
+///    followed by the remaining arguments.
+/// 4. Stores the result to the destination local.
+#[allow(clippy::too_many_arguments)]
+fn emit_virtual_call(
+    dest: LocalId,
+    object: LocalId,
+    vtable_index: u32,
+    args: &[Value],
+    return_type: &Type,
+    param_types: &[Type],
+    emitter: &mut LLVMEmitter,
+    local_regs: &mut HashMap<LocalId, String>,
+    local_types: &HashMap<LocalId, Type>,
+    next_reg: &mut u32,
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    string_constants: &mut Vec<(String, String)>,
+    stack_locals: &StackLocals,
+) {
+    // Step 1: Load data_ptr and vtable_ptr from the fat pointer.
+    // The object is stored as 2 consecutive i64s on the stack.
+    let object_slot = stack_locals
+        .get(&object)
+        .cloned()
+        .or_else(|| local_regs.get(&object).cloned());
+    let Some(base_ptr) = object_slot else {
+        // Fallback: emit a zero placeholder if the object is not found.
+        let reg = fresh_reg(next_reg);
+        emitter.indent(&format!(
+            "{reg} = add i64 0, 0 ; virtual call: object not found"
+        ));
+        store_to_stack_or_alias(
+            dest,
+            &reg,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            stack_locals,
+        );
+        return;
+    };
+
+    let data_ptr_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{data_ptr_reg} = load i64, ptr {base_ptr}, align 8"
+    ));
+
+    let vtable_addr_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{vtable_addr_reg} = getelementptr i64, ptr {base_ptr}, i32 1"
+    ));
+
+    let vtable_ptr_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{vtable_ptr_reg} = load i64, ptr {vtable_addr_reg}, align 8"
+    ));
+
+    // Step 2: Index into the vtable to get the function pointer.
+    let vtable_as_ptr = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{vtable_as_ptr} = inttoptr i64 {vtable_ptr_reg} to ptr"
+    ));
+
+    let fn_slot_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{fn_slot_reg} = getelementptr i64, ptr {vtable_as_ptr}, i32 {vtable_index}"
+    ));
+
+    let fn_ptr_i64_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{fn_ptr_i64_reg} = load i64, ptr {fn_slot_reg}, align 8"
+    ));
+
+    let fn_ptr_reg = fresh_reg(next_reg);
+    emitter.indent(&format!(
+        "{fn_ptr_reg} = inttoptr i64 {fn_ptr_i64_reg} to ptr"
+    ));
+
+    // Step 3: Build the function type signature.
+    // The signature is: ret_type (i64 self, param_types...)
+    let ret_str = llvm_type(return_type, struct_defs, enum_defs);
+    let mut all_param_strs = vec!["i64".to_string()]; // self (data_ptr) is always i64
+    for pt in param_types {
+        all_param_strs.push(llvm_type(pt, struct_defs, enum_defs));
+    }
+    let fn_ty = format!("{ret_str} ({})", all_param_strs.join(", "));
+
+    // Step 4: Build the argument list: self (data_ptr) + remaining args.
+    let mut arg_strs = vec![format!("i64 {data_ptr_reg}")];
+    for (i, arg) in args.iter().enumerate() {
+        let vr = emit_value(
+            arg,
+            emitter,
+            local_regs,
+            local_types,
+            next_reg,
+            struct_defs,
+            enum_defs,
+            string_constants,
+            stack_locals,
+        );
+        let ty_str = param_types
+            .get(i)
+            .map_or("i64".to_string(), |t| llvm_type(t, struct_defs, enum_defs));
+        match vr {
+            ValueResult::Register(r) => arg_strs.push(format!("{ty_str} {r}")),
+            ValueResult::Constant(v) | ValueResult::FloatConstant(v) => {
+                arg_strs.push(format!("{ty_str} {v}"));
+            }
+            ValueResult::Void => {}
+        }
+    }
+
+    // Step 5: Emit the indirect call and store the result.
+    let args_joined = arg_strs.join(", ");
+    if ret_str == "void" {
+        emitter.indent(&format!("call void {fn_ptr_reg}({args_joined})"));
+    } else {
+        let result_reg = fresh_reg(next_reg);
+        emitter.indent(&format!(
+            "{result_reg} = call {fn_ty} {fn_ptr_reg}({args_joined})"
+        ));
+        store_typed_to_stack_or_alias(
+            dest,
+            &result_reg,
+            &ret_str,
+            emitter,
+            local_regs,
+            stack_locals,
+        );
     }
 }
 
