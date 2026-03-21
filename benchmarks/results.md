@@ -1,14 +1,20 @@
 # Benchmark Results: Task Management API
 
-## Overview
+> Full methodology and honest limitations: https://kodo-lang.dev/docs/reference/benchmarks/
 
-Five identical Task Management APIs implemented in Kōdo, Python, TypeScript, Rust, and Go.
-All implementations have equivalent functionality: CRUD operations, priority validation (1-5),
-status workflow (pending → in_progress → done), JSON API, persistence, and tests.
+## What this measures
 
-## Token Count (GPT-4 Tokenizer)
+This benchmark compares **compile-time safety** and **agent-specific features** — areas where
+Kōdo was designed to excel. It does NOT measure runtime performance, ecosystem maturity, or
+general-purpose productivity. All source code is open: https://github.com/rfunix/kodo/tree/main/benchmarks
 
-Lower is better — fewer tokens means cheaper and faster for AI agents to read and write.
+## The project
+
+Same Task Management REST API in all 5 languages: CRUD, priority validation (1-5),
+status workflow (pending → in_progress → done), JSON API, persistence, tests.
+All implementations are idiomatic for their language.
+
+## Token Count (GPT-4 `cl100k_base` tokenizer)
 
 | Metric | Kōdo | Python | TypeScript | Rust | Go |
 |--------|-----:|-----:|-----:|-----:|-----:|
@@ -17,26 +23,21 @@ Lower is better — fewer tokens means cheaper and faster for AI agents to read 
 | Code Lines | 503 | 220 | 495 | 552 | 639 |
 | Comments | 59 | 9 | 3 | 10 | 12 |
 
-## Token Analysis
+**Python wins on raw token count.** This is expected — Python is concise by design, and
+FastAPI generates minimal boilerplate. We don't claim Kōdo is more concise than Python.
 
-Kōdo's token count includes **built-in safety guarantees** that other languages lack entirely:
-contracts, agent traceability, refinement types, and compilation certificates.
-Comparing raw tokens without considering what those tokens *buy you* misses the point.
+Kōdo's extra tokens include contracts, refinement types, agent traceability annotations, and
+inline tests — features the other implementations lack because their languages don't support them.
 
-**Kōdo**: 5,053 tokens → 7/7 compile-time bug classes caught
+**Token count vs. compile-time guarantees:**
 
-- **Python**: 2,230 tokens (2,823 fewer) — but only 0/7 bug classes caught
-- **TypeScript**: 4,467 tokens (586 fewer) — but only 2/7 bug classes caught
-- **Rust**: 4,819 tokens (234 fewer) — but only 4/7 bug classes caught
-- **Go**: 4,655 tokens (398 fewer) — but only 2/7 bug classes caught
-
-**Cost per safety class:**
-
-- Kōdo: 721 tokens per bug class caught
-- Python: ∞ (zero bug classes caught at compile time)
-- TypeScript: 2,233 tokens per bug class caught
-- Rust: 1,204 tokens per bug class caught
-- Go: 2,327 tokens per bug class caught
+| Language | Tokens | Bug Classes Caught (compile-time) |
+|----------|-------:|----------------------------------:|
+| Kōdo | 5,053 | 7/7 |
+| Python | 2,230 | 0/7 |
+| TypeScript | 4,467 | 2/7 |
+| Rust | 4,819 | 4/7 |
+| Go | 4,655 | 2/7 |
 
 ## Compile-Time Safety
 
@@ -84,27 +85,26 @@ Features specifically designed for AI agent workflows — not available in gener
 
 ## Summary
 
-| Dimension | Winner | Why |
-|-----------|--------|-----|
-| **Safety per Token** | Kōdo | Best ratio of compile-time guarantees per token |
-| **Compile-Time Safety** | Kōdo | 7/7 bug classes caught at compile time |
-| **Error Machine-Readability** | Kōdo | 5/5 — JSON errors with auto-fix patches |
-| **Agent Features** | Kōdo | 9/9 — purpose-built for AI agents |
-| **Raw Token Count** | Python | Most concise syntax — but 0/7 compile-time safety |
+| Dimension | Result | Notes |
+|-----------|--------|-------|
+| **Compile-Time Safety** | Kōdo 7/7 | Contracts and refinement types catch 3 bug classes no other language covers |
+| **Error Machine-Readability** | Kōdo 5/5 | Only language with native JSON error output and byte-offset fix patches |
+| **Agent-Specific Features** | Kōdo 9/9 | Features designed for agent workflows — other languages weren't built for this |
+| **Raw Token Count** | Python smallest | Python is more concise — expected and not a flaw |
+| **Ownership Safety** | Kōdo and Rust tied | Both enforce linear ownership; Rust's system is more mature |
 
-### Why Kōdo Wins for AI Agents
+### What this means
 
-The question isn't "which language uses the fewest tokens?" — it's **"which language lets agents
-produce correct code with the least total effort?"** Total effort includes writing, debugging,
-fixing, and verifying.
+Kōdo's advantage is in **compile-time verification of business logic** (contracts, refinement
+types, state machine transitions) and **agent-specific infrastructure** (traceability, confidence
+scores, structured errors, certificates). These features don't exist in general-purpose languages
+because those languages weren't designed for this use case.
 
-1. **Contracts catch bugs at compile time** that other languages only find at runtime (or never) — every `requires`/`ensures` clause eliminates entire categories of runtime failures
-2. **Structured JSON errors** with machine-applicable fix patches enable autonomous error→fix loops — agents fix their own mistakes without human intervention
-3. **Agent traceability** (`@confidence`, `@authored_by`) is built into the grammar — not comments that get lost or ignored
-4. **Self-describing modules** (`meta` blocks) give agents instant context without reading code
-5. **Refinement types** (`type Priority = Int requires { self >= 1 && self <= 5 }`) eliminate invalid states at the type level
-6. **Intent blocks** reduce boilerplate — agents declare WHAT, the compiler generates HOW
-7. **Compilation certificates** provide verifiable proof of correctness for deployment pipelines
+This is not a claim that Kōdo is "better" than Python, Rust, Go, or TypeScript in any absolute
+sense. Those are mature, battle-tested languages. Kōdo is purpose-built for a specific niche.
+
+For full methodology, limitations, and honest discussion of scoring:
+https://kodo-lang.dev/docs/reference/benchmarks/
 
 ---
 
