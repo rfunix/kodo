@@ -1,4 +1,4 @@
-.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report validate-docs ui-test ui-bless
+.PHONY: all check fmt clippy test doc build clean run-lex run-parse run-check run-build bench ci install uninstall coverage coverage-report validate-docs ui-test ui-bless validate-examples validate-cli validate-everything
 
 # Default: run all checks
 all: fmt clippy test doc
@@ -261,3 +261,22 @@ help:
 	@echo "    make test-count  Count total tests"
 	@echo "    make deps        Show dependency tree"
 	@echo "    make help        This message"
+	@echo ""
+	@echo "  Validation:"
+	@echo "    make validate-examples    Validate all .ko examples"
+	@echo "    make validate-cli         Validate all CLI commands"
+	@echo "    make validate-everything  Run ALL validation phases"
+
+# === Full Validation ===
+
+# Validate all .ko examples compile and run
+validate-examples:
+	./scripts/validate-all-examples.sh
+
+# Validate all kodoc CLI commands
+validate-cli:
+	./scripts/validate-cli.sh
+
+# Master validation: build + lint + test + UI + examples + CLI + docs
+validate-everything:
+	./scripts/validate-everything.sh
