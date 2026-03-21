@@ -1,13 +1,13 @@
-# Kōdo Roadmap — v0.8.0 → v1.0.0
+# Kōdo Roadmap
 
-> Plano sequencial de 10 milestones para levar Kōdo de alpha a self-hosting.
-> Cada milestone é uma release com software funcional e testado.
+> v1.0.0 achieved! All 10 milestones complete. Next: bootstrap compiler.
 
-## Status atual (v0.8.0)
+## Status atual (v1.0.0) ✅
 
-- 98.000+ linhas de Rust, 16 crates, 2.385 testes, 52 UI tests
+- 98.000+ linhas de Rust, 17 crates, 2.400+ testes, 56 UI tests
 - Green threads M:N com work-stealing, async/await, generic channels
 - Testing framework com property-based testing e generate-tests
+- LLVM backend, package manager, self-hosted lexer + parser
 - Error fix patches com 98% de cobertura
 - LSP com hover, completions, goto-definition
 - Z3-verified contracts, linear ownership, agent traceability
@@ -286,6 +286,41 @@ $ diff expected.json actual.json  # idênticos
 | 10. Self-Hosting Parser | v1.0.0 | 15-20d | ~20 sem |
 
 **Total estimado: ~20 semanas (~5 meses) até v1.0.0**
+**Realizado: 1 sessão (~1 dia)**
+
+---
+
+## Post-v1.0.0 Roadmap
+
+### Milestone 11: Bootstrap Compiler (v2.0.0)
+**Esforço**: ~4-8 semanas | **Impacto**: Kōdo compila a si mesmo
+
+Substituir os crates Rust do lexer e parser pelos equivalentes em Kōdo. O compilador passa a usar o parser self-hosted como frontend real.
+
+**Escopo:**
+- Self-hosted lexer/parser produzem AST no **mesmo formato** que os crates Rust
+- Type checker aceita output do parser Kōdo como input
+- Bootstrapping: compilar parser Kōdo v1 com compilador Rust → usar parser Kōdo v1 para compilar parser Kōdo v2
+- Corrigir codegen bugs encontrados (branches perdidos em compilações grandes)
+- `kodoc build --self-hosted` para usar o frontend Kōdo
+
+**Critério de sucesso:**
+```bash
+$ kodoc build --self-hosted examples/hello.ko && ./examples/hello
+Hello, World!
+```
+
+### Milestone 12: Self-Hosting Type Checker (v2.1.0)
+**Esforço**: ~8-12 semanas | **Impacto**: Maioria do compilador em Kōdo
+
+Portar `kodo_types` (16.000+ linhas, o maior crate) para Kōdo.
+
+### Milestone 13: Full Self-Hosting (v3.0.0)
+**Esforço**: ~6-12 meses | **Impacto**: Compilador inteiro em Kōdo
+
+Portar MIR, codegen, e runtime. Kōdo compila a si mesmo sem Rust.
+
+---
 
 ## Princípios
 
