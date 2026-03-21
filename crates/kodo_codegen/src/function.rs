@@ -31,6 +31,8 @@ pub(crate) enum HeapKind {
     List,
     /// A heap-allocated `Map` (opaque i64 handle).
     Map,
+    /// A heap-allocated `Set` (opaque i64 handle).
+    Set,
 }
 
 /// Holds the mapping from MIR locals to Cranelift variables during translation.
@@ -507,8 +509,10 @@ mod tests {
         assert_eq!(HeapKind::String, HeapKind::String);
         assert_eq!(HeapKind::List, HeapKind::List);
         assert_eq!(HeapKind::Map, HeapKind::Map);
+        assert_eq!(HeapKind::Set, HeapKind::Set);
         assert_ne!(HeapKind::String, HeapKind::List);
         assert_ne!(HeapKind::List, HeapKind::Map);
+        assert_ne!(HeapKind::Map, HeapKind::Set);
     }
 
     #[test]
@@ -524,9 +528,11 @@ mod tests {
         vm.heap_locals.insert(LocalId(0), HeapKind::String);
         vm.heap_locals.insert(LocalId(1), HeapKind::List);
         vm.heap_locals.insert(LocalId(2), HeapKind::Map);
-        assert_eq!(vm.heap_locals.len(), 3);
+        vm.heap_locals.insert(LocalId(3), HeapKind::Set);
+        assert_eq!(vm.heap_locals.len(), 4);
         assert_eq!(vm.heap_locals[&LocalId(0)], HeapKind::String);
         assert_eq!(vm.heap_locals[&LocalId(1)], HeapKind::List);
         assert_eq!(vm.heap_locals[&LocalId(2)], HeapKind::Map);
+        assert_eq!(vm.heap_locals[&LocalId(3)], HeapKind::Set);
     }
 }

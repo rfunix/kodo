@@ -1783,6 +1783,337 @@ pub unsafe extern "C" fn kodo_map_values_free(iter_ptr: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// Set<Int> collection
+// ---------------------------------------------------------------------------
+
+/// Initial capacity for set hash tables.
+const SET_INITIAL_CAPACITY: usize = 16;
+
+/// A single entry in the set's hash table (open addressing, linear probing).
+#[derive(Clone)]
+struct KodoSetEntry {
+    /// The stored value.
+    value: i64,
+    /// Whether this slot is occupied.
+    occupied: bool,
+}
+
+/// A hash-set of i64 values backed by open addressing with linear probing.
+struct KodoSet {
+    /// Pointer to the backing entries array.
+    entries: *mut KodoSetEntry,
+    /// Number of occupied entries.
+    len: usize,
+    /// Total number of slots.
+    capacity: usize,
+}
+
+/// Creates a new empty set.
+///
+/// Returns a pointer (as i64) to a heap-allocated `KodoSet`.
+#[no_mangle]
+pub extern "C" fn kodo_set_new() -> i64 {
+    let entries = vec![
+        KodoSetEntry {
+            value: 0,
+            occupied: false,
+        };
+        SET_INITIAL_CAPACITY
+    ];
+    let boxed = entries.into_boxed_slice();
+    // SAFETY: intentionally leaks the entries array; ownership moves to KodoSet.
+    let entries_ptr = Box::into_raw(boxed).cast::<KodoSetEntry>();
+    let set = Box::new(KodoSet {
+        entries: entries_ptr,
+        len: 0,
+        capacity: SET_INITIAL_CAPACITY,
+    });
+    // SAFETY: intentionally leaks so caller manages via opaque pointer. Freed by `kodo_set_free`.
+    Box::into_raw(set) as i64
+}
+
+/// Computes a hash index for a value within the set's capacity.
+fn set_hash(value: i64, capacity: usize) -> usize {
+    // FNV-inspired mixing (same as map_hash).
+    #[allow(clippy::cast_sign_loss)]
+    let v = value as u64;
+    let mixed = v.wrapping_mul(0x517c_c1b7_2722_0a95);
+    #[allow(clippy::cast_possible_truncation)]
+    let index = mixed as usize;
+    index % capacity
+}
+
+/// Grows the set's backing storage when the load factor exceeds 0.75.
+fn set_grow(set: &mut KodoSet) {
+    let new_cap = set.capacity * 2;
+    let new_entries = vec![
+        KodoSetEntry {
+            value: 0,
+            occupied: false,
+        };
+        new_cap
+    ];
+    let new_boxed = new_entries.into_boxed_slice();
+    // SAFETY: intentionally leaks the new entries array; ownership moves to KodoSet.
+    let new_ptr = Box::into_raw(new_boxed).cast::<KodoSetEntry>();
+
+    // Re-insert all existing entries.
+    for i in 0..set.capacity {
+        // SAFETY: entries array has capacity elements, all valid.
+        let entry = unsafe { &*set.entries.add(i) };
+        if entry.occupied {
+            let mut idx = set_hash(entry.value, new_cap);
+            loop {
+                // SAFETY: idx < new_cap, new_ptr was allocated with new_cap elements.
+                let slot = unsafe { &mut *new_ptr.add(idx) };
+                if !slot.occupied {
+                    slot.value = entry.value;
+                    slot.occupied = true;
+                    break;
+                }
+                idx = (idx + 1) % new_cap;
+            }
+        }
+    }
+
+    // Free old entries.
+    if !set.entries.is_null() && set.capacity > 0 {
+        // SAFETY: entries was allocated as a Box<[KodoSetEntry]> with capacity elements.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                set.entries,
+                set.capacity,
+            ))
+        };
+    }
+    set.entries = new_ptr;
+    set.capacity = new_cap;
+}
+
+/// Adds a value to the set. If the value already exists, this is a no-op.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_add(set_ptr: i64, value: i64) {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    #[allow(clippy::cast_possible_truncation)]
+    let set = unsafe { &mut *(set_ptr as *mut KodoSet) };
+
+    // Grow if load factor > 0.75.
+    if set.len * 4 >= set.capacity * 3 {
+        set_grow(set);
+    }
+
+    let mut idx = set_hash(value, set.capacity);
+    loop {
+        // SAFETY: idx < set.capacity, entries was allocated with capacity elements.
+        let entry = unsafe { &mut *set.entries.add(idx) };
+        if !entry.occupied {
+            entry.value = value;
+            entry.occupied = true;
+            set.len += 1;
+            return;
+        }
+        if entry.value == value {
+            // Already present — no-op.
+            return;
+        }
+        idx = (idx + 1) % set.capacity;
+    }
+}
+
+/// Returns 1 if the set contains the given value, 0 otherwise.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_contains(set_ptr: i64, value: i64) -> i64 {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    let set = unsafe { &*(set_ptr as *const KodoSet) };
+    let mut idx = set_hash(value, set.capacity);
+    for _ in 0..set.capacity {
+        // SAFETY: idx < set.capacity, entries was allocated with capacity elements.
+        let entry = unsafe { &*set.entries.add(idx) };
+        if !entry.occupied {
+            return 0;
+        }
+        if entry.value == value {
+            return 1;
+        }
+        idx = (idx + 1) % set.capacity;
+    }
+    0
+}
+
+/// Removes a value from the set. Returns 1 if the value was found and removed,
+/// 0 if it was not in the set.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_remove(set_ptr: i64, value: i64) -> i64 {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    #[allow(clippy::cast_possible_truncation)]
+    let set = unsafe { &mut *(set_ptr as *mut KodoSet) };
+    let mut idx = set_hash(value, set.capacity);
+    for _ in 0..set.capacity {
+        // SAFETY: idx < set.capacity, entries was allocated with capacity elements.
+        let entry = unsafe { &mut *set.entries.add(idx) };
+        if !entry.occupied {
+            return 0;
+        }
+        if entry.value == value {
+            entry.occupied = false;
+            set.len -= 1;
+            // Re-insert subsequent entries to maintain linear probing invariant.
+            let mut next = (idx + 1) % set.capacity;
+            loop {
+                // SAFETY: next < set.capacity.
+                let next_entry = unsafe { &mut *set.entries.add(next) };
+                if !next_entry.occupied {
+                    break;
+                }
+                let rehash_val = next_entry.value;
+                next_entry.occupied = false;
+                set.len -= 1;
+                // Re-add via the public add function to find the correct slot.
+                unsafe { kodo_set_add(set_ptr, rehash_val) };
+                next = (next + 1) % set.capacity;
+            }
+            return 1;
+        }
+        idx = (idx + 1) % set.capacity;
+    }
+    0
+}
+
+/// Returns the number of elements in the set.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_length(set_ptr: i64) -> i64 {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    let set = unsafe { &*(set_ptr as *const KodoSet) };
+    #[allow(clippy::cast_possible_wrap)]
+    let len = set.len as i64;
+    len
+}
+
+/// Returns 1 if the set is empty, 0 otherwise.
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_is_empty(set_ptr: i64) -> i64 {
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new.
+    let set = unsafe { &*(set_ptr as *const KodoSet) };
+    i64::from(set.len == 0)
+}
+
+/// Creates a new set containing all elements from both input sets (union).
+///
+/// # Safety
+///
+/// Both `a_ptr` and `b_ptr` must be valid pointers returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_union(a_ptr: i64, b_ptr: i64) -> i64 {
+    let result = kodo_set_new();
+    // SAFETY: caller guarantees both pointers are valid.
+    let a = unsafe { &*(a_ptr as *const KodoSet) };
+    let b = unsafe { &*(b_ptr as *const KodoSet) };
+    for i in 0..a.capacity {
+        // SAFETY: i < a.capacity.
+        let entry = unsafe { &*a.entries.add(i) };
+        if entry.occupied {
+            unsafe { kodo_set_add(result, entry.value) };
+        }
+    }
+    for i in 0..b.capacity {
+        // SAFETY: i < b.capacity.
+        let entry = unsafe { &*b.entries.add(i) };
+        if entry.occupied {
+            unsafe { kodo_set_add(result, entry.value) };
+        }
+    }
+    result
+}
+
+/// Creates a new set containing only elements present in both input sets (intersection).
+///
+/// # Safety
+///
+/// Both `a_ptr` and `b_ptr` must be valid pointers returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_intersection(a_ptr: i64, b_ptr: i64) -> i64 {
+    let result = kodo_set_new();
+    // SAFETY: caller guarantees both pointers are valid.
+    let a = unsafe { &*(a_ptr as *const KodoSet) };
+    for i in 0..a.capacity {
+        // SAFETY: i < a.capacity.
+        let entry = unsafe { &*a.entries.add(i) };
+        if entry.occupied && unsafe { kodo_set_contains(b_ptr, entry.value) } == 1 {
+            unsafe { kodo_set_add(result, entry.value) };
+        }
+    }
+    result
+}
+
+/// Creates a new set containing elements in `a` that are not in `b` (difference).
+///
+/// # Safety
+///
+/// Both `a_ptr` and `b_ptr` must be valid pointers returned by `kodo_set_new`.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_difference(a_ptr: i64, b_ptr: i64) -> i64 {
+    let result = kodo_set_new();
+    // SAFETY: caller guarantees both pointers are valid.
+    let a = unsafe { &*(a_ptr as *const KodoSet) };
+    for i in 0..a.capacity {
+        // SAFETY: i < a.capacity.
+        let entry = unsafe { &*a.entries.add(i) };
+        if entry.occupied && unsafe { kodo_set_contains(b_ptr, entry.value) } == 0 {
+            unsafe { kodo_set_add(result, entry.value) };
+        }
+    }
+    result
+}
+
+/// Frees a heap-allocated `KodoSet` and its backing entries array.
+///
+/// Does nothing if `set_ptr` is zero (null handle).
+///
+/// # Safety
+///
+/// `set_ptr` must be a valid pointer returned by `kodo_set_new`, or zero.
+/// After calling this function, the set pointer must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn kodo_set_free(set_ptr: i64) {
+    if set_ptr == 0 {
+        return;
+    }
+    // SAFETY: caller guarantees set_ptr was returned by kodo_set_new
+    // (i.e. Box::into_raw on a Box<KodoSet>).
+    let set = unsafe { Box::from_raw(set_ptr as *mut KodoSet) };
+    if !set.entries.is_null() && set.capacity > 0 {
+        // SAFETY: entries was allocated as a Box<[KodoSetEntry]> with capacity elements.
+        let _ = unsafe {
+            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                set.entries,
+                set.capacity,
+            ))
+        };
+    }
+    // set is dropped here, freeing the KodoSet struct itself.
+}
+
+// ---------------------------------------------------------------------------
 // Actor runtime builtins
 // ---------------------------------------------------------------------------
 
@@ -3027,5 +3358,154 @@ mod tests {
         let closure = make_closure((gt_ten_fn as *const ()) as usize);
         let result = unsafe { kodo_list_any(list, closure) };
         assert_eq!(result, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Set tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn set_new_is_empty() {
+        let set = kodo_set_new();
+        assert_eq!(unsafe { kodo_set_length(set) }, 0);
+        assert_eq!(unsafe { kodo_set_is_empty(set) }, 1);
+        unsafe { kodo_set_free(set) };
+    }
+
+    #[test]
+    fn set_add_and_contains() {
+        let set = kodo_set_new();
+        unsafe {
+            kodo_set_add(set, 42);
+            kodo_set_add(set, 100);
+        }
+        assert_eq!(unsafe { kodo_set_contains(set, 42) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(set, 100) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(set, 999) }, 0);
+        assert_eq!(unsafe { kodo_set_length(set) }, 2);
+        assert_eq!(unsafe { kodo_set_is_empty(set) }, 0);
+        unsafe { kodo_set_free(set) };
+    }
+
+    #[test]
+    fn set_add_duplicate() {
+        let set = kodo_set_new();
+        unsafe {
+            kodo_set_add(set, 5);
+            kodo_set_add(set, 5);
+            kodo_set_add(set, 5);
+        }
+        assert_eq!(unsafe { kodo_set_length(set) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(set, 5) }, 1);
+        unsafe { kodo_set_free(set) };
+    }
+
+    #[test]
+    fn set_remove() {
+        let set = kodo_set_new();
+        unsafe {
+            kodo_set_add(set, 10);
+            kodo_set_add(set, 20);
+            kodo_set_add(set, 30);
+        }
+        assert_eq!(unsafe { kodo_set_remove(set, 20) }, 1);
+        assert_eq!(unsafe { kodo_set_length(set) }, 2);
+        assert_eq!(unsafe { kodo_set_contains(set, 20) }, 0);
+        assert_eq!(unsafe { kodo_set_contains(set, 10) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(set, 30) }, 1);
+        // Removing non-existent value returns 0.
+        assert_eq!(unsafe { kodo_set_remove(set, 999) }, 0);
+        unsafe { kodo_set_free(set) };
+    }
+
+    #[test]
+    fn set_union() {
+        let a = kodo_set_new();
+        let b = kodo_set_new();
+        unsafe {
+            kodo_set_add(a, 1);
+            kodo_set_add(a, 2);
+            kodo_set_add(b, 2);
+            kodo_set_add(b, 3);
+        }
+        let result = unsafe { kodo_set_union(a, b) };
+        assert_eq!(unsafe { kodo_set_length(result) }, 3);
+        assert_eq!(unsafe { kodo_set_contains(result, 1) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 2) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 3) }, 1);
+        unsafe {
+            kodo_set_free(a);
+            kodo_set_free(b);
+            kodo_set_free(result);
+        }
+    }
+
+    #[test]
+    fn set_intersection() {
+        let a = kodo_set_new();
+        let b = kodo_set_new();
+        unsafe {
+            kodo_set_add(a, 1);
+            kodo_set_add(a, 2);
+            kodo_set_add(a, 3);
+            kodo_set_add(b, 2);
+            kodo_set_add(b, 3);
+            kodo_set_add(b, 4);
+        }
+        let result = unsafe { kodo_set_intersection(a, b) };
+        assert_eq!(unsafe { kodo_set_length(result) }, 2);
+        assert_eq!(unsafe { kodo_set_contains(result, 2) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 3) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 1) }, 0);
+        assert_eq!(unsafe { kodo_set_contains(result, 4) }, 0);
+        unsafe {
+            kodo_set_free(a);
+            kodo_set_free(b);
+            kodo_set_free(result);
+        }
+    }
+
+    #[test]
+    fn set_difference() {
+        let a = kodo_set_new();
+        let b = kodo_set_new();
+        unsafe {
+            kodo_set_add(a, 1);
+            kodo_set_add(a, 2);
+            kodo_set_add(a, 3);
+            kodo_set_add(b, 2);
+            kodo_set_add(b, 4);
+        }
+        let result = unsafe { kodo_set_difference(a, b) };
+        assert_eq!(unsafe { kodo_set_length(result) }, 2);
+        assert_eq!(unsafe { kodo_set_contains(result, 1) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 3) }, 1);
+        assert_eq!(unsafe { kodo_set_contains(result, 2) }, 0);
+        unsafe {
+            kodo_set_free(a);
+            kodo_set_free(b);
+            kodo_set_free(result);
+        }
+    }
+
+    #[test]
+    fn set_grow_with_many_elements() {
+        let set = kodo_set_new();
+        // Add more elements than SET_INITIAL_CAPACITY to trigger growth.
+        for i in 0..50 {
+            unsafe { kodo_set_add(set, i) };
+        }
+        assert_eq!(unsafe { kodo_set_length(set) }, 50);
+        for i in 0..50 {
+            assert_eq!(unsafe { kodo_set_contains(set, i) }, 1);
+        }
+        assert_eq!(unsafe { kodo_set_contains(set, 50) }, 0);
+        unsafe { kodo_set_free(set) };
+    }
+
+    #[test]
+    fn set_free_null() {
+        // Freeing a null handle should be a no-op.
+        unsafe { kodo_set_free(0) };
     }
 }

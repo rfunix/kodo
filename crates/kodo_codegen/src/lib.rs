@@ -1806,7 +1806,9 @@ mod tests {
     fn heap_kind_enum_variants() {
         assert_ne!(HeapKind::String, HeapKind::List);
         assert_ne!(HeapKind::List, HeapKind::Map);
+        assert_ne!(HeapKind::Map, HeapKind::Set);
         assert_eq!(HeapKind::String, HeapKind::String);
+        assert_eq!(HeapKind::Set, HeapKind::Set);
     }
 
     // ---------------------------------------------------------------

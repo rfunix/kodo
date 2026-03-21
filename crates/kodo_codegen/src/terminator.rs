@@ -322,6 +322,16 @@ pub(crate) fn emit_heap_cleanup(
                     var_map,
                 )?;
             }
+            HeapKind::Set => {
+                emit_handle_free(
+                    local_id,
+                    "kodo_set_free",
+                    builder,
+                    module,
+                    builtins,
+                    var_map,
+                )?;
+            }
         }
     }
     Ok(())

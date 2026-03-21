@@ -529,6 +529,57 @@ fn all_builtins() -> Vec<Builtin> {
             params: &["i64"],
             ret: "void",
         },
+        // -- Collections: Set --
+        Builtin {
+            name: "kodo_set_new",
+            params: &[],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_add",
+            params: &["i64", "i64"],
+            ret: "void",
+        },
+        Builtin {
+            name: "kodo_set_contains",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_remove",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_length",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_is_empty",
+            params: &["i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_union",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_intersection",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_difference",
+            params: &["i64", "i64"],
+            ret: "i64",
+        },
+        Builtin {
+            name: "kodo_set_free",
+            params: &["i64"],
+            ret: "void",
+        },
         // -- Network / JSON --
         Builtin {
             name: "kodo_http_get",

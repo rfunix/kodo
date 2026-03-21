@@ -64,6 +64,7 @@ pub(crate) fn completions_for_source(source: &str, position: Position) -> Vec<Co
     add_string_method_completions(&mut items);
     add_list_method_completions(&mut items);
     add_map_method_completions(&mut items);
+    add_set_method_completions(&mut items);
     add_keyword_completions(&mut items);
 
     items
@@ -388,6 +389,62 @@ fn add_map_method_completions(items: &mut Vec<CompletionItem>) {
             label: (*name).to_string(),
             kind: Some(CompletionItemKind::METHOD),
             detail: Some(format!("Map<K, V>.{name}{signature}")),
+            documentation: Some(Documentation::String((*doc).to_string())),
+            sort_text: Some(format!("1_{name}")),
+            ..Default::default()
+        });
+    }
+}
+
+/// Adds `Set<T>` method completions to the list.
+fn add_set_method_completions(items: &mut Vec<CompletionItem>) {
+    let set_methods = [
+        (
+            "add",
+            "Adds an element to the set (duplicates are ignored)",
+            "(value: T) -> Unit",
+        ),
+        (
+            "contains",
+            "Checks if the set contains the given value",
+            "(value: T) -> Bool",
+        ),
+        (
+            "remove",
+            "Removes the element from the set",
+            "(value: T) -> Bool",
+        ),
+        (
+            "length",
+            "Returns the number of elements in the set",
+            "() -> Int",
+        ),
+        (
+            "is_empty",
+            "Returns true if the set has no elements",
+            "() -> Bool",
+        ),
+        (
+            "union",
+            "Returns a new set with elements from both sets",
+            "(other: Set<T>) -> Set<T>",
+        ),
+        (
+            "intersection",
+            "Returns a new set with elements common to both sets",
+            "(other: Set<T>) -> Set<T>",
+        ),
+        (
+            "difference",
+            "Returns a new set with elements in this set but not in the other",
+            "(other: Set<T>) -> Set<T>",
+        ),
+    ];
+    for (name, doc, signature) in &set_methods {
+        items.push(CompletionItem {
+            label: (*name).to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some(format!("Set<T>.{name}{signature}")),
             documentation: Some(Documentation::String((*doc).to_string())),
             sort_text: Some(format!("1_{name}")),
             ..Default::default()
@@ -776,6 +833,39 @@ mod tests {
             assert!(
                 labels.contains(method),
                 "completions should include Map method: {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_include_set_methods() {
+        let source = module_with_function();
+        let items = completions_for_source(source, Position::new(0, 0));
+        let set_methods: Vec<&CompletionItem> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    && i.detail.as_deref().unwrap_or("").starts_with("Set<T>.")
+            })
+            .collect();
+        assert!(
+            !set_methods.is_empty(),
+            "completions should include Set methods"
+        );
+        let labels: Vec<&str> = set_methods.iter().map(|i| i.label.as_str()).collect();
+        for method in &[
+            "add",
+            "contains",
+            "remove",
+            "length",
+            "is_empty",
+            "union",
+            "intersection",
+            "difference",
+        ] {
+            assert!(
+                labels.contains(method),
+                "completions should include Set method: {method}"
             );
         }
     }

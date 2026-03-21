@@ -77,3 +77,5 @@ examples/self_hosted_lexer/main
 # Proptest regressions
 *.proptest-regressions
 .claude/worktrees/
+examples/task_manager/task_manager
+examples/task_manager/task_manager.ko.cert.json

@@ -92,6 +92,7 @@ impl TypeChecker {
         self.register_iterator_functions();
         self.register_combinator_methods();
         self.register_map_functions();
+        self.register_set_functions();
         self.register_http_functions();
         self.register_json_functions();
         self.register_time_functions();
@@ -1184,6 +1185,132 @@ impl TypeChecker {
                 vec![Type::Generic("Map".to_string(), vec![Type::Int, Type::Int])],
                 Box::new(Type::Bool),
             ),
+        );
+    }
+
+    /// Registers builtin functions and methods for `Set<T>` operations.
+    ///
+    /// Sets use integer values at the runtime level. All elements are
+    /// represented as i64. Provides add, contains, remove, length, `is_empty`,
+    /// and set-theoretic operations (union, intersection, difference).
+    #[allow(clippy::too_many_lines)]
+    fn register_set_functions(&mut self) {
+        let set_ty = Type::Generic("Set".to_string(), vec![Type::Int]);
+
+        // set_new() -> Set<Int>
+        self.env.insert(
+            "set_new".to_string(),
+            Type::Function(vec![], Box::new(set_ty.clone())),
+        );
+
+        // Set.add(elem: Int)
+        self.method_lookup.insert(
+            ("Set".to_string(), "add".to_string()),
+            (
+                "set_add".to_string(),
+                vec![set_ty.clone(), Type::Int],
+                Type::Unit,
+            ),
+        );
+        self.env.insert(
+            "set_add".to_string(),
+            Type::Function(vec![set_ty.clone(), Type::Int], Box::new(Type::Unit)),
+        );
+
+        // Set.contains(elem: Int) -> Bool
+        self.method_lookup.insert(
+            ("Set".to_string(), "contains".to_string()),
+            (
+                "set_contains".to_string(),
+                vec![set_ty.clone(), Type::Int],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "set_contains".to_string(),
+            Type::Function(vec![set_ty.clone(), Type::Int], Box::new(Type::Bool)),
+        );
+
+        // Set.remove(elem: Int) -> Bool
+        self.method_lookup.insert(
+            ("Set".to_string(), "remove".to_string()),
+            (
+                "set_remove".to_string(),
+                vec![set_ty.clone(), Type::Int],
+                Type::Bool,
+            ),
+        );
+        self.env.insert(
+            "set_remove".to_string(),
+            Type::Function(vec![set_ty.clone(), Type::Int], Box::new(Type::Bool)),
+        );
+
+        // Set.length() -> Int
+        self.method_lookup.insert(
+            ("Set".to_string(), "length".to_string()),
+            ("set_length".to_string(), vec![set_ty.clone()], Type::Int),
+        );
+        self.env.insert(
+            "set_length".to_string(),
+            Type::Function(vec![set_ty.clone()], Box::new(Type::Int)),
+        );
+
+        // Set.is_empty() -> Bool
+        self.method_lookup.insert(
+            ("Set".to_string(), "is_empty".to_string()),
+            ("set_is_empty".to_string(), vec![set_ty.clone()], Type::Bool),
+        );
+        self.env.insert(
+            "set_is_empty".to_string(),
+            Type::Function(vec![set_ty.clone()], Box::new(Type::Bool)),
+        );
+
+        // Set.union(other: Set<Int>) -> Set<Int>
+        self.method_lookup.insert(
+            ("Set".to_string(), "union".to_string()),
+            (
+                "set_union".to_string(),
+                vec![set_ty.clone(), set_ty.clone()],
+                set_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "set_union".to_string(),
+            Type::Function(
+                vec![set_ty.clone(), set_ty.clone()],
+                Box::new(set_ty.clone()),
+            ),
+        );
+
+        // Set.intersection(other: Set<Int>) -> Set<Int>
+        self.method_lookup.insert(
+            ("Set".to_string(), "intersection".to_string()),
+            (
+                "set_intersection".to_string(),
+                vec![set_ty.clone(), set_ty.clone()],
+                set_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "set_intersection".to_string(),
+            Type::Function(
+                vec![set_ty.clone(), set_ty.clone()],
+                Box::new(set_ty.clone()),
+            ),
+        );
+
+        // Set.difference(other: Set<Int>) -> Set<Int>
+        self.method_lookup.insert(
+            ("Set".to_string(), "difference".to_string()),
+            (
+                "set_difference".to_string(),
+                vec![set_ty.clone(), set_ty.clone()],
+                set_ty.clone(),
+            ),
+        );
+        self.env.insert(
+            "set_difference".to_string(),
+            Type::Function(vec![set_ty.clone(), set_ty.clone()], Box::new(set_ty)),
         );
     }
 

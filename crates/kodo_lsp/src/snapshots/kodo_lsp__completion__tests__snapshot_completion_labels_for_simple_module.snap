@@ -1,6 +1,5 @@
 ---
 source: crates/kodo_lsp/src/completion.rs
-assertion_line: 672
 expression: "labels.join(\"\\n\")"
 ---
 [enum] Color
@@ -38,22 +37,29 @@ expression: "labels.join(\"\\n\")"
 [fn] print
 [fn] print_int
 [fn] println
+[method] add
+[method] contains
 [method] contains
 [method] contains
 [method] contains_key
+[method] difference
 [method] ends_with
 [method] entries
 [method] get
 [method] get
 [method] insert
+[method] intersection
+[method] is_empty
 [method] is_empty
 [method] is_empty
 [method] keys
 [method] length
 [method] length
 [method] length
+[method] length
 [method] pop
 [method] push
+[method] remove
 [method] remove
 [method] remove
 [method] reverse
@@ -65,6 +71,7 @@ expression: "labels.join(\"\\n\")"
 [method] to_string
 [method] to_upper
 [method] trim
+[method] union
 [method] values
 [other] async
 [other] await

@@ -206,6 +206,31 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .entry("channel_generic_recv".to_string())
         .or_insert(Type::Int);
 
+    // Set<Int> builtins.
+    let set_int = Type::Generic("Set".to_string(), vec![Type::Int]);
+    fn_return_types
+        .entry("set_new".to_string())
+        .or_insert(set_int.clone());
+    for name in &["set_contains", "set_remove", "set_is_empty"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Bool);
+    }
+    fn_return_types
+        .entry("set_length".to_string())
+        .or_insert(Type::Int);
+    fn_return_types
+        .entry("set_add".to_string())
+        .or_insert(Type::Unit);
+    fn_return_types
+        .entry("set_free".to_string())
+        .or_insert(Type::Unit);
+    for name in &["set_union", "set_intersection", "set_difference"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(set_int.clone());
+    }
+
     register_stdlib_expansion_return_types(fn_return_types);
 
     register_sprint5_return_types(fn_return_types);

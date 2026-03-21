@@ -267,9 +267,13 @@ impl TypeChecker {
                 // Iterating over Map yields keys (K).
                 args[0].clone()
             }
+            Type::Generic(name_str, args) if name_str == "Set" && args.len() == 1 => {
+                // Iterating over Set yields elements (T).
+                args[0].clone()
+            }
             _ => {
                 return Err(TypeError::Mismatch {
-                    expected: "List<T> or Map<K, V>".to_string(),
+                    expected: "List<T>, Map<K, V>, or Set<T>".to_string(),
                     found: format!("{iter_ty}"),
                     span: expr_span(iterable),
                 });

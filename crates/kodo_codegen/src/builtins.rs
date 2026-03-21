@@ -524,6 +524,7 @@ fn declare_collection_builtins(
 ) -> Result<()> {
     declare_list_builtins(module, call_conv, builtins)?;
     declare_map_builtins_impl(module, call_conv, builtins)?;
+    declare_set_builtins(module, call_conv, builtins)?;
     Ok(())
 }
 
@@ -772,6 +773,72 @@ fn declare_map_builtins_impl(
         types::I64
     );
     decl_void!("kodo_map_free_ss", "map_free_ss", types::I64);
+
+    Ok(())
+}
+
+/// Declares set builtins (new, add, contains, remove, length, `is_empty`,
+/// union, intersection, difference, free).
+fn declare_set_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    decl_ret!("kodo_set_new", "set_new", [], types::I64);
+    decl_void!("kodo_set_add", "set_add", types::I64, types::I64);
+    decl_ret!(
+        "kodo_set_contains",
+        "set_contains",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_set_remove",
+        "set_remove",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!("kodo_set_length", "set_length", [types::I64], types::I64);
+    decl_ret!(
+        "kodo_set_is_empty",
+        "set_is_empty",
+        [types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_set_union",
+        "set_union",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_set_intersection",
+        "set_intersection",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_ret!(
+        "kodo_set_difference",
+        "set_difference",
+        [types::I64, types::I64],
+        types::I64
+    );
+    decl_void!("kodo_set_free", "kodo_set_free", types::I64);
 
     Ok(())
 }

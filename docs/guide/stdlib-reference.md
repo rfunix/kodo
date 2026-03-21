@@ -577,6 +577,84 @@ for value in scores.values() {
 }
 ```
 
+## Set<T>
+
+An unordered collection of unique elements. Currently supports `Int` elements.
+
+### `Set::new() -> Set<T>`
+
+Creates a new empty set.
+
+```rust
+let s: Set<Int> = Set::new()
+```
+
+### `set.add(value: T)`
+
+Adds an element to the set. Duplicates are silently ignored.
+
+```rust
+s.add(1)
+s.add(2)
+s.add(2)  // no effect, already present
+```
+
+### `set.contains(value: T) -> Bool`
+
+Returns `true` if the set contains the given value.
+
+```rust
+let has_it: Bool = s.contains(1)  // true
+```
+
+### `set.remove(value: T) -> Bool`
+
+Removes the element from the set. Returns `true` if it was present.
+
+```rust
+let removed: Bool = s.remove(1)
+```
+
+### `set.length() -> Int`
+
+Returns the number of elements in the set.
+
+```rust
+let n: Int = s.length()
+```
+
+### `set.is_empty() -> Bool`
+
+Returns `true` if the set has no elements.
+
+```rust
+let empty: Bool = s.is_empty()
+```
+
+### `set.union(other: Set<T>) -> Set<T>`
+
+Returns a new set containing all elements from both sets.
+
+```rust
+let combined: Set<Int> = s1.union(s2)
+```
+
+### `set.intersection(other: Set<T>) -> Set<T>`
+
+Returns a new set containing only elements present in both sets.
+
+```rust
+let common: Set<Int> = s1.intersection(s2)
+```
+
+### `set.difference(other: Set<T>) -> Set<T>`
+
+Returns a new set containing elements in this set but not in the other.
+
+```rust
+let only_in_s1: Set<Int> = s1.difference(s2)
+```
+
 ## JSON
 
 ### Parsing

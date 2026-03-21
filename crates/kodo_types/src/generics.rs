@@ -141,6 +141,9 @@ impl TypeChecker {
             if e_name == "List" && f_name == "List" && e_args.len() == 1 && f_args.len() == 1 {
                 return e_args.iter().all(|t| valid_types.contains(t));
             }
+            if e_name == "Set" && f_name == "Set" && e_args.len() == 1 && f_args.len() == 1 {
+                return e_args.iter().all(|t| valid_types.contains(t));
+            }
         }
         false
     }

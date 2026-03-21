@@ -182,6 +182,14 @@ pub(crate) fn is_map_allocating_builtin(callee: &str) -> bool {
     matches!(callee, "map_new")
 }
 
+/// Returns true if the builtin allocates a new set on the heap.
+pub(crate) fn is_set_allocating_builtin(callee: &str) -> bool {
+    matches!(
+        callee,
+        "set_new" | "set_union" | "set_intersection" | "set_difference"
+    )
+}
+
 /// Translates a single MIR instruction.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_instruction(
@@ -1351,11 +1359,13 @@ fn translate_call(
         }
     }
 
-    // Track list/map allocating builtins for cleanup before return.
+    // Track list/map/set allocating builtins for cleanup before return.
     if is_list_allocating_builtin(callee) {
         var_map.heap_locals.insert(dest, HeapKind::List);
     } else if is_map_allocating_builtin(callee) {
         var_map.heap_locals.insert(dest, HeapKind::Map);
+    } else if is_set_allocating_builtin(callee) {
+        var_map.heap_locals.insert(dest, HeapKind::Set);
     }
 
     // Check if the dest has a composite type (sret return from callee).
