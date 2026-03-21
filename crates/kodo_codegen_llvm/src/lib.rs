@@ -159,24 +159,12 @@ pub fn compile_module_to_llvm_ir(
         })
         .collect();
 
-    // -- Forward-declare all user functions --
-    emitter.comment("User function forward declarations");
-    for func in mir_functions {
-        let fn_name = if func.name == "main" {
-            "kodo_main".to_string()
-        } else {
-            func.name.clone()
-        };
-        let ret_ty = types::llvm_return_type(&func.return_type, struct_defs, enum_defs);
-        let param_tys: Vec<String> = func
-            .locals
-            .iter()
-            .take(func.param_count)
-            .map(|l| types::llvm_type(&l.ty, struct_defs, enum_defs))
-            .collect();
-        let params_str = param_tys.join(", ");
-        emitter.line(&format!("declare {ret_ty} @{fn_name}({params_str})"));
-    }
+    // -- Forward-declare user functions that are only declared, not defined --
+    // Functions with bodies will be emitted as `define` later — emitting
+    // both `declare` and `define` for the same name is an LLVM IR error.
+    // Only emit `declare` for functions that are referenced but not defined
+    // in this module (e.g., imported from other modules).
+    // Since all MIR functions will be defined below, we skip forward declarations.
     emitter.blank();
 
     // -- Function definitions --

@@ -27,13 +27,26 @@ pub(crate) fn llvm_type(
         Type::Float64 => "double".to_string(),
         Type::String | Type::DynTrait(_) => "{ i64, i64 }".to_string(),
         Type::Unit => "void".to_string(),
-        Type::Struct(name) => format!("%{name}"),
-        Type::Enum(name) => {
-            let payload_size = enum_payload_size(name, enum_defs, struct_defs);
-            if payload_size == 0 {
-                "{ i64 }".to_string()
+        Type::Struct(name) => {
+            if struct_defs.contains_key(name) {
+                format!("%{name}")
             } else {
-                format!("{{ i64, [{payload_size} x i8] }}")
+                // Unknown struct (e.g., generic placeholder) — treat as opaque handle.
+                "i64".to_string()
+            }
+        }
+        Type::Enum(name) => {
+            if enum_defs.contains_key(name) {
+                let payload_size = enum_payload_size(name, enum_defs, struct_defs);
+                if payload_size == 0 {
+                    "{ i64 }".to_string()
+                } else {
+                    format!("{{ i64, [{payload_size} x i8] }}")
+                }
+            } else {
+                // Unknown enum (e.g., unresolved generic like "Option", "Result")
+                // — use a reasonable default layout: discriminant + 16 bytes payload.
+                "{ i64, [16 x i8] }".to_string()
             }
         }
         // Generic types like List<T>, Map<K,V>, Option<T>, Result<T,E> are
