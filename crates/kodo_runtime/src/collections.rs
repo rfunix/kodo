@@ -2868,7 +2868,7 @@ mod tests {
             kodo_list_push(list, 2);
             kodo_list_push(list, 3);
         }
-        let closure = make_closure(double_fn as usize);
+        let closure = make_closure((double_fn as *const ()) as usize);
         let result = unsafe { kodo_list_map(list, closure) };
         assert_eq!(unsafe { kodo_list_length(result) }, 3);
         let mut val: i64 = 0;
@@ -2884,7 +2884,7 @@ mod tests {
     #[test]
     fn list_map_empty() {
         let list = kodo_list_new();
-        let closure = make_closure(double_fn as usize);
+        let closure = make_closure((double_fn as *const ()) as usize);
         let result = unsafe { kodo_list_map(list, closure) };
         assert_eq!(unsafe { kodo_list_length(result) }, 0);
     }
@@ -2898,7 +2898,7 @@ mod tests {
             kodo_list_push(list, 3);
             kodo_list_push(list, 4);
         }
-        let closure = make_closure(is_even_fn as usize);
+        let closure = make_closure((is_even_fn as *const ()) as usize);
         let result = unsafe { kodo_list_filter(list, closure) };
         assert_eq!(unsafe { kodo_list_length(result) }, 2);
         let mut val: i64 = 0;
@@ -2917,7 +2917,7 @@ mod tests {
             kodo_list_push(list, 3);
             kodo_list_push(list, 5);
         }
-        let closure = make_closure(is_even_fn as usize);
+        let closure = make_closure((is_even_fn as *const ()) as usize);
         let result = unsafe { kodo_list_filter(list, closure) };
         assert_eq!(unsafe { kodo_list_length(result) }, 0);
     }
@@ -2930,7 +2930,7 @@ mod tests {
             kodo_list_push(list, 2);
             kodo_list_push(list, 3);
         }
-        let closure = make_closure(sum_fn as usize);
+        let closure = make_closure((sum_fn as *const ()) as usize);
         let result = unsafe { kodo_list_fold(list, 0, closure) };
         assert_eq!(result, 6);
     }
@@ -2942,7 +2942,7 @@ mod tests {
             kodo_list_push(list, 10);
             kodo_list_push(list, 20);
         }
-        let closure = make_closure(sum_fn as usize);
+        let closure = make_closure((sum_fn as *const ()) as usize);
         let result = unsafe { kodo_list_fold(list, 100, closure) };
         assert_eq!(result, 130);
     }
@@ -2950,7 +2950,7 @@ mod tests {
     #[test]
     fn list_fold_empty() {
         let list = kodo_list_new();
-        let closure = make_closure(sum_fn as usize);
+        let closure = make_closure((sum_fn as *const ()) as usize);
         let result = unsafe { kodo_list_fold(list, 42, closure) };
         assert_eq!(result, 42);
     }
@@ -2963,7 +2963,7 @@ mod tests {
             kodo_list_push(list, 10);
             kodo_list_push(list, 15);
         }
-        let closure = make_closure(sum_fn as usize);
+        let closure = make_closure((sum_fn as *const ()) as usize);
         let result = unsafe { kodo_list_reduce(list, 0, closure) };
         assert_eq!(result, 30);
     }
@@ -2978,7 +2978,7 @@ mod tests {
             kodo_list_push(list, 4);
             kodo_list_push(list, 5);
         }
-        let closure = make_closure(is_even_fn as usize);
+        let closure = make_closure((is_even_fn as *const ()) as usize);
         let result = unsafe { kodo_list_count(list, closure) };
         assert_eq!(result, 2);
     }
@@ -2990,7 +2990,7 @@ mod tests {
             kodo_list_push(list, 1);
             kodo_list_push(list, 3);
         }
-        let closure = make_closure(is_even_fn as usize);
+        let closure = make_closure((is_even_fn as *const ()) as usize);
         let result = unsafe { kodo_list_count(list, closure) };
         assert_eq!(result, 0);
     }
@@ -3003,7 +3003,7 @@ mod tests {
             kodo_list_push(list, 20);
             kodo_list_push(list, 3);
         }
-        let closure = make_closure(gt_ten_fn as usize);
+        let closure = make_closure((gt_ten_fn as *const ()) as usize);
         let result = unsafe { kodo_list_any(list, closure) };
         assert_eq!(result, 1);
     }
@@ -3016,7 +3016,7 @@ mod tests {
             kodo_list_push(list, 5);
             kodo_list_push(list, 9);
         }
-        let closure = make_closure(gt_ten_fn as usize);
+        let closure = make_closure((gt_ten_fn as *const ()) as usize);
         let result = unsafe { kodo_list_any(list, closure) };
         assert_eq!(result, 0);
     }
@@ -3024,7 +3024,7 @@ mod tests {
     #[test]
     fn list_any_empty() {
         let list = kodo_list_new();
-        let closure = make_closure(gt_ten_fn as usize);
+        let closure = make_closure((gt_ten_fn as *const ()) as usize);
         let result = unsafe { kodo_list_any(list, closure) };
         assert_eq!(result, 0);
     }
