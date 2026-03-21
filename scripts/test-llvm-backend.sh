@@ -61,20 +61,21 @@ for ex in "${EXAMPLES[@]}"; do
         continue
     fi
 
+    # Skip files without fn main (like testing.ko which uses kodoc test)
+    if grep -q "^[[:space:]]*test " "$KO_FILE" && ! grep -q "fn main" "$KO_FILE"; then
+        echo "  SKIP  $ex (no fn main — use kodoc test)"
+        ((SKIP++))
+        continue
+    fi
+
     # Step 2: Full compile (IR → obj → link → binary)
     BIN_FILE="/tmp/kodo_llvm_test_$(echo $ex | tr '/' '_')"
-    BUILD_OUTPUT=$(cargo run -p kodoc --quiet -- build "$KO_FILE" --backend=llvm 2>&1)
+    BUILD_OUTPUT=$(cargo run -p kodoc --quiet -- build "$KO_FILE" --backend=llvm -o "$BIN_FILE" 2>&1)
     if [ $? -eq 0 ]; then
-        # Step 3: Run and verify it produces output without crashing
-        TIMEOUT_CMD="timeout 5"
-        if ! command -v timeout &> /dev/null; then
-            TIMEOUT_CMD="gtimeout 5 2>/dev/null ||"
-        fi
-        RUN_OUTPUT=$($BIN_FILE 2>&1 || true)
-        echo "  PASS  $ex"
+        echo "  PASS  $ex (compiled)"
         ((PASS++))
     else
-        FIRST_ERROR=$(echo "$BUILD_OUTPUT" | grep -m1 "error:" || echo "$BUILD_OUTPUT" | tail -1)
+        FIRST_ERROR=$(echo "$BUILD_OUTPUT" | grep -m1 "error:\|symbol.*not found\|Undefined" || echo "$BUILD_OUTPUT" | tail -1)
         echo "  FAIL  $ex"
         echo "        $FIRST_ERROR"
         FAILURES="$FAILURES\n  $ex: $FIRST_ERROR"
