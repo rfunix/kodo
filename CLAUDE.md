@@ -248,9 +248,9 @@ The #1 value proposition of Kōdo is the closed-loop repair cycle. Every compile
 Agents don't read prose — they parse structured data. Every `kodoc` subcommand that produces output should support `--json`:
 - `kodoc check --json-errors` ✓ (done)
 - `kodoc confidence-report --json` ✓ (done)
-- `kodoc explain --json` ✗ (needed)
-- `kodoc repl --json` ✗ (needed)
-- `kodoc intent-explain --json` ✗ (needed)
+- `kodoc explain --json` ✓ (done)
+- `kodoc repl --json` ✓ (done)
+- `kodoc intent-explain --json` ✓ (done)
 - `kodoc describe --json` ✓ (done)
 
 ### 3. Contracts Are the Killer Feature — Double Down
@@ -258,15 +258,15 @@ Agents don't read prose — they parse structured data. Every `kodoc` subcommand
 Contracts (`requires`/`ensures`) verified by Z3 are what no other language offers agents. Prioritize:
 - More errors with contract-aware fix patches (e.g., "add `requires { x > 0 }` to satisfy callee's precondition")
 - Contract status in compilation certificates (`verified_static` vs `runtime_only`)
-- Recoverable contract mode (`--contracts=recoverable`) so services don't crash on violations
-- Contract-aware LSP completions (show `requires`/`ensures` in hover and autocomplete)
+- Recoverable contract mode (`--contracts=recoverable`) ✓ (done, tested E2E)
+- Contract-aware LSP completions (show `requires`/`ensures` in hover and autocomplete) ✓ (done, format_expr)
 
 ### 4. Confidence + Certificates = Automated Trust
 
 The `@confidence` → `@reviewed_by` enforcement is unique. Make it operationally useful:
-- Store transitive confidence scores in `.ko.cert.json` (currently computed but not persisted)
-- Enable policy-based automation: "deploy if all functions > 0.9 confidence and all contracts statically verified"
-- `kodoc audit` command combining confidence + contracts + annotations in one report
+- Store transitive confidence scores in `.ko.cert.json` ✓ (done)
+- Enable policy-based automation ✓ (done: `kodoc audit --policy "min_confidence=0.9,contracts=all_verified"` exits 1 on violation)
+- `kodoc audit` command combining confidence + contracts + annotations in one report ✓ (done, --json --policy)
 
 ### 5. Collections Are Complete — Maintain and Extend
 
@@ -278,15 +278,15 @@ Collections are fully wired through type checker → codegen as of v0.3.0:
 Next priorities for collections:
 - **List**: sort, filter, map, fold, reduce, count, any (higher-order collection methods) -- DONE
 - **Map**: merge, filter -- DONE
-- **Set<T>**: new collection type
+- **Set<T>**: new collection type -- DONE (add, contains, remove, length, is_empty, union, intersection, difference, for-in)
 
 ### 6. LSP Is the Agent's Eyes
 
 For agents operating via IDE/editor integration, LSP quality directly impacts productivity:
 - Hover MUST show full annotations: `@confidence(0.85)`, `@authored_by(agent: "claude")`, not just `@confidence`
-- Code actions should surface `FixPatch` as one-click fixes
-- Goto definition should work (currently a stub)
-- Completions should be contract-aware
+- Code actions should surface `FixPatch` as one-click fixes ✓ (done)
+- Goto definition should work ✓ (done)
+- Completions should be contract-aware ✓ (done, format_expr for requires/ensures)
 
 ### 7. Known Limitations to Communicate Clearly
 
