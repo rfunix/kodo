@@ -1349,6 +1349,15 @@ mod tests {
             kodo_green_run();
         }
 
+        // The work-stealing scheduler may return slightly before the
+        // spawned task commits its flag write. Brief spin to avoid flaky CI.
+        for _ in 0..100 {
+            if FLAG.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
         assert!(
             FLAG.load(Ordering::SeqCst),
             "green thread should have set the flag"
