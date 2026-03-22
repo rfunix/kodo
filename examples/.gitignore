@@ -1,15 +1,20 @@
 # Ignore compiled binaries (Mach-O, ELF, etc.)
-# Keep only .ko source files in this directory
+# Keep only .ko source files and .gitignore in this directory
 *
 !*.ko
 !.gitignore
 !multi_file/
-!multi_file/**
+!multi_file/**/*.ko
+!multi_file/.gitignore
 !multifile/
-!multifile/**
+!multifile/**/*.ko
+!multifile/.gitignore
 !audit_log/
-!audit_log/**
+!audit_log/**/*.ko
+!audit_log/.gitignore
 !self_hosted_lexer/
-!self_hosted_lexer/**
+!self_hosted_lexer/**/*.ko
+!self_hosted_lexer/.gitignore
 !task_manager/
-!task_manager/**
+!task_manager/**/*.ko
+!task_manager/.gitignore
