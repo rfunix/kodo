@@ -112,6 +112,15 @@ pub fn compile_module(
         eprintln!("=========================");
     }
 
+    // Verify the module before optimization — catches invalid IR that
+    // would cause LLVM to crash in optimization passes.
+    if let Err(msg) = module.verify() {
+        return Err(format!(
+            "LLVM module verification failed: {}",
+            msg.to_string()
+        ));
+    }
+
     // The inkwell backend is specifically for optimized native builds,
     // so always use aggressive optimization (O3) regardless of the
     // requested level. The alloca-heavy IR pattern relies on mem2reg/sroa
@@ -373,6 +382,7 @@ fn translate_function_body<'ctx>(
                 enum_defs,
                 name_counter,
                 &mut ssa_cache,
+                alloca_bb,
             );
         }
 
@@ -390,6 +400,7 @@ fn translate_function_body<'ctx>(
             enum_defs,
             name_counter,
             &mut ssa_cache,
+            alloca_bb,
         );
     }
 }

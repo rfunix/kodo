@@ -62,6 +62,33 @@ pub(crate) struct ValueCtx<'a, 'ctx> {
     /// just stored. Cleared at block boundaries since SSA values don't
     /// propagate across blocks without phi nodes.
     pub ssa_cache: &'a mut HashMap<LocalId, BasicValueEnum<'ctx>>,
+    /// The entry (alloca) basic block — all allocas must be placed here
+    /// to avoid LLVM pass crashes.
+    pub alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
+}
+
+/// Creates an alloca in the entry block of the function, avoiding
+/// allocas in non-entry blocks which crash LLVM optimization passes.
+#[cfg(feature = "inkwell")]
+pub(crate) fn alloca_in_entry<'ctx>(
+    builder: &Builder<'ctx>,
+    alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
+    ty: inkwell::types::BasicTypeEnum<'ctx>,
+    name: &str,
+) -> PointerValue<'ctx> {
+    let current_block = builder.get_insert_block();
+    // Position before the terminator of the alloca block
+    if let Some(term) = alloca_block.get_terminator() {
+        builder.position_before(&term);
+    } else {
+        builder.position_at_end(alloca_block);
+    }
+    let alloca = builder.build_alloca(ty, name).unwrap();
+    // Restore builder position
+    if let Some(bb) = current_block {
+        builder.position_at_end(bb);
+    }
+    alloca
 }
 
 /// Generates a unique name for an LLVM value.
@@ -248,7 +275,8 @@ fn to_i64_value<'ctx>(val: BasicValueEnum<'ctx>, ctx: &mut ValueCtx<'_, 'ctx>) -
         BasicValueEnum::StructValue(sv) => {
             // Store struct to alloca, load as i64.
             let uname = unique_name(ctx.name_counter, "s2i_a");
-            let alloca = ctx.builder.build_alloca(sv.get_type(), &uname).unwrap();
+            let alloca =
+                alloca_in_entry(ctx.builder, ctx.alloca_block, sv.get_type().into(), &uname);
             ctx.builder.build_store(alloca, sv).unwrap();
             let uname2 = unique_name(ctx.name_counter, "s2i_l");
             ctx.builder
@@ -612,10 +640,12 @@ fn translate_field_get<'ctx>(
             &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
             false,
         );
-        let str_alloca = ctx
-            .builder
-            .build_alloca(str_ty, &unique_name(ctx.name_counter, "stmp"))
-            .unwrap();
+        let str_alloca = alloca_in_entry(
+            ctx.builder,
+            ctx.alloca_block,
+            str_ty.into(),
+            &unique_name(ctx.name_counter, "stmp"),
+        );
         // Load ptr into field 0
         let ptr_val = ctx
             .builder
@@ -716,14 +746,18 @@ fn translate_string_concat<'ctx>(
     // Allocate out-parameter slots.
     let out_ptr_name = unique_name(ctx.name_counter, "out_p");
     let out_len_name = unique_name(ctx.name_counter, "out_l");
-    let out_ptr = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_ptr_name)
-        .unwrap();
-    let out_len = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_len_name)
-        .unwrap();
+    let out_ptr = alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_ptr_name,
+    );
+    let out_len = alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_len_name,
+    );
 
     let out_ptr_i64_name = unique_name(ctx.name_counter, "opi");
     let out_len_i64_name = unique_name(ctx.name_counter, "oli");

@@ -58,6 +58,7 @@ pub(crate) fn translate_terminator<'ctx>(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
     ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
+    alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
 ) {
     let mut vctx = ValueCtx {
         context,
@@ -70,6 +71,7 @@ pub(crate) fn translate_terminator<'ctx>(
         enum_defs,
         name_counter,
         ssa_cache,
+        alloca_block,
     };
 
     match term {

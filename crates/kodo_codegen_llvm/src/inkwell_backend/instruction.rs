@@ -56,6 +56,7 @@ pub(crate) fn translate_instruction<'ctx>(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
     ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
+    alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
 ) {
     let mut vctx = ValueCtx {
         context,
@@ -68,6 +69,7 @@ pub(crate) fn translate_instruction<'ctx>(
         enum_defs,
         name_counter,
         ssa_cache,
+        alloca_block,
     };
 
     match instr {
@@ -418,12 +420,14 @@ fn translate_call<'ctx>(
         return;
     };
 
-    // Emit argument values, expanding strings to (ptr, len).
+    // Emit argument values.
+    // For RUNTIME builtins, expand strings to (ptr, len) two-arg pairs.
+    // For USER functions, pass the { i64, i64 } struct directly.
     let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
     for arg in args {
         if let Some(val) = translate_value(arg, ctx) {
             let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
-            if arg_ty == Type::String && val.is_struct_value() {
+            if arg_ty == Type::String && val.is_struct_value() && !is_user_fn {
                 // Expand string struct {ptr, len} to two args.
                 let sv = val.into_struct_value();
                 let ptr_name = unique_name(ctx.name_counter, "ap");
@@ -432,7 +436,7 @@ fn translate_call<'ctx>(
                 let len = ctx.builder.build_extract_value(sv, 1, &len_name).unwrap();
                 arg_vals.push(ptr.into());
                 arg_vals.push(len.into());
-            } else if arg_ty == Type::String && val.is_int_value() {
+            } else if arg_ty == Type::String && val.is_int_value() && !is_user_fn {
                 // String handle (i64) — points to a [ptr, len] pair on heap.
                 // Load ptr from handle, len from handle+8.
                 let handle = val.into_int_value();
@@ -525,14 +529,18 @@ fn translate_string_returning_call<'ctx>(
     // Allocate out-parameter slots.
     let out_ptr_name = unique_name(ctx.name_counter, "sro_p");
     let out_len_name = unique_name(ctx.name_counter, "sro_l");
-    let out_ptr = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_ptr_name)
-        .unwrap();
-    let out_len = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_len_name)
-        .unwrap();
+    let out_ptr = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_ptr_name,
+    );
+    let out_len = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_len_name,
+    );
 
     let outptr_int_name = unique_name(ctx.name_counter, "sro_ptr_int");
     let outlen_int_name = unique_name(ctx.name_counter, "sro_len_int");
@@ -621,14 +629,18 @@ fn translate_outparam_get_call<'ctx>(
     // Allocate out-parameter slots.
     let out_val_name = unique_name(ctx.name_counter, "ov");
     let out_some_name = unique_name(ctx.name_counter, "os");
-    let out_value = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_val_name)
-        .unwrap();
-    let out_is_some = ctx
-        .builder
-        .build_alloca(ctx.context.i64_type(), &out_some_name)
-        .unwrap();
+    let out_value = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_val_name,
+    );
+    let out_is_some = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &out_some_name,
+    );
 
     let outval_int_name = unique_name(ctx.name_counter, "outval_int");
     let outsome_int_name = unique_name(ctx.name_counter, "outsome_int");
