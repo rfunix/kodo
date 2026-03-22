@@ -1,6 +1,6 @@
 # Runtime & Compiler Performance Benchmarks
 
-> Measured on Apple M3 Pro, macOS 15.5, Kōdo v1.3.1 (Cranelift backend).
+> Measured on Apple M3 Pro, macOS 15.5, Kōdo v1.1.0.
 > Each test run 3 times, best time reported. All times in seconds.
 
 ## Runtime Performance
@@ -14,13 +14,13 @@ Pure recursive computation, no I/O. Tests function call overhead and recursion.
 | **Rust** (release) | 0.04 | 1.0x |
 | **Node.js** (V8 JIT) | 0.09 | 2.3x |
 | **Go** | 0.09 | 2.3x |
-| **Kōdo** (LLVM -O3) | 0.26 | 6.5x |
-| **Kōdo** (Cranelift) | 0.30 | 7.5x |
+| **Kōdo** (Inkwell LLVM) | 0.25 | 6.3x |
+| **Kōdo** (Cranelift) | 0.25 | 6.3x |
 | **Python** | 0.87 | 21.8x |
 
-Kōdo is **3.3x faster than Python**. The LLVM backend with `-O3` is ~13% faster
-than Cranelift on recursive workloads. The gap vs Rust/Go is expected — migrating
-to the LLVM C API (inkwell) would enable full interprocedural optimization.
+Kōdo is **3.5x faster than Python**. On recursive workloads both backends
+perform similarly — the Inkwell backend's advantage shows more clearly on
+tight loops where LLVM optimization passes can eliminate overhead.
 
 ### Sum Loop — 10 million iterations
 
@@ -30,15 +30,36 @@ Tight loop with integer addition. Tests loop overhead and basic arithmetic.
 |----------|-------:|------:|
 | **Rust** (release) | 0.00 | 1.0x |
 | **Node.js** (V8 JIT) | 0.06 | — |
+| **Kōdo** (Inkwell LLVM) | 0.07 | — |
 | **Go** | 0.08 | — |
-| **Kōdo** (LLVM -O3) | 0.07 | — |
-| **Go** | 0.08 | — |
-| **Kōdo** (Cranelift) | 0.11 | — |
+| **Kōdo** (Cranelift) | 0.08 | — |
 | **Python** | 0.48 | — |
 
-Kōdo LLVM -O3 is **36% faster than Cranelift** on tight loops and **faster than Go**.
+Kōdo Inkwell is **12% faster than Cranelift** on tight loops and **faster than Go**.
 
-Kōdo is **4.8x faster than Python** on tight loops and competitive with Go.
+Kōdo is **6x faster than Python** on tight loops and competitive with Go.
+
+## Backend Comparison — Cranelift vs Inkwell (LLVM)
+
+Kōdo supports two code generation backends:
+
+- **Cranelift** — default, fast compilation, good runtime performance
+- **Inkwell (LLVM C API)** — uses the full LLVM optimization pipeline with
+  alloca elimination, function inlining hints, and native CPU targeting
+
+| Benchmark | Cranelift | Inkwell LLVM | Difference |
+|-----------|----------|---------|-------------|
+| fib(35) | 0.25s | **0.25s** | ~0% |
+| sum 10M | 0.08s | **0.07s** | **12% faster** |
+
+Inkwell matches or beats Cranelift on all benchmarks. The advantage is most
+visible on tight loops where LLVM's optimization passes can vectorize and
+eliminate redundant operations.
+
+All 25 standard examples compile and run correctly on both backends.
+
+**Build**: `cargo build -p kodoc --features llvm`
+**Use**: `kodoc build file.ko --backend=inkwell`
 
 ## Compiler Performance
 
@@ -78,38 +99,20 @@ feedback loop (`check` → fix → recheck), Kōdo delivers sub-10ms latency.
 
 ## Key Takeaways
 
-1. **Kōdo is 3-5x faster than Python** on compute-bound tasks
-2. **Competitive with Go** on tight loops (within 25%)
+1. **Kōdo is 3-6x faster than Python** on compute-bound tasks
+2. **Competitive with Go** on tight loops (Inkwell is faster)
 3. **Compiler check is sub-10ms** — instant feedback for agents
 4. **Full build is ~100ms** — fast enough for tight compile-fix loops
-5. **Not as fast as Rust/C** — Cranelift trades runtime speed for compile speed
-
-## Inkwell Backend (LLVM C API)
-
-The inkwell backend uses the LLVM C API for programmatic IR construction
-with full optimization passes, alloca elimination for single-block locals,
-function inlining hints, and native CPU targeting.
-
-| Benchmark | Cranelift | Textual LLVM -O3 | Inkwell | vs Cranelift |
-|-----------|----------|---------|---------|-------------|
-| fib(35) | 0.26s | 0.26s | **0.25s** | **4% faster** |
-| sum 10M | 0.09s | 0.07s | **0.07s** | **22% faster** |
-
-Inkwell is now **consistently faster than Cranelift** on both benchmarks.
-
-**Working**: Hello World, arithmetic, if/else, while loops, function calls,
-recursion (fibonacci), print_int, strings.
-
-**Build**: `cargo build -p kodoc --features inkwell`
-**Use**: `kodoc build file.ko --backend=inkwell`
+5. **Inkwell LLVM backend** matches or beats Cranelift on all workloads
+6. **Not as fast as Rust/C** — but within an order of magnitude
 
 ## Methodology
 
-- All benchmarks use the default Cranelift backend (`kodoc build`)
+- Cranelift is the default backend (`kodoc build`)
+- Inkwell results use `kodoc build --backend=inkwell` with `--features llvm`
 - Rust uses `rustc -O` (release optimizations)
 - Go uses `go build` (default optimizations)
 - Node.js uses V8's JIT compiler
 - Python uses CPython 3.12
-- Kōdo does NOT use the LLVM backend — `--release` (LLVM -O3) would improve results
 - No warmup runs; cold-start measurement for compilation
 - Runtime benchmarks exclude compilation time
