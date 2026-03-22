@@ -69,6 +69,9 @@ cranelift-native = "0.129.1"
 cranelift-object = "0.129.1"
 object = "0.36"
 
+# LLVM (inkwell)
+inkwell = { version = "0.8", features = ["llvm21-1"] }
+
 # SMT solver (optional)
 z3 = "0.19.13"
 

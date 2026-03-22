@@ -51,6 +51,14 @@ mod terminator;
 mod types;
 mod value;
 
+/// Inkwell-based LLVM backend (feature-gated).
+///
+/// When the `inkwell` feature is enabled, this module provides an alternative
+/// compilation path that uses the LLVM C API (via inkwell) for programmatic
+/// IR construction, enabling the full LLVM optimization pipeline.
+#[cfg(feature = "inkwell")]
+pub mod inkwell_backend;
+
 use std::collections::HashMap;
 
 use kodo_mir::MirFunction;
