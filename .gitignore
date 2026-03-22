@@ -71,8 +71,26 @@ examples/structs
 examples/copy_semantics
 examples/confidence_demo
 concurrency_dem
+concurrency_demo
+crud_api
 *.ko.cert.json
 examples/self_hosted_lexer/main
+examples/actor_demo
+examples/audit_log/main
+examples/contracts
+examples/contracts_smt_demo
+examples/expressions
+examples/file_io_demo
+examples/intent_composed
+examples/intent_demo
+examples/intent_math
+examples/list_demo
+examples/map_demo
+examples/ownership
+examples/string_demo
+examples/task_manager/task_manager
+examples/task_manager/task_manager.ko.cert.json
+tests/fixtures/valid/result_option
 
 # Proptest regressions
 *.proptest-regressions
