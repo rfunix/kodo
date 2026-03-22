@@ -4,26 +4,17 @@
 //! flow. This module translates those terminators to LLVM branch, return,
 //! and unreachable instructions via the inkwell builder API.
 
-#[cfg(feature = "inkwell")]
 use std::collections::HashMap;
 
-#[cfg(feature = "inkwell")]
 use inkwell::basic_block::BasicBlock;
-#[cfg(feature = "inkwell")]
 use inkwell::builder::Builder;
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::module::Module;
-#[cfg(feature = "inkwell")]
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 
-#[cfg(feature = "inkwell")]
 use kodo_mir::{BlockId, LocalId, Terminator};
-#[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
-#[cfg(feature = "inkwell")]
 use super::value::{translate_value, unique_name, ValueCtx};
 
 /// Translates a MIR terminator to inkwell builder calls.
@@ -42,7 +33,6 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `enum_defs` - Enum type definitions.
 /// * `name_counter` - Counter for unique value names.
 /// * `ssa_cache` - Per-block SSA store-forwarding cache for avoiding redundant loads.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_terminator<'ctx>(
     term: &Terminator,

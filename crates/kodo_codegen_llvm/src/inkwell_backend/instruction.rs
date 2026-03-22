@@ -4,26 +4,17 @@
 //! operations. The translation maintains a mapping from `LocalId` to
 //! alloca stack slots, storing and loading values as needed.
 
-#[cfg(feature = "inkwell")]
 use std::collections::HashMap;
 
-#[cfg(feature = "inkwell")]
 use inkwell::builder::Builder;
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::module::Module;
-#[cfg(feature = "inkwell")]
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 
-#[cfg(feature = "inkwell")]
 use kodo_mir::{Instruction, LocalId, Value};
-#[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
-#[cfg(feature = "inkwell")]
 use super::types::to_llvm_type;
-#[cfg(feature = "inkwell")]
 use super::value::{translate_value, unique_name, ValueCtx};
 
 /// Translates a single MIR instruction to inkwell builder calls.
@@ -41,7 +32,6 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `enum_defs` - Enum type definitions.
 /// * `name_counter` - Counter for unique value names.
 /// * `ssa_cache` - Per-block SSA store-forwarding cache to avoid redundant loads.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_instruction<'ctx>(
     instr: &Instruction,
@@ -122,7 +112,6 @@ pub(crate) fn translate_instruction<'ctx>(
 /// Stores the value to the alloca for correctness (other blocks may read it),
 /// and also caches it in the SSA cache so subsequent reads in the same block
 /// can use the value directly without emitting a redundant load.
-#[cfg(feature = "inkwell")]
 fn translate_assign(dest: LocalId, value: &Value, ctx: &mut ValueCtx<'_, '_>) {
     if let Some(val) = translate_value(value, ctx) {
         if let Some(alloca) = ctx.local_allocas.get(&dest) {
@@ -134,7 +123,6 @@ fn translate_assign(dest: LocalId, value: &Value, ctx: &mut ValueCtx<'_, '_>) {
 }
 
 /// Resolves a Kodo callee name to its runtime C-ABI name.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_lines)]
 fn resolve_runtime_name(callee: &str) -> &str {
     match callee {
@@ -331,7 +319,6 @@ fn resolve_runtime_name(callee: &str) -> &str {
 }
 
 /// Returns true if the builtin returns a String via out-parameters.
-#[cfg(feature = "inkwell")]
 fn is_string_returning_builtin(callee: &str) -> bool {
     matches!(
         callee,
@@ -364,13 +351,11 @@ fn is_string_returning_builtin(callee: &str) -> bool {
 }
 
 /// Returns true if the builtin uses out-parameters for its return value.
-#[cfg(feature = "inkwell")]
 fn is_outparam_get_builtin(callee: &str) -> bool {
     matches!(callee, "list_get" | "map_get" | "map_get_sk")
 }
 
 /// Translates a function call instruction.
-#[cfg(feature = "inkwell")]
 fn translate_call<'ctx>(
     dest: LocalId,
     callee: &str,
@@ -498,7 +483,6 @@ fn translate_call<'ctx>(
 }
 
 /// Translates a string-returning builtin call with out-parameters.
-#[cfg(feature = "inkwell")]
 fn translate_string_returning_call<'ctx>(
     dest: LocalId,
     callee: &str,
@@ -599,7 +583,6 @@ fn translate_string_returning_call<'ctx>(
 }
 
 /// Translates an out-parameter get builtin call.
-#[cfg(feature = "inkwell")]
 fn translate_outparam_get_call<'ctx>(
     dest: LocalId,
     callee: &str,
@@ -678,7 +661,6 @@ fn translate_outparam_get_call<'ctx>(
 }
 
 /// Translates an indirect (function pointer) call.
-#[cfg(feature = "inkwell")]
 fn translate_indirect_call<'ctx>(
     dest: LocalId,
     callee: &Value,
@@ -751,7 +733,6 @@ fn translate_indirect_call<'ctx>(
 }
 
 /// Translates an `IncRef` instruction.
-#[cfg(feature = "inkwell")]
 fn translate_incref(local: LocalId, ctx: &mut ValueCtx<'_, '_>) {
     let local_ty = ctx.local_types.get(&local).cloned().unwrap_or(Type::Int);
     if local_ty == Type::String {
@@ -788,7 +769,6 @@ fn translate_incref(local: LocalId, ctx: &mut ValueCtx<'_, '_>) {
 }
 
 /// Translates a `DecRef` instruction.
-#[cfg(feature = "inkwell")]
 fn translate_decref(local: LocalId, ctx: &mut ValueCtx<'_, '_>) {
     let local_ty = ctx.local_types.get(&local).cloned().unwrap_or(Type::Int);
     if local_ty == Type::String {
@@ -825,7 +805,6 @@ fn translate_decref(local: LocalId, ctx: &mut ValueCtx<'_, '_>) {
 
 /// Returns true for composite types (structs, enums, etc.) that don't have
 /// simple scalar refcounting.
-#[cfg(feature = "inkwell")]
 fn is_composite(ty: &Type) -> bool {
     matches!(
         ty,

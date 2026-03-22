@@ -1,14 +1,11 @@
 //! Type mapping from Kōdo types to LLVM types via inkwell.
 
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::types::BasicTypeEnum;
 
 use kodo_types::Type;
 
 /// Converts a Kōdo type to an inkwell basic type.
-#[cfg(feature = "inkwell")]
 pub fn to_llvm_type<'ctx>(ctx: &'ctx Context, ty: &Type) -> BasicTypeEnum<'ctx> {
     if is_enum_like(ty) {
         // Enums, Option, and Result use { i64, i64 } — discriminant + payload.
@@ -28,7 +25,6 @@ pub fn to_llvm_type<'ctx>(ctx: &'ctx Context, ty: &Type) -> BasicTypeEnum<'ctx> 
 }
 
 /// Returns true if the type is an enum-like type that uses { discriminant, payload }.
-#[cfg(feature = "inkwell")]
 fn is_enum_like(ty: &Type) -> bool {
     match ty {
         Type::Enum(_) => true,
@@ -38,7 +34,6 @@ fn is_enum_like(ty: &Type) -> bool {
 }
 
 /// Returns true if the type should be represented as void in LLVM.
-#[cfg(feature = "inkwell")]
 pub fn is_void(ty: &Type) -> bool {
     matches!(ty, Type::Unit)
 }

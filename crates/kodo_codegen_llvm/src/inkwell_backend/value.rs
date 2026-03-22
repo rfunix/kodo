@@ -4,28 +4,18 @@
 //! calls, producing a `BasicValueEnum` that can be used in instructions
 //! and terminators.
 
-#[cfg(feature = "inkwell")]
 use std::collections::HashMap;
 
-#[cfg(feature = "inkwell")]
 use inkwell::builder::Builder;
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::module::Module;
-#[cfg(feature = "inkwell")]
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
-#[cfg(feature = "inkwell")]
 use inkwell::IntPredicate;
 
-#[cfg(feature = "inkwell")]
 use kodo_ast::BinOp;
-#[cfg(feature = "inkwell")]
 use kodo_mir::{LocalId, Value};
-#[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
-#[cfg(feature = "inkwell")]
 use super::types::to_llvm_type;
 
 /// Context passed to value translation functions to avoid excessive parameters.
@@ -36,7 +26,6 @@ use super::types::to_llvm_type;
 /// instruction from the alloca. This eliminates unnecessary alloca+store+load
 /// patterns for immutable single-assignment locals within a block, reducing
 /// the work that LLVM's mem2reg pass needs to do.
-#[cfg(feature = "inkwell")]
 pub(crate) struct ValueCtx<'a, 'ctx> {
     /// The LLVM context.
     pub context: &'ctx Context,
@@ -69,7 +58,6 @@ pub(crate) struct ValueCtx<'a, 'ctx> {
 
 /// Creates an alloca in the entry block of the function, avoiding
 /// allocas in non-entry blocks which crash LLVM optimization passes.
-#[cfg(feature = "inkwell")]
 pub(crate) fn alloca_in_entry<'ctx>(
     builder: &Builder<'ctx>,
     alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
@@ -92,7 +80,6 @@ pub(crate) fn alloca_in_entry<'ctx>(
 }
 
 /// Generates a unique name for an LLVM value.
-#[cfg(feature = "inkwell")]
 pub(crate) fn unique_name(counter: &mut u32, prefix: &str) -> String {
     let name = format!("{prefix}{counter}");
     *counter += 1;
@@ -102,7 +89,6 @@ pub(crate) fn unique_name(counter: &mut u32, prefix: &str) -> String {
 /// Translates a MIR `Value` to an inkwell `BasicValueEnum`.
 ///
 /// Returns `None` for void/unit values that have no LLVM representation.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_lines)]
 pub(crate) fn translate_value<'ctx>(
     value: &Value,
@@ -261,7 +247,6 @@ pub(crate) fn translate_value<'ctx>(
 }
 
 /// Converts a `BasicValueEnum` to an i64 `IntValue`, bitcasting if needed.
-#[cfg(feature = "inkwell")]
 fn to_i64_value<'ctx>(val: BasicValueEnum<'ctx>, ctx: &mut ValueCtx<'_, 'ctx>) -> IntValue<'ctx> {
     match val {
         BasicValueEnum::IntValue(iv) => iv,
@@ -292,7 +277,6 @@ fn to_i64_value<'ctx>(val: BasicValueEnum<'ctx>, ctx: &mut ValueCtx<'_, 'ctx>) -
 }
 
 /// Translates a string constant to a `{ i64, i64 }` struct (ptr, len).
-#[cfg(feature = "inkwell")]
 fn translate_string_const<'ctx>(s: &str, ctx: &mut ValueCtx<'_, 'ctx>) -> BasicValueEnum<'ctx> {
     let str_val = ctx.context.const_string(s.as_bytes(), false);
     let uname = unique_name(ctx.name_counter, ".str.");
@@ -327,7 +311,6 @@ fn translate_string_const<'ctx>(s: &str, ctx: &mut ValueCtx<'_, 'ctx>) -> BasicV
 }
 
 /// Translates a binary operation.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_lines)]
 fn translate_binop<'ctx>(
     op: BinOp,
@@ -475,7 +458,6 @@ fn translate_binop<'ctx>(
 /// pointer, and fields are stored at `ptr + (index * 8)`. The struct value
 /// is the i64 pointer itself, matching `to_llvm_type` which maps
 /// `Type::Struct(_)` to i64.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::cast_possible_truncation)]
 fn translate_struct_lit<'ctx>(
     name: &str,
@@ -585,7 +567,6 @@ fn translate_struct_lit<'ctx>(
 ///
 /// The struct value is an i64 pointer. Fields are loaded from
 /// `ptr + (field_index * 8)`.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::cast_possible_truncation)]
 fn translate_field_get<'ctx>(
     object: &Value,
@@ -711,7 +692,6 @@ fn translate_field_get<'ctx>(
 }
 
 /// Translates string concatenation via `kodo_string_concat` runtime call.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::unnecessary_wraps)]
 fn translate_string_concat<'ctx>(
     lhs: BasicValueEnum<'ctx>,
@@ -817,7 +797,6 @@ fn translate_string_concat<'ctx>(
 }
 
 /// Translates string comparison via `kodo_string_eq` runtime call.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::unnecessary_wraps)]
 fn translate_string_compare<'ctx>(
     op: BinOp,
@@ -875,7 +854,6 @@ fn translate_string_compare<'ctx>(
 }
 
 /// Simple type inference for deciding between integer and float operations.
-#[cfg(feature = "inkwell")]
 pub(crate) fn infer_value_type_simple(value: &Value, local_types: &HashMap<LocalId, Type>) -> Type {
     match value {
         Value::FloatConst(_) => Type::Float64,

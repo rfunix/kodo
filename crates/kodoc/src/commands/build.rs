@@ -405,11 +405,23 @@ pub(crate) fn run_build(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| file.with_extension(""));
 
-    // Inkwell LLVM backend (feature-gated, uses LLVM C API for optimized codegen)
-    #[cfg(feature = "inkwell")]
-    if backend == "inkwell" {
+    let link_result = if backend == "llvm" || backend == "inkwell" {
+        // LLVM backend via inkwell (LLVM C API).
         let opt = if release { 3 } else { 2 };
-        return match kodo_codegen_llvm::inkwell_backend::compile_module(
+
+        if emit_llvm {
+            // Emit LLVM IR to file without compiling.
+            let ir = kodo_codegen_llvm::emit_ir(&all_mir_functions, &struct_defs, &enum_defs);
+            let ll_path = output_path.with_extension("ll");
+            if let Err(e) = std::fs::write(&ll_path, &ir) {
+                eprintln!("error: could not write LLVM IR file: {e}");
+                return 1;
+            }
+            println!("Emitted LLVM IR → {}", ll_path.display());
+            return 0;
+        }
+
+        match kodo_codegen_llvm::compile_module(
             &all_mir_functions,
             &struct_defs,
             &enum_defs,
@@ -421,90 +433,9 @@ pub(crate) fn run_build(
                 let obj_path = output_path.with_extension("o");
                 let result = link_executable(&obj_path, &output_path);
                 let _ = std::fs::remove_file(&obj_path);
-                match result {
-                    Ok(()) => {
-                        println!("Successfully compiled → {}", output_path.display());
-                        0
-                    }
-                    Err(e) => {
-                        eprintln!("link error: {e}");
-                        1
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("inkwell codegen error: {e}");
-                1
-            }
-        };
-    }
-
-    let link_result = if backend == "llvm" {
-        // LLVM backend: generate textual IR, optionally compile with llc.
-        let llvm_opts = kodo_codegen_llvm::LLVMCodegenOptions::default();
-        let llvm_vtable_defs: std::collections::HashMap<(String, String), Vec<String>> =
-            vtable_defs
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-        let ir = match kodo_codegen_llvm::compile_module_to_llvm_ir(
-            &all_mir_functions,
-            &struct_defs,
-            &enum_defs,
-            &llvm_vtable_defs,
-            &llvm_opts,
-            Some(&metadata_json),
-        ) {
-            Ok(ir) => ir,
-            Err(e) => {
-                eprintln!("codegen-llvm error: {e}");
-                return 1;
-            }
-        };
-
-        let ll_path = output_path.with_extension("ll");
-        if let Err(e) = std::fs::write(&ll_path, &ir) {
-            eprintln!("error: could not write LLVM IR file: {e}");
-            return 1;
-        }
-
-        if emit_llvm {
-            println!("Emitted LLVM IR → {}", ll_path.display());
-            return 0;
-        }
-
-        // Compile .ll → .o using llc, then link.
-        let obj_path = output_path.with_extension("o");
-        let opt_flag = if release { "-O3" } else { "-O2" };
-        let llc_status = std::process::Command::new("llc")
-            .args([
-                "-filetype=obj",
-                opt_flag,
-                ll_path.to_str().unwrap_or("output.ll"),
-                "-o",
-                obj_path.to_str().unwrap_or("output.o"),
-            ])
-            .status();
-
-        // Clean up the .ll file after compilation.
-        let _ = std::fs::remove_file(&ll_path);
-
-        match llc_status {
-            Ok(status) if status.success() => {
-                let result = link_executable(&obj_path, &output_path);
-                let _ = std::fs::remove_file(&obj_path);
                 result
             }
-            Ok(status) => {
-                let _ = std::fs::remove_file(&obj_path);
-                Err(format!("llc exited with status {status}"))
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&obj_path);
-                Err(format!(
-                    "LLVM backend requires `llc` in PATH. Install LLVM or use default Cranelift backend. ({e})"
-                ))
-            }
+            Err(e) => Err(format!("LLVM codegen error: {e}")),
         }
     } else {
         // Cranelift backend (default).

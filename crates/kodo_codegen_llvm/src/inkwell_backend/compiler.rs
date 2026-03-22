@@ -3,33 +3,22 @@
 //! Takes MIR functions and produces an object file using LLVM's
 //! optimization pipeline and native code emission.
 
-#[cfg(feature = "inkwell")]
 use std::collections::{HashMap, HashSet};
-#[cfg(feature = "inkwell")]
 use std::path::Path;
 
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::passes::PassBuilderOptions;
-#[cfg(feature = "inkwell")]
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-#[cfg(feature = "inkwell")]
 use inkwell::types::BasicTypeEnum;
-#[cfg(feature = "inkwell")]
 use inkwell::OptimizationLevel;
 
-#[cfg(feature = "inkwell")]
 use inkwell::values::BasicValueEnum;
 
-#[cfg(feature = "inkwell")]
 use kodo_mir::{BlockId, Instruction, LocalId, MirFunction, Terminator, Value};
-#[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
-#[cfg(feature = "inkwell")]
 use super::types::to_llvm_type;
 
 /// Compiles MIR functions to a native object file using the inkwell LLVM API.
@@ -43,7 +32,6 @@ use super::types::to_llvm_type;
 ///
 /// Panics if LLVM builder calls fail due to invalid insertion point
 /// (should not happen with well-formed MIR).
-#[cfg(feature = "inkwell")]
 #[allow(
     clippy::implicit_hasher,
     clippy::too_many_lines,
@@ -176,7 +164,6 @@ pub fn compile_module(
 }
 
 /// Returns the LLVM IR as a string (for `--emit-llvm`).
-#[cfg(feature = "inkwell")]
 #[must_use]
 #[allow(clippy::implicit_hasher, clippy::cast_possible_truncation)]
 pub fn emit_ir(
@@ -222,7 +209,6 @@ pub fn emit_ir(
 }
 
 /// Declares all user functions in the LLVM module.
-#[cfg(feature = "inkwell")]
 fn declare_functions<'ctx>(
     functions: &[MirFunction],
     context: &'ctx Context,
@@ -294,7 +280,6 @@ fn declare_functions<'ctx>(
 }
 
 /// Translates a single function body from MIR to LLVM IR.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_arguments, clippy::cast_possible_truncation)]
 fn translate_function_body<'ctx>(
     func: &MirFunction,
@@ -416,7 +401,6 @@ fn translate_function_body<'ctx>(
 /// Locals that only appear in a single block can be kept purely in the SSA
 /// cache, eliminating redundant alloca+store+load patterns and reducing
 /// the work that LLVM's mem2reg pass needs to do.
-#[cfg(feature = "inkwell")]
 fn analyze_locals_needing_alloca(func: &MirFunction) -> HashSet<LocalId> {
     let mut local_blocks: HashMap<LocalId, HashSet<BlockId>> = HashMap::new();
     let mut needs_alloca_from_refcount: HashSet<LocalId> = HashSet::new();
@@ -455,7 +439,6 @@ fn analyze_locals_needing_alloca(func: &MirFunction) -> HashSet<LocalId> {
 
 /// Collects local references from a MIR instruction, recording which block
 /// each local appears in. Also flags locals used by `IncRef`/`DecRef`.
-#[cfg(feature = "inkwell")]
 fn collect_instruction_locals(
     instr: &Instruction,
     block_id: BlockId,
@@ -501,7 +484,6 @@ fn collect_instruction_locals(
 }
 
 /// Collects local references from a MIR value.
-#[cfg(feature = "inkwell")]
 fn collect_value_locals(
     value: &Value,
     block_id: BlockId,
@@ -548,7 +530,6 @@ fn collect_value_locals(
 }
 
 /// Collects local references from a MIR terminator.
-#[cfg(feature = "inkwell")]
 fn collect_terminator_locals(
     term: &Terminator,
     block_id: BlockId,

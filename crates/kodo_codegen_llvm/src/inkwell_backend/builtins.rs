@@ -3,13 +3,10 @@
 //! Declares all Kodo runtime functions so they can be called from generated
 //! code. These correspond to C-ABI functions provided by `libkodo_runtime`.
 
-#[cfg(feature = "inkwell")]
 use inkwell::context::Context;
-#[cfg(feature = "inkwell")]
 use inkwell::module::Module;
 
 /// A single runtime builtin declaration for the inkwell backend.
-#[cfg(feature = "inkwell")]
 struct InkwellBuiltin {
     /// The C-ABI function name.
     name: &'static str,
@@ -23,7 +20,6 @@ struct InkwellBuiltin {
 ///
 /// This function declares every C-ABI function that compiled Kodo code may call,
 /// matching the full list from the textual backend's `builtins.rs`.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_lines)]
 pub(crate) fn declare_all_runtime_builtins<'a>(context: &'a Context, module: &Module<'a>) {
     let i64_ty = context.i64_type();
@@ -69,7 +65,6 @@ pub(crate) fn declare_all_runtime_builtins<'a>(context: &'a Context, module: &Mo
 }
 
 /// Returns the full list of runtime builtins.
-#[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_lines)]
 fn all_builtins() -> Vec<InkwellBuiltin> {
     vec![

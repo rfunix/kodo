@@ -1339,7 +1339,6 @@ dependencies = [
  "kodo_ast",
  "kodo_mir",
  "kodo_types",
- "thiserror",
 ]
 
 [[package]]
