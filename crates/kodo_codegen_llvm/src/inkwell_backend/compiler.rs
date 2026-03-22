@@ -52,6 +52,7 @@ pub fn compile_module(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     opt_level: u8,
     output_path: &Path,
+    metadata_json: Option<&str>,
 ) -> Result<(), String> {
     // Initialize LLVM targets
     Target::initialize_native(&InitializationConfig::default())
@@ -63,6 +64,15 @@ pub fn compile_module(
 
     // Declare ALL runtime builtins
     super::builtins::declare_all_runtime_builtins(&context, &module);
+
+    // Add module metadata globals (kodo_meta + kodo_meta_len)
+    let meta = metadata_json.unwrap_or("{}");
+    let meta_val = context.const_string(meta.as_bytes(), false);
+    let meta_global = module.add_global(meta_val.get_type(), None, "kodo_meta");
+    meta_global.set_initializer(&meta_val);
+    let meta_len_val = context.i64_type().const_int(meta.len() as u64, false);
+    let meta_len_global = module.add_global(context.i64_type(), None, "kodo_meta_len");
+    meta_len_global.set_initializer(&meta_len_val);
 
     // Collect user function names
     let user_functions: Vec<String> = functions.iter().map(|f| f.name.clone()).collect();
@@ -213,7 +223,13 @@ fn declare_functions<'ctx>(
             }
         };
 
-        let fn_val = module.add_function(&func.name, fn_type, None);
+        // Rename "main" to "kodo_main" as the runtime expects
+        let llvm_name = if func.name == "main" {
+            "kodo_main".to_string()
+        } else {
+            func.name.clone()
+        };
+        let fn_val = module.add_function(&llvm_name, fn_type, None);
         fn_map.insert(func.name.clone(), fn_val);
     }
 }

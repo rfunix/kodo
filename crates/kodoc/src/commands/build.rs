@@ -415,6 +415,7 @@ pub(crate) fn run_build(
             &enum_defs,
             opt,
             &output_path,
+            Some(&metadata_json),
         ) {
             Ok(()) => {
                 let obj_path = output_path.with_extension("o");

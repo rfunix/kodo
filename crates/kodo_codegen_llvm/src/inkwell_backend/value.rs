@@ -184,6 +184,10 @@ pub(crate) fn translate_value<'ctx>(
         }
         Value::EnumDiscriminant(inner) => {
             let inner_val = translate_value(inner, ctx)?;
+            // If the value is already an int (Unknown type / non-enum), return it directly
+            if inner_val.is_int_value() {
+                return Some(inner_val);
+            }
             let struct_val = inner_val.into_struct_value();
             let uname = unique_name(ctx.name_counter, "disc");
             let disc = ctx
@@ -194,6 +198,9 @@ pub(crate) fn translate_value<'ctx>(
         }
         Value::EnumPayload { value: inner, .. } => {
             let inner_val = translate_value(inner, ctx)?;
+            if inner_val.is_int_value() {
+                return Some(inner_val);
+            }
             let struct_val = inner_val.into_struct_value();
             let uname = unique_name(ctx.name_counter, "payload");
             let payload = ctx
