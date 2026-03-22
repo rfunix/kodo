@@ -51,7 +51,7 @@ build:
 	cargo build --workspace
 
 release:
-	cargo build --workspace --release
+	cargo build --workspace --release --features llvm
 
 check:
 	cargo check --workspace
