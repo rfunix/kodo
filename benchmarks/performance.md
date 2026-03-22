@@ -1,6 +1,6 @@
 # Runtime & Compiler Performance Benchmarks
 
-> Measured on Apple M3 Pro, macOS 15.5, Kōdo v1.1.0.
+> Measured on Apple M3 Pro, macOS 15.5, Kōdo v1.7.0.
 > Each test run 3 times, best time reported. All times in seconds.
 
 ## Runtime Performance
