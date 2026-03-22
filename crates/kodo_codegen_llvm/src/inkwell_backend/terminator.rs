@@ -16,7 +16,7 @@ use inkwell::context::Context;
 #[cfg(feature = "inkwell")]
 use inkwell::module::Module;
 #[cfg(feature = "inkwell")]
-use inkwell::values::{FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 
 #[cfg(feature = "inkwell")]
 use kodo_mir::{BlockId, LocalId, Terminator};
@@ -41,6 +41,7 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `struct_defs` - Struct type definitions.
 /// * `enum_defs` - Enum type definitions.
 /// * `name_counter` - Counter for unique value names.
+/// * `ssa_cache` - Per-block SSA store-forwarding cache for avoiding redundant loads.
 #[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_terminator<'ctx>(
@@ -56,6 +57,7 @@ pub(crate) fn translate_terminator<'ctx>(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
+    ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
 ) {
     let mut vctx = ValueCtx {
         context,
@@ -67,6 +69,7 @@ pub(crate) fn translate_terminator<'ctx>(
         struct_defs,
         enum_defs,
         name_counter,
+        ssa_cache,
     };
 
     match term {

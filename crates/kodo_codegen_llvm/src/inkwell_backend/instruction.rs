@@ -14,7 +14,7 @@ use inkwell::context::Context;
 #[cfg(feature = "inkwell")]
 use inkwell::module::Module;
 #[cfg(feature = "inkwell")]
-use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 
 #[cfg(feature = "inkwell")]
 use kodo_mir::{Instruction, LocalId, Value};
@@ -40,6 +40,7 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `struct_defs` - Struct type definitions.
 /// * `enum_defs` - Enum type definitions.
 /// * `name_counter` - Counter for unique value names.
+/// * `ssa_cache` - Per-block SSA store-forwarding cache to avoid redundant loads.
 #[cfg(feature = "inkwell")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_instruction<'ctx>(
@@ -54,6 +55,7 @@ pub(crate) fn translate_instruction<'ctx>(
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
+    ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
 ) {
     let mut vctx = ValueCtx {
         context,
@@ -65,6 +67,7 @@ pub(crate) fn translate_instruction<'ctx>(
         struct_defs,
         enum_defs,
         name_counter,
+        ssa_cache,
     };
 
     match instr {
@@ -92,10 +95,11 @@ pub(crate) fn translate_instruction<'ctx>(
             // Virtual call stub — store 0 for now.
             let _ = vtable_index;
             let _ = args;
+            let zero = vctx.context.i64_type().const_int(0, false);
             if let Some(alloca) = vctx.local_allocas.get(dest) {
-                let zero = vctx.context.i64_type().const_int(0, false);
                 vctx.builder.build_store(*alloca, zero).unwrap();
             }
+            vctx.ssa_cache.insert(*dest, zero.into());
         }
         Instruction::IncRef(local) => {
             translate_incref(*local, &mut vctx);
@@ -112,12 +116,18 @@ pub(crate) fn translate_instruction<'ctx>(
 }
 
 /// Translates an `Assign` instruction.
+///
+/// Stores the value to the alloca for correctness (other blocks may read it),
+/// and also caches it in the SSA cache so subsequent reads in the same block
+/// can use the value directly without emitting a redundant load.
 #[cfg(feature = "inkwell")]
 fn translate_assign(dest: LocalId, value: &Value, ctx: &mut ValueCtx<'_, '_>) {
     if let Some(val) = translate_value(value, ctx) {
         if let Some(alloca) = ctx.local_allocas.get(&dest) {
             ctx.builder.build_store(*alloca, val).unwrap();
         }
+        // Cache the assigned value for store-forwarding within the same block.
+        ctx.ssa_cache.insert(dest, val);
     }
 }
 
@@ -439,6 +449,8 @@ fn translate_call<'ctx>(
         if let Some(alloca) = ctx.local_allocas.get(&dest) {
             ctx.builder.build_store(*alloca, result_val).unwrap();
         }
+        // Cache call result for store-forwarding within the same block.
+        ctx.ssa_cache.insert(dest, result_val);
     }
 }
 
@@ -531,11 +543,12 @@ fn translate_string_returning_call<'ctx>(
         .build_insert_value(s1, res_len, 1, &s2_name)
         .unwrap();
 
+    let string_val: BasicValueEnum<'ctx> = s2.into_struct_value().into();
     if let Some(alloca) = ctx.local_allocas.get(&dest) {
-        ctx.builder
-            .build_store(*alloca, s2.into_struct_value())
-            .unwrap();
+        ctx.builder.build_store(*alloca, string_val).unwrap();
     }
+    // Cache string result for store-forwarding within the same block.
+    ctx.ssa_cache.insert(dest, string_val);
 }
 
 /// Translates an out-parameter get builtin call.
@@ -609,6 +622,8 @@ fn translate_outparam_get_call<'ctx>(
     if let Some(alloca) = ctx.local_allocas.get(&dest) {
         ctx.builder.build_store(*alloca, result).unwrap();
     }
+    // Cache result for store-forwarding within the same block.
+    ctx.ssa_cache.insert(dest, result);
 }
 
 /// Translates an indirect (function pointer) call.
@@ -679,6 +694,8 @@ fn translate_indirect_call<'ctx>(
         if let Some(alloca) = ctx.local_allocas.get(&dest) {
             ctx.builder.build_store(*alloca, result_val).unwrap();
         }
+        // Cache indirect call result for store-forwarding within the same block.
+        ctx.ssa_cache.insert(dest, result_val);
     }
 }
 

@@ -22,6 +22,9 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::OptimizationLevel;
 
 #[cfg(feature = "inkwell")]
+use inkwell::values::BasicValueEnum;
+
+#[cfg(feature = "inkwell")]
 use kodo_mir::{BlockId, LocalId, MirFunction};
 #[cfg(feature = "inkwell")]
 use kodo_types::Type;
@@ -332,10 +335,15 @@ fn translate_function_body<'ctx>(
         .unwrap_or_else(|| block_map[&BlockId(0)]);
     builder.build_unconditional_branch(entry_bb).unwrap();
 
-    // Translate each block
+    // Translate each block with a fresh SSA store-forwarding cache.
+    // The cache avoids redundant loads by tracking values stored in the
+    // current block. It is cleared at each block boundary because SSA
+    // values don't propagate across blocks without phi nodes.
     for block in &func.blocks {
         let bb = block_map[&block.id];
         builder.position_at_end(bb);
+
+        let mut ssa_cache: HashMap<LocalId, BasicValueEnum<'ctx>> = HashMap::new();
 
         for instr in &block.instructions {
             super::instruction::translate_instruction(
@@ -350,6 +358,7 @@ fn translate_function_body<'ctx>(
                 struct_defs,
                 enum_defs,
                 name_counter,
+                &mut ssa_cache,
             );
         }
 
@@ -366,6 +375,7 @@ fn translate_function_body<'ctx>(
             struct_defs,
             enum_defs,
             name_counter,
+            &mut ssa_cache,
         );
     }
 }

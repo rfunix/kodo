@@ -29,6 +29,13 @@ use kodo_types::Type;
 use super::types::to_llvm_type;
 
 /// Context passed to value translation functions to avoid excessive parameters.
+///
+/// Includes an SSA store-forwarding cache that maps locals to their most
+/// recently assigned value within the current basic block. When a local is
+/// read, the cache is checked first to avoid emitting a redundant `load`
+/// instruction from the alloca. This eliminates unnecessary alloca+store+load
+/// patterns for immutable single-assignment locals within a block, reducing
+/// the work that LLVM's mem2reg pass needs to do.
 #[cfg(feature = "inkwell")]
 pub(crate) struct ValueCtx<'a, 'ctx> {
     /// The LLVM context.
@@ -50,6 +57,11 @@ pub(crate) struct ValueCtx<'a, 'ctx> {
     pub enum_defs: &'a HashMap<String, Vec<(String, Vec<Type>)>>,
     /// Counter for generating unique names.
     pub name_counter: &'a mut u32,
+    /// SSA store-forwarding cache: maps locals to their last assigned value
+    /// in the current basic block. Avoids redundant loads when a value was
+    /// just stored. Cleared at block boundaries since SSA values don't
+    /// propagate across blocks without phi nodes.
+    pub ssa_cache: &'a mut HashMap<LocalId, BasicValueEnum<'ctx>>,
 }
 
 /// Generates a unique name for an LLVM value.
@@ -85,6 +97,11 @@ pub(crate) fn translate_value<'ctx>(
         }
         Value::StringConst(s) => Some(translate_string_const(s, ctx)),
         Value::Local(id) => {
+            // Check SSA cache first — avoids redundant load when the value
+            // was stored in the same basic block.
+            if let Some(cached) = ctx.ssa_cache.get(id) {
+                return Some(*cached);
+            }
             let alloca = ctx.local_allocas.get(id)?;
             let ty = ctx.local_types.get(id).unwrap_or(&Type::Int);
             if super::types::is_void(ty) {
