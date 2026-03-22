@@ -116,8 +116,12 @@ pub fn compile_module(
     // so always use aggressive optimization (O3) regardless of the
     // requested level. The alloca-heavy IR pattern relies on mem2reg/sroa
     // passes in O3 to eliminate unnecessary loads and stores.
-    let _ = opt_level; // acknowledged but overridden
-    let opt = OptimizationLevel::Aggressive;
+    let opt = match opt_level {
+        0 => OptimizationLevel::None,
+        1 => OptimizationLevel::Less,
+        2 => OptimizationLevel::Default,
+        _ => OptimizationLevel::Aggressive,
+    };
 
     let target_triple = TargetMachine::get_default_triple();
     let target =
@@ -142,11 +146,13 @@ pub fn compile_module(
         )
         .ok_or_else(|| "failed to create target machine".to_string())?;
 
-    // Run new pass manager — always O3 for maximum optimization.
-    // This includes mem2reg and sroa which eliminate the alloca+load+store
-    // patterns generated for immutable locals.
     let pass_opts = PassBuilderOptions::create();
-    let passes = "default<O3>";
+    let passes = match opt_level {
+        0 => "default<O0>",
+        1 => "default<O1>",
+        2 => "default<O2>",
+        _ => "default<O3>",
+    };
     module
         .run_passes(passes, &target_machine, pass_opts)
         .map_err(|e| format!("optimization passes failed: {e}"))?;

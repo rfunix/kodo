@@ -185,7 +185,7 @@ pub(crate) fn translate_value<'ctx>(
             let uname = unique_name(ctx.name_counter, "enum");
             let mut agg = ctx
                 .builder
-                .build_insert_value(enum_ty.get_undef(), disc_val, 0, &uname)
+                .build_insert_value(enum_ty.const_zero(), disc_val, 0, &uname)
                 .unwrap();
             if let Some(first_arg) = args.first() {
                 if let Some(arg_val) = translate_value(first_arg, ctx) {
@@ -288,7 +288,7 @@ fn translate_string_const<'ctx>(s: &str, ctx: &mut ValueCtx<'_, 'ctx>) -> BasicV
     let s1_name = unique_name(ctx.name_counter, "str_s1");
     let s1 = ctx
         .builder
-        .build_insert_value(str_struct_ty.get_undef(), ptr_int, 0, &s1_name)
+        .build_insert_value(str_struct_ty.const_zero(), ptr_int, 0, &s1_name)
         .unwrap();
     let s2_name = unique_name(ctx.name_counter, "str_s2");
     let s2 = ctx
@@ -772,7 +772,7 @@ fn translate_string_concat<'ctx>(
     let s1_name = unique_name(ctx.name_counter, "cs1");
     let s1 = ctx
         .builder
-        .build_insert_value(str_struct_ty.get_undef(), res_ptr, 0, &s1_name)
+        .build_insert_value(str_struct_ty.const_zero(), res_ptr, 0, &s1_name)
         .unwrap();
     let s2_name = unique_name(ctx.name_counter, "cs2");
     let s2 = ctx
