@@ -102,6 +102,13 @@ pub fn compile_module(
         );
     }
 
+    // Debug: print IR before optimization
+    if std::env::var("KODO_DUMP_IR").is_ok() {
+        eprintln!("=== LLVM IR (pre-opt) ===");
+        eprintln!("{}", module.print_to_string().to_string());
+        eprintln!("=========================");
+    }
+
     // Run optimization passes
     let opt = match opt_level {
         0 => OptimizationLevel::None,
@@ -253,19 +260,19 @@ fn translate_function_body<'ctx>(
     let local_types: HashMap<LocalId, Type> =
         func.locals.iter().map(|l| (l.id, l.ty.clone())).collect();
 
-    // Create basic blocks for each MIR block
+    // Create a dedicated alloca block (before MIR blocks) to avoid
+    // interleaving allocas with translated instructions in bb0.
+    let alloca_bb = context.append_basic_block(fn_val, "alloca");
+
+    // Create basic blocks for each MIR block, keyed by their actual BlockId
     let mut block_map = HashMap::new();
-    for (i, _block) in func.blocks.iter().enumerate() {
-        let bb = context.append_basic_block(fn_val, &format!("bb{i}"));
-        block_map.insert(BlockId(i as u32), bb);
+    for block in &func.blocks {
+        let bb = context.append_basic_block(fn_val, &format!("bb{}", block.id.0));
+        block_map.insert(block.id, bb);
     }
 
-    // Create allocas for all locals in the entry block
-    let entry_bb = block_map
-        .get(&func.entry)
-        .copied()
-        .unwrap_or_else(|| block_map[&BlockId(0)]);
-    builder.position_at_end(entry_bb);
+    // Create allocas in the dedicated alloca block
+    builder.position_at_end(alloca_bb);
 
     let mut local_allocas = HashMap::new();
     for (i, local) in func.locals.iter().enumerate() {
@@ -284,9 +291,16 @@ fn translate_function_body<'ctx>(
         }
     }
 
+    // Branch from alloca block to the entry MIR block
+    let entry_bb = block_map
+        .get(&func.entry)
+        .copied()
+        .unwrap_or_else(|| block_map[&BlockId(0)]);
+    builder.build_unconditional_branch(entry_bb).unwrap();
+
     // Translate each block
-    for (i, block) in func.blocks.iter().enumerate() {
-        let bb = block_map[&BlockId(i as u32)];
+    for block in &func.blocks {
+        let bb = block_map[&block.id];
         builder.position_at_end(bb);
 
         for instr in &block.instructions {
