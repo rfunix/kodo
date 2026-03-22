@@ -4,7 +4,7 @@
 //! optimization pipeline and native code emission.
 
 #[cfg(feature = "inkwell")]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "inkwell")]
 use std::path::Path;
 
@@ -25,7 +25,7 @@ use inkwell::OptimizationLevel;
 use inkwell::values::BasicValueEnum;
 
 #[cfg(feature = "inkwell")]
-use kodo_mir::{BlockId, LocalId, MirFunction};
+use kodo_mir::{BlockId, Instruction, LocalId, MirFunction, Terminator, Value};
 #[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
@@ -308,15 +308,23 @@ fn translate_function_body<'ctx>(
         block_map.insert(block.id, bb);
     }
 
+    // Pre-analyze which locals need alloca: only those used across multiple
+    // blocks require stack slots. Single-block locals use SSA cache only,
+    // eliminating redundant alloca+store+load patterns before LLVM's mem2reg.
+    let needs_alloca = analyze_locals_needing_alloca(func);
+
     // Create allocas in the dedicated alloca block
     builder.position_at_end(alloca_bb);
 
     let mut local_allocas = HashMap::new();
     for (i, local) in func.locals.iter().enumerate() {
-        let ty = to_llvm_type(context, &local.ty);
-        let alloca_name = format!("local{i}");
-        let alloca = builder.build_alloca(ty, &alloca_name).unwrap();
-        local_allocas.insert(LocalId(i as u32), alloca);
+        let id = LocalId(i as u32);
+        if needs_alloca.contains(&id) {
+            let ty = to_llvm_type(context, &local.ty);
+            let alloca_name = format!("local{i}");
+            let alloca = builder.build_alloca(ty, &alloca_name).unwrap();
+            local_allocas.insert(id, alloca);
+        }
     }
 
     // Store function parameters into their allocas
@@ -377,5 +385,165 @@ fn translate_function_body<'ctx>(
             name_counter,
             &mut ssa_cache,
         );
+    }
+}
+
+/// Analyzes a MIR function to determine which locals need stack allocations.
+///
+/// A local needs an alloca if:
+/// - It appears in more than one basic block (SSA cache is per-block only).
+/// - It is a function parameter (stored in entry, used in body blocks).
+/// - It is used by `IncRef`/`DecRef` (which load directly from alloca,
+///   bypassing the SSA cache).
+///
+/// Locals that only appear in a single block can be kept purely in the SSA
+/// cache, eliminating redundant alloca+store+load patterns and reducing
+/// the work that LLVM's mem2reg pass needs to do.
+#[cfg(feature = "inkwell")]
+fn analyze_locals_needing_alloca(func: &MirFunction) -> HashSet<LocalId> {
+    let mut local_blocks: HashMap<LocalId, HashSet<BlockId>> = HashMap::new();
+    let mut needs_alloca_from_refcount: HashSet<LocalId> = HashSet::new();
+
+    for block in &func.blocks {
+        for instr in &block.instructions {
+            collect_instruction_locals(
+                instr,
+                block.id,
+                &mut local_blocks,
+                &mut needs_alloca_from_refcount,
+            );
+        }
+        collect_terminator_locals(&block.terminator, block.id, &mut local_blocks);
+    }
+
+    // Locals appearing in >1 block need alloca for cross-block reads.
+    let mut needs_alloca: HashSet<LocalId> = local_blocks
+        .iter()
+        .filter(|(_, blocks)| blocks.len() > 1)
+        .map(|(id, _)| *id)
+        .collect();
+
+    // Function parameters always need alloca — they are stored in the
+    // entry alloca block and read in the function body.
+    for i in 0..func.param_count {
+        needs_alloca.insert(LocalId(i as u32));
+    }
+
+    // Locals used by IncRef/DecRef need alloca because those instructions
+    // load directly from the stack slot, bypassing the SSA cache.
+    needs_alloca.extend(&needs_alloca_from_refcount);
+
+    needs_alloca
+}
+
+/// Collects local references from a MIR instruction, recording which block
+/// each local appears in. Also flags locals used by `IncRef`/`DecRef`.
+#[cfg(feature = "inkwell")]
+fn collect_instruction_locals(
+    instr: &Instruction,
+    block_id: BlockId,
+    local_blocks: &mut HashMap<LocalId, HashSet<BlockId>>,
+    refcount_locals: &mut HashSet<LocalId>,
+) {
+    match instr {
+        Instruction::Assign(dest, value) => {
+            local_blocks.entry(*dest).or_default().insert(block_id);
+            collect_value_locals(value, block_id, local_blocks);
+        }
+        Instruction::Call { dest, args, .. } => {
+            local_blocks.entry(*dest).or_default().insert(block_id);
+            for arg in args {
+                collect_value_locals(arg, block_id, local_blocks);
+            }
+        }
+        Instruction::IndirectCall {
+            dest, callee, args, ..
+        } => {
+            local_blocks.entry(*dest).or_default().insert(block_id);
+            collect_value_locals(callee, block_id, local_blocks);
+            for arg in args {
+                collect_value_locals(arg, block_id, local_blocks);
+            }
+        }
+        Instruction::VirtualCall {
+            dest, object, args, ..
+        } => {
+            local_blocks.entry(*dest).or_default().insert(block_id);
+            local_blocks.entry(*object).or_default().insert(block_id);
+            for arg in args {
+                collect_value_locals(arg, block_id, local_blocks);
+            }
+        }
+        Instruction::IncRef(id) | Instruction::DecRef(id) => {
+            local_blocks.entry(*id).or_default().insert(block_id);
+            // IncRef/DecRef load directly from alloca, bypassing SSA cache.
+            refcount_locals.insert(*id);
+        }
+        Instruction::Yield => {}
+    }
+}
+
+/// Collects local references from a MIR value.
+#[cfg(feature = "inkwell")]
+fn collect_value_locals(
+    value: &Value,
+    block_id: BlockId,
+    local_blocks: &mut HashMap<LocalId, HashSet<BlockId>>,
+) {
+    match value {
+        Value::Local(id) => {
+            local_blocks.entry(*id).or_default().insert(block_id);
+        }
+        Value::BinOp(_, lhs, rhs) => {
+            collect_value_locals(lhs, block_id, local_blocks);
+            collect_value_locals(rhs, block_id, local_blocks);
+        }
+        Value::Not(inner) | Value::Neg(inner) => {
+            collect_value_locals(inner, block_id, local_blocks);
+        }
+        Value::StructLit { fields, .. } => {
+            for (_, v) in fields {
+                collect_value_locals(v, block_id, local_blocks);
+            }
+        }
+        Value::FieldGet { object, .. } => {
+            collect_value_locals(object, block_id, local_blocks);
+        }
+        Value::EnumVariant { args, .. } => {
+            for arg in args {
+                collect_value_locals(arg, block_id, local_blocks);
+            }
+        }
+        Value::EnumDiscriminant(inner) | Value::EnumPayload { value: inner, .. } => {
+            collect_value_locals(inner, block_id, local_blocks);
+        }
+        Value::MakeDynTrait { value: inner, .. } => {
+            collect_value_locals(inner, block_id, local_blocks);
+        }
+        // Constants, Unit, FuncRef — no local references.
+        Value::IntConst(_)
+        | Value::FloatConst(_)
+        | Value::BoolConst(_)
+        | Value::StringConst(_)
+        | Value::Unit
+        | Value::FuncRef(_) => {}
+    }
+}
+
+/// Collects local references from a MIR terminator.
+#[cfg(feature = "inkwell")]
+fn collect_terminator_locals(
+    term: &Terminator,
+    block_id: BlockId,
+    local_blocks: &mut HashMap<LocalId, HashSet<BlockId>>,
+) {
+    match term {
+        Terminator::Return(val) => {
+            collect_value_locals(val, block_id, local_blocks);
+        }
+        Terminator::Branch { condition, .. } => {
+            collect_value_locals(condition, block_id, local_blocks);
+        }
+        Terminator::Goto(_) | Terminator::Unreachable => {}
     }
 }
