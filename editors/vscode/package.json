@@ -1,14 +1,34 @@
 {
   "name": "kodo-lang",
-  "displayName": "Kodo Language",
-  "description": "Language support for the Kodo programming language",
-  "version": "0.1.0",
-  "publisher": "kodo",
+  "displayName": "Kōdo Language",
+  "description": "Full language support for Kōdo — the programming language designed for AI agents. Syntax highlighting, LSP integration, diagnostics, hover, go-to-definition, completions, and code actions.",
+  "version": "1.5.1",
+  "publisher": "kodo-lang",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rfunix/kodo"
+  },
+  "homepage": "https://kodo-lang.dev",
+  "bugs": {
+    "url": "https://github.com/rfunix/kodo/issues"
+  },
+  "keywords": [
+    "kodo",
+    "programming language",
+    "AI",
+    "contracts",
+    "ownership",
+    "LSP"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters",
+    "Formatters"
   ],
   "activationEvents": [
     "onLanguage:kodo"
@@ -26,13 +46,18 @@
       {
         "id": "kodo",
         "aliases": [
+          "Kōdo",
           "Kodo",
           "kodo"
         ],
         "extensions": [
           ".ko"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
       }
     ],
     "grammars": [
@@ -43,12 +68,18 @@
       }
     ],
     "configuration": {
-      "title": "Kodo",
+      "title": "Kōdo",
       "properties": {
         "kodo.serverPath": {
           "type": "string",
           "default": "kodoc",
-          "description": "Path to the kodoc binary"
+          "description": "Path to the kodoc binary for the language server"
+        },
+        "kodo.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace communication between VS Code and the Kōdo language server"
         }
       }
     }

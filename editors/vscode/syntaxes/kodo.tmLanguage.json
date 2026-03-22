@@ -38,7 +38,7 @@
             },
             {
               "name": "variable.other.interpolation.kodo",
-              "match": "\\$\\{[^}]*\\}"
+              "match": "\\{[^}]*\\}"
             }
           ]
         }
@@ -52,7 +52,7 @@
         },
         {
           "name": "keyword.declaration.kodo",
-          "match": "\\b(fn|let|mut|ref|own|struct|enum|trait|impl|module|meta|import|from|intent|actor|handler|type)\\b"
+          "match": "\\b(fn|let|mut|ref|own|struct|enum|trait|impl|module|meta|import|from|intent|actor|handler|type|pub|test|describe|setup|teardown|forall|is)\\b"
         },
         {
           "name": "keyword.contract.kodo",
@@ -72,7 +72,7 @@
         },
         {
           "name": "support.type.generic.kodo",
-          "match": "\\b(Option|Result|List|Map)\\b"
+          "match": "\\b(Option|Result|List|Map|Set|Channel|Future)\\b"
         },
         {
           "name": "entity.name.type.kodo",
