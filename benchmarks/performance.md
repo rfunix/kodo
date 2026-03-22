@@ -15,11 +15,12 @@ Pure recursive computation, no I/O. Tests function call overhead and recursion.
 | **Node.js** (V8 JIT) | 0.09 | 2.3x |
 | **Go** | 0.09 | 2.3x |
 | **Kōdo** (Cranelift) | 0.27 | 6.8x |
+| **Kōdo** (LLVM -O3) | 0.27 | 6.8x |
 | **Python** | 0.87 | 21.8x |
 
 Kōdo is **3.2x faster than Python** and within an order of magnitude of Go/Node.
-The gap vs Rust/Go is expected — Cranelift prioritizes compilation speed over
-runtime optimization. The LLVM backend (`--release`) narrows this gap.
+Both Cranelift and LLVM backends produce similar runtime performance — the LLVM
+textual IR emitter does not yet leverage LLVM's full optimization pipeline.
 
 ### Sum Loop — 10 million iterations
 
@@ -31,6 +32,7 @@ Tight loop with integer addition. Tests loop overhead and basic arithmetic.
 | **Node.js** (V8 JIT) | 0.06 | — |
 | **Go** | 0.08 | — |
 | **Kōdo** (Cranelift) | 0.10 | — |
+| **Kōdo** (LLVM -O3) | 0.10 | — |
 | **Python** | 0.48 | — |
 
 Kōdo is **4.8x faster than Python** on tight loops and competitive with Go.
