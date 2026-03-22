@@ -34,6 +34,7 @@ pub(crate) fn run_build(
     green_threads: bool,
     backend: &str,
     emit_llvm: bool,
+    release: bool,
 ) -> i32 {
     // If the argument is a directory, delegate to directory compilation.
     if file.is_dir() {
@@ -440,10 +441,11 @@ pub(crate) fn run_build(
 
         // Compile .ll → .o using llc, then link.
         let obj_path = output_path.with_extension("o");
+        let opt_flag = if release { "-O3" } else { "-O2" };
         let llc_status = std::process::Command::new("llc")
             .args([
                 "-filetype=obj",
-                "-O2",
+                opt_flag,
                 ll_path.to_str().unwrap_or("output.ll"),
                 "-o",
                 obj_path.to_str().unwrap_or("output.o"),
@@ -703,5 +705,6 @@ fn run_build_dir(
         green_threads,
         backend,
         emit_llvm,
+        backend == "llvm",
     )
 }

@@ -325,6 +325,7 @@ fn main() {
                 !no_green_threads,
                 effective_backend,
                 emit_llvm,
+                release,
             )
         }
         Command::Mir { file, contracts } => commands::misc::run_mir(&file, &contracts),
