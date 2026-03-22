@@ -405,6 +405,10 @@ pub(crate) fn run_build(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| file.with_extension(""));
 
+    // Suppress unused variable warning when llvm feature is disabled.
+    let _ = &release;
+    let _ = &emit_llvm;
+
     #[cfg(not(feature = "llvm"))]
     if backend == "llvm" || backend == "inkwell" {
         eprintln!(
