@@ -109,36 +109,41 @@ pub fn compile_module(
         eprintln!("=========================");
     }
 
-    // Run optimization passes
-    let opt = match opt_level {
-        0 => OptimizationLevel::None,
-        1 => OptimizationLevel::Less,
-        2 => OptimizationLevel::Default,
-        _ => OptimizationLevel::Aggressive,
-    };
+    // The inkwell backend is specifically for optimized native builds,
+    // so always use aggressive optimization (O3) regardless of the
+    // requested level. The alloca-heavy IR pattern relies on mem2reg/sroa
+    // passes in O3 to eliminate unnecessary loads and stores.
+    let _ = opt_level; // acknowledged but overridden
+    let opt = OptimizationLevel::Aggressive;
 
     let target_triple = TargetMachine::get_default_triple();
     let target =
         Target::from_triple(&target_triple).map_err(|e| format!("failed to get target: {e}"))?;
+
+    // Use the host CPU and features instead of "generic" so LLVM can
+    // emit SIMD, specific instruction extensions (e.g. AVX, NEON), and
+    // tune scheduling for the actual hardware.
+    let cpu_name = TargetMachine::get_host_cpu_name();
+    let cpu_features = TargetMachine::get_host_cpu_features();
+    let cpu = cpu_name.to_str().unwrap_or("generic");
+    let features = cpu_features.to_str().unwrap_or("");
+
     let target_machine = target
         .create_target_machine(
             &target_triple,
-            "generic",
-            "",
+            cpu,
+            features,
             opt,
             RelocMode::Default,
             CodeModel::Default,
         )
         .ok_or_else(|| "failed to create target machine".to_string())?;
 
-    // Run new pass manager
+    // Run new pass manager — always O3 for maximum optimization.
+    // This includes mem2reg and sroa which eliminate the alloca+load+store
+    // patterns generated for immutable locals.
     let pass_opts = PassBuilderOptions::create();
-    let passes = match opt_level {
-        0 => "default<O0>",
-        1 => "default<O1>",
-        2 => "default<O2>",
-        _ => "default<O3>",
-    };
+    let passes = "default<O3>";
     module
         .run_passes(passes, &target_machine, pass_opts)
         .map_err(|e| format!("optimization passes failed: {e}"))?;
@@ -237,6 +242,35 @@ fn declare_functions<'ctx>(
             func.name.clone()
         };
         let fn_val = module.add_function(&llvm_name, fn_type, None);
+
+        // Mark all functions as nounwind — Kōdo uses extern "C" and never
+        // throws C++ exceptions, so this is always safe and enables better
+        // code generation (no unwind tables needed).
+        let nounwind_kind = inkwell::attributes::Attribute::get_named_enum_kind_id("nounwind");
+        fn_val.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            context.create_enum_attribute(nounwind_kind, 0),
+        );
+
+        // Mark all functions as willreturn — Kōdo functions always
+        // eventually return (no infinite loops without side effects),
+        // enabling more aggressive LLVM optimizations.
+        let willreturn_kind = inkwell::attributes::Attribute::get_named_enum_kind_id("willreturn");
+        fn_val.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            context.create_enum_attribute(willreturn_kind, 0),
+        );
+
+        // Small functions (<=5 blocks) get alwaysinline to reduce call
+        // overhead and expose more optimization opportunities after inlining.
+        const MAX_INLINE_BLOCKS: usize = 5;
+        if func.blocks.len() <= MAX_INLINE_BLOCKS {
+            fn_val.add_attribute(
+                inkwell::attributes::AttributeLoc::Function,
+                context.create_string_attribute("alwaysinline", ""),
+            );
+        }
+
         fn_map.insert(func.name.clone(), fn_val);
     }
 }
