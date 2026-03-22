@@ -1,0 +1,17 @@
+[package]
+name = "kodo_playground"
+version.workspace = true
+edition.workspace = true
+description = "WebAssembly playground for Kōdo — runs lexer, parser, and type checker in the browser"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+kodo_ast = { path = "../kodo_ast" }
+kodo_lexer = { path = "../kodo_lexer" }
+kodo_parser = { path = "../kodo_parser" }
+kodo_types = { path = "../kodo_types" }
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

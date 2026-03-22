@@ -1402,6 +1402,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kodo_playground"
+version = "1.1.0"
+dependencies = [
+ "kodo_ast",
+ "kodo_lexer",
+ "kodo_parser",
+ "kodo_types",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "kodo_resolver"
 version = "1.1.0"
 dependencies = [
