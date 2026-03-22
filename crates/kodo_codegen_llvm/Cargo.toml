@@ -6,8 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 description = "LLVM code generation backend for the Kodo compiler (via inkwell)"
 
+[features]
+default = []
+llvm = ["dep:inkwell"]
+
 [dependencies]
 kodo_mir.workspace = true
 kodo_types.workspace = true
 kodo_ast.workspace = true
-inkwell.workspace = true
+inkwell = { workspace = true, optional = true }

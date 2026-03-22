@@ -405,37 +405,52 @@ pub(crate) fn run_build(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| file.with_extension(""));
 
-    let link_result = if backend == "llvm" || backend == "inkwell" {
+    #[cfg(not(feature = "llvm"))]
+    if backend == "llvm" || backend == "inkwell" {
+        eprintln!(
+            "LLVM backend not available. Rebuild kodoc with: cargo build -p kodoc --features llvm"
+        );
+        eprintln!("Using Cranelift backend instead.");
+    }
+
+    let link_result = if cfg!(feature = "llvm") && (backend == "llvm" || backend == "inkwell") {
         // LLVM backend via inkwell (LLVM C API).
-        let opt = if release { 3 } else { 2 };
+        #[cfg(feature = "llvm")]
+        {
+            let opt = if release { 3 } else { 2 };
 
-        if emit_llvm {
-            // Emit LLVM IR to file without compiling.
-            let ir = kodo_codegen_llvm::emit_ir(&all_mir_functions, &struct_defs, &enum_defs);
-            let ll_path = output_path.with_extension("ll");
-            if let Err(e) = std::fs::write(&ll_path, &ir) {
-                eprintln!("error: could not write LLVM IR file: {e}");
-                return 1;
+            if emit_llvm {
+                // Emit LLVM IR to file without compiling.
+                let ir = kodo_codegen_llvm::emit_ir(&all_mir_functions, &struct_defs, &enum_defs);
+                let ll_path = output_path.with_extension("ll");
+                if let Err(e) = std::fs::write(&ll_path, &ir) {
+                    eprintln!("error: could not write LLVM IR file: {e}");
+                    return 1;
+                }
+                println!("Emitted LLVM IR → {}", ll_path.display());
+                return 0;
             }
-            println!("Emitted LLVM IR → {}", ll_path.display());
-            return 0;
+
+            match kodo_codegen_llvm::compile_module(
+                &all_mir_functions,
+                &struct_defs,
+                &enum_defs,
+                opt,
+                &output_path,
+                Some(&metadata_json),
+            ) {
+                Ok(()) => {
+                    let obj_path = output_path.with_extension("o");
+                    let result = link_executable(&obj_path, &output_path);
+                    let _ = std::fs::remove_file(&obj_path);
+                    result
+                }
+                Err(e) => Err(format!("LLVM codegen error: {e}")),
+            }
         }
-
-        match kodo_codegen_llvm::compile_module(
-            &all_mir_functions,
-            &struct_defs,
-            &enum_defs,
-            opt,
-            &output_path,
-            Some(&metadata_json),
-        ) {
-            Ok(()) => {
-                let obj_path = output_path.with_extension("o");
-                let result = link_executable(&obj_path, &output_path);
-                let _ = std::fs::remove_file(&obj_path);
-                result
-            }
-            Err(e) => Err(format!("LLVM codegen error: {e}")),
+        #[cfg(not(feature = "llvm"))]
+        {
+            Err("LLVM backend not available".to_string())
         }
     } else {
         // Cranelift backend (default).

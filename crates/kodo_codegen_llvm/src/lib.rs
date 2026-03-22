@@ -5,6 +5,9 @@
 //! the full LLVM optimization pipeline including inlining, loop vectorization,
 //! and scalar optimizations.
 //!
+//! Requires the `llvm` feature to be enabled and LLVM to be installed on the
+//! build system. Without the feature, the crate is a no-op stub.
+//!
 //! ## Usage
 //!
 //! ```ignore
@@ -12,24 +15,14 @@
 //!     &mir_functions, &struct_defs, &enum_defs, opt_level,
 //!     &output_path, Some(&metadata_json),
 //! )?;
-//! // Produces output_path.o which can be linked with the runtime.
 //! ```
-//!
-//! ## Academic References
-//!
-//! - **\[Tiger\]** *Modern Compiler Implementation in ML* Ch. 9–11 — Instruction
-//!   selection and code emission strategies.
-//! - **\[EC\]** *Engineering a Compiler* Ch. 11–13 — Target-independent IR
-//!   generation and lowering to machine-specific representations.
-//!
-//! See `docs/REFERENCES.md` for the full bibliography.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
-// Inkwell builder calls return Result for API uniformity but are infallible
-// in practice (they only fail when the builder has no insertion point).
 #![allow(clippy::unwrap_used)]
 
+#[cfg(feature = "llvm")]
 mod inkwell_backend;
 
+#[cfg(feature = "llvm")]
 pub use inkwell_backend::{compile_module, emit_ir};
