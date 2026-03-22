@@ -385,6 +385,49 @@ fn translate_binop<'ctx>(
                 Some(ctx.context.i64_type().const_int(0, false).into())
             }
         }
+    } else if lhs_val.is_struct_value() && rhs_val.is_struct_value() {
+        // Enum comparison: compare discriminant and payload fields.
+        return translate_enum_compare(op, lhs_val, rhs_val, ctx);
+    } else if lhs_val.is_struct_value() || rhs_val.is_struct_value() {
+        // Mixed struct/int — extract discriminant from struct side.
+        let l = if lhs_val.is_struct_value() {
+            let n = unique_name(ctx.name_counter, "disc");
+            ctx.builder
+                .build_extract_value(lhs_val.into_struct_value(), 0, &n)
+                .unwrap()
+                .into_int_value()
+        } else {
+            lhs_val.into_int_value()
+        };
+        let r = if rhs_val.is_struct_value() {
+            let n = unique_name(ctx.name_counter, "disc");
+            ctx.builder
+                .build_extract_value(rhs_val.into_struct_value(), 0, &n)
+                .unwrap()
+                .into_int_value()
+        } else {
+            rhs_val.into_int_value()
+        };
+        let l = l;
+        let r = r;
+        match op {
+            BinOp::Eq | BinOp::Ne => {
+                let pred = if matches!(op, BinOp::Eq) {
+                    inkwell::IntPredicate::EQ
+                } else {
+                    inkwell::IntPredicate::NE
+                };
+                let n = unique_name(ctx.name_counter, "icmp");
+                let cmp = ctx.builder.build_int_compare(pred, l, r, &n).unwrap();
+                let n2 = unique_name(ctx.name_counter, "ext");
+                let result = ctx
+                    .builder
+                    .build_int_z_extend(cmp, ctx.context.i64_type(), &n2)
+                    .unwrap();
+                return Some(result.into());
+            }
+            _ => return Some(ctx.context.i64_type().const_int(0, false).into()),
+        }
     } else {
         let l = lhs_val.into_int_value();
         let r = rhs_val.into_int_value();
@@ -448,6 +491,103 @@ fn translate_binop<'ctx>(
                     .unwrap();
                 Some(result.into())
             }
+        }
+    }
+}
+
+/// Translates comparison between two enum values (`{ i64, i64 }`).
+///
+/// For `Eq`: both discriminant and payload must match.
+/// For `Ne`: either discriminant or payload differs.
+/// Other ops compare discriminants only.
+fn translate_enum_compare<'ctx>(
+    op: BinOp,
+    lhs: BasicValueEnum<'ctx>,
+    rhs: BasicValueEnum<'ctx>,
+    ctx: &mut ValueCtx<'_, 'ctx>,
+) -> Option<BasicValueEnum<'ctx>> {
+    let l_struct = lhs.into_struct_value();
+    let r_struct = rhs.into_struct_value();
+
+    let ld_name = unique_name(ctx.name_counter, "l_disc");
+    let l_disc = ctx
+        .builder
+        .build_extract_value(l_struct, 0, &ld_name)
+        .unwrap()
+        .into_int_value();
+    let rd_name = unique_name(ctx.name_counter, "r_disc");
+    let r_disc = ctx
+        .builder
+        .build_extract_value(r_struct, 0, &rd_name)
+        .unwrap()
+        .into_int_value();
+
+    match op {
+        BinOp::Eq | BinOp::Ne => {
+            // Compare discriminants.
+            let dc_name = unique_name(ctx.name_counter, "disc_cmp");
+            let disc_eq = ctx
+                .builder
+                .build_int_compare(IntPredicate::EQ, l_disc, r_disc, &dc_name)
+                .unwrap();
+
+            // Compare payloads.
+            let lp_name = unique_name(ctx.name_counter, "l_pay");
+            let l_pay = ctx
+                .builder
+                .build_extract_value(l_struct, 1, &lp_name)
+                .unwrap()
+                .into_int_value();
+            let rp_name = unique_name(ctx.name_counter, "r_pay");
+            let r_pay = ctx
+                .builder
+                .build_extract_value(r_struct, 1, &rp_name)
+                .unwrap()
+                .into_int_value();
+            let pc_name = unique_name(ctx.name_counter, "pay_cmp");
+            let pay_eq = ctx
+                .builder
+                .build_int_compare(IntPredicate::EQ, l_pay, r_pay, &pc_name)
+                .unwrap();
+
+            // Both must be equal for Eq; either differs for Ne.
+            let both_name = unique_name(ctx.name_counter, "both_eq");
+            let both_eq = ctx.builder.build_and(disc_eq, pay_eq, &both_name).unwrap();
+
+            let result_i1 = if matches!(op, BinOp::Eq) {
+                both_eq
+            } else {
+                let not_name = unique_name(ctx.name_counter, "not_eq");
+                ctx.builder.build_not(both_eq, &not_name).unwrap()
+            };
+
+            let ext_name = unique_name(ctx.name_counter, "zext");
+            let result = ctx
+                .builder
+                .build_int_z_extend(result_i1, ctx.context.i64_type(), &ext_name)
+                .unwrap();
+            Some(result.into())
+        }
+        _ => {
+            // Other ops on enums: compare discriminants only.
+            let pred = match op {
+                BinOp::Lt => IntPredicate::SLT,
+                BinOp::Gt => IntPredicate::SGT,
+                BinOp::Le => IntPredicate::SLE,
+                BinOp::Ge => IntPredicate::SGE,
+                _ => return Some(ctx.context.i64_type().const_int(0, false).into()),
+            };
+            let n = unique_name(ctx.name_counter, "enum_cmp");
+            let cmp = ctx
+                .builder
+                .build_int_compare(pred, l_disc, r_disc, &n)
+                .unwrap();
+            let n2 = unique_name(ctx.name_counter, "zext");
+            let result = ctx
+                .builder
+                .build_int_z_extend(cmp, ctx.context.i64_type(), &n2)
+                .unwrap();
+            Some(result.into())
         }
     }
 }
