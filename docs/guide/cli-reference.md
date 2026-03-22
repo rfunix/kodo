@@ -393,6 +393,118 @@ The audit report includes:
 - Deployability status (`true` if min confidence > 0.9 and zero contract failures)
 - All annotations per function
 
+## Package Manager
+
+Kōdo includes a built-in package manager for managing projects and dependencies. Projects use a `kodo.toml` manifest file and a `kodo.lock` lockfile.
+
+### `kodo.toml` Format
+
+```toml
+module = "my-project"
+version = "0.1.0"
+
+[deps]
+mathlib = { path = "./libs/mathlib" }
+utils = { git = "https://github.com/user/kodo-utils", tag = "v0.1.0" }
+```
+
+### `kodoc init`
+
+Create a new Kōdo project with a `kodo.toml` manifest and a `src/main.ko` source file.
+
+```bash
+kodoc init [NAME]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `[NAME]` | Project name (optional — defaults to the current directory name) |
+
+**Example:**
+
+```bash
+kodoc init my-project
+# Creates: my-project/kodo.toml and my-project/src/main.ko
+```
+
+### `kodoc add`
+
+Add a dependency to the project. Supports git repositories and local paths.
+
+```bash
+kodoc add <SOURCE> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<SOURCE>` | Git URL or local path to the dependency |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--tag <TAG>` | Git tag to pin the dependency to | (none) |
+| `--name <NAME>` | Override the dependency name in `kodo.toml` | (inferred from source) |
+| `--path` | Treat `<SOURCE>` as a local filesystem path | `false` |
+
+**Examples:**
+
+```bash
+# Add a git dependency
+kodoc add https://github.com/user/kodo-utils --tag v0.1.0
+
+# Add a local path dependency
+kodoc add ./libs/mathlib --path
+```
+
+### `kodoc remove`
+
+Remove a dependency from the project.
+
+```bash
+kodoc remove <NAME>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<NAME>` | Name of the dependency to remove (as it appears in `kodo.toml`) |
+
+**Example:**
+
+```bash
+kodoc remove mathlib
+```
+
+### `kodoc update`
+
+Re-resolve dependencies and update the `kodo.lock` lockfile. If a specific dependency name is given, only that dependency is updated.
+
+```bash
+kodoc update [NAME]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `[NAME]` | Optional dependency name to update (omit to update all) |
+
+**Example:**
+
+```bash
+# Update all dependencies
+kodoc update
+
+# Update a specific dependency
+kodoc update mathlib
+```
+
 ## Running via Cargo
 
 If you haven't installed `kodoc` to your PATH, run it through Cargo:
