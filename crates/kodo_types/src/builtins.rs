@@ -86,6 +86,39 @@ impl TypeChecker {
         self.register_int_methods();
         self.register_float_methods();
         self.register_bool_methods();
+        // Register Option<T> and Result<T, E> as generic enums so
+        // Option::Some(x) and Result::Ok(x) work in the type checker.
+        self.generic_enums.insert(
+            "Option".to_string(),
+            crate::types::GenericEnumDef {
+                params: vec!["T".to_string()],
+                bounds: vec![vec![]],
+                variants: vec![
+                    (
+                        "Some".to_string(),
+                        vec![kodo_ast::TypeExpr::Named("T".to_string())],
+                    ),
+                    ("None".to_string(), vec![]),
+                ],
+            },
+        );
+        self.generic_enums.insert(
+            "Result".to_string(),
+            crate::types::GenericEnumDef {
+                params: vec!["T".to_string(), "E".to_string()],
+                bounds: vec![vec![], vec![]],
+                variants: vec![
+                    (
+                        "Ok".to_string(),
+                        vec![kodo_ast::TypeExpr::Named("T".to_string())],
+                    ),
+                    (
+                        "Err".to_string(),
+                        vec![kodo_ast::TypeExpr::Named("E".to_string())],
+                    ),
+                ],
+            },
+        );
         self.register_option_methods();
         self.register_result_methods();
         self.register_list_functions();

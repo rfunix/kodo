@@ -273,3 +273,31 @@ mod tests {
         assert_eq!(result["functions"][0]["requires_count"], 1);
     }
 }
+
+#[test]
+fn check_option_example() {
+    let source = r#"module error_handling {
+    meta { purpose: "Option and Result types", version: "1.0.0" }
+    fn safe_get(idx: Int) -> Option<Int> {
+        if idx >= 0 {
+            return Option::Some(idx * 10)
+        }
+        return Option::None
+    }
+    fn main() -> Int {
+        let val: Option<Int> = safe_get(3)
+        match val {
+            Option::Some(x) => { print_int(x) }
+            Option::None => { println("not found") }
+        }
+        return 0
+    }
+}"#;
+    let json = check(source);
+    let result: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        result["success"], true,
+        "Option example should pass: {}",
+        result["diagnostics"]
+    );
+}
