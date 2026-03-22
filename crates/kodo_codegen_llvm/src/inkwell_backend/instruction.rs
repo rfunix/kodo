@@ -423,8 +423,8 @@ fn translate_call<'ctx>(
     for arg in args {
         if let Some(val) = translate_value(arg, ctx) {
             let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
-            if arg_ty == Type::String {
-                // Expand string struct to (ptr, len) pair.
+            if arg_ty == Type::String && val.is_struct_value() {
+                // Expand string struct {ptr, len} to two args.
                 let sv = val.into_struct_value();
                 let ptr_name = unique_name(ctx.name_counter, "ap");
                 let len_name = unique_name(ctx.name_counter, "al");
@@ -432,6 +432,45 @@ fn translate_call<'ctx>(
                 let len = ctx.builder.build_extract_value(sv, 1, &len_name).unwrap();
                 arg_vals.push(ptr.into());
                 arg_vals.push(len.into());
+            } else if arg_ty == Type::String && val.is_int_value() {
+                // String handle (i64) — points to a [ptr, len] pair on heap.
+                // Load ptr from handle, len from handle+8.
+                let handle = val.into_int_value();
+                let ptr_type = ctx.context.ptr_type(inkwell::AddressSpace::default());
+                let str_ptr = ctx
+                    .builder
+                    .build_int_to_ptr(handle, ptr_type, &unique_name(ctx.name_counter, "shp"))
+                    .unwrap();
+                let s_ptr = ctx
+                    .builder
+                    .build_load(
+                        ctx.context.i64_type(),
+                        str_ptr,
+                        &unique_name(ctx.name_counter, "sp"),
+                    )
+                    .unwrap();
+                let off8 = ctx
+                    .builder
+                    .build_int_add(
+                        handle,
+                        ctx.context.i64_type().const_int(8, false),
+                        &unique_name(ctx.name_counter, "so"),
+                    )
+                    .unwrap();
+                let len_ptr = ctx
+                    .builder
+                    .build_int_to_ptr(off8, ptr_type, &unique_name(ctx.name_counter, "slp"))
+                    .unwrap();
+                let s_len = ctx
+                    .builder
+                    .build_load(
+                        ctx.context.i64_type(),
+                        len_ptr,
+                        &unique_name(ctx.name_counter, "sl"),
+                    )
+                    .unwrap();
+                arg_vals.push(s_ptr.into());
+                arg_vals.push(s_len.into());
             } else {
                 arg_vals.push(val.into());
             }

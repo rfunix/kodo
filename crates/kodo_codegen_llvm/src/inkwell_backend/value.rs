@@ -441,7 +441,12 @@ fn translate_binop<'ctx>(
     }
 }
 
-/// Translates a struct literal to an LLVM struct value.
+/// Translates a struct literal to a heap-allocated struct via `kodo_alloc`.
+///
+/// Structs in Kōdo are heap-allocated: `kodo_alloc(size)` returns an i64
+/// pointer, and fields are stored at `ptr + (index * 8)`. The struct value
+/// is the i64 pointer itself, matching `to_llvm_type` which maps
+/// `Type::Struct(_)` to i64.
 #[cfg(feature = "inkwell")]
 #[allow(clippy::cast_possible_truncation)]
 fn translate_struct_lit<'ctx>(
@@ -449,46 +454,109 @@ fn translate_struct_lit<'ctx>(
     fields: &[(String, Value)],
     ctx: &mut ValueCtx<'_, 'ctx>,
 ) -> Option<BasicValueEnum<'ctx>> {
-    let field_order: Vec<String> = ctx
-        .struct_defs
-        .get(name)
-        .map(|fs| fs.iter().map(|(n, _)| n.clone()).collect())
-        .unwrap_or_default();
+    let field_order: Vec<(String, Type)> = ctx.struct_defs.get(name).cloned().unwrap_or_default();
 
     if field_order.is_empty() {
         return None;
     }
 
-    // Build the LLVM struct type from fields.
-    let field_types: Vec<inkwell::types::BasicTypeEnum<'ctx>> = ctx
-        .struct_defs
-        .get(name)
-        .map(|fs| {
-            fs.iter()
-                .map(|(_, t)| to_llvm_type(ctx.context, t))
-                .collect()
-        })
-        .unwrap_or_default();
-    let struct_ty = ctx.context.struct_type(&field_types, false);
-    let mut current: BasicValueEnum<'ctx> = struct_ty.get_undef().into();
+    // Calculate field offsets: String fields are 16 bytes ({ptr, len}), others are 8.
+    let field_offsets: Vec<u64> = {
+        let mut offsets = Vec::with_capacity(field_order.len());
+        let mut offset = 0u64;
+        for (_, ty) in &field_order {
+            offsets.push(offset);
+            offset += if matches!(ty, Type::String) { 16 } else { 8 };
+        }
+        offsets
+    };
+    let total_size = field_offsets.last().map_or(0, |last| {
+        let last_ty = &field_order.last().unwrap().1;
+        last + if matches!(last_ty, Type::String) {
+            16
+        } else {
+            8
+        }
+    });
 
-    for (idx, field_name) in field_order.iter().enumerate() {
+    // Allocate heap memory via kodo_alloc(size) -> i64 pointer.
+    let alloc_fn = ctx.module.get_function("kodo_alloc")?;
+    let size_val = ctx.context.i64_type().const_int(total_size, false);
+    let alloc_name = unique_name(ctx.name_counter, "struct_alloc");
+    let call = ctx
+        .builder
+        .build_call(alloc_fn, &[size_val.into()], &alloc_name)
+        .unwrap();
+    let ptr_i64 = call.try_as_basic_value().basic()?.into_int_value();
+
+    // Store each field at its computed offset.
+    for (idx, (field_name, field_ty)) in field_order.iter().enumerate() {
         if let Some((_, val)) = fields.iter().find(|(n, _)| n == field_name) {
             if let Some(field_val) = translate_value(val, ctx) {
-                let uname = unique_name(ctx.name_counter, "sf");
-                let agg = ctx
+                let offset = field_offsets[idx];
+                let off_name = unique_name(ctx.name_counter, "foff");
+                let field_ptr_i64 = ctx
                     .builder
-                    .build_insert_value(current.into_struct_value(), field_val, idx as u32, &uname)
+                    .build_int_add(
+                        ptr_i64,
+                        ctx.context.i64_type().const_int(offset, false),
+                        &off_name,
+                    )
                     .unwrap();
-                current = BasicValueEnum::StructValue(agg.into_struct_value());
+                let ptr_name = unique_name(ctx.name_counter, "fptr");
+                let field_ptr = ctx
+                    .builder
+                    .build_int_to_ptr(
+                        field_ptr_i64,
+                        ctx.context.ptr_type(inkwell::AddressSpace::default()),
+                        &ptr_name,
+                    )
+                    .unwrap();
+
+                if matches!(field_ty, Type::String) && field_val.is_struct_value() {
+                    // String field: store ptr and len as 2 consecutive i64s.
+                    let sv = field_val.into_struct_value();
+                    let p = ctx
+                        .builder
+                        .build_extract_value(sv, 0, &unique_name(ctx.name_counter, "sp"))
+                        .unwrap();
+                    let l = ctx
+                        .builder
+                        .build_extract_value(sv, 1, &unique_name(ctx.name_counter, "sl"))
+                        .unwrap();
+                    ctx.builder.build_store(field_ptr, p).unwrap();
+                    let len_off = ctx
+                        .builder
+                        .build_int_add(
+                            field_ptr_i64,
+                            ctx.context.i64_type().const_int(8, false),
+                            &unique_name(ctx.name_counter, "lo"),
+                        )
+                        .unwrap();
+                    let len_ptr = ctx
+                        .builder
+                        .build_int_to_ptr(
+                            len_off,
+                            ctx.context.ptr_type(inkwell::AddressSpace::default()),
+                            &unique_name(ctx.name_counter, "lp"),
+                        )
+                        .unwrap();
+                    ctx.builder.build_store(len_ptr, l).unwrap();
+                } else {
+                    let store_val = to_i64_value(field_val, ctx);
+                    ctx.builder.build_store(field_ptr, store_val).unwrap();
+                }
             }
         }
     }
 
-    Some(current)
+    Some(ptr_i64.into())
 }
 
-/// Translates a field access on a struct value.
+/// Translates a field access on a heap-allocated struct.
+///
+/// The struct value is an i64 pointer. Fields are loaded from
+/// `ptr + (field_index * 8)`.
 #[cfg(feature = "inkwell")]
 #[allow(clippy::cast_possible_truncation)]
 fn translate_field_get<'ctx>(
@@ -497,21 +565,119 @@ fn translate_field_get<'ctx>(
     struct_name: &str,
     ctx: &mut ValueCtx<'_, 'ctx>,
 ) -> Option<BasicValueEnum<'ctx>> {
+    let struct_def = ctx.struct_defs.get(struct_name)?;
+    let field_idx = struct_def.iter().position(|(n, _)| n == field).unwrap_or(0);
+    let field_ty = struct_def
+        .get(field_idx)
+        .map(|(_, t)| t.clone())
+        .unwrap_or(Type::Int);
+
     let obj_val = translate_value(object, ctx)?;
-    let struct_val = obj_val.into_struct_value();
+    let ptr_i64 = obj_val.into_int_value();
 
-    let field_idx = ctx
-        .struct_defs
-        .get(struct_name)
-        .and_then(|fs| fs.iter().position(|(n, _)| n == field))
-        .unwrap_or(0);
-
-    let uname = unique_name(ctx.name_counter, "field");
-    let result = ctx
+    // Compute offset using same layout as translate_struct_lit.
+    let offset: u64 = struct_def
+        .iter()
+        .take(field_idx)
+        .map(|(_, ty)| {
+            if matches!(ty, Type::String) {
+                16u64
+            } else {
+                8u64
+            }
+        })
+        .sum();
+    let off_name = unique_name(ctx.name_counter, "goff");
+    let field_ptr_i64 = ctx
         .builder
-        .build_extract_value(struct_val, field_idx as u32, &uname)
+        .build_int_add(
+            ptr_i64,
+            ctx.context.i64_type().const_int(offset, false),
+            &off_name,
+        )
         .unwrap();
-    Some(result)
+    let ptr_name = unique_name(ctx.name_counter, "gptr");
+    let field_ptr = ctx
+        .builder
+        .build_int_to_ptr(
+            field_ptr_i64,
+            ctx.context.ptr_type(inkwell::AddressSpace::default()),
+            &ptr_name,
+        )
+        .unwrap();
+
+    if matches!(&field_ty, Type::String) {
+        // String fields: load { ptr, len } struct from two consecutive i64s.
+        let str_ty = ctx.context.struct_type(
+            &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
+            false,
+        );
+        let str_alloca = ctx
+            .builder
+            .build_alloca(str_ty, &unique_name(ctx.name_counter, "stmp"))
+            .unwrap();
+        // Load ptr into field 0
+        let ptr_val = ctx
+            .builder
+            .build_load(
+                ctx.context.i64_type(),
+                field_ptr,
+                &unique_name(ctx.name_counter, "sp"),
+            )
+            .unwrap();
+        let f0_ptr = ctx
+            .builder
+            .build_struct_gep(str_ty, str_alloca, 0, &unique_name(ctx.name_counter, "sg0"))
+            .unwrap();
+        ctx.builder.build_store(f0_ptr, ptr_val).unwrap();
+        // Load len into field 1
+        let len_off = ctx
+            .builder
+            .build_int_add(
+                field_ptr_i64,
+                ctx.context.i64_type().const_int(8, false),
+                &unique_name(ctx.name_counter, "lo"),
+            )
+            .unwrap();
+        let len_p = ctx
+            .builder
+            .build_int_to_ptr(
+                len_off,
+                ctx.context.ptr_type(inkwell::AddressSpace::default()),
+                &unique_name(ctx.name_counter, "lp"),
+            )
+            .unwrap();
+        let len_val = ctx
+            .builder
+            .build_load(
+                ctx.context.i64_type(),
+                len_p,
+                &unique_name(ctx.name_counter, "sl"),
+            )
+            .unwrap();
+        let f1_ptr = ctx
+            .builder
+            .build_struct_gep(str_ty, str_alloca, 1, &unique_name(ctx.name_counter, "sg1"))
+            .unwrap();
+        ctx.builder.build_store(f1_ptr, len_val).unwrap();
+        // Load the complete struct
+        let result = ctx
+            .builder
+            .build_load(str_ty, str_alloca, &unique_name(ctx.name_counter, "sld"))
+            .unwrap();
+        Some(result)
+    } else {
+        let load_name = unique_name(ctx.name_counter, "fld");
+        let load_ty = match &field_ty {
+            Type::Float64 | Type::Float32 => to_llvm_type(ctx.context, &field_ty),
+            _ => ctx.context.i64_type().into(),
+        };
+        let val = ctx
+            .builder
+            .build_load(load_ty, field_ptr, &load_name)
+            .unwrap();
+        Some(val)
+    }
 }
 
 /// Translates string concatenation via `kodo_string_concat` runtime call.
