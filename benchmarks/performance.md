@@ -84,6 +84,19 @@ feedback loop (`check` → fix → recheck), Kōdo delivers sub-10ms latency.
 4. **Full build is ~100ms** — fast enough for tight compile-fix loops
 5. **Not as fast as Rust/C** — Cranelift trades runtime speed for compile speed
 
+## Inkwell Backend (Experimental)
+
+The inkwell backend uses the LLVM C API (via inkwell crate) for programmatic
+IR construction, enabling full LLVM optimization passes. Status:
+
+- **Working**: Hello World, arithmetic, if/else, print_int
+- **Not yet**: Recursion, closures, complex programs
+- **Expected**: 2-3x speedup over textual LLVM once complete
+- **Build**: `cargo build -p kodoc --features inkwell`
+- **Use**: `kodoc build file.ko --backend=inkwell`
+
+Once recursion is fixed, benchmark results will be updated.
+
 ## Methodology
 
 - All benchmarks use the default Cranelift backend (`kodoc build`)
