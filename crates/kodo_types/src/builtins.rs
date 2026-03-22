@@ -24,64 +24,7 @@ impl TypeChecker {
     /// - Timeout builtins: `kodo_test_set_timeout`, `kodo_test_clear_timeout`
     /// - Isolation builtins: `kodo_test_isolate_start`, `kodo_test_isolate_end`
     pub(crate) fn register_builtins(&mut self) {
-        self.env.insert(
-            "println".to_string(),
-            Type::Function(vec![Type::String], Box::new(Type::Unit)),
-        );
-        self.env.insert(
-            "print".to_string(),
-            Type::Function(vec![Type::String], Box::new(Type::Unit)),
-        );
-        self.env.insert(
-            "print_int".to_string(),
-            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
-        );
-        self.env.insert(
-            "print_float".to_string(),
-            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
-        );
-        self.env.insert(
-            "println_float".to_string(),
-            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
-        );
-        // Math builtins
-        self.env.insert(
-            "abs".to_string(),
-            Type::Function(vec![Type::Int], Box::new(Type::Int)),
-        );
-        self.env.insert(
-            "min".to_string(),
-            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
-        );
-        self.env.insert(
-            "max".to_string(),
-            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
-        );
-        self.env.insert(
-            "clamp".to_string(),
-            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
-        );
-
-        // File I/O builtins
-        self.env.insert(
-            "file_exists".to_string(),
-            Type::Function(vec![Type::String], Box::new(Type::Bool)),
-        );
-        self.env.insert(
-            "file_read".to_string(),
-            Type::Function(
-                vec![Type::String],
-                Box::new(Type::Enum("Result__String_String".to_string())),
-            ),
-        );
-        self.env.insert(
-            "file_write".to_string(),
-            Type::Function(
-                vec![Type::String, Type::String],
-                Box::new(Type::Enum("Result__Unit_String".to_string())),
-            ),
-        );
-
+        self.register_io_and_math_builtins();
         self.register_string_methods();
         self.register_int_methods();
         self.register_float_methods();
@@ -144,6 +87,64 @@ impl TypeChecker {
 
         self.register_future_builtins();
         self.register_test_builtins();
+    }
+
+    /// Registers I/O, print, and math builtin functions.
+    fn register_io_and_math_builtins(&mut self) {
+        self.env.insert(
+            "println".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "print".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "print_int".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "print_float".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "println_float".to_string(),
+            Type::Function(vec![Type::Float64], Box::new(Type::Unit)),
+        );
+        self.env.insert(
+            "abs".to_string(),
+            Type::Function(vec![Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "min".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "max".to_string(),
+            Type::Function(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "clamp".to_string(),
+            Type::Function(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        self.env.insert(
+            "file_exists".to_string(),
+            Type::Function(vec![Type::String], Box::new(Type::Bool)),
+        );
+        self.env.insert(
+            "file_read".to_string(),
+            Type::Function(
+                vec![Type::String],
+                Box::new(Type::Enum("Result__String_String".to_string())),
+            ),
+        );
+        self.env.insert(
+            "file_write".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Enum("Result__Unit_String".to_string())),
+            ),
+        );
     }
 
     /// Registers builtin functions for Future/async operations.
@@ -722,6 +723,7 @@ impl TypeChecker {
     /// At runtime, lists are opaque heap pointers managed by the runtime.
     fn register_list_functions(&mut self) {
         self.register_list_core_functions();
+        self.register_list_core_methods();
         self.register_list_methods();
     }
 
@@ -817,6 +819,89 @@ impl TypeChecker {
                 vec![Type::Generic("List".to_string(), vec![Type::Int])],
                 Box::new(Type::Unit),
             ),
+        );
+    }
+
+    /// Registers core list methods (length, contains, push, get, pop, remove, set, `is_empty`, reverse).
+    fn register_list_core_methods(&mut self) {
+        let list_int = Type::Generic("List".to_string(), vec![Type::Int]);
+
+        // List.length() -> Int
+        self.method_lookup.insert(
+            ("List".to_string(), "length".to_string()),
+            ("list_length".to_string(), vec![list_int.clone()], Type::Int),
+        );
+
+        // List.contains(Int) -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "contains".to_string()),
+            (
+                "list_contains".to_string(),
+                vec![list_int.clone(), Type::Int],
+                Type::Bool,
+            ),
+        );
+
+        // List.push(Int) -> ()
+        self.method_lookup.insert(
+            ("List".to_string(), "push".to_string()),
+            (
+                "list_push".to_string(),
+                vec![list_int.clone(), Type::Int],
+                Type::Unit,
+            ),
+        );
+
+        // List.get(Int) -> Int
+        self.method_lookup.insert(
+            ("List".to_string(), "get".to_string()),
+            (
+                "list_get".to_string(),
+                vec![list_int.clone(), Type::Int],
+                Type::Int,
+            ),
+        );
+
+        // List.pop() -> Int
+        self.method_lookup.insert(
+            ("List".to_string(), "pop".to_string()),
+            ("list_pop".to_string(), vec![list_int.clone()], Type::Int),
+        );
+
+        // List.remove(Int) -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "remove".to_string()),
+            (
+                "list_remove".to_string(),
+                vec![list_int.clone(), Type::Int],
+                Type::Bool,
+            ),
+        );
+
+        // List.set(Int, Int) -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "set".to_string()),
+            (
+                "list_set".to_string(),
+                vec![list_int.clone(), Type::Int, Type::Int],
+                Type::Bool,
+            ),
+        );
+
+        // List.is_empty() -> Bool
+        self.method_lookup.insert(
+            ("List".to_string(), "is_empty".to_string()),
+            (
+                "list_is_empty".to_string(),
+                vec![list_int.clone()],
+                Type::Bool,
+            ),
+        );
+
+        // List.reverse() -> ()
+        self.method_lookup.insert(
+            ("List".to_string(), "reverse".to_string()),
+            ("list_reverse".to_string(), vec![list_int], Type::Unit),
         );
     }
 
