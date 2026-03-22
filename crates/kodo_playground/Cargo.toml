@@ -2,6 +2,8 @@
 name = "kodo_playground"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 description = "WebAssembly playground for Kōdo — runs lexer, parser, and type checker in the browser"
 
 [lib]
