@@ -410,11 +410,14 @@ pub(crate) fn run_build(
     let _ = &emit_llvm;
 
     #[cfg(not(feature = "llvm"))]
-    if backend == "llvm" || backend == "inkwell" {
+    if backend == "llvm" || backend == "inkwell" || release {
         eprintln!(
-            "LLVM backend not available. Rebuild kodoc with: cargo build -p kodoc --features llvm"
+            "error: LLVM backend not available. Rebuild kodoc with: cargo build -p kodoc --features llvm"
         );
-        eprintln!("Using Cranelift backend instead.");
+        if release {
+            eprintln!("The --release flag requires the LLVM backend for optimized builds.");
+        }
+        return 1;
     }
 
     let link_result = if cfg!(feature = "llvm") && (backend == "llvm" || backend == "inkwell") {

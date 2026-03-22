@@ -10,6 +10,16 @@
 //!    a lower ID (a back-edge in the CFG), a yield is inserted at the start
 //!    of the target block.
 //!
+//! ## Concurrency-Aware Optimization
+//!
+//! Functions that do not participate in concurrency (no `spawn`, `channel_*`,
+//! or `async` operations) skip yield insertion entirely. This avoids massive
+//! overhead in pure recursive functions — e.g., `fib(35)` would otherwise
+//! generate ~58 million unnecessary yield calls.
+//!
+//! The analysis is inter-procedural: a function needs yields if it directly
+//! uses concurrency primitives OR calls any function that does (transitively).
+//!
 //! ## Design Rationale
 //!
 //! Cooperative scheduling requires explicit yield points. Without them, a
@@ -86,17 +96,107 @@ fn is_builtin(callee: &str) -> bool {
         .any(|prefix| callee.starts_with(prefix))
 }
 
+/// Concurrency primitives that mark a function as needing yield points.
+const CONCURRENCY_PRIMITIVES: &[&str] = &[
+    "kodo_green_spawn",
+    "kodo_green_spawn_with_env",
+    "kodo_spawn_async",
+    "channel_new",
+    "channel_send",
+    "channel_recv",
+    "channel_select",
+];
+
+/// Returns `true` if the callee is a concurrency primitive.
+fn is_concurrency_primitive(callee: &str) -> bool {
+    CONCURRENCY_PRIMITIVES
+        .iter()
+        .any(|prim| callee.starts_with(prim))
+}
+
+/// Returns `true` if the function directly uses concurrency primitives.
+fn uses_concurrency_directly(func: &MirFunction) -> bool {
+    func.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instr| {
+            matches!(instr, Instruction::Call { callee, .. } if is_concurrency_primitive(callee))
+        })
+    })
+}
+
+/// Collects the set of non-builtin callees from a function.
+fn collect_callees(func: &MirFunction) -> HashSet<String> {
+    let mut callees = HashSet::new();
+    for block in &func.blocks {
+        for instr in &block.instructions {
+            if let Instruction::Call { callee, .. } = instr {
+                if !is_builtin(callee) {
+                    callees.insert(callee.clone());
+                }
+            }
+        }
+    }
+    callees
+}
+
+/// Computes the set of function names that need yield points via
+/// inter-procedural analysis. A function needs yields if it directly
+/// uses concurrency primitives or transitively calls one that does.
+fn compute_functions_needing_yields(functions: &[MirFunction]) -> HashSet<String> {
+    // Phase 1: Mark functions that directly use concurrency.
+    let mut needs_yield: HashSet<String> = functions
+        .iter()
+        .filter(|f| uses_concurrency_directly(f))
+        .map(|f| f.name.clone())
+        .collect();
+
+    // The main function always needs yields because it may be the
+    // entry point for green thread scheduling.
+    for func in functions {
+        if func.name == "main" {
+            needs_yield.insert(func.name.clone());
+        }
+    }
+
+    // Phase 2: Fixed-point propagation — if a function calls any
+    // function in needs_yield, it also needs yields.
+    let callees_map: std::collections::HashMap<String, HashSet<String>> = functions
+        .iter()
+        .map(|f| (f.name.clone(), collect_callees(f)))
+        .collect();
+
+    loop {
+        let mut changed = false;
+        for func in functions {
+            if needs_yield.contains(&func.name) {
+                continue;
+            }
+            if let Some(callees) = callees_map.get(&func.name) {
+                if callees.iter().any(|c| needs_yield.contains(c)) {
+                    needs_yield.insert(func.name.clone());
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    needs_yield
+}
+
 /// Inserts yield points for green thread scheduling.
 ///
-/// Yield points are inserted before user function calls and at loop
-/// back-edges. This enables cooperative scheduling — green threads
-/// voluntarily yield control at these points.
-///
-/// Builtins and internal runtime functions do NOT get yield points
-/// to avoid unnecessary overhead.
+/// Only functions that participate in concurrency (directly or
+/// transitively) receive yield points. Pure computational functions
+/// like recursive fibonacci are left untouched for maximum performance.
 pub fn insert_yield_points(functions: &mut [MirFunction]) {
+    let needs_yield = compute_functions_needing_yields(functions);
+
     for func in functions {
-        insert_yields_in_function(func);
+        if needs_yield.contains(&func.name) {
+            insert_yields_in_function(func);
+        }
     }
 }
 
@@ -209,10 +309,28 @@ mod tests {
         }
     }
 
+    /// Helper: creates a function that calls `kodo_green_spawn` (concurrent).
+    fn make_concurrent_function(name: &str) -> MirFunction {
+        make_function_with_blocks(
+            name,
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "kodo_green_spawn".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        )
+    }
+
     #[test]
-    fn yield_inserted_before_user_call() {
-        let mut func = make_function_with_blocks(
-            "caller",
+    fn yield_skipped_for_pure_function() {
+        // A function that only calls user_func (no concurrency) should NOT
+        // receive yields — this is the key optimization.
+        let func = make_function_with_blocks(
+            "pure_caller",
             vec![BasicBlock {
                 id: BlockId(0),
                 instructions: vec![Instruction::Call {
@@ -226,17 +344,148 @@ mod tests {
 
         let mut functions = [func];
         insert_yield_points(&mut functions);
-        func = functions
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unreachable!());
 
-        assert_eq!(func.blocks[0].instructions.len(), 2);
-        assert_eq!(func.blocks[0].instructions[0], Instruction::Yield);
-        assert!(matches!(
-            func.blocks[0].instructions[1],
-            Instruction::Call { .. }
-        ));
+        assert_eq!(
+            functions[0].blocks[0].instructions.len(),
+            1,
+            "Pure function should NOT get yield points"
+        );
+    }
+
+    #[test]
+    fn yield_inserted_in_concurrent_function() {
+        // A function that calls kodo_green_spawn should get yields
+        // before its other user calls.
+        let func = make_function_with_blocks(
+            "spawner",
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![
+                    Instruction::Call {
+                        dest: LocalId(0),
+                        callee: "user_func".to_string(),
+                        args: vec![],
+                    },
+                    Instruction::Call {
+                        dest: LocalId(1),
+                        callee: "kodo_green_spawn".to_string(),
+                        args: vec![],
+                    },
+                ],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        );
+
+        let mut functions = [func];
+        insert_yield_points(&mut functions);
+
+        // user_func gets a yield before it; kodo_green_spawn is a builtin, no yield.
+        assert_eq!(functions[0].blocks[0].instructions.len(), 3);
+        assert_eq!(functions[0].blocks[0].instructions[0], Instruction::Yield);
+    }
+
+    #[test]
+    fn yield_inserted_in_main() {
+        // main() always gets yields because it's the green thread entry point.
+        let func = make_function_with_blocks(
+            "main",
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "user_func".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        );
+
+        let mut functions = [func];
+        insert_yield_points(&mut functions);
+
+        assert_eq!(functions[0].blocks[0].instructions.len(), 2);
+        assert_eq!(functions[0].blocks[0].instructions[0], Instruction::Yield);
+    }
+
+    #[test]
+    fn yield_propagated_transitively() {
+        // func_a calls kodo_green_spawn (concurrent)
+        // func_b calls func_a (transitively concurrent)
+        // func_c calls func_b (transitively concurrent)
+        // func_d calls only builtins (pure — no yields)
+        let func_a = make_concurrent_function("func_a");
+
+        let func_b = make_function_with_blocks(
+            "func_b",
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "func_a".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        );
+
+        let func_c = make_function_with_blocks(
+            "func_c",
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "func_b".to_string(),
+                    args: vec![],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        );
+
+        let func_d = make_function_with_blocks(
+            "func_d",
+            vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "print_int".to_string(),
+                    args: vec![Value::IntConst(42)],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+        );
+
+        let mut functions = [func_a, func_b, func_c, func_d];
+        insert_yield_points(&mut functions);
+
+        // func_b calls func_a (concurrent) → gets yields.
+        let func_b_yields = functions[1].blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::Yield))
+            .count();
+        assert!(
+            func_b_yields > 0,
+            "func_b should get yields (calls concurrent func_a)"
+        );
+
+        // func_c calls func_b (transitively concurrent) → gets yields.
+        let func_c_yields = functions[2].blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::Yield))
+            .count();
+        assert!(
+            func_c_yields > 0,
+            "func_c should get yields (transitively concurrent)"
+        );
+
+        // func_d only calls builtins → no yields.
+        let func_d_yields = functions[3].blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::Yield))
+            .count();
+        assert_eq!(func_d_yields, 0, "func_d should NOT get yields (pure)");
     }
 
     #[test]
@@ -252,8 +501,9 @@ mod tests {
             "sqrt",
         ];
         for builtin_name in builtins {
-            let mut func = make_function_with_blocks(
-                "caller",
+            // Even in a concurrent function (main), builtins don't get yields.
+            let func = make_function_with_blocks(
+                "main",
                 vec![BasicBlock {
                     id: BlockId(0),
                     instructions: vec![Instruction::Call {
@@ -267,13 +517,9 @@ mod tests {
 
             let mut functions = [func];
             insert_yield_points(&mut functions);
-            func = functions
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| unreachable!());
 
             assert_eq!(
-                func.blocks[0].instructions.len(),
+                functions[0].blocks[0].instructions.len(),
                 1,
                 "Yield should NOT be inserted before builtin `{builtin_name}`"
             );
@@ -281,11 +527,10 @@ mod tests {
     }
 
     #[test]
-    fn yield_inserted_at_loop_back_edge() {
-        // bb0: instructions, Goto(bb1)
-        // bb1: instructions, Goto(bb0) <-- back-edge to bb0
-        let mut func = make_function_with_blocks(
-            "looper",
+    fn yield_inserted_at_loop_back_edge_in_main() {
+        // main() with a loop should get yields at back-edges.
+        let func = make_function_with_blocks(
+            "main",
             vec![
                 BasicBlock {
                     id: BlockId(0),
@@ -302,19 +547,43 @@ mod tests {
 
         let mut functions = [func];
         insert_yield_points(&mut functions);
-        func = functions
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unreachable!());
 
-        // bb0 should have a Yield inserted at the start (back-edge target).
-        assert_eq!(func.blocks[0].instructions[0], Instruction::Yield);
-        assert_eq!(func.blocks[0].instructions.len(), 2);
+        assert_eq!(functions[0].blocks[0].instructions[0], Instruction::Yield);
+        assert_eq!(functions[0].blocks[0].instructions.len(), 2);
+    }
+
+    #[test]
+    fn yield_skipped_at_loop_back_edge_in_pure_function() {
+        // A pure function with a loop should NOT get yields.
+        let func = make_function_with_blocks(
+            "pure_looper",
+            vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![Instruction::Assign(LocalId(0), Value::IntConst(0))],
+                    terminator: Terminator::Goto(BlockId(1)),
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![Instruction::Assign(LocalId(1), Value::IntConst(1))],
+                    terminator: Terminator::Goto(BlockId(0)),
+                },
+            ],
+        );
+
+        let mut functions = [func];
+        insert_yield_points(&mut functions);
+
+        assert_eq!(
+            functions[0].blocks[0].instructions.len(),
+            1,
+            "Pure looper should NOT get yield at back-edge"
+        );
     }
 
     #[test]
     fn yield_not_inserted_in_test_function() {
-        let mut func = make_function_with_blocks(
+        let func = make_function_with_blocks(
             "__test_0",
             vec![BasicBlock {
                 id: BlockId(0),
@@ -329,26 +598,19 @@ mod tests {
 
         let mut functions = [func];
         insert_yield_points(&mut functions);
-        func = functions
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unreachable!());
 
-        // No Yield should be inserted in test functions.
-        assert_eq!(func.blocks[0].instructions.len(), 1);
+        assert_eq!(functions[0].blocks[0].instructions.len(), 1);
         assert!(matches!(
-            func.blocks[0].instructions[0],
+            functions[0].blocks[0].instructions[0],
             Instruction::Call { .. }
         ));
     }
 
     #[test]
     fn yield_at_back_edge_only_inserted_once() {
-        // Two back-edges targeting the same block.
-        // bb0: Branch { true: bb1, false: bb0 } <-- back-edge to bb0
-        // bb1: Goto(bb0) <-- another back-edge to bb0
-        let mut func = make_function_with_blocks(
-            "multi_back",
+        // In main (concurrent), back-edge targets get exactly one yield.
+        let func = make_function_with_blocks(
+            "main",
             vec![
                 BasicBlock {
                     id: BlockId(0),
@@ -369,13 +631,8 @@ mod tests {
 
         let mut functions = [func];
         insert_yield_points(&mut functions);
-        func = functions
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unreachable!());
 
-        // bb0 should have exactly one Yield at the start.
-        let yield_count = func.blocks[0]
+        let yield_count = functions[0].blocks[0]
             .instructions
             .iter()
             .filter(|i| matches!(i, Instruction::Yield))
@@ -407,8 +664,23 @@ mod tests {
     }
 
     #[test]
-    fn yield_before_io_calls() {
-        // I/O calls like http_get and file_read should get yield points.
+    fn is_concurrency_primitive_checks() {
+        assert!(is_concurrency_primitive("kodo_green_spawn"));
+        assert!(is_concurrency_primitive("kodo_green_spawn_with_env"));
+        assert!(is_concurrency_primitive("kodo_spawn_async"));
+        assert!(is_concurrency_primitive("channel_new"));
+        assert!(is_concurrency_primitive("channel_send"));
+        assert!(is_concurrency_primitive("channel_recv"));
+        assert!(is_concurrency_primitive("channel_select_2"));
+        assert!(!is_concurrency_primitive("user_func"));
+        assert!(!is_concurrency_primitive("print_int"));
+        assert!(!is_concurrency_primitive("fib"));
+    }
+
+    #[test]
+    fn yield_before_io_calls_in_concurrent_fn() {
+        // I/O calls like http_get and file_read should get yield points
+        // only when the function participates in concurrency.
         let io_calls = [
             "http_get",
             "http_post",
