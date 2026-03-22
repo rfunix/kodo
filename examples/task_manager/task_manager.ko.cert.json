@@ -1,0 +1,483 @@
+{
+  "module": "task_manager",
+  "purpose": "Task Management REST API — benchmark showcase of all Kodo features",
+  "version": "1.0.0",
+  "compiled_at": "2026-03-21T14:38:05Z",
+  "compiler_version": "1.1.0",
+  "contracts": {
+    "requires_count": 33,
+    "ensures_count": 1,
+    "mode": "runtime",
+    "static_verified": 0,
+    "runtime_checks_needed": 34,
+    "failures": 0
+  },
+  "functions": [
+    "validate_priority",
+    "validate_title",
+    "validate_transition",
+    "status_to_string",
+    "status_from_string",
+    "create_task",
+    "find_task_index",
+    "update_status",
+    "delete_task",
+    "task_to_json",
+    "tasks_to_json_array",
+    "count_by_status",
+    "collect_statuses",
+    "sum_priorities",
+    "high_priority_count",
+    "stats_to_json",
+    "save_tasks",
+    "make_error",
+    "make_success",
+    "handle_create",
+    "handle_list",
+    "handle_health",
+    "handle_stats",
+    "route",
+    "main",
+    "Option_is_some",
+    "Option_is_none",
+    "Option_unwrap_or",
+    "Result_is_ok",
+    "Result_is_err",
+    "Result_unwrap_or",
+    "List_map",
+    "List_filter",
+    "List_fold",
+    "List_reduce",
+    "List_count",
+    "List_any",
+    "List_all"
+  ],
+  "function_details": [
+    {
+      "name": "validate_priority",
+      "annotations": {
+        "security_sensitive": true,
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.99
+      }
+    },
+    {
+      "name": "validate_title",
+      "annotations": {
+        "security_sensitive": true,
+        "confidence": 0.95,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "validate_transition",
+      "annotations": {
+        "confidence": 0.9,
+        "reviewed_by": {
+          "human": "rafael"
+        },
+        "security_sensitive": true,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "status_to_string",
+      "annotations": {
+        "confidence": 0.99,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "status_from_string",
+      "annotations": {
+        "confidence": 0.95,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "create_task",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.95
+      }
+    },
+    {
+      "name": "find_task_index",
+      "annotations": {
+        "confidence": 0.9,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "update_status",
+      "annotations": {
+        "confidence": 0.9,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "delete_task",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "name": "task_to_json",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.95
+      }
+    },
+    {
+      "name": "tasks_to_json_array",
+      "annotations": {
+        "confidence": 0.85,
+        "reviewed_by": {
+          "human": "rafael"
+        },
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "count_by_status",
+      "annotations": {
+        "confidence": 0.95,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "collect_statuses",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "name": "sum_priorities",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "name": "high_priority_count",
+      "annotations": {
+        "confidence": 0.9,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "stats_to_json",
+      "annotations": {
+        "reviewed_by": {
+          "human": "rafael"
+        },
+        "confidence": 0.85,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "save_tasks",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.85,
+        "reviewed_by": {
+          "human": "rafael"
+        }
+      }
+    },
+    {
+      "name": "make_error",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.99
+      }
+    },
+    {
+      "name": "make_success",
+      "annotations": {
+        "confidence": 0.99,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "handle_create",
+      "annotations": {
+        "confidence": 0.9,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "handle_list",
+      "annotations": {
+        "confidence": 0.9,
+        "authored_by": {
+          "agent": "claude"
+        }
+      }
+    },
+    {
+      "name": "handle_health",
+      "annotations": {
+        "reviewed_by": {
+          "human": "rafael"
+        },
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.85
+      }
+    },
+    {
+      "name": "handle_stats",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "name": "route",
+      "annotations": {
+        "authored_by": {
+          "agent": "claude"
+        },
+        "confidence": 0.9
+      }
+    }
+  ],
+  "validators": [
+    "validate_validate_priority",
+    "validate_validate_title",
+    "validate_validate_transition",
+    "validate_status_to_string",
+    "validate_status_from_string",
+    "validate_create_task",
+    "validate_find_task_index",
+    "validate_update_status",
+    "validate_delete_task",
+    "validate_task_to_json",
+    "validate_tasks_to_json_array",
+    "validate_count_by_status",
+    "validate_collect_statuses",
+    "validate_sum_priorities",
+    "validate_high_priority_count",
+    "validate_stats_to_json",
+    "validate_save_tasks",
+    "validate_make_error",
+    "validate_make_success",
+    "validate_handle_create",
+    "validate_handle_list",
+    "validate_handle_health",
+    "validate_handle_stats",
+    "validate_route",
+    "validate_main"
+  ],
+  "type_check": "passed",
+  "source_hash": "sha256:48b97e6af3afe9f11be62abf139a36f59eff2739fe0af17bda8cdaa3ba74d955",
+  "binary_hash": "sha256:52226dd2eebb89e5c25d8bd4bb4a4062eaee4d75eb0c2ec23ccb3b7a42dad16f",
+  "certificate_hash": "sha256:284c8b8308b0492b3460cade67ad017057f15076c9741d1a824cca135f15b0d4",
+  "parent_certificate": "sha256:c1b792d0ca2dee536cc924d96ccb2370418e848a19038f5225f8a9b710a6b939",
+  "diff_from_parent": {
+    "functions_added": [],
+    "functions_removed": [],
+    "contracts_changed": false,
+    "source_hash_changed": false
+  },
+  "function_contracts": [
+    {
+      "name": "validate_priority",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "validate_title",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "validate_transition",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "status_to_string",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "status_from_string",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "create_task",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "find_task_index",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "update_status",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "delete_task",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "task_to_json",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "tasks_to_json_array",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "count_by_status",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "collect_statuses",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "sum_priorities",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "high_priority_count",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "stats_to_json",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "save_tasks",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "make_error",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "make_success",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "handle_create",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "handle_list",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "handle_health",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "handle_stats",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "route",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "main",
+      "contracts": "runtime_only"
+    },
+    {
+      "name": "Option_is_some",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_is_none",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Option_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_ok",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_is_err",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "Result_unwrap_or",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_map",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_filter",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_fold",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_reduce",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_count",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_any",
+      "contracts": "no_contracts"
+    },
+    {
+      "name": "List_all",
+      "contracts": "no_contracts"
+    }
+  ]
+}

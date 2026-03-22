@@ -11,8 +11,6 @@ use std::path::Path;
 #[cfg(feature = "inkwell")]
 use inkwell::context::Context;
 #[cfg(feature = "inkwell")]
-use inkwell::types::BasicTypeEnum;
-#[cfg(feature = "inkwell")]
 use inkwell::module::Module;
 #[cfg(feature = "inkwell")]
 use inkwell::passes::PassBuilderOptions;
@@ -20,6 +18,8 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
+#[cfg(feature = "inkwell")]
+use inkwell::types::BasicTypeEnum;
 #[cfg(feature = "inkwell")]
 use inkwell::OptimizationLevel;
 
@@ -112,8 +112,8 @@ pub fn compile_module(
     };
 
     let target_triple = TargetMachine::get_default_triple();
-    let target = Target::from_triple(&target_triple)
-        .map_err(|e| format!("failed to get target: {e}"))?;
+    let target =
+        Target::from_triple(&target_triple).map_err(|e| format!("failed to get target: {e}"))?;
     let target_machine = target
         .create_target_machine(
             &target_triple,
