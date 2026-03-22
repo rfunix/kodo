@@ -3,46 +3,37 @@
 #[cfg(feature = "inkwell")]
 use inkwell::context::Context;
 #[cfg(feature = "inkwell")]
-use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::types::BasicTypeEnum;
 
 use kodo_types::Type;
 
 /// Converts a Kōdo type to an inkwell basic type.
 #[cfg(feature = "inkwell")]
 pub fn to_llvm_type<'ctx>(ctx: &'ctx Context, ty: &Type) -> BasicTypeEnum<'ctx> {
+    if is_enum_like(ty) {
+        // Enums, Option, and Result use { i64, i64 } — discriminant + payload.
+        return ctx
+            .struct_type(&[ctx.i64_type().into(), ctx.i64_type().into()], false)
+            .into();
+    }
     match ty {
-        Type::Int | Type::Bool | Type::Function(_, _) => ctx.i64_type().into(),
         Type::Float64 => ctx.f64_type().into(),
         Type::String => ctx
             .struct_type(&[ctx.i64_type().into(), ctx.i64_type().into()], false)
             .into(),
-        Type::Unit => ctx.i64_type().into(), // Unit represented as i64(0)
-        Type::Generic(name, _) if name == "List" || name == "Map" || name == "Set" => {
-            ctx.i64_type().into() // Opaque pointer handle
-        }
-        Type::Generic(name, _) if name == "Channel" => ctx.i64_type().into(),
-        Type::Generic(name, _) if name == "Option" || name == "Result" => {
-            // Option/Result are enums — tag + payload
-            ctx.struct_type(
-                &[
-                    ctx.i64_type().into(), // discriminant
-                    ctx.i64_type().into(), // payload
-                ],
-                false,
-            )
-            .into()
-        }
-        Type::Struct(_) => ctx.i64_type().into(), // Pointer to heap struct
-        Type::Enum(_) => ctx
-            .struct_type(
-                &[
-                    ctx.i64_type().into(), // discriminant
-                    ctx.i64_type().into(), // payload (largest variant)
-                ],
-                false,
-            )
-            .into(),
-        _ => ctx.i64_type().into(), // Default fallback
+        // All other types use i64: Int, Bool, Unit, Function pointers,
+        // List/Map/Set/Channel (opaque handles), Struct (heap pointer).
+        _ => ctx.i64_type().into(),
+    }
+}
+
+/// Returns true if the type is an enum-like type that uses { discriminant, payload }.
+#[cfg(feature = "inkwell")]
+fn is_enum_like(ty: &Type) -> bool {
+    match ty {
+        Type::Enum(_) => true,
+        Type::Generic(name, _) if name == "Option" || name == "Result" => true,
+        _ => false,
     }
 }
 

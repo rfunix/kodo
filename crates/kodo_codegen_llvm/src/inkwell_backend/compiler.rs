@@ -11,8 +11,6 @@ use std::path::Path;
 #[cfg(feature = "inkwell")]
 use inkwell::context::Context;
 #[cfg(feature = "inkwell")]
-use inkwell::module::Module;
-#[cfg(feature = "inkwell")]
 use inkwell::passes::PassBuilderOptions;
 #[cfg(feature = "inkwell")]
 use inkwell::targets::{
@@ -24,7 +22,7 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::OptimizationLevel;
 
 #[cfg(feature = "inkwell")]
-use kodo_mir::MirFunction;
+use kodo_mir::{BlockId, LocalId, MirFunction};
 #[cfg(feature = "inkwell")]
 use kodo_types::Type;
 
@@ -33,18 +31,25 @@ use super::types::to_llvm_type;
 
 /// Compiles MIR functions to a native object file using the inkwell LLVM API.
 ///
-/// This is the main entry point for the inkwell backend. It:
-/// 1. Creates an LLVM module with all function declarations
-/// 2. Translates each MIR function to LLVM IR
-/// 3. Runs the LLVM optimization pipeline
-/// 4. Emits a native object file
+/// # Errors
 ///
-/// Returns the path to the generated object file, or an error message.
+/// Returns an error string if LLVM initialization, optimization, or
+/// object file emission fails.
+///
+/// # Panics
+///
+/// Panics if LLVM builder calls fail due to invalid insertion point
+/// (should not happen with well-formed MIR).
 #[cfg(feature = "inkwell")]
+#[allow(
+    clippy::implicit_hasher,
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation
+)]
 pub fn compile_module(
     functions: &[MirFunction],
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
-    _enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     opt_level: u8,
     output_path: &Path,
 ) -> Result<(), String> {
@@ -56,51 +61,35 @@ pub fn compile_module(
     let module = context.create_module("kodo_module");
     let builder = context.create_builder();
 
-    // Declare runtime builtins
-    declare_runtime_builtins(&context, &module);
+    // Declare ALL runtime builtins
+    super::builtins::declare_all_runtime_builtins(&context, &module);
+
+    // Collect user function names
+    let user_functions: Vec<String> = functions.iter().map(|f| f.name.clone()).collect();
 
     // Declare all user functions first (forward declarations)
     let mut fn_map = HashMap::new();
-    for func in functions {
-        let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = func
-            .locals
-            .iter()
-            .take(func.param_count)
-            .map(|local| to_llvm_type(&context, &local.ty).into())
-            .collect();
+    declare_functions(functions, &context, &module, &mut fn_map);
 
-        let fn_type = if super::types::is_void(&func.return_type) {
-            context.void_type().fn_type(&param_types, false)
-        } else {
-            match to_llvm_type(&context, &func.return_type) {
-                BasicTypeEnum::IntType(t) => t.fn_type(&param_types, false),
-                BasicTypeEnum::FloatType(t) => t.fn_type(&param_types, false),
-                BasicTypeEnum::StructType(t) => t.fn_type(&param_types, false),
-                BasicTypeEnum::PointerType(t) => t.fn_type(&param_types, false),
-                BasicTypeEnum::ArrayType(t) => t.fn_type(&param_types, false),
-                BasicTypeEnum::VectorType(t) => t.fn_type(&param_types, false),
-                _ => context.i64_type().fn_type(&param_types, false),
-            }
+    // Translate each function's body
+    let mut name_counter: u32 = 0;
+    for func in functions {
+        let Some(fn_val) = fn_map.get(&func.name).copied() else {
+            continue;
         };
 
-        let fn_val = module.add_function(&func.name, fn_type, None);
-        fn_map.insert(func.name.clone(), fn_val);
-    }
-
-    // TODO: Phase 2 — translate each function's body (instructions, terminators)
-    // For now, each function is just a stub that returns 0/void.
-    for func in functions {
-        if let Some(fn_val) = fn_map.get(&func.name) {
-            let entry = context.append_basic_block(*fn_val, "entry");
-            builder.position_at_end(entry);
-
-            if super::types::is_void(&func.return_type) {
-                let _ = builder.build_return(None);
-            } else {
-                let zero = context.i64_type().const_int(0, false);
-                let _ = builder.build_return(Some(&zero));
-            }
-        }
+        translate_function_body(
+            func,
+            fn_val,
+            &context,
+            &module,
+            &builder,
+            &fn_map,
+            &user_functions,
+            struct_defs,
+            enum_defs,
+            &mut name_counter,
+        );
     }
 
     // Run optimization passes
@@ -146,50 +135,173 @@ pub fn compile_module(
     Ok(())
 }
 
-/// Returns the LLVM IR as a string (for --emit-llvm).
+/// Returns the LLVM IR as a string (for `--emit-llvm`).
 #[cfg(feature = "inkwell")]
+#[must_use]
+#[allow(clippy::implicit_hasher, clippy::cast_possible_truncation)]
 pub fn emit_ir(
     functions: &[MirFunction],
     struct_defs: &HashMap<String, Vec<(String, Type)>>,
-    _enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
-) -> Result<String, String> {
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+) -> String {
     let context = Context::create();
     let module = context.create_module("kodo_module");
+    let builder = context.create_builder();
 
-    declare_runtime_builtins(&context, &module);
+    // Declare all runtime builtins
+    super::builtins::declare_all_runtime_builtins(&context, &module);
 
-    // TODO: Full translation in Phase 2
-    Ok(module.print_to_string().to_string())
+    // Collect user function names
+    let user_functions: Vec<String> = functions.iter().map(|f| f.name.clone()).collect();
+
+    // Declare and translate all functions
+    let mut fn_map = HashMap::new();
+    declare_functions(functions, &context, &module, &mut fn_map);
+
+    let mut name_counter: u32 = 0;
+    for func in functions {
+        let Some(fn_val) = fn_map.get(&func.name).copied() else {
+            continue;
+        };
+
+        translate_function_body(
+            func,
+            fn_val,
+            &context,
+            &module,
+            &builder,
+            &fn_map,
+            &user_functions,
+            struct_defs,
+            enum_defs,
+            &mut name_counter,
+        );
+    }
+
+    module.print_to_string().to_string()
 }
 
-/// Declares common runtime builtins (kodo_println, kodo_list_new, etc.).
+/// Declares all user functions in the LLVM module.
 #[cfg(feature = "inkwell")]
-fn declare_runtime_builtins<'a>(context: &'a Context, module: &Module<'a>) {
-    let i64_ty = context.i64_type();
-    let void_ty = context.void_type();
+fn declare_functions<'ctx>(
+    functions: &[MirFunction],
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    fn_map: &mut HashMap<String, inkwell::values::FunctionValue<'ctx>>,
+) {
+    for func in functions {
+        let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = func
+            .locals
+            .iter()
+            .take(func.param_count)
+            .map(|local| to_llvm_type(context, &local.ty).into())
+            .collect();
 
-    // Print functions
-    let println_ty = void_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
-    module.add_function("kodo_println", println_ty, None);
+        let fn_type = if super::types::is_void(&func.return_type) {
+            context.void_type().fn_type(&param_types, false)
+        } else {
+            let ret_ty = to_llvm_type(context, &func.return_type);
+            #[allow(clippy::match_wildcard_for_single_variants)]
+            match ret_ty {
+                BasicTypeEnum::IntType(t) => t.fn_type(&param_types, false),
+                BasicTypeEnum::FloatType(t) => t.fn_type(&param_types, false),
+                BasicTypeEnum::StructType(t) => t.fn_type(&param_types, false),
+                BasicTypeEnum::PointerType(t) => t.fn_type(&param_types, false),
+                BasicTypeEnum::ArrayType(t) => t.fn_type(&param_types, false),
+                BasicTypeEnum::VectorType(t) => t.fn_type(&param_types, false),
+                _ => context.i64_type().fn_type(&param_types, false),
+            }
+        };
 
-    let print_int_ty = void_ty.fn_type(&[i64_ty.into()], false);
-    module.add_function("kodo_print_int", print_int_ty, None);
+        let fn_val = module.add_function(&func.name, fn_type, None);
+        fn_map.insert(func.name.clone(), fn_val);
+    }
+}
 
-    // List operations
-    let list_new_ty = i64_ty.fn_type(&[], false);
-    module.add_function("kodo_list_new", list_new_ty, None);
+/// Translates a single function body from MIR to LLVM IR.
+#[cfg(feature = "inkwell")]
+#[allow(clippy::too_many_arguments, clippy::cast_possible_truncation)]
+fn translate_function_body<'ctx>(
+    func: &MirFunction,
+    fn_val: inkwell::values::FunctionValue<'ctx>,
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    builder: &inkwell::builder::Builder<'ctx>,
+    fn_map: &HashMap<String, inkwell::values::FunctionValue<'ctx>>,
+    user_functions: &[String],
+    struct_defs: &HashMap<String, Vec<(String, Type)>>,
+    enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
+    name_counter: &mut u32,
+) {
+    // Build local type map
+    let local_types: HashMap<LocalId, Type> =
+        func.locals.iter().map(|l| (l.id, l.ty.clone())).collect();
 
-    let list_push_ty = void_ty.fn_type(&[i64_ty.into(), i64_ty.into()], false);
-    module.add_function("kodo_list_push", list_push_ty, None);
+    // Create basic blocks for each MIR block
+    let mut block_map = HashMap::new();
+    for (i, _block) in func.blocks.iter().enumerate() {
+        let bb = context.append_basic_block(fn_val, &format!("bb{i}"));
+        block_map.insert(BlockId(i as u32), bb);
+    }
 
-    // Memory
-    let alloc_ty = i64_ty.fn_type(&[i64_ty.into()], false);
-    module.add_function("kodo_alloc", alloc_ty, None);
+    // Create allocas for all locals in the entry block
+    let entry_bb = block_map
+        .get(&func.entry)
+        .copied()
+        .unwrap_or_else(|| block_map[&BlockId(0)]);
+    builder.position_at_end(entry_bb);
 
-    let free_ty = void_ty.fn_type(&[i64_ty.into()], false);
-    module.add_function("kodo_free", free_ty, None);
+    let mut local_allocas = HashMap::new();
+    for (i, local) in func.locals.iter().enumerate() {
+        let ty = to_llvm_type(context, &local.ty);
+        let alloca_name = format!("local{i}");
+        let alloca = builder.build_alloca(ty, &alloca_name).unwrap();
+        local_allocas.insert(LocalId(i as u32), alloca);
+    }
 
-    // TODO: Phase 1 completion — declare all 160+ runtime builtins
-    // For now, only essential ones are declared. The full list will be
-    // ported from the textual backend's builtins.rs.
+    // Store function parameters into their allocas
+    for i in 0..func.param_count {
+        if let Some(param_val) = fn_val.get_nth_param(i as u32) {
+            if let Some(alloca) = local_allocas.get(&LocalId(i as u32)) {
+                builder.build_store(*alloca, param_val).unwrap();
+            }
+        }
+    }
+
+    // Translate each block
+    for (i, block) in func.blocks.iter().enumerate() {
+        let bb = block_map[&BlockId(i as u32)];
+        builder.position_at_end(bb);
+
+        for instr in &block.instructions {
+            super::instruction::translate_instruction(
+                instr,
+                context,
+                module,
+                builder,
+                &local_allocas,
+                &local_types,
+                fn_map,
+                user_functions,
+                struct_defs,
+                enum_defs,
+                name_counter,
+            );
+        }
+
+        super::terminator::translate_terminator(
+            &block.terminator,
+            context,
+            module,
+            builder,
+            &local_allocas,
+            &local_types,
+            fn_map,
+            &block_map,
+            &func.return_type,
+            struct_defs,
+            enum_defs,
+            name_counter,
+        );
+    }
 }
