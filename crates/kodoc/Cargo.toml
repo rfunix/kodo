@@ -19,7 +19,7 @@ kodo_contracts = { workspace = true, features = ["smt"] }
 kodo_resolver.workspace = true
 kodo_mir.workspace = true
 kodo_codegen.workspace = true
-kodo_codegen_llvm.workspace = true
+kodo_codegen_llvm = { workspace = true, features = [] }
 kodo_std.workspace = true
 kodo_desugar.workspace = true
 kodo_lsp.workspace = true
@@ -36,3 +36,7 @@ strsim.workspace = true
 object.workspace = true
 rustyline.workspace = true
 toml.workspace = true
+
+[features]
+default = []
+inkwell = ["kodo_codegen_llvm/inkwell"]

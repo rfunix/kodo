@@ -405,6 +405,39 @@ pub(crate) fn run_build(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| file.with_extension(""));
 
+    // Inkwell LLVM backend (feature-gated, uses LLVM C API for optimized codegen)
+    #[cfg(feature = "inkwell")]
+    if backend == "inkwell" {
+        let opt = if release { 3 } else { 2 };
+        return match kodo_codegen_llvm::inkwell_backend::compile_module(
+            &all_mir_functions,
+            &struct_defs,
+            &enum_defs,
+            opt,
+            &output_path,
+        ) {
+            Ok(()) => {
+                let obj_path = output_path.with_extension("o");
+                let result = link_executable(&obj_path, &output_path);
+                let _ = std::fs::remove_file(&obj_path);
+                match result {
+                    Ok(()) => {
+                        println!("Successfully compiled → {}", output_path.display());
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("link error: {e}");
+                        1
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("inkwell codegen error: {e}");
+                1
+            }
+        };
+    }
+
     let link_result = if backend == "llvm" {
         // LLVM backend: generate textual IR, optionally compile with llc.
         let llvm_opts = kodo_codegen_llvm::LLVMCodegenOptions::default();
