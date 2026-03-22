@@ -328,7 +328,8 @@ impl MirBuilder {
         let ensures_exprs = self.ensures.clone();
 
         // Store the return value in a local so ensures expressions can reference it.
-        let result_local = self.alloc_local(Type::Unknown, false);
+        let result_ty = self.infer_value_type(ret_val);
+        let result_local = self.alloc_local(result_ty, false);
         self.emit(Instruction::Assign(result_local, ret_val.clone()));
         let prev_result = self.name_map.insert("result".to_string(), result_local);
 

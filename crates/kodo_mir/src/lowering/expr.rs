@@ -780,7 +780,8 @@ impl MirBuilder {
         let object_local = match object_val {
             Value::Local(id) => id,
             other => {
-                let tmp = self.alloc_local(Type::Unknown, false);
+                let tmp_ty = self.infer_value_type(&other);
+                let tmp = self.alloc_local(tmp_ty, false);
                 self.emit(Instruction::Assign(tmp, other));
                 tmp
             }
@@ -1086,7 +1087,8 @@ impl MirBuilder {
 
         // Lower the then branch.
         let then_val = self.lower_block(then_branch)?;
-        let then_result = self.alloc_local(Type::Unknown, false);
+        let then_ty = self.infer_value_type(&then_val);
+        let then_result = self.alloc_local(then_ty, false);
         self.emit(Instruction::Assign(then_result, then_val));
         self.seal_block(Terminator::Goto(merge_block), else_block);
 
@@ -1096,7 +1098,8 @@ impl MirBuilder {
         } else {
             Value::Unit
         };
-        let else_result = self.alloc_local(Type::Unknown, false);
+        let else_ty = self.infer_value_type(&else_val);
+        let else_result = self.alloc_local(else_ty, false);
         self.emit(Instruction::Assign(else_result, else_val));
         self.seal_block(Terminator::Goto(merge_block), merge_block);
 

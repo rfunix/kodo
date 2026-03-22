@@ -50,6 +50,9 @@ impl MirBuilder {
         };
 
         // Generate a chain of branches testing discriminant.
+        // Track the first arm's result type so we can retroactively
+        // update result_local from Unknown to the concrete type.
+        let mut result_ty_resolved = false;
         for (i, arm) in arms.iter().enumerate() {
             let is_last = i + 1 == arms.len();
             match &arm.pattern {
@@ -71,6 +74,13 @@ impl MirBuilder {
                 kodo_ast::Pattern::Wildcard(_) => {
                     // Wildcard catches everything remaining.
                     let arm_val = self.lower_expr(&arm.body)?;
+                    if !result_ty_resolved {
+                        let arm_ty = self.infer_value_type(&arm_val);
+                        if arm_ty != Type::Unknown {
+                            self.local_types.insert(ctx.result_local, arm_ty);
+                            result_ty_resolved = true;
+                        }
+                    }
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
                 }
@@ -80,6 +90,13 @@ impl MirBuilder {
                 kodo_ast::Pattern::Tuple(_, _) => {
                     // Tuple patterns in match arms: lower body directly.
                     let arm_val = self.lower_expr(&arm.body)?;
+                    if !result_ty_resolved {
+                        let arm_ty = self.infer_value_type(&arm_val);
+                        if arm_ty != Type::Unknown {
+                            self.local_types.insert(ctx.result_local, arm_ty);
+                            result_ty_resolved = true;
+                        }
+                    }
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
                 }

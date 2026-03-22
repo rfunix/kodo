@@ -18,14 +18,14 @@ MirFunction {
             id: LocalId(
                 1,
             ),
-            ty: Unknown,
+            ty: Int,
             mutable: false,
         },
         Local {
             id: LocalId(
                 2,
             ),
-            ty: Unknown,
+            ty: Int,
             mutable: false,
         },
     ],

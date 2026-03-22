@@ -71,10 +71,16 @@ impl MirBuilder {
 
     /// Recursively binds tuple pattern variables to extracted tuple elements.
     fn lower_tuple_pattern_bindings(&mut self, pattern: &kodo_ast::Pattern, val: &Value) {
+        let val_ty = self.infer_value_type(val);
         match pattern {
             kodo_ast::Pattern::Tuple(pats, _) => {
                 for (i, pat) in pats.iter().enumerate() {
-                    let elem_local = self.alloc_local(Type::Unknown, false);
+                    // Extract element type from the parent tuple type when available.
+                    let elem_ty = match &val_ty {
+                        Type::Tuple(elems) => elems.get(i).cloned().unwrap_or(Type::Unknown),
+                        _ => Type::Unknown,
+                    };
+                    let elem_local = self.alloc_local(elem_ty, false);
                     #[allow(clippy::cast_possible_truncation)]
                     let field_idx = i as u32;
                     self.emit(Instruction::Assign(
@@ -94,7 +100,8 @@ impl MirBuilder {
                 ..
             } if bindings.is_empty() => {
                 // Simple identifier binding (e.g., `a` in `let (a, b) = ...`).
-                let bind_local = self.alloc_local(Type::Unknown, false);
+                let bind_ty = self.infer_value_type(val);
+                let bind_local = self.alloc_local(bind_ty, false);
                 self.name_map.insert(name.clone(), bind_local);
                 self.emit(Instruction::Assign(bind_local, val.clone()));
             }
