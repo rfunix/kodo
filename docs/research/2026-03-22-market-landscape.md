@@ -1,128 +1,128 @@
-# Pesquisa de Mercado — 2026-03-22
+# Market Research — 2026-03-22
 
-## Contexto
+## Context
 
-Pesquisa de mercado sobre linguagens compiladas, tendências em AI-assisted programming,
-e inovações em type systems/contracts. Objetivo: identificar oportunidades e ameaças
-para o posicionamento do Kōdo como linguagem para AI agents.
+Market research on compiled languages, AI-assisted programming trends,
+and innovations in type systems/contracts. Goal: identify opportunities and threats
+for Kōdo's positioning as a language for AI agents.
 
 ---
 
-## 1. Panorama de Linguagens Compiladas (2025-2026)
+## 1. Compiled Languages Landscape (2025-2026)
 
 ### Rust
-- Subiu de #19 para #14 no TIOBE. Consolidou-se como escolha padrão para infraestrutura segura.
-- **Rust 2026 goals**: ~60 propostas em andamento. Destaques:
-  - **Next-gen trait solver**: refatoração que desbloqueia implied bounds, negative impls, e corrige unsoundnesses.
-  - **Polonius**: novo borrow checker que habilita "lending iterators" e padrões de borrowing mais expressivos. Meta: estabilização em 2026.
-  - **In-place initialization**: criação de structs vinculados a locais em memória, desbloqueando `dyn Trait` com `async fn` e `-> impl Trait`.
-- **Sem contracts nativos**: Rust ainda não tem RFC aceita para contracts (`requires`/`ensures`). Isso mantém o diferencial do Kōdo.
+- Climbed from #19 to #14 on TIOBE. Established as the standard choice for safe infrastructure.
+- **Rust 2026 goals**: ~60 proposals in progress. Highlights:
+  - **Next-gen trait solver**: refactoring that unblocks implied bounds, negative impls, and fixes unsoundnesses.
+  - **Polonius**: new borrow checker enabling "lending iterators" and more expressive borrowing patterns. Target: stabilization in 2026.
+  - **In-place initialization**: creating structs bound to memory locations, unblocking `dyn Trait` with `async fn` and `-> impl Trait`.
+- **No native contracts**: Rust still has no accepted RFC for contracts (`requires`/`ensures`). This preserves Kōdo's differentiator.
 
 ### Mojo
-- **Primeira linguagem construída inteiramente sobre MLIR**. Permite compilação para GPUs, TPUs, ASICs.
-- Compilador será open-source em 2026. Versão production-ready esperada para Q1 2026.
-- Suporte a GPUs portáveis (NVIDIA + AMD) desde junho 2025.
-- **Posicionamento**: Python-like com performance de C. Foco em AI/ML, não em agentes autônomos.
-- **Relevância para Kōdo**: Mojo valida que linguagens novas podem ganhar tração se resolverem um problema claro. O target dele (AI/ML hardware) é ortogonal ao do Kōdo (AI agents escrevendo código).
+- **First language built entirely on MLIR**. Enables compilation for GPUs, TPUs, ASICs.
+- Compiler will be open-source in 2026. Production-ready version expected Q1 2026.
+- Portable GPU support (NVIDIA + AMD) since June 2025.
+- **Positioning**: Python-like with C performance. Focus on AI/ML, not autonomous agents.
+- **Relevance to Kōdo**: Mojo validates that new languages can gain traction if they solve a clear problem. Its target (AI/ML hardware) is orthogonal to Kōdo's (AI agents writing code).
 
 ### Zig
-- Saltou de #149 para #61 no TIOBE. Competidor direto de C.
-- Simplicidade radical: controle low-level com safety features opcionais (bounds checking, null checks, error unions).
-- **Relevância para Kōdo**: Zig mostra que simplicidade vende. O Kōdo deve manter a sintaxe limpa e LL(1).
+- Jumped from #149 to #61 on TIOBE. Direct competitor to C.
+- Radical simplicity: low-level control with optional safety features (bounds checking, null checks, error unions).
+- **Relevance to Kōdo**: Zig shows that simplicity sells. Kōdo should maintain clean syntax and LL(1).
 
 ### Carbon
-- Linguagem experimental do Google para suceder C++. Foco em interoperabilidade com C++ existente.
-- Ainda em estágio experimental. Sem timeline de produção.
-- **Relevância para Kōdo**: baixa. Carbon compete no espaço legacy C++.
+- Google's experimental language to succeed C++. Focus on interoperability with existing C++.
+- Still in experimental stage. No production timeline.
+- **Relevance to Kōdo**: Low. Carbon competes in the legacy C++ space.
 
 ### Gleam
-- Roda na Erlang VM. Foco em concorrência e fault-tolerance.
-- **Relevância para Kōdo**: O modelo de concorrência do Gleam (actor-based via BEAM) é maduro. Kōdo pode estudar o modelo para evoluir structured concurrency no futuro.
+- Runs on the Erlang VM. Focus on concurrency and fault-tolerance.
+- **Relevance to Kōdo**: Gleam's concurrency model (actor-based via BEAM) is mature. Kōdo can study it to evolve structured concurrency in the future.
 
 ### Vale
-- Abordagem inovadora: **generational references** + **region borrowing**.
-- Cada objeto tem um "current generation" integer incrementado no free. Ponteiros carregam "remembered generation". Na desreferência, assert que os números batem.
-- **Region borrowing**: o compilador sabe que durante um escopo, uma região de dados não será modificada, eliminando overhead de generation checks.
-- Protótipo mostrou **zero overhead observável** quando usando linear style + regions.
-- **Relevância para Kōdo**: ALTA. O modelo de Vale para memory safety sem borrow checker complexo é uma alternativa interessante ao modelo own/ref/mut do Kōdo. Vale que generational references permitem padrões que borrow checking proíbe (observers, back-references, graphs). Monitorar evolução.
+- Innovative approach: **generational references** + **region borrowing**.
+- Each object has a "current generation" integer incremented on free. Pointers carry a "remembered generation". On dereference, assert the numbers match.
+- **Region borrowing**: the compiler knows that during a scope, a data region won't be modified, eliminating generation check overhead.
+- Prototype showed **zero observable overhead** when using linear style + regions.
+- **Relevance to Kōdo**: HIGH. Vale's model for memory safety without a complex borrow checker is an interesting alternative to Kōdo's own/ref/mut model. Generational references allow patterns that borrow checking prohibits (observers, back-references, graphs). Monitor evolution.
 
 ### Roc
-- Linguagem funcional pura com foco em performance e binários pequenos.
-- **Relevância para Kōdo**: baixa diretamente, mas o foco de Roc em "platform hosts" (separar IO do código puro) é conceito interessante para sandboxing de agentes.
+- Pure functional language focused on performance and small binaries.
+- **Relevance to Kōdo**: Low directly, but Roc's focus on "platform hosts" (separating IO from pure code) is an interesting concept for agent sandboxing.
 
 ---
 
-## 2. Tendências em AI-Assisted Programming
+## 2. AI-Assisted Programming Trends
 
-### Relatório Anthropic "2026 Agentic Coding Trends"
+### Anthropic "2026 Agentic Coding Trends" Report
 
-Oito tendências identificadas:
+Eight identified trends:
 
-1. **Mudança de papel dos engenheiros**: de escrever código para orquestrar agentes. Foco em arquitetura, design e decisões estratégicas.
-2. **De single-agent para multi-agent**: organizações deployam agentes especializados trabalhando em paralelo com context windows separados.
-3. **Colaboração human-AI**: 60% do trabalho integra AI, com supervisão ativa em 80-100% das tarefas delegadas.
-4. **Multi-agent coordination**: raciocínio paralelo em context windows separados é prática padrão.
-5. **Scaling de agentic coding além de engenharia**: domain experts de outros departamentos podem usar.
-6. **AI-automated review**: sistemas de review automatizado são essenciais para gerenciar output de agentes.
-7. **Cross-functional adoption**: adoção multiplicativa de valor.
-8. **Quality assurance em escala**: manter qualidade com throughput acelerado.
+1. **Shifting engineer role**: from writing code to orchestrating agents. Focus on architecture, design, and strategic decisions.
+2. **Single-agent to multi-agent**: organizations deploy specialized agents working in parallel with separate context windows.
+3. **Human-AI collaboration**: 60% of work integrates AI, with active supervision in 80-100% of delegated tasks.
+4. **Multi-agent coordination**: parallel reasoning in separate context windows is standard practice.
+5. **Scaling agentic coding beyond engineering**: domain experts from other departments can use it.
+6. **AI-automated review**: automated review systems are essential for managing agent output.
+7. **Cross-functional adoption**: multiplicative value adoption.
+8. **Quality assurance at scale**: maintaining quality with accelerated throughput.
 
-### Modelos Especializados por Linguagem
-- Em 2026, surgiram modelos narrow-focused treinados exclusivamente nas regras de segurança e memória de ecossistemas específicos (Rust, Swift).
-- **Oportunidade para Kōdo**: um modelo fine-tuned para Kōdo que entenda contracts, ownership linear, e intent blocks seria um diferencial competitivo enorme.
+### Language-Specialized Models
+- In 2026, narrow-focused models trained exclusively on security and memory rules of specific ecosystems (Rust, Swift) emerged.
+- **Opportunity for Kōdo**: a fine-tuned model for Kōdo that understands contracts, linear ownership, and intent blocks would be an enormous competitive differentiator.
 
-### MCP como Padrão
-- MCP (Model Context Protocol) entrou na Linux Foundation e se tornou padrão para tool/data access em sistemas agênticos.
-- **Kōdo já tem MCP server** — isso é um diferencial. Manter e expandir.
+### MCP as Standard
+- MCP (Model Context Protocol) joined the Linux Foundation and became the standard for tool/data access in agentic systems.
+- **Kōdo already has an MCP server** — this is a differentiator. Maintain and expand.
 
-### Stack de Mercado
-- GPT-5.2 lidera em lógica, Claude 4.5 em qualidade de engenharia, Gemini 3 em large context.
-- Devstral (Mistral) foca em code-agent model.
-- DeepSeek-V3.2 melhor open-source para reasoning e agentic workloads.
+### Market Stack
+- GPT-5.2 leads in logic, Claude 4.5 in engineering quality, Gemini 3 in large context.
+- Devstral (Mistral) focuses on code-agent model.
+- DeepSeek-V3.2 best open-source for reasoning and agentic workloads.
 
-### Nenhuma Linguagem Concorrente para AI Agents
-- **Achado crítico**: Não existe outra linguagem projetada especificamente para AI agents. O espaço é dominado por **ferramentas** (Cursor, Claude Code, Copilot, Devin) que trabalham com linguagens existentes.
-- **Kōdo ocupa um nicho vazio**. Isso é simultaneamente uma oportunidade (first-mover) e um risco (o mercado pode não ver necessidade de uma linguagem nova).
-
----
-
-## 3. Inovações em Type Systems e Contracts
-
-### Contracts: Estado da Arte
-- **Racket**: implementação nativa de contracts com ênfase em "blame assignment" — quando um contrato é violado, o sistema identifica qual parte do código é culpada com explicação precisa.
-- **UC Berkeley (2025)**: "Constraint-behavior contracts" para componentes físicos usando equações implícitas. Foco em automação de verificação.
-- **Integração type system + contracts**: tendência de tratar contracts como parte do sistema de tipos, não como anotações externas.
-
-### Oportunidades para Kōdo
-1. **Blame assignment aprimorado**: implementar blame tracking estilo Racket nos contracts do Kōdo. Quando um `requires` falha, identificar automaticamente qual caller violou a precondição e gerar fix patch.
-2. **Contracts como tipos**: explorar a possibilidade de refinement types (`x: Int where x > 0`) que unificam constraints com o sistema de tipos.
-3. **Contract inference**: inferir contracts automaticamente a partir do corpo da função (e.g., se a função faz `x / y`, inferir `requires { y != 0 }`).
+### No Competing Language for AI Agents
+- **Critical finding**: No other language is designed specifically for AI agents. The space is dominated by **tools** (Cursor, Claude Code, Copilot, Devin) that work with existing languages.
+- **Kōdo occupies an empty niche**. This is simultaneously an opportunity (first-mover) and a risk (the market may not see the need for a new language).
 
 ---
 
-## 4. Avaliação de Impacto para o Kōdo
+## 3. Type System and Contract Innovations
 
-### Ameaças
-| Ameaça | Severidade | Mitigação |
-|--------|------------|-----------|
-| Rust adotar contracts nativos | Alta | Kōdo já tem contracts + Z3; manter liderança em DX |
-| Mojo capturar mindshare "nova linguagem" | Média | Posicionamento diferente (AI agents vs AI/ML hardware) |
-| Ferramentas como Cursor/Devin tornam linguagem irrelevante | Média | Kōdo oferece garantias que ferramentas sobre linguagens existentes não podem |
-| Modelos narrow-focused para Rust | Baixa | Criar modelo fine-tuned para Kōdo |
+### Contracts: State of the Art
+- **Racket**: native contract implementation with emphasis on "blame assignment" — when a contract is violated, the system identifies which part of the code is at fault with precise explanation.
+- **UC Berkeley (2025)**: "Constraint-behavior contracts" for physical components using implicit equations. Focus on verification automation.
+- **Type system + contracts integration**: trend of treating contracts as part of the type system, not as external annotations.
 
-### Oportunidades
-| Oportunidade | Prioridade | Ação |
-|--------------|------------|------|
-| Nicho vazio de "linguagem para AI agents" | Crítica | Marketing e developer relations focados |
-| Multi-agent coordination (Anthropic report) | Alta | Expandir MCP server para suportar multi-agent workflows |
-| Blame assignment em contracts | Alta | Implementar blame tracking estilo Racket |
-| Contract inference automática | Média | Pesquisar viabilidade com Z3 |
-| Modelo fine-tuned para Kōdo | Média | Coletar dataset de código .ko para fine-tuning |
-| Region borrowing (Vale) | Baixa | Monitorar; considerar para v2.0 |
+### Opportunities for Kōdo
+1. **Enhanced blame assignment**: implement Racket-style blame tracking in Kōdo's contracts. When a `requires` fails, automatically identify which caller violated the precondition and generate a fix patch.
+2. **Contracts as types**: explore the possibility of refinement types (`x: Int where x > 0`) that unify constraints with the type system.
+3. **Contract inference**: automatically infer contracts from function bodies (e.g., if the function does `x / y`, infer `requires { y != 0 }`).
 
 ---
 
-## Fontes
+## 4. Impact Assessment for Kōdo
+
+### Threats
+| Threat | Severity | Mitigation |
+|--------|----------|------------|
+| Rust adopts native contracts | High | Kōdo already has contracts + Z3; maintain DX leadership |
+| Mojo captures "new language" mindshare | Medium | Different positioning (AI agents vs AI/ML hardware) |
+| Tools like Cursor/Devin make language irrelevant | Medium | Kōdo offers guarantees that tools on existing languages cannot |
+| Narrow-focused models for Rust | Low | Create fine-tuned model for Kōdo |
+
+### Opportunities
+| Opportunity | Priority | Action |
+|-------------|----------|--------|
+| Empty niche of "language for AI agents" | Critical | Focused marketing and developer relations |
+| Multi-agent coordination (Anthropic report) | High | Expand MCP server to support multi-agent workflows |
+| Blame assignment in contracts | High | Implement Racket-style blame tracking |
+| Automatic contract inference | Medium | Research feasibility with Z3 |
+| Fine-tuned model for Kōdo | Medium | Collect .ko code dataset for fine-tuning |
+| Region borrowing (Vale) | Low | Monitor; consider for v2.0 |
+
+---
+
+## Sources
 
 - [Semaphore - Top 8 Emerging Programming Languages 2025](https://semaphore.io/blog/programming-languages-2025)
 - [CodeCrafters - 7 New Programming Languages](https://codecrafters.io/blog/new-programming-languages)
