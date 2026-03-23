@@ -1,9 +1,7 @@
 //@ run-pass
-// Bug: match expression returning String in a separate function compiles
-// but segfaults at runtime (exit 139). The match result_local is allocated
-// with Type::Unknown, so codegen does not create a _String stack slot.
-// When the String is later used (e.g. passed to print), it reads garbage
-// memory instead of the proper (ptr, len) pair.
+// Fixed: match expression returning String in a separate function now works.
+// The fix syncs the resolved type from local_types back into the locals vec
+// so codegen allocates the correct _String stack slot (16 bytes for ptr + len).
 
 module match_returns_string_fn {
     meta { purpose: "Regression: match returning String in function causes segfault" }
