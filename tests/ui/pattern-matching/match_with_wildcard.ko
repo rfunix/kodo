@@ -1,0 +1,23 @@
+//@ check-pass
+// Tests wildcard pattern (_) as a catch-all in match expressions.
+
+module match_with_wildcard {
+    meta { purpose: "Test wildcard pattern in match" }
+
+    enum Status {
+        Active,
+        Inactive,
+        Pending,
+        Suspended
+    }
+
+    fn main() {
+        let s: Status = Status::Pending
+        let code: Int = match s {
+            Status::Active => 1,
+            Status::Inactive => 2,
+            _ => 0
+        }
+        print_int(code)
+    }
+}

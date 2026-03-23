@@ -1,0 +1,20 @@
+//@ check-pass
+// Tests match on Option<Int> where the value is None.
+
+module match_option_none {
+    meta { purpose: "Test match on Option None variant" }
+
+    fn get_or_default(opt: Option<Int>) -> Int {
+        let result: Int = match opt {
+            Some(v) => v,
+            None => 42
+        }
+        return result
+    }
+
+    fn main() {
+        let none_val: Option<Int> = Option::None
+        let n: Int = get_or_default(none_val)
+        print_int(n)
+    }
+}

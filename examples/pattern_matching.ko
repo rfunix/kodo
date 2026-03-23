@@ -1,0 +1,132 @@
+// Pattern Matching — comprehensive enum destructuring and match expressions.
+//
+// Demonstrates:
+//   - Enum variants with different payloads
+//   - Match expressions with destructuring
+//   - Wildcard patterns (_)
+//   - if let for Option
+//   - Contracts on functions that use pattern matching
+//
+// Compile and run:
+//   kodoc build examples/pattern_matching.ko -o pattern_matching
+//   ./pattern_matching
+
+module pattern_matching {
+    meta {
+        purpose: "Demonstrate pattern matching with enums, wildcards, and contracts"
+        version: "1.0.0"
+    }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int),
+        Triangle(Int, Int, Int)
+    }
+
+    // Compute the perimeter of a shape using pattern matching.
+    fn perimeter(s: Shape) -> Int
+        requires { true }
+        ensures  { result >= 0 }
+    {
+        let p: Int = match s {
+            Shape::Circle(r) => 2 * 3 * r,
+            Shape::Rectangle(w, h) => 2 * (w + h),
+            Shape::Triangle(a, b, c) => a + b + c
+        }
+        return p
+    }
+
+    // Check if a shape is a circle using wildcard.
+    fn is_circle(s: Shape) -> Int {
+        let tag: Int = match s {
+            Shape::Circle(_) => 1,
+            _ => 0
+        }
+        return tag
+    }
+
+    // Extract the area approximation (integer math).
+    fn area(s: Shape) -> Int {
+        let a: Int = match s {
+            Shape::Circle(r) => 3 * r * r,
+            Shape::Rectangle(w, h) => w * h,
+            Shape::Triangle(b, h, _) => b * h / 2
+        }
+        return a
+    }
+
+    // Safe division returning Option to avoid divide-by-zero.
+    fn safe_divide(a: Int, b: Int) -> Option<Int>
+        ensures { true }
+    {
+        if b == 0 {
+            return Option::None
+        }
+        return Option::Some(a / b)
+    }
+
+    fn main() -> Int {
+        // Match on enum variants with destructuring
+        let c: Shape = Shape::Circle(5)
+        println("Circle perimeter:")
+        print_int(perimeter(c))
+
+        let r: Shape = Shape::Rectangle(3, 4)
+        println("Rectangle perimeter:")
+        print_int(perimeter(r))
+
+        let t: Shape = Shape::Triangle(3, 4, 5)
+        println("Triangle perimeter:")
+        print_int(perimeter(t))
+
+        // Wildcard pattern: check if circle
+        let c2: Shape = Shape::Circle(10)
+        let tag: Int = is_circle(c2)
+        println("Is circle (1=yes):")
+        print_int(tag)
+
+        let r2: Shape = Shape::Rectangle(6, 8)
+        let tag2: Int = is_circle(r2)
+        println("Is circle (1=yes):")
+        print_int(tag2)
+
+        // Area with different variants
+        let c3: Shape = Shape::Circle(7)
+        println("Circle area:")
+        print_int(area(c3))
+
+        let r3: Shape = Shape::Rectangle(5, 10)
+        println("Rectangle area:")
+        print_int(area(r3))
+
+        // if let with Option
+        let opt: Option<Int> = Option::Some(42)
+        if let Option::Some(v) = opt {
+            println("Got value:")
+            print_int(v)
+        }
+
+        let empty: Option<Int> = Option::None
+        if let Option::Some(v) = empty {
+            print_int(v)
+        } else {
+            println("Option is None")
+        }
+
+        // Safe division with if let
+        let result: Option<Int> = safe_divide(100, 7)
+        if let Option::Some(val) = result {
+            println("100 / 7 =")
+            print_int(val)
+        }
+
+        let bad: Option<Int> = safe_divide(10, 0)
+        if let Option::Some(val) = bad {
+            print_int(val)
+        } else {
+            println("Division by zero avoided")
+        }
+
+        return 0
+    }
+}

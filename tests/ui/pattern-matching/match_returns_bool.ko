@@ -1,0 +1,26 @@
+//@ check-pass
+// Tests match expression returning Bool values.
+
+module match_returns_bool {
+    meta { purpose: "Test match returning Bool" }
+
+    enum Toggle { On, Off }
+
+    fn is_on(t: Toggle) -> Bool {
+        let result: Bool = match t {
+            Toggle::On => true,
+            Toggle::Off => false
+        }
+        return result
+    }
+
+    fn main() {
+        let t: Toggle = Toggle::On
+        let b: Bool = is_on(t)
+        if b {
+            print_int(1)
+        } else {
+            print_int(0)
+        }
+    }
+}

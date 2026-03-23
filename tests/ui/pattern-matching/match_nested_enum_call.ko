@@ -1,0 +1,20 @@
+//@ check-pass
+// Tests match on enum with variant payloads, using the result in arithmetic.
+
+module match_nested_enum_call {
+    meta { purpose: "Test match with enum payload extraction" }
+
+    fn compute(val: Result<Int, String>) -> Int {
+        let result: Int = match val {
+            Ok(v) => v * 2,
+            Err(e) => -1
+        }
+        return result
+    }
+
+    fn main() {
+        let ok_val: Result<Int, String> = Result::Ok(21)
+        let n: Int = compute(ok_val)
+        print_int(n)
+    }
+}
