@@ -62,7 +62,7 @@ impl MirBuilder {
                     bindings,
                     ..
                 } => {
-                    self.lower_variant_arm(
+                    let arm_ty = self.lower_variant_arm(
                         &ctx,
                         enum_name.as_deref(),
                         variant,
@@ -70,6 +70,14 @@ impl MirBuilder {
                         &arm.body,
                         is_last,
                     )?;
+                    if !result_ty_resolved {
+                        if let Some(ty) = arm_ty {
+                            if ty != Type::Unknown {
+                                self.local_types.insert(ctx.result_local, ty);
+                                result_ty_resolved = true;
+                            }
+                        }
+                    }
                 }
                 kodo_ast::Pattern::Wildcard(_) => {
                     // Wildcard catches everything remaining.
@@ -99,6 +107,17 @@ impl MirBuilder {
                     }
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
+                }
+            }
+        }
+
+        // Sync the resolved type back into self.locals so codegen
+        // allocates the correct stack slot (e.g., 16 bytes for String
+        // instead of 8 bytes for i64).
+        if let Some(resolved_ty) = self.local_types.get(&ctx.result_local) {
+            if *resolved_ty != Type::Unknown {
+                if let Some(local) = self.locals.iter_mut().find(|l| l.id == ctx.result_local) {
+                    local.ty = resolved_ty.clone();
                 }
             }
         }
@@ -256,7 +275,7 @@ impl MirBuilder {
         bindings: &[String],
         body: &Expr,
         is_last: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<Type>> {
         // Resolve discriminant for this variant.
         // For generic enums, fall back to the matched local's
         // type which already carries the monomorphized name.
@@ -366,10 +385,11 @@ impl MirBuilder {
 
         // Lower arm body.
         let arm_val = self.lower_expr(body)?;
+        let arm_ty = self.infer_value_type(&arm_val);
         self.emit(Instruction::Assign(ctx.result_local, arm_val));
         self.seal_block(Terminator::Goto(ctx.merge_block), next_block);
 
-        Ok(())
+        Ok(Some(arm_ty))
     }
 
     /// Lowers a single `Literal` pattern arm inside a match expression.
