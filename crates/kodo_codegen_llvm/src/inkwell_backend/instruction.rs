@@ -350,9 +350,25 @@ fn is_string_returning_builtin(callee: &str) -> bool {
     )
 }
 
-/// Returns true if the builtin uses out-parameters for its return value.
+/// Returns true if the builtin uses out-parameters for its return value (int result).
 fn is_outparam_get_builtin(callee: &str) -> bool {
     matches!(callee, "list_get" | "map_get" | "map_get_sk")
+}
+
+/// Returns true if the builtin uses out-parameters that return a string value
+/// (ptr, len, is_some).
+fn is_string_outparam_get_builtin(callee: &str) -> bool {
+    matches!(callee, "map_get_sv" | "map_get_ss")
+}
+
+/// Returns true if the builtin is a file/HTTP I/O call that returns
+/// Result<String, String> via out-parameters (discriminant as return value,
+/// string via out_ptr/out_len).
+fn is_result_io_builtin(callee: &str) -> bool {
+    matches!(
+        callee,
+        "file_read" | "file_write" | "file_append" | "http_get" | "http_post"
+    )
 }
 
 /// Translates a function call instruction.
@@ -376,9 +392,21 @@ fn translate_call<'ctx>(
         return;
     }
 
-    // Handle out-parameter get builtins.
+    // Handle out-parameter get builtins (int result).
     if !is_user_fn && is_outparam_get_builtin(callee) {
         translate_outparam_get_call(dest, callee, args, ctx);
+        return;
+    }
+
+    // Handle string-valued out-parameter get builtins (ptr, len, is_some).
+    if !is_user_fn && is_string_outparam_get_builtin(callee) {
+        translate_string_outparam_get_call(dest, callee, args, ctx);
+        return;
+    }
+
+    // Handle Result-returning I/O builtins (file_read, file_write, etc.).
+    if !is_user_fn && is_result_io_builtin(callee) {
+        translate_result_io_call(dest, callee, args, ctx);
         return;
     }
 
@@ -405,13 +433,28 @@ fn translate_call<'ctx>(
         return;
     };
 
+    // Get parameter types from the LLVM function to detect type mismatches.
+    let fn_param_types: Vec<_> = fn_val.get_type().get_param_types();
+
     // Emit argument values.
     // For RUNTIME builtins, expand strings to (ptr, len) two-arg pairs.
     // For USER functions, pass the { i64, i64 } struct directly.
     let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+    let mut param_idx = 0usize;
     for arg in args {
         if let Some(val) = translate_value(arg, ctx) {
             let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
+            // For user functions: if param expects struct but value is int,
+            // reconstruct the string struct from the heap handle.
+            if is_user_fn && val.is_int_value() && param_idx < fn_param_types.len() {
+                if fn_param_types[param_idx].is_struct_type() {
+                    let handle = val.into_int_value();
+                    let str_val = reconstruct_string_from_handle(handle, ctx);
+                    arg_vals.push(str_val.into());
+                    param_idx += 1;
+                    continue;
+                }
+            }
             if arg_ty == Type::String && val.is_struct_value() && !is_user_fn {
                 // Expand string struct {ptr, len} to two args.
                 let sv = val.into_struct_value();
@@ -421,6 +464,7 @@ fn translate_call<'ctx>(
                 let len = ctx.builder.build_extract_value(sv, 1, &len_name).unwrap();
                 arg_vals.push(ptr.into());
                 arg_vals.push(len.into());
+                param_idx += 2;
             } else if arg_ty == Type::String && val.is_int_value() && !is_user_fn {
                 // String handle (i64) — points to a [ptr, len] pair on heap.
                 // Load ptr from handle, len from handle+8.
@@ -460,8 +504,10 @@ fn translate_call<'ctx>(
                     .unwrap();
                 arg_vals.push(s_ptr.into());
                 arg_vals.push(s_len.into());
+                param_idx += 2;
             } else {
                 arg_vals.push(val.into());
+                param_idx += 1;
             }
         }
     }
@@ -657,6 +703,364 @@ fn translate_outparam_get_call<'ctx>(
         ctx.builder.build_store(*alloca, result).unwrap();
     }
     // Cache result for store-forwarding within the same block.
+    ctx.ssa_cache.insert(dest, result);
+}
+
+/// Reconstructs a `{ i64, i64 }` string struct from a heap handle (i64).
+///
+/// The handle points to 16 bytes: `[ptr: i64, len: i64]`.
+/// Returns a `{ ptr, len }` struct value.
+fn reconstruct_string_from_handle<'ctx>(
+    handle: inkwell::values::IntValue<'ctx>,
+    ctx: &mut ValueCtx<'_, 'ctx>,
+) -> BasicValueEnum<'ctx> {
+    let ptr_type = ctx.context.ptr_type(inkwell::AddressSpace::default());
+    let handle_ptr = ctx
+        .builder
+        .build_int_to_ptr(handle, ptr_type, &unique_name(ctx.name_counter, "rsh_p"))
+        .unwrap();
+    let str_ptr = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            handle_ptr,
+            &unique_name(ctx.name_counter, "rsh_sp"),
+        )
+        .unwrap();
+    let off8 = ctx
+        .builder
+        .build_int_add(
+            handle,
+            ctx.context.i64_type().const_int(8, false),
+            &unique_name(ctx.name_counter, "rsh_o"),
+        )
+        .unwrap();
+    let len_ptr = ctx
+        .builder
+        .build_int_to_ptr(off8, ptr_type, &unique_name(ctx.name_counter, "rsh_lp"))
+        .unwrap();
+    let str_len = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            len_ptr,
+            &unique_name(ctx.name_counter, "rsh_sl"),
+        )
+        .unwrap();
+
+    let str_ty = ctx.context.struct_type(
+        &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
+        false,
+    );
+    let s1 = ctx
+        .builder
+        .build_insert_value(
+            str_ty.get_undef(),
+            str_ptr,
+            0,
+            &unique_name(ctx.name_counter, "rsh_s1"),
+        )
+        .unwrap();
+    let s2 = ctx
+        .builder
+        .build_insert_value(s1, str_len, 1, &unique_name(ctx.name_counter, "rsh_s2"))
+        .unwrap();
+    s2.into_struct_value().into()
+}
+
+/// Translates a string-valued out-parameter get call (e.g., `map_get_sv`).
+///
+/// These builtins return a string via 3 out-parameters: out_ptr, out_len,
+/// out_is_some. The result is stored as a `{ i64, i64 }` string struct.
+fn translate_string_outparam_get_call<'ctx>(
+    dest: LocalId,
+    callee: &str,
+    args: &[Value],
+    ctx: &mut ValueCtx<'_, 'ctx>,
+) {
+    let runtime_name = resolve_runtime_name(callee);
+
+    let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+    for arg in args {
+        if let Some(val) = translate_value(arg, ctx) {
+            arg_vals.push(val.into());
+        }
+    }
+
+    // Allocate 3 out-parameter slots: ptr, len, is_some.
+    let out_ptr = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "sogp"),
+    );
+    let out_len = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "sogl"),
+    );
+    let out_is_some = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "sogs"),
+    );
+
+    let ptr_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_ptr,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "opi"),
+        )
+        .unwrap();
+    let len_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_len,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "oli"),
+        )
+        .unwrap();
+    let some_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_is_some,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "osi"),
+        )
+        .unwrap();
+
+    arg_vals.push(ptr_i64.into());
+    arg_vals.push(len_i64.into());
+    arg_vals.push(some_i64.into());
+
+    if let Some(fn_val) = ctx.module.get_function(runtime_name) {
+        let call_name = unique_name(ctx.name_counter, "sogc");
+        ctx.builder
+            .build_call(fn_val, &arg_vals, &call_name)
+            .unwrap();
+    }
+
+    // Load ptr and len, build string struct { ptr, len }.
+    let res_ptr = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_ptr,
+            &unique_name(ctx.name_counter, "sogr_p"),
+        )
+        .unwrap();
+    let res_len = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_len,
+            &unique_name(ctx.name_counter, "sogr_l"),
+        )
+        .unwrap();
+
+    let str_ty = ctx.context.struct_type(
+        &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
+        false,
+    );
+    let s1 = ctx
+        .builder
+        .build_insert_value(
+            str_ty.get_undef(),
+            res_ptr,
+            0,
+            &unique_name(ctx.name_counter, "sog1"),
+        )
+        .unwrap();
+    let s2 = ctx
+        .builder
+        .build_insert_value(s1, res_len, 1, &unique_name(ctx.name_counter, "sog2"))
+        .unwrap();
+
+    let string_val: BasicValueEnum<'ctx> = s2.into_struct_value().into();
+    if let Some(alloca) = ctx.local_allocas.get(&dest) {
+        ctx.builder.build_store(*alloca, string_val).unwrap();
+    }
+    ctx.ssa_cache.insert(dest, string_val);
+}
+
+/// Translates a Result-returning I/O call (e.g., `file_write`, `file_read`).
+///
+/// These builtins return `Result<String, String>` via:
+/// - Return value (i64): discriminant (1 = Ok, 0 = Err)
+/// - Out-parameters: out_ptr, out_len for the string payload
+///
+/// The result is stored as `{ i64, i64 }` enum struct (discriminant, payload).
+/// The payload is a heap-allocated string handle that wraps (ptr, len).
+fn translate_result_io_call<'ctx>(
+    dest: LocalId,
+    callee: &str,
+    args: &[Value],
+    ctx: &mut ValueCtx<'_, 'ctx>,
+) {
+    let runtime_name = resolve_runtime_name(callee);
+
+    // Emit arguments with string expansion.
+    let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+    for arg in args {
+        if let Some(val) = translate_value(arg, ctx) {
+            let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
+            if arg_ty == Type::String && val.is_struct_value() {
+                let sv = val.into_struct_value();
+                let ptr = ctx
+                    .builder
+                    .build_extract_value(sv, 0, &unique_name(ctx.name_counter, "iop"))
+                    .unwrap();
+                let len = ctx
+                    .builder
+                    .build_extract_value(sv, 1, &unique_name(ctx.name_counter, "iol"))
+                    .unwrap();
+                arg_vals.push(ptr.into());
+                arg_vals.push(len.into());
+            } else {
+                arg_vals.push(val.into());
+            }
+        }
+    }
+
+    // Allocate out-parameter slots for the result string.
+    let out_ptr = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "iorp"),
+    );
+    let out_len = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "iorl"),
+    );
+
+    let ptr_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_ptr,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "iorpi"),
+        )
+        .unwrap();
+    let len_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_len,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "iorli"),
+        )
+        .unwrap();
+
+    arg_vals.push(ptr_i64.into());
+    arg_vals.push(len_i64.into());
+
+    let disc = if let Some(fn_val) = ctx.module.get_function(runtime_name) {
+        let call_name = unique_name(ctx.name_counter, "iorc");
+        let call_result = ctx
+            .builder
+            .build_call(fn_val, &arg_vals, &call_name)
+            .unwrap();
+        call_result
+            .try_as_basic_value()
+            .basic()
+            .map(|v| v.into_int_value())
+    } else {
+        None
+    };
+
+    let disc_val = disc.unwrap_or_else(|| ctx.context.i64_type().const_int(0, false));
+
+    // Load the string result and pack into heap handle.
+    let res_ptr = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_ptr,
+            &unique_name(ctx.name_counter, "ior_rp"),
+        )
+        .unwrap()
+        .into_int_value();
+    let res_len = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_len,
+            &unique_name(ctx.name_counter, "ior_rl"),
+        )
+        .unwrap()
+        .into_int_value();
+
+    // Allocate 16 bytes for string handle (ptr + len), store ptr and len.
+    let alloc_fn = ctx.module.get_function("kodo_alloc");
+    let str_handle = if let Some(alloc) = alloc_fn {
+        let size = ctx.context.i64_type().const_int(16, false);
+        let alloc_call = ctx
+            .builder
+            .build_call(alloc, &[size.into()], &unique_name(ctx.name_counter, "sha"))
+            .unwrap();
+        let handle = alloc_call
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+
+        // Store ptr at handle[0].
+        let ptr_type = ctx.context.ptr_type(inkwell::AddressSpace::default());
+        let handle_ptr = ctx
+            .builder
+            .build_int_to_ptr(handle, ptr_type, &unique_name(ctx.name_counter, "shp"))
+            .unwrap();
+        ctx.builder.build_store(handle_ptr, res_ptr).unwrap();
+
+        // Store len at handle[8].
+        let off8 = ctx
+            .builder
+            .build_int_add(
+                handle,
+                ctx.context.i64_type().const_int(8, false),
+                &unique_name(ctx.name_counter, "sho"),
+            )
+            .unwrap();
+        let len_dest = ctx
+            .builder
+            .build_int_to_ptr(off8, ptr_type, &unique_name(ctx.name_counter, "slp"))
+            .unwrap();
+        ctx.builder.build_store(len_dest, res_len).unwrap();
+
+        handle
+    } else {
+        // Fallback: use ptr as payload.
+        res_ptr
+    };
+
+    // Build enum struct { discriminant, payload }.
+    let enum_ty = ctx.context.struct_type(
+        &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
+        false,
+    );
+    let e1 = ctx
+        .builder
+        .build_insert_value(
+            enum_ty.const_zero(),
+            disc_val,
+            0,
+            &unique_name(ctx.name_counter, "ioe1"),
+        )
+        .unwrap();
+    let e2 = ctx
+        .builder
+        .build_insert_value(e1, str_handle, 1, &unique_name(ctx.name_counter, "ioe2"))
+        .unwrap();
+
+    let result: BasicValueEnum<'ctx> = e2.into_struct_value().into();
+    if let Some(alloca) = ctx.local_allocas.get(&dest) {
+        ctx.builder.build_store(*alloca, result).unwrap();
+    }
     ctx.ssa_cache.insert(dest, result);
 }
 
