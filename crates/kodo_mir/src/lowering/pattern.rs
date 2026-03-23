@@ -5,6 +5,8 @@
 //! branching into per-arm blocks that bind pattern variables and lower
 //! the arm body.
 
+use std::cell::Cell;
+
 use kodo_ast::Expr;
 use kodo_types::Type;
 
@@ -21,6 +23,10 @@ struct MatchContext {
     result_local: LocalId,
     /// The block that all arms jump to after completion.
     merge_block: BlockId,
+    /// Whether the result local's type has been resolved from an arm body.
+    /// Uses `Cell` because the context is shared by reference across arm
+    /// lowering helpers that also need `&mut self` on the builder.
+    result_ty_resolved: Cell<bool>,
 }
 
 impl MirBuilder {
@@ -47,12 +53,12 @@ impl MirBuilder {
             matched_local,
             result_local,
             merge_block,
+            result_ty_resolved: Cell::new(false),
         };
 
         // Generate a chain of branches testing discriminant.
         // Track the first arm's result type so we can retroactively
         // update result_local from Unknown to the concrete type.
-        let mut result_ty_resolved = false;
         for (i, arm) in arms.iter().enumerate() {
             let is_last = i + 1 == arms.len();
             match &arm.pattern {
@@ -62,7 +68,7 @@ impl MirBuilder {
                     bindings,
                     ..
                 } => {
-                    let arm_ty = self.lower_variant_arm(
+                    self.lower_variant_arm(
                         &ctx,
                         enum_name.as_deref(),
                         variant,
@@ -70,25 +76,11 @@ impl MirBuilder {
                         &arm.body,
                         is_last,
                     )?;
-                    if !result_ty_resolved {
-                        if let Some(ty) = arm_ty {
-                            if ty != Type::Unknown {
-                                self.local_types.insert(ctx.result_local, ty);
-                                result_ty_resolved = true;
-                            }
-                        }
-                    }
                 }
                 kodo_ast::Pattern::Wildcard(_) => {
                     // Wildcard catches everything remaining.
                     let arm_val = self.lower_expr(&arm.body)?;
-                    if !result_ty_resolved {
-                        let arm_ty = self.infer_value_type(&arm_val);
-                        if arm_ty != Type::Unknown {
-                            self.local_types.insert(ctx.result_local, arm_ty);
-                            result_ty_resolved = true;
-                        }
-                    }
+                    self.resolve_result_type(&ctx, &arm_val);
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
                 }
@@ -98,26 +90,9 @@ impl MirBuilder {
                 kodo_ast::Pattern::Tuple(_, _) => {
                     // Tuple patterns in match arms: lower body directly.
                     let arm_val = self.lower_expr(&arm.body)?;
-                    if !result_ty_resolved {
-                        let arm_ty = self.infer_value_type(&arm_val);
-                        if arm_ty != Type::Unknown {
-                            self.local_types.insert(ctx.result_local, arm_ty);
-                            result_ty_resolved = true;
-                        }
-                    }
+                    self.resolve_result_type(&ctx, &arm_val);
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
-                }
-            }
-        }
-
-        // Sync the resolved type back into self.locals so codegen
-        // allocates the correct stack slot (e.g., 16 bytes for String
-        // instead of 8 bytes for i64).
-        if let Some(resolved_ty) = self.local_types.get(&ctx.result_local) {
-            if *resolved_ty != Type::Unknown {
-                if let Some(local) = self.locals.iter_mut().find(|l| l.id == ctx.result_local) {
-                    local.ty = resolved_ty.clone();
                 }
             }
         }
@@ -275,7 +250,7 @@ impl MirBuilder {
         bindings: &[String],
         body: &Expr,
         is_last: bool,
-    ) -> Result<Option<Type>> {
+    ) -> Result<()> {
         // Resolve discriminant for this variant.
         // For generic enums, fall back to the matched local's
         // type which already carries the monomorphized name.
@@ -383,13 +358,13 @@ impl MirBuilder {
             ));
         }
 
-        // Lower arm body.
+        // Lower arm body and resolve result type if not yet known.
         let arm_val = self.lower_expr(body)?;
-        let arm_ty = self.infer_value_type(&arm_val);
+        self.resolve_result_type(ctx, &arm_val);
         self.emit(Instruction::Assign(ctx.result_local, arm_val));
         self.seal_block(Terminator::Goto(ctx.merge_block), next_block);
 
-        Ok(Some(arm_ty))
+        Ok(())
     }
 
     /// Lowers a single `Literal` pattern arm inside a match expression.
@@ -422,10 +397,32 @@ impl MirBuilder {
             arm_block,
         );
         let arm_val = self.lower_expr(body)?;
+        self.resolve_result_type(ctx, &arm_val);
         self.emit(Instruction::Assign(ctx.result_local, arm_val));
         self.seal_block(Terminator::Goto(ctx.merge_block), next_block);
 
         Ok(())
+    }
+
+    /// Updates the match result local's type from the first arm that produces
+    /// a concrete (non-`Unknown`) type. This ensures codegen allocates the
+    /// correct stack slot size (e.g., 16-byte `(ptr, len)` for `String`
+    /// instead of a scalar `i64`).
+    fn resolve_result_type(&mut self, ctx: &MatchContext, arm_val: &Value) {
+        if !ctx.result_ty_resolved.get() {
+            let arm_ty = self.infer_value_type(arm_val);
+            if arm_ty != Type::Unknown {
+                self.local_types.insert(ctx.result_local, arm_ty.clone());
+                // Also update the Local entry in the locals vec so codegen
+                // sees the resolved type when allocating stack slots (e.g.,
+                // 16-byte (ptr, len) for String instead of scalar i64).
+                let idx = ctx.result_local.0 as usize;
+                if let Some(local) = self.locals.get_mut(idx) {
+                    local.ty = arm_ty;
+                }
+                ctx.result_ty_resolved.set(true);
+            }
+        }
     }
 }
 
