@@ -280,3 +280,28 @@ validate-cli:
 # Master validation: build + lint + test + UI + examples + CLI + docs
 validate-everything:
 	./scripts/validate-everything.sh
+
+# === Kōdo Architect Agent ===
+
+# Start the Kōdo Architect autonomous agent (registers 7 cron jobs + keeps session alive)
+architect:
+	claude "Leia .claude/agents/kodo-architect.md e registre os 7 cron jobs do Kōdo Architect conforme /Users/rfunix/.claude/plans/temporal-zooming-pixel.md (Phase 4, Task 5). Use o repo rfunix/kodo para comandos gh. Após registrar, execute o modo SENTINEL uma vez para confirmar que tudo funciona."
+
+# Show Kōdo Architect agent status (logs, crons, PRs)
+architect-status:
+	@echo "═══ Kōdo Architect — Status ═══"
+	@echo ""
+	@echo "── Última Patrulha (Sentinel) ──"
+	@head -20 ~/.claude/projects/-Users-rfunix-dev-kodo/memory/agent_patrol_log.md 2>/dev/null | tail -12 || echo "(sem dados)"
+	@echo ""
+	@echo "── Builder (última ação) ──"
+	@head -20 ~/.claude/projects/-Users-rfunix-dev-kodo/memory/agent_builder_log.md 2>/dev/null | tail -12 || echo "(sem dados)"
+	@echo ""
+	@echo "── Testes ──"
+	@head -20 ~/.claude/projects/-Users-rfunix-dev-kodo/memory/agent_test_log.md 2>/dev/null | tail -12 || echo "(sem dados)"
+	@echo ""
+	@echo "── PRs do Agente ──"
+	@gh pr list --repo rfunix/kodo --label agent-generated --state all --limit 10 --json number,title,state 2>/dev/null || echo "(nenhum PR)"
+	@echo ""
+	@echo "── Relatório Semanal ──"
+	@head -30 ~/.claude/projects/-Users-rfunix-dev-kodo/memory/agent_weekly_report.md 2>/dev/null | tail -22 || echo "(sem relatório ainda)"
