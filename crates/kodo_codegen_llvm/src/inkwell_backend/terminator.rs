@@ -69,7 +69,9 @@ pub(crate) fn translate_terminator<'ctx>(
             if super::types::is_void(return_type) {
                 builder.build_return(None).unwrap();
             } else if let Some(val) = translate_value(value, &mut vctx) {
-                builder.build_return(Some(&val)).unwrap();
+                let expected_ty = super::types::to_llvm_type(context, return_type);
+                let coerced = coerce_return_value(val, expected_ty, &mut vctx);
+                builder.build_return(Some(&coerced)).unwrap();
             } else {
                 // Unit value in non-void function — dead block, emit unreachable.
                 builder.build_unreachable().unwrap();
@@ -110,5 +112,51 @@ pub(crate) fn translate_terminator<'ctx>(
         Terminator::Unreachable => {
             builder.build_unreachable().unwrap();
         }
+    }
+}
+
+/// Coerces a return value to match the expected LLVM return type.
+///
+/// Handles mismatches between `{ i64, i64 }` struct (enum) and `i64` scalar,
+/// and vice versa. This occurs when the MIR return type differs from the
+/// actual value type due to enum/Result/Option representation.
+fn coerce_return_value<'ctx>(
+    val: BasicValueEnum<'ctx>,
+    expected: inkwell::types::BasicTypeEnum<'ctx>,
+    vctx: &mut ValueCtx<'_, 'ctx>,
+) -> BasicValueEnum<'ctx> {
+    let val_is_struct = val.is_struct_value();
+    let expected_is_struct = expected.is_struct_type();
+
+    if val_is_struct && !expected_is_struct {
+        // Returning { i64, i64 } from a function that expects i64.
+        // Extract the payload (field 1) — common when returning enum
+        // discriminant from a match, or when local holds enum but
+        // function returns scalar.
+        let sv = val.into_struct_value();
+        let name = unique_name(vctx.name_counter, "ret_coerce");
+        vctx.builder
+            .build_extract_value(sv, 1, &name)
+            .unwrap()
+            .into()
+    } else if !val_is_struct && expected_is_struct {
+        // Returning i64 from a function that expects { i64, i64 }.
+        // Build a struct with discriminant 0 and the value as payload.
+        let i64_val = val.into_int_value();
+        let struct_ty = expected.into_struct_type();
+        let zero = vctx.context.i64_type().const_int(0, false);
+        let s1_name = unique_name(vctx.name_counter, "ret_s1");
+        let s1 = vctx
+            .builder
+            .build_insert_value(struct_ty.const_zero(), zero, 0, &s1_name)
+            .unwrap();
+        let s2_name = unique_name(vctx.name_counter, "ret_s2");
+        let s2 = vctx
+            .builder
+            .build_insert_value(s1, i64_val, 1, &s2_name)
+            .unwrap();
+        s2.into_struct_value().into()
+    } else {
+        val
     }
 }
