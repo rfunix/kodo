@@ -1,4 +1,4 @@
-//@ run-fail
+//@ run-pass
 // Bug: match expression returning String in a separate function compiles
 // but segfaults at runtime (exit 139). The match result_local is allocated
 // with Type::Unknown, so codegen does not create a _String stack slot.
