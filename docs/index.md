@@ -28,6 +28,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 - [HTTP, JSON & Networking](guide/http.md) — HTTP client and server, JSON parsing and building
 - [CLI Tools, File I/O & Math](guide/cli-tools.md) — `args()`, `readln`, `exit`, file operations, extended math
 - [Actors](guide/actors.md) — actor model with state and message passing
+- [Collections](guide/collections.md) — List, Map, Set, and JSON
 - [Iterators](guide/iterators.md) — for-in loops, iterator protocol, collection traversal
 - [Functional Combinators](guide/functional.md) — map, filter, fold, count, any, all, reduce, pipelines
 - [Concurrency & Spawn](guide/concurrency.md) — spawn with captured variables
