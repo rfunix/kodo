@@ -1187,6 +1187,16 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::atomic::AtomicI64;
 
+    /// Mutex to serialise tests that use the global scheduler.
+    ///
+    /// The scheduler is a process-wide singleton (`OnceLock`), and its state
+    /// (`ALIVE_COUNT`, `shutdown` flag, thread map) is shared across all tests
+    /// running in the same process.  Without serialisation, parallel tests can
+    /// corrupt each other's state (e.g. one test sets `shutdown = true` while
+    /// another is still running green threads), leading to intermittent
+    /// SIGSEGV on CI.
+    static SCHEDULER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // -----------------------------------------------------------------------
     // GreenThreadId tests
     // -----------------------------------------------------------------------
@@ -1333,6 +1343,8 @@ mod tests {
 
     #[test]
     fn spawn_single_thread_runs() {
+        let _lock = SCHEDULER_TEST_LOCK.lock().unwrap();
+
         static FLAG: AtomicBool = AtomicBool::new(false);
 
         extern "C" fn set_flag() {
@@ -1340,6 +1352,12 @@ mod tests {
         }
 
         FLAG.store(false, Ordering::SeqCst);
+
+        // Reset scheduler state from any previous test.
+        if let Some(sched) = SCHEDULER.get() {
+            sched.shutdown.store(false, Ordering::SeqCst);
+        }
+        ALIVE_COUNT.store(0, Ordering::SeqCst);
 
         // Use the full scheduler API.
         // SAFETY: calling the extern "C" scheduler API.
@@ -1366,6 +1384,8 @@ mod tests {
 
     #[test]
     fn spawn_multiple_threads_all_run() {
+        let _lock = SCHEDULER_TEST_LOCK.lock().unwrap();
+
         static COUNTER: AtomicI64 = AtomicI64::new(0);
 
         extern "C" fn increment() {
@@ -1373,6 +1393,12 @@ mod tests {
         }
 
         COUNTER.store(0, Ordering::SeqCst);
+
+        // Reset scheduler state from any previous test.
+        if let Some(sched) = SCHEDULER.get() {
+            sched.shutdown.store(false, Ordering::SeqCst);
+        }
+        ALIVE_COUNT.store(0, Ordering::SeqCst);
 
         // Use the full scheduler API.  We must ensure init is called.
         // SAFETY: calling the extern "C" API is safe in test context.
@@ -1422,6 +1448,8 @@ mod tests {
 
     #[test]
     fn scheduler_completes_when_all_done() {
+        let _lock = SCHEDULER_TEST_LOCK.lock().unwrap();
+
         static DONE: AtomicBool = AtomicBool::new(false);
 
         extern "C" fn mark_done() {
@@ -1429,6 +1457,12 @@ mod tests {
         }
 
         DONE.store(false, Ordering::SeqCst);
+
+        // Reset scheduler state from any previous test.
+        if let Some(sched) = SCHEDULER.get() {
+            sched.shutdown.store(false, Ordering::SeqCst);
+        }
+        ALIVE_COUNT.store(0, Ordering::SeqCst);
 
         // SAFETY: calling the extern "C" API.
         unsafe {
