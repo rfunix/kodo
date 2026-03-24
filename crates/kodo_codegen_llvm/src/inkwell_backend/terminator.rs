@@ -69,7 +69,9 @@ pub(crate) fn translate_terminator<'ctx>(
             if super::types::is_void(return_type) {
                 builder.build_return(None).unwrap();
             } else if let Some(val) = translate_value(value, &mut vctx) {
-                builder.build_return(Some(&val)).unwrap();
+                let expected_ty = super::types::to_llvm_type(context, return_type);
+                let coerced = coerce_return_value(val, expected_ty, &mut vctx);
+                builder.build_return(Some(&coerced)).unwrap();
             } else {
                 // Unit value in non-void function — dead block, emit unreachable.
                 builder.build_unreachable().unwrap();
@@ -110,5 +112,46 @@ pub(crate) fn translate_terminator<'ctx>(
         Terminator::Unreachable => {
             builder.build_unreachable().unwrap();
         }
+    }
+}
+
+/// Coerces a return value to match the expected LLVM return type.
+fn coerce_return_value<'ctx>(
+    val: BasicValueEnum<'ctx>,
+    expected: inkwell::types::BasicTypeEnum<'ctx>,
+    vctx: &mut ValueCtx<'_, 'ctx>,
+) -> BasicValueEnum<'ctx> {
+    let val_is_struct = val.is_struct_value();
+    let expected_is_struct = expected.is_struct_type();
+
+    if val_is_struct && !expected_is_struct {
+        // Struct → scalar: extract payload (field 1).
+        let sv = val.into_struct_value();
+        let name = unique_name(vctx.name_counter, "ret_c");
+        vctx.builder
+            .build_extract_value(sv, 1, &name)
+            .unwrap()
+            .into()
+    } else if !val_is_struct && expected_is_struct {
+        // Scalar → struct: wrap with discriminant 0.
+        let i64_val = val.into_int_value();
+        let struct_ty = expected.into_struct_type();
+        let zero = vctx.context.i64_type().const_int(0, false);
+        let s1 = vctx
+            .builder
+            .build_insert_value(
+                struct_ty.const_zero(),
+                zero,
+                0,
+                &unique_name(vctx.name_counter, "rc1"),
+            )
+            .unwrap();
+        let s2 = vctx
+            .builder
+            .build_insert_value(s1, i64_val, 1, &unique_name(vctx.name_counter, "rc2"))
+            .unwrap();
+        s2.into_struct_value().into()
+    } else {
+        val
     }
 }

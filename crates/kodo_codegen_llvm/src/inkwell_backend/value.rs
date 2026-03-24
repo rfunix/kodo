@@ -838,8 +838,19 @@ fn translate_string_concat<'ctx>(
     rhs: BasicValueEnum<'ctx>,
     ctx: &mut ValueCtx<'_, 'ctx>,
 ) -> Option<BasicValueEnum<'ctx>> {
-    let l_struct = lhs.into_struct_value();
-    let r_struct = rhs.into_struct_value();
+    // Coerce i64 handles to { ptr, len } structs if needed.
+    let lhs_coerced = if lhs.is_int_value() {
+        super::instruction::reconstruct_string_from_handle(lhs.into_int_value(), ctx)
+    } else {
+        lhs
+    };
+    let rhs_coerced = if rhs.is_int_value() {
+        super::instruction::reconstruct_string_from_handle(rhs.into_int_value(), ctx)
+    } else {
+        rhs
+    };
+    let l_struct = lhs_coerced.into_struct_value();
+    let r_struct = rhs_coerced.into_struct_value();
 
     let l_ptr_name = unique_name(ctx.name_counter, "lp");
     let l_len_name = unique_name(ctx.name_counter, "ll");
@@ -944,8 +955,18 @@ fn translate_string_compare<'ctx>(
     rhs: BasicValueEnum<'ctx>,
     ctx: &mut ValueCtx<'_, 'ctx>,
 ) -> Option<BasicValueEnum<'ctx>> {
-    let l_struct = lhs.into_struct_value();
-    let r_struct = rhs.into_struct_value();
+    let lhs_c = if lhs.is_int_value() {
+        super::instruction::reconstruct_string_from_handle(lhs.into_int_value(), ctx)
+    } else {
+        lhs
+    };
+    let rhs_c = if rhs.is_int_value() {
+        super::instruction::reconstruct_string_from_handle(rhs.into_int_value(), ctx)
+    } else {
+        rhs
+    };
+    let l_struct = lhs_c.into_struct_value();
+    let r_struct = rhs_c.into_struct_value();
 
     let l_ptr_name = unique_name(ctx.name_counter, "slp");
     let l_len_name = unique_name(ctx.name_counter, "sll");

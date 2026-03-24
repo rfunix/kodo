@@ -336,7 +336,6 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "json_stringify"
             | "time_format"
             | "env_get"
-            | "env_set"
             | "channel_recv_string"
             | "list_join"
             | "readln"
@@ -425,8 +424,20 @@ fn translate_call<'ctx>(
     }
 
     // Rewrite variadic __env_pack to fixed-arity __env_pack_N.
+    // Count expanded args (strings become ptr+len = 2 args).
     let final_name = if runtime_name == "__env_pack" {
-        format!("__env_pack_{}", args.len())
+        let expanded_count: usize = args
+            .iter()
+            .map(|a| {
+                let ty = super::value::infer_value_type_simple(a, ctx.local_types);
+                if ty == Type::String {
+                    2
+                } else {
+                    1
+                }
+            })
+            .sum();
+        format!("__env_pack_{expanded_count}")
     } else {
         runtime_name.to_string()
     };
@@ -889,7 +900,7 @@ fn translate_outparam_get_call<'ctx>(
 ///
 /// The handle points to 16 bytes: `[ptr: i64, len: i64]`.
 /// Returns a `{ ptr, len }` struct value.
-fn reconstruct_string_from_handle<'ctx>(
+pub(super) fn reconstruct_string_from_handle<'ctx>(
     handle: inkwell::values::IntValue<'ctx>,
     ctx: &mut ValueCtx<'_, 'ctx>,
 ) -> BasicValueEnum<'ctx> {
@@ -962,7 +973,23 @@ fn translate_string_outparam_get_call<'ctx>(
     let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
     for arg in args {
         if let Some(val) = translate_value(arg, ctx) {
-            arg_vals.push(val.into());
+            let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
+            if arg_ty == Type::String && val.is_struct_value() {
+                // Expand string struct {ptr, len} to two args.
+                let sv = val.into_struct_value();
+                let ptr = ctx
+                    .builder
+                    .build_extract_value(sv, 0, &unique_name(ctx.name_counter, "sogap"))
+                    .unwrap();
+                let len = ctx
+                    .builder
+                    .build_extract_value(sv, 1, &unique_name(ctx.name_counter, "sogal"))
+                    .unwrap();
+                arg_vals.push(ptr.into());
+                arg_vals.push(len.into());
+            } else {
+                arg_vals.push(val.into());
+            }
         }
     }
 
