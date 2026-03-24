@@ -28,13 +28,14 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `local_types` - Mapping from local IDs to Kodo types.
 /// * `fn_map` - Mapping from function names to LLVM function values.
 /// * `block_map` - Mapping from MIR block IDs to LLVM basic blocks.
-/// * `return_type` - The function's return type.
-/// * `struct_defs` - Struct type definitions.
-/// * `enum_defs` - Enum type definitions.
-/// * `name_counter` - Counter for unique value names.
-/// * `ssa_cache` - Per-block SSA store-forwarding cache for avoiding redundant loads.
+/// * `return_type` - The Kodo return type of the current function.
+/// * `struct_defs` - Struct field definitions for heap-allocated structs.
+/// * `enum_defs` - Enum variant definitions.
+/// * `name_counter` - Counter for unique SSA names.
+/// * `ssa_cache` - SSA store-forwarding cache.
+/// * `alloca_block` - The alloca entry block for stack slot allocation.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn translate_terminator<'ctx>(
+pub fn translate_terminator<'ctx>(
     term: &Terminator,
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -48,7 +49,7 @@ pub(crate) fn translate_terminator<'ctx>(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
     ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
-    alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
+    alloca_block: BasicBlock<'ctx>,
 ) {
     let mut vctx = ValueCtx {
         context,

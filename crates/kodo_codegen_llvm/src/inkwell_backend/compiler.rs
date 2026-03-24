@@ -71,6 +71,7 @@ pub fn compile_module(
     // Declare all user functions first (forward declarations)
     let mut fn_map = HashMap::new();
     declare_functions(functions, &context, &module, &mut fn_map);
+    ensure_kodo_main(&context, &module, &builder, functions);
 
     // Translate each function's body
     let mut name_counter: u32 = 0;
@@ -184,6 +185,7 @@ pub fn emit_ir(
     // Declare and translate all functions
     let mut fn_map = HashMap::new();
     declare_functions(functions, &context, &module, &mut fn_map);
+    ensure_kodo_main(&context, &module, &builder, functions);
 
     let mut name_counter: u32 = 0;
     for func in functions {
@@ -206,6 +208,27 @@ pub fn emit_ir(
     }
 
     module.print_to_string().to_string()
+}
+
+/// Ensures a `kodo_main` function exists in the module.
+///
+/// Test-only modules have no `fn main()`, so the linker would fail
+/// looking for `kodo_main`. This adds an empty stub that returns 0.
+fn ensure_kodo_main<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    builder: &inkwell::builder::Builder<'ctx>,
+    functions: &[MirFunction],
+) {
+    let has_main = functions.iter().any(|f| f.name == "main");
+    if has_main || module.get_function("kodo_main").is_some() {
+        return;
+    }
+    let fn_type = context.void_type().fn_type(&[], false);
+    let fn_val = module.add_function("kodo_main", fn_type, None);
+    let bb = context.append_basic_block(fn_val, "entry");
+    builder.position_at_end(bb);
+    builder.build_return(None).unwrap();
 }
 
 /// Declares all user functions in the LLVM module.
