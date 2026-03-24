@@ -859,9 +859,10 @@ fn repair_plan_trait_and_contract(
 
 /// Returns a machine-applicable fix patch for the given type error.
 ///
-/// Covers all 43 error variants with auto-applicable patches that AI agents
-/// can use to fix code without human interpretation. The only variant without
-/// a patch is `PolicyViolation`, which is too generic to auto-fix.
+/// Covers all 50 of 51 error variants with auto-applicable patches that AI
+/// agents can use to fix code without human interpretation. The only variant
+/// without a patch is `PolicyViolation`, which is too context-dependent to
+/// auto-fix.
 fn fix_patch_for_error(err: &TypeError) -> Option<kodo_ast::FixPatch> {
     fix_patch_meta_and_policy(err)
         .or_else(|| fix_patch_names_and_fields(err))
