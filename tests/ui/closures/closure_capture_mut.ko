@@ -1,0 +1,18 @@
+//@ check-pass
+module closure_capture_mut {
+    meta { purpose: "Closure capturing multiple variables from enclosing scope" }
+
+    fn main() {
+        let base: Int = 100
+        let scale: Int = 3
+
+        // Closure captures both base and scale
+        let compute: (Int) -> Int = |x: Int| -> Int { base + x * scale }
+
+        let r1: Int = compute(5)
+        let r2: Int = compute(10)
+
+        print_int(r1)
+        print_int(r2)
+    }
+}

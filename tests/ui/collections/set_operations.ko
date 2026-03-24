@@ -1,0 +1,41 @@
+//@ check-pass
+module set_operations_ui {
+    meta { purpose: "Set operations: union, intersection, difference" }
+
+    fn main() {
+        let a: Set<Int> = set_new()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+
+        let b: Set<Int> = set_new()
+        b.add(2)
+        b.add(3)
+        b.add(4)
+
+        // union: {1, 2, 3, 4}
+        let u: Set<Int> = a.union(b)
+        print_int(u.length())
+
+        // intersection: {2, 3}
+        let inter: Set<Int> = a.intersection(b)
+        print_int(inter.length())
+
+        // difference: {1}
+        let diff: Set<Int> = a.difference(b)
+        print_int(diff.length())
+
+        // contains check
+        if a.contains(2) {
+            print_int(1)
+        }
+
+        // remove and check is_empty
+        a.remove(1)
+        a.remove(2)
+        a.remove(3)
+        if a.is_empty() {
+            print_int(1)
+        }
+    }
+}

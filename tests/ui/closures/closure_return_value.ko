@@ -1,0 +1,30 @@
+//@ check-pass
+module closure_return_value {
+    meta { purpose: "Closures returning computed values" }
+
+    fn apply(f: (Int) -> Int, x: Int) -> Int {
+        return f(x)
+    }
+
+    fn main() {
+        // Closure with arithmetic return
+        let square: (Int) -> Int = |x: Int| -> Int { x * x }
+        let s: Int = square(7)
+        print_int(s)
+
+        // Closure with conditional return
+        let abs_val: (Int) -> Int = |x: Int| -> Int {
+            if x < 0 { return 0 - x }
+            return x
+        }
+        let a: Int = abs_val(-5)
+        let b: Int = abs_val(3)
+        print_int(a)
+        print_int(b)
+
+        // Closure used via higher-order function
+        let negate: (Int) -> Int = |x: Int| -> Int { 0 - x }
+        let result: Int = apply(negate, 42)
+        print_int(result)
+    }
+}

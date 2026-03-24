@@ -1,0 +1,36 @@
+//@ check-pass
+module list_higher_order {
+    meta { purpose: "Higher-order operations on List: map, filter, fold, count, any, all" }
+
+    fn main() {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        // map: square each element
+        let squares: List<Int> = nums.map(|x: Int| -> Int { x * x })
+        print_int(list_get(squares, 0))
+        print_int(list_get(squares, 4))
+
+        // filter: keep odd numbers
+        let odds: List<Int> = nums.filter(|x: Int| -> Bool { x % 2 != 0 })
+        print_int(list_length(odds))
+
+        // fold: compute sum
+        let sum: Int = nums.fold(0, |acc: Int, x: Int| -> Int { acc + x })
+        print_int(sum)
+
+        // count: count elements > 2
+        let big: Int = nums.count(|x: Int| -> Bool { x > 2 })
+        print_int(big)
+
+        // any: is there an element == 5?
+        let has_five: Bool = nums.any(|x: Int| -> Bool { x == 5 })
+
+        // all: are all elements > 0?
+        let all_pos: Bool = nums.all(|x: Int| -> Bool { x > 0 })
+    }
+}
