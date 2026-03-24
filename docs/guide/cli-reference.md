@@ -352,6 +352,23 @@ A dedicated VSCode extension is available that connects to the Kōdo LSP server.
 
 To use it, install the extension and ensure `kodoc` is in your PATH. The extension automatically starts the LSP server when you open a `.ko` file.
 
+### Neovim
+
+Neovim support is provided through the `editors/neovim/` plugin (syntax, indent, ftdetect) and LSP via `kodoc lsp`.
+
+**Quick setup (Neovim 0.11+):**
+
+```lua
+vim.lsp.config.kodo = {
+  cmd = { 'kodoc', 'lsp' },
+  filetypes = { 'kodo' },
+  root_markers = { '.git' },
+}
+vim.lsp.enable('kodo')
+```
+
+For detailed instructions (nvim-lspconfig, LazyVim, tree-sitter), see [`editors/neovim/README.md`](../../editors/neovim/README.md).
+
 ### `kodoc audit`
 
 Generate a consolidated audit report combining confidence scores, contract verification status, and annotations.
