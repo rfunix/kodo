@@ -28,13 +28,14 @@ use super::value::{translate_value, unique_name, ValueCtx};
 /// * `local_types` - Mapping from local IDs to Kodo types.
 /// * `fn_map` - Mapping from function names to LLVM function values.
 /// * `block_map` - Mapping from MIR block IDs to LLVM basic blocks.
-/// * `return_type` - The function's return type.
-/// * `struct_defs` - Struct type definitions.
-/// * `enum_defs` - Enum type definitions.
-/// * `name_counter` - Counter for unique value names.
-/// * `ssa_cache` - Per-block SSA store-forwarding cache for avoiding redundant loads.
+/// * `return_type` - The Kodo return type of the current function.
+/// * `struct_defs` - Struct field definitions for heap-allocated structs.
+/// * `enum_defs` - Enum variant definitions.
+/// * `name_counter` - Counter for unique SSA names.
+/// * `ssa_cache` - SSA store-forwarding cache.
+/// * `alloca_block` - The alloca entry block for stack slot allocation.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn translate_terminator<'ctx>(
+pub fn translate_terminator<'ctx>(
     term: &Terminator,
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -48,7 +49,7 @@ pub(crate) fn translate_terminator<'ctx>(
     enum_defs: &HashMap<String, Vec<(String, Vec<Type>)>>,
     name_counter: &mut u32,
     ssa_cache: &mut HashMap<LocalId, BasicValueEnum<'ctx>>,
-    alloca_block: inkwell::basic_block::BasicBlock<'ctx>,
+    alloca_block: BasicBlock<'ctx>,
 ) {
     let mut vctx = ValueCtx {
         context,
@@ -116,6 +117,10 @@ pub(crate) fn translate_terminator<'ctx>(
 }
 
 /// Coerces a return value to match the expected LLVM return type.
+///
+/// Handles mismatches between `{ i64, i64 }` struct (enum) and `i64` scalar,
+/// and vice versa. This occurs when the MIR return type differs from the
+/// actual value type due to enum/Result/Option representation.
 fn coerce_return_value<'ctx>(
     val: BasicValueEnum<'ctx>,
     expected: inkwell::types::BasicTypeEnum<'ctx>,
@@ -125,30 +130,31 @@ fn coerce_return_value<'ctx>(
     let expected_is_struct = expected.is_struct_type();
 
     if val_is_struct && !expected_is_struct {
-        // Struct → scalar: extract payload (field 1).
+        // Returning { i64, i64 } from a function that expects i64.
+        // Extract the payload (field 1) — common when returning enum
+        // discriminant from a match, or when local holds enum but
+        // function returns scalar.
         let sv = val.into_struct_value();
-        let name = unique_name(vctx.name_counter, "ret_c");
+        let name = unique_name(vctx.name_counter, "ret_coerce");
         vctx.builder
             .build_extract_value(sv, 1, &name)
             .unwrap()
             .into()
     } else if !val_is_struct && expected_is_struct {
-        // Scalar → struct: wrap with discriminant 0.
+        // Returning i64 from a function that expects { i64, i64 }.
+        // Build a struct with discriminant 0 and the value as payload.
         let i64_val = val.into_int_value();
         let struct_ty = expected.into_struct_type();
         let zero = vctx.context.i64_type().const_int(0, false);
+        let s1_name = unique_name(vctx.name_counter, "ret_s1");
         let s1 = vctx
             .builder
-            .build_insert_value(
-                struct_ty.const_zero(),
-                zero,
-                0,
-                &unique_name(vctx.name_counter, "rc1"),
-            )
+            .build_insert_value(struct_ty.const_zero(), zero, 0, &s1_name)
             .unwrap();
+        let s2_name = unique_name(vctx.name_counter, "ret_s2");
         let s2 = vctx
             .builder
-            .build_insert_value(s1, i64_val, 1, &unique_name(vctx.name_counter, "rc2"))
+            .build_insert_value(s1, i64_val, 1, &s2_name)
             .unwrap();
         s2.into_struct_value().into()
     } else {
