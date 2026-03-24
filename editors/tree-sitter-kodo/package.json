@@ -1,0 +1,37 @@
+{
+  "name": "tree-sitter-kodo",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Kodo programming language",
+  "license": "MIT",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "kodo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kodo-lang/tree-sitter-kodo"
+  },
+  "dependencies": {
+    "nan": "^2.18.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.kodo",
+      "file-types": [
+        "ko"
+      ],
+      "highlights": "queries/highlights.scm",
+      "indents": "queries/indents.scm"
+    }
+  ]
+}
