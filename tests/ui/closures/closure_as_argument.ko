@@ -1,0 +1,29 @@
+//@ check-pass
+module closure_as_argument {
+    meta { purpose: "Passing closures as function arguments" }
+
+    fn apply_twice(f: (Int) -> Int, x: Int) -> Int {
+        return f(f(x))
+    }
+
+    fn transform(f: (Int) -> Int, a: Int, b: Int) -> Int {
+        return f(a) + f(b)
+    }
+
+    fn main() {
+        let inc: (Int) -> Int = |x: Int| -> Int { x + 1 }
+        let dbl: (Int) -> Int = |x: Int| -> Int { x * 2 }
+
+        // apply_twice(inc, 0) => inc(inc(0)) => 2
+        let r1: Int = apply_twice(inc, 0)
+        print_int(r1)
+
+        // apply_twice(dbl, 3) => dbl(dbl(3)) => 12
+        let r2: Int = apply_twice(dbl, 3)
+        print_int(r2)
+
+        // transform(dbl, 5, 10) => 10 + 20 => 30
+        let r3: Int = transform(dbl, 5, 10)
+        print_int(r3)
+    }
+}

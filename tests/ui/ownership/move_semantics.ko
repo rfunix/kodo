@@ -1,0 +1,23 @@
+//@ check-pass
+module move_semantics_ui {
+    meta { purpose: "Copy types are freely copied, non-Copy types are moved" }
+
+    fn consume(own s: String) {
+        println(s)
+    }
+
+    fn main() {
+        // Primitives (Copy types) can be used after assignment
+        let a: Int = 10
+        let b: Int = a
+        let c: Int = a + b
+        print_int(c)
+
+        // Bool is also Copy
+        let flag: Bool = true
+        let other: Bool = flag
+        if flag {
+            print_int(1)
+        }
+    }
+}

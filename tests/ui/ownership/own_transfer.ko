@@ -1,0 +1,32 @@
+//@ check-pass
+module own_transfer {
+    meta { purpose: "Ownership transfer with own keyword on structs" }
+
+    struct Payload {
+        value: Int
+    }
+
+    fn consume_payload(own p: Payload) -> Int {
+        return p.value
+    }
+
+    fn borrow_payload(ref p: Payload) -> Int {
+        return p.value
+    }
+
+    fn create_payload(v: Int) -> Payload {
+        return Payload { value: v }
+    }
+
+    fn main() {
+        // Create and borrow — struct remains usable
+        let p: Payload = create_payload(42)
+        let v1: Int = borrow_payload(p)
+        let v2: Int = borrow_payload(p)
+        print_int(v1 + v2)
+
+        // Transfer ownership — after this, p is consumed
+        let result: Int = consume_payload(p)
+        print_int(result)
+    }
+}

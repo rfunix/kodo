@@ -1,0 +1,25 @@
+//@ check-pass
+module ref_borrowing {
+    meta { purpose: "Borrowing with ref allows reuse of non-Copy values" }
+
+    fn read_value(ref s: String) {
+        println(s)
+    }
+
+    fn string_length(ref s: String) -> Int {
+        return s.length()
+    }
+
+    fn main() {
+        let msg: String = "borrowed value"
+        // Multiple ref borrows are allowed
+        read_value(msg)
+        read_value(msg)
+
+        let len: Int = string_length(msg)
+        print_int(len)
+
+        // msg is still usable after ref borrows
+        println(msg)
+    }
+}
