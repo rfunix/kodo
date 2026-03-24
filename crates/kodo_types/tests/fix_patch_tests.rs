@@ -786,3 +786,424 @@ fn fix_patch_private_access_returns_some() {
     assert_valid_patch(&patch, false);
     assert!(patch.replacement.contains("pub"));
 }
+
+// ===========================================================================
+// Closure capture variants — all return Some
+// ===========================================================================
+
+#[test]
+fn fix_patch_closure_capture_after_move() {
+    let err = TypeError::ClosureCaptureAfterMove {
+        name: "data".to_string(),
+        moved_at_line: 10,
+        span: Span::new(50, 60),
+    };
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("ref data"));
+    assert_eq!(patch.start_offset, 50);
+    assert_eq!(patch.end_offset, 60);
+}
+
+#[test]
+fn fix_patch_closure_capture_moves_variable() {
+    let err = TypeError::ClosureCaptureMovesVariable {
+        name: "buffer".to_string(),
+        span: Span::new(70, 80),
+    };
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("ref buffer"));
+    assert_eq!(patch.start_offset, 70);
+    assert_eq!(patch.end_offset, 80);
+}
+
+#[test]
+fn fix_patch_closure_double_capture() {
+    let err = TypeError::ClosureDoubleCapture {
+        name: "items".to_string(),
+        first_capture_line: 5,
+        span: Span::new(90, 100),
+    };
+    let patch = err.fix_patch().unwrap();
+    assert_valid_patch(&patch, false);
+    assert!(patch.replacement.contains("items_clone"));
+    assert!(patch.replacement.contains("clone()"));
+    assert_eq!(patch.start_offset, 90);
+    assert_eq!(patch.end_offset, 90); // insertion before span
+}
+
+// ===========================================================================
+// Exhaustiveness — every variant except PolicyViolation returns Some
+// ===========================================================================
+
+/// Verifies that every `TypeError` variant produces a `FixPatch`, except
+/// `PolicyViolation` which is intentionally excluded as it is too
+/// context-dependent to auto-fix.
+#[test]
+fn fix_patch_exhaustiveness_all_variants_covered() {
+    let span = Span::new(10, 20);
+
+    let all_errors: Vec<(&str, TypeError)> = vec![
+        (
+            "Mismatch",
+            TypeError::Mismatch {
+                expected: "Int".into(),
+                found: "String".into(),
+                span,
+            },
+        ),
+        (
+            "Undefined",
+            TypeError::Undefined {
+                name: "x".into(),
+                span,
+                similar: None,
+            },
+        ),
+        (
+            "ArityMismatch",
+            TypeError::ArityMismatch {
+                expected: 2,
+                found: 1,
+                span,
+            },
+        ),
+        (
+            "NotCallable",
+            TypeError::NotCallable {
+                found: "Int".into(),
+                span,
+            },
+        ),
+        ("MissingMeta", TypeError::MissingMeta),
+        ("EmptyPurpose", TypeError::EmptyPurpose { span }),
+        ("MissingPurpose", TypeError::MissingPurpose { span }),
+        (
+            "UnknownStruct",
+            TypeError::UnknownStruct {
+                name: "Foo".into(),
+                span,
+            },
+        ),
+        (
+            "MissingStructField",
+            TypeError::MissingStructField {
+                field: "x".into(),
+                struct_name: "S".into(),
+                span,
+            },
+        ),
+        (
+            "ExtraStructField",
+            TypeError::ExtraStructField {
+                field: "x".into(),
+                struct_name: "S".into(),
+                span,
+                similar: None,
+            },
+        ),
+        (
+            "DuplicateStructField",
+            TypeError::DuplicateStructField {
+                field: "x".into(),
+                struct_name: "S".into(),
+                span,
+            },
+        ),
+        (
+            "NoSuchField",
+            TypeError::NoSuchField {
+                field: "x".into(),
+                type_name: "T".into(),
+                span,
+                similar: None,
+            },
+        ),
+        (
+            "UnknownEnum",
+            TypeError::UnknownEnum {
+                name: "E".into(),
+                span,
+            },
+        ),
+        (
+            "UnknownVariant",
+            TypeError::UnknownVariant {
+                variant: "V".into(),
+                enum_name: "E".into(),
+                span,
+                similar: None,
+            },
+        ),
+        (
+            "NonExhaustiveMatch",
+            TypeError::NonExhaustiveMatch {
+                enum_name: "E".into(),
+                missing: vec!["A".into()],
+                span,
+            },
+        ),
+        (
+            "WrongTypeArgCount",
+            TypeError::WrongTypeArgCount {
+                name: "T".into(),
+                expected: 1,
+                found: 0,
+                span,
+            },
+        ),
+        (
+            "UndefinedTypeParam",
+            TypeError::UndefinedTypeParam {
+                name: "T".into(),
+                span,
+            },
+        ),
+        (
+            "MissingTypeArgs",
+            TypeError::MissingTypeArgs {
+                name: "List".into(),
+                span,
+            },
+        ),
+        ("TryInNonResultFn", TypeError::TryInNonResultFn { span }),
+        (
+            "OptionalChainOnNonOption",
+            TypeError::OptionalChainOnNonOption {
+                found: "Int".into(),
+                span,
+            },
+        ),
+        (
+            "CoalesceTypeMismatch",
+            TypeError::CoalesceTypeMismatch {
+                found: "Int".into(),
+                span,
+            },
+        ),
+        (
+            "ClosureParamTypeMissing",
+            TypeError::ClosureParamTypeMissing {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "UnknownTrait",
+            TypeError::UnknownTrait {
+                name: "T".into(),
+                span,
+            },
+        ),
+        (
+            "MissingTraitMethod",
+            TypeError::MissingTraitMethod {
+                method: "m".into(),
+                trait_name: "T".into(),
+                span,
+            },
+        ),
+        (
+            "MissingAssociatedType",
+            TypeError::MissingAssociatedType {
+                assoc_type: "Item".into(),
+                trait_name: "T".into(),
+                span,
+            },
+        ),
+        (
+            "UnexpectedAssociatedType",
+            TypeError::UnexpectedAssociatedType {
+                assoc_type: "X".into(),
+                trait_name: "T".into(),
+                span,
+            },
+        ),
+        (
+            "TraitBoundNotSatisfied",
+            TypeError::TraitBoundNotSatisfied {
+                concrete_type: "MyT".into(),
+                trait_name: "Ord".into(),
+                param: "T".into(),
+                span,
+            },
+        ),
+        (
+            "MethodNotFound",
+            TypeError::MethodNotFound {
+                method: "m".into(),
+                type_name: "T".into(),
+                span,
+                similar: None,
+            },
+        ),
+        ("AwaitOutsideAsync", TypeError::AwaitOutsideAsync { span }),
+        (
+            "SpawnCaptureMutableRef",
+            TypeError::SpawnCaptureMutableRef {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "SpawnCaptureNonSend",
+            TypeError::SpawnCaptureNonSend {
+                name: "x".into(),
+                type_name: "ref S".into(),
+                span,
+            },
+        ),
+        (
+            "ActorDirectFieldAccess",
+            TypeError::ActorDirectFieldAccess {
+                field: "f".into(),
+                actor_name: "A".into(),
+                span,
+            },
+        ),
+        (
+            "LowConfidenceWithoutReview",
+            TypeError::LowConfidenceWithoutReview {
+                name: "fn_name".into(),
+                confidence: "0.5".into(),
+                span,
+            },
+        ),
+        (
+            "ConfidenceThreshold",
+            TypeError::ConfidenceThreshold {
+                computed: "0.6".into(),
+                threshold: "0.8".into(),
+                weakest_fn: "f".into(),
+                weakest_confidence: "0.6".into(),
+                span,
+            },
+        ),
+        (
+            "SecuritySensitiveWithoutContract",
+            TypeError::SecuritySensitiveWithoutContract {
+                name: "f".into(),
+                span,
+            },
+        ),
+        (
+            "UseAfterMove",
+            TypeError::UseAfterMove {
+                name: "x".into(),
+                moved_at_line: 5,
+                span,
+            },
+        ),
+        (
+            "MutBorrowWhileRefBorrowed",
+            TypeError::MutBorrowWhileRefBorrowed {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "RefBorrowWhileMutBorrowed",
+            TypeError::RefBorrowWhileMutBorrowed {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "DoubleMutBorrow",
+            TypeError::DoubleMutBorrow {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "AssignThroughRef",
+            TypeError::AssignThroughRef {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "BorrowEscapesScope",
+            TypeError::BorrowEscapesScope {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "MoveWhileBorrowed",
+            TypeError::MoveWhileBorrowed {
+                name: "x".into(),
+                span,
+            },
+        ),
+        ("BreakOutsideLoop", TypeError::BreakOutsideLoop { span }),
+        (
+            "ContinueOutsideLoop",
+            TypeError::ContinueOutsideLoop { span },
+        ),
+        (
+            "TupleIndexOutOfBounds",
+            TypeError::TupleIndexOutOfBounds {
+                index: 5,
+                length: 3,
+                span,
+            },
+        ),
+        (
+            "PrivateAccess",
+            TypeError::PrivateAccess {
+                name: "x".into(),
+                defining_module: "m".into(),
+                span,
+            },
+        ),
+        (
+            "InvariantNotBool",
+            TypeError::InvariantNotBool {
+                found: "Int".into(),
+                span,
+            },
+        ),
+        (
+            "ClosureCaptureAfterMove",
+            TypeError::ClosureCaptureAfterMove {
+                name: "x".into(),
+                moved_at_line: 5,
+                span,
+            },
+        ),
+        (
+            "ClosureCaptureMovesVariable",
+            TypeError::ClosureCaptureMovesVariable {
+                name: "x".into(),
+                span,
+            },
+        ),
+        (
+            "ClosureDoubleCapture",
+            TypeError::ClosureDoubleCapture {
+                name: "x".into(),
+                first_capture_line: 5,
+                span,
+            },
+        ),
+    ];
+
+    for (variant_name, err) in &all_errors {
+        assert!(
+            err.fix_patch().is_some(),
+            "TypeError::{variant_name} should produce a FixPatch but returned None"
+        );
+    }
+
+    // PolicyViolation is intentionally excluded — verify it returns None.
+    let policy = TypeError::PolicyViolation {
+        message: "test".into(),
+        span,
+    };
+    assert!(
+        policy.fix_patch().is_none(),
+        "PolicyViolation should NOT produce a FixPatch"
+    );
+}
