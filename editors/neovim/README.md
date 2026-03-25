@@ -147,6 +147,25 @@ The Kodo LSP server provides:
 | Rename | Rename symbols across the module |
 | Code Actions | Quick fixes based on diagnostics |
 | Signature Help | Parameter hints on function calls |
+| **Formatting** | **Format document via `kodoc fmt` (format-on-save enabled by default)** |
+
+## Format on Save
+
+The plugin enables **format-on-save by default** via `ftplugin/kodo.vim`. Every time you save
+a `.ko` file, the LSP calls `textDocument/formatting` to reformat the code.
+
+To disable format-on-save, add to your Neovim config:
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "kodo",
+  callback = function()
+    vim.api.nvim_clear_autocmds({ group = "kodo_format_on_save", buffer = 0 })
+  end,
+})
+```
+
+To format manually: `:lua vim.lsp.buf.format()` or bind it to a key.
 
 ## Verify
 

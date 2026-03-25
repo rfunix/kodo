@@ -28,6 +28,7 @@
 mod actions;
 mod completion;
 mod diagnostics;
+mod format;
 mod goto;
 mod hover;
 mod rename;
@@ -129,6 +130,7 @@ impl LanguageServer for KodoLanguageServer {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -359,6 +361,34 @@ impl LanguageServer for KodoLanguageServer {
         }
 
         Ok(None)
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        if let Some(source) = self.get_source(&uri)? {
+            match kodo_parser::parse(&source) {
+                Ok(module) => {
+                    let formatted = format::format_module(&module);
+                    if formatted == source {
+                        return Ok(None); // already formatted
+                    }
+                    let lines: Vec<&str> = source.lines().collect();
+                    #[allow(clippy::cast_possible_truncation)] // LSP positions are u32 per spec
+                    let last_line = lines.len().saturating_sub(1) as u32;
+                    #[allow(clippy::cast_possible_truncation)]
+                    let last_col = lines.last().map_or(0, |l| l.len()) as u32;
+                    let edit = TextEdit {
+                        range: Range::new(Position::new(0, 0), Position::new(last_line, last_col)),
+                        new_text: formatted,
+                    };
+                    Ok(Some(vec![edit]))
+                }
+                Err(_) => Ok(None), // don't format if file has parse errors
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 

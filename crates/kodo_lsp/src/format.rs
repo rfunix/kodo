@@ -14,6 +14,12 @@
 //! - `async` keyword on async functions
 //! - Limitation: does not preserve comments
 
+// Formatter builds strings by appending formatted fragments — `push_str(&format!(..))`
+// is the natural pattern here.  Using `write!` would add error handling noise for
+// infallible `String` writes.  Similarly, formatter functions are large by nature
+// (one arm per AST node).
+#![allow(clippy::format_push_string, clippy::too_many_lines)]
+
 use kodo_ast::{
     ActorDecl, BinOp, Block, DescribeDecl, EnumDecl, Expr, Function, GenericParam,
     IntentConfigValue, Module, Ownership, Pattern, Stmt, TestDecl, TypeDecl, TypeExpr, UnaryOp,
