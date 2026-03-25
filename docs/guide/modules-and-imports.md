@@ -267,6 +267,63 @@ let result2: Int = math::add(1, 2)
 
 This is equivalent to calling `add(1, 2)` directly — the module prefix makes the origin explicit.
 
+## Visibility
+
+By default, all declarations in a module are **private** — they can only be used within the same module. Use the `pub` keyword to make them accessible from other modules.
+
+### Public vs Private
+
+```rust
+module auth {
+    meta { purpose: "Authentication utilities" }
+
+    // Public — part of the module's API
+    pub struct User {
+        name: String,
+        role: String
+    }
+
+    // Public — callable from other modules
+    pub fn create_user(name: String, role: String) -> User {
+        return User { name: validate_name(name), role: role }
+    }
+
+    // Private — internal helper, not visible outside this module
+    fn validate_name(name: String) -> String {
+        return name
+    }
+}
+```
+
+Importing `auth` gives access to `User` and `create_user`, but not `validate_name`.
+
+### What Can Be `pub`
+
+| Declaration | Default | With `pub` |
+|-------------|---------|------------|
+| `fn` | Private | Callable from other modules |
+| `struct` | Private | Usable as a type from other modules |
+| `enum` | Private | Usable as a type from other modules |
+| `trait` | Private | Implementable from other modules |
+
+### Visibility with Annotations
+
+`pub` works with all Kōdo annotations:
+
+```rust
+@authored_by(agent: "claude")
+@confidence(0.95)
+pub fn process(data: String) -> String
+    requires { data.length() > 0 }
+{
+    return data
+}
+```
+
+### Design Guideline
+
+Keep the public API minimal. Expose only what other modules need, and hide implementation details. This makes refactoring safer — private functions can change freely without breaking callers.
+
 ## Compilation Certificates
 
 When you compile a Kōdo program, the compiler emits a **compilation certificate** alongside the binary. For `hello.ko`, the compiler creates `hello.ko.cert.json`:
