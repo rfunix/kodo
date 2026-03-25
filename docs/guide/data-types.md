@@ -204,6 +204,58 @@ Output:
 21
 ```
 
+## Tuples
+
+A tuple groups a fixed number of values of possibly different types. Unlike structs, tuple fields are accessed by position rather than by name.
+
+### Tuple Literals
+
+Create tuples with parentheses:
+
+```rust
+let pair: (Int, Int) = (42, 99)
+let triple: (Int, String, Bool) = (1, "hello", true)
+```
+
+### Accessing Elements
+
+Use `.0`, `.1`, `.2` etc. to access elements by index:
+
+```rust
+let pair: (Int, Int) = (10, 20)
+let first: Int = pair.0
+let second: Int = pair.1
+```
+
+### Destructuring
+
+Bind all elements at once with destructuring:
+
+```rust
+let triple: (Int, Int, Int) = (1, 2, 3)
+let (a, b, c) = triple
+// a = 1, b = 2, c = 3
+```
+
+### Returning Tuples from Functions
+
+Tuples are useful when a function needs to return multiple values:
+
+```rust
+fn min_max(a: Int, b: Int) -> (Int, Int) {
+    if a < b {
+        return (a, b)
+    }
+    return (b, a)
+}
+
+fn main() {
+    let result: (Int, Int) = min_max(7, 3)
+    print_int(result.0)  // 3
+    print_int(result.1)  // 7
+}
+```
+
 ## Float64
 
 Kōdo supports 64-bit floating-point numbers with full arithmetic:
