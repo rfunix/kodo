@@ -363,10 +363,7 @@ impl LanguageServer for KodoLanguageServer {
         Ok(None)
     }
 
-    async fn formatting(
-        &self,
-        params: DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
 
         if let Some(source) = self.get_source(&uri)? {
@@ -377,13 +374,12 @@ impl LanguageServer for KodoLanguageServer {
                         return Ok(None); // already formatted
                     }
                     let lines: Vec<&str> = source.lines().collect();
+                    #[allow(clippy::cast_possible_truncation)] // LSP positions are u32 per spec
                     let last_line = lines.len().saturating_sub(1) as u32;
+                    #[allow(clippy::cast_possible_truncation)]
                     let last_col = lines.last().map_or(0, |l| l.len()) as u32;
                     let edit = TextEdit {
-                        range: Range::new(
-                            Position::new(0, 0),
-                            Position::new(last_line, last_col),
-                        ),
+                        range: Range::new(Position::new(0, 0), Position::new(last_line, last_col)),
                         new_text: formatted,
                     };
                     Ok(Some(vec![edit]))

@@ -14,6 +14,12 @@
 //! - `async` keyword on async functions
 //! - Limitation: does not preserve comments
 
+// Formatter builds strings by appending formatted fragments — `push_str(&format!(..))`
+// is the natural pattern here.  Using `write!` would add error handling noise for
+// infallible `String` writes.  Similarly, formatter functions are large by nature
+// (one arm per AST node).
+#![allow(clippy::format_push_string, clippy::too_many_lines)]
+
 use kodo_ast::{
     ActorDecl, BinOp, Block, DescribeDecl, EnumDecl, Expr, Function, GenericParam,
     IntentConfigValue, Module, Ownership, Pattern, Stmt, TestDecl, TypeDecl, TypeExpr, UnaryOp,
@@ -224,7 +230,10 @@ fn format_type_alias(out: &mut String, ta: &kodo_ast::TypeAlias, level: usize) {
 
 fn format_invariant(out: &mut String, inv: &kodo_ast::InvariantDecl, level: usize) {
     indent(out, level);
-    out.push_str(&format!("invariant {{ {} }}\n", format_expr(&inv.condition)));
+    out.push_str(&format!(
+        "invariant {{ {} }}\n",
+        format_expr(&inv.condition)
+    ));
 }
 
 // ─── Structs ──────────────────────────────────────────────────
@@ -295,7 +304,9 @@ fn format_trait(out: &mut String, td: &kodo_ast::TraitDecl, level: usize) {
 
     // Methods
     for method in &td.methods {
-        if !td.associated_types.is_empty() || td.methods.first().map(|m| &m.name) != Some(&method.name) {
+        if !td.associated_types.is_empty()
+            || td.methods.first().map(|m| &m.name) != Some(&method.name)
+        {
             // Add blank line between associated types and methods, and between methods
         }
         indent(out, level + 1);
