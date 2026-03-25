@@ -548,7 +548,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             if let Some(ty) = ty {
                 out.push_str(&format!(": {}", format_type_expr(ty)));
             }
-            out.push_str(&format!(" = {}\n", format_expr(value)));
+            out.push_str(&format!(" = {}\n", format_expr_at(value, level)));
         }
         Stmt::LetPattern {
             mutable,
@@ -566,16 +566,16 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             if let Some(ty) = ty {
                 out.push_str(&format!(": {}", format_type_expr(ty)));
             }
-            out.push_str(&format!(" = {}\n", format_expr(value)));
+            out.push_str(&format!(" = {}\n", format_expr_at(value, level)));
         }
         Stmt::Assign { name, value, .. } => {
             indent(out, level);
-            out.push_str(&format!("{name} = {}\n", format_expr(value)));
+            out.push_str(&format!("{name} = {}\n", format_expr_at(value, level)));
         }
         Stmt::Return { value, .. } => {
             indent(out, level);
             if let Some(val) = value {
-                out.push_str(&format!("return {}\n", format_expr(val)));
+                out.push_str(&format!("return {}\n", format_expr_at(val, level)));
             } else {
                 out.push_str("return\n");
             }
@@ -622,7 +622,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         }
         Stmt::Expr(expr) => {
             indent(out, level);
-            out.push_str(&format!("{}\n", format_expr(expr)));
+            out.push_str(&format!("{}\n", format_expr_at(expr, level)));
         }
         Stmt::IfLet {
             pattern,
@@ -687,6 +687,10 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
 // ─── Expressions ──────────────────────────────────────────────
 
 fn format_expr(expr: &Expr) -> String {
+    format_expr_at(expr, 0)
+}
+
+fn format_expr_at(expr: &Expr, level: usize) -> String {
     match expr {
         Expr::IntLit(n, _) => n.to_string(),
         Expr::FloatLit(f, _) => f.to_string(),
@@ -731,17 +735,13 @@ fn format_expr(expr: &Expr) -> String {
             ..
         } => {
             let mut s = format!("if {} {{\n", format_expr(condition));
-            for stmt in &then_branch.stmts {
-                s.push_str("    ");
-                s.push_str(&format_stmt_inline(stmt));
-            }
+            format_block_inner_to_string(&mut s, then_branch, level + 1);
+            indent_to_string(&mut s, level);
             s.push('}');
             if let Some(else_b) = else_branch {
                 s.push_str(" else {\n");
-                for stmt in &else_b.stmts {
-                    s.push_str("    ");
-                    s.push_str(&format_stmt_inline(stmt));
-                }
+                format_block_inner_to_string(&mut s, else_b, level + 1);
+                indent_to_string(&mut s, level);
                 s.push('}');
             }
             s
@@ -772,21 +772,21 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Match { expr, arms, .. } => {
             let mut s = format!("match {} {{\n", format_expr(expr));
             for arm in arms {
+                indent_to_string(&mut s, level + 1);
                 s.push_str(&format!(
-                    "    {} => {},\n",
+                    "{} => {},\n",
                     format_pattern(&arm.pattern),
-                    format_expr(&arm.body)
+                    format_expr_at(&arm.body, level + 1)
                 ));
             }
+            indent_to_string(&mut s, level);
             s.push('}');
             s
         }
         Expr::Block(block) => {
             let mut s = String::from("{\n");
-            for stmt in &block.stmts {
-                s.push_str("    ");
-                s.push_str(&format_stmt_inline(stmt));
-            }
+            format_block_inner_to_string(&mut s, block, level + 1);
+            indent_to_string(&mut s, level);
             s.push('}');
             s
         }
@@ -860,10 +860,16 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
-fn format_stmt_inline(stmt: &Stmt) -> String {
-    let mut s = String::new();
-    format_stmt(&mut s, stmt, 0);
-    s
+fn indent_to_string(s: &mut String, level: usize) {
+    for _ in 0..level {
+        s.push_str("    ");
+    }
+}
+
+fn format_block_inner_to_string(s: &mut String, block: &Block, level: usize) {
+    for stmt in &block.stmts {
+        format_stmt(s, stmt, level);
+    }
 }
 
 // ─── Patterns ─────────────────────────────────────────────────
