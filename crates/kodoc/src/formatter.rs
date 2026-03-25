@@ -224,7 +224,10 @@ fn format_type_alias(out: &mut String, ta: &kodo_ast::TypeAlias, level: usize) {
 
 fn format_invariant(out: &mut String, inv: &kodo_ast::InvariantDecl, level: usize) {
     indent(out, level);
-    out.push_str(&format!("invariant {{ {} }}\n", format_expr(&inv.condition)));
+    out.push_str(&format!(
+        "invariant {{ {} }}\n",
+        format_expr(&inv.condition)
+    ));
 }
 
 // ─── Structs ──────────────────────────────────────────────────
@@ -295,7 +298,9 @@ fn format_trait(out: &mut String, td: &kodo_ast::TraitDecl, level: usize) {
 
     // Methods
     for method in &td.methods {
-        if !td.associated_types.is_empty() || td.methods.first().map(|m| &m.name) != Some(&method.name) {
+        if !td.associated_types.is_empty()
+            || td.methods.first().map(|m| &m.name) != Some(&method.name)
+        {
             // Add blank line between associated types and methods, and between methods
         }
         indent(out, level + 1);
