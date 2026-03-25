@@ -933,3 +933,164 @@ fn format_type_expr(ty: &TypeExpr) -> String {
         TypeExpr::DynTrait(name) => format!("dyn {name}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: parse source → format → return formatted string.
+    fn roundtrip(source: &str) -> String {
+        let module = kodo_parser::parse(source).expect("parse failed");
+        format_module(&module)
+    }
+
+    #[test]
+    fn format_simple_module() {
+        let src = r#"module hello {
+    meta { purpose: "test" }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(
+            formatted.contains("module hello {"),
+            "should preserve module name"
+        );
+        assert!(formatted.contains("meta {"), "should preserve meta block");
+        assert!(
+            formatted.contains("fn main() -> Int"),
+            "should preserve function signature"
+        );
+    }
+
+    #[test]
+    fn format_is_idempotent() {
+        let src = r#"module idem {
+    meta { purpose: "idempotency test" }
+
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let first = roundtrip(src);
+        let second = roundtrip(&first);
+        assert_eq!(first, second, "formatting should be idempotent");
+    }
+
+    #[test]
+    fn format_preserves_pub_keyword() {
+        let src = r#"module vis {
+    meta { purpose: "visibility" }
+
+    pub fn greet() -> String {
+        return "hi"
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(
+            formatted.contains("pub fn greet"),
+            "should preserve pub keyword"
+        );
+    }
+
+    #[test]
+    fn format_preserves_contracts() {
+        let src = r#"module contracts {
+    meta { purpose: "contracts" }
+
+    fn safe_div(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(
+            formatted.contains("requires"),
+            "should preserve requires clause"
+        );
+    }
+
+    #[test]
+    fn format_preserves_struct_fields() {
+        let src = r#"module types {
+    meta { purpose: "types" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(formatted.contains("struct Point"), "should preserve struct");
+        assert!(formatted.contains("x: Int"), "should preserve field x");
+        assert!(formatted.contains("y: Int"), "should preserve field y");
+    }
+
+    #[test]
+    fn format_preserves_enum_variants() {
+        let src = r#"module enums {
+    meta { purpose: "enums" }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(formatted.contains("enum Color"), "should preserve enum");
+        assert!(formatted.contains("Red"), "should preserve variant Red");
+        assert!(formatted.contains("Green"), "should preserve variant Green");
+        assert!(formatted.contains("Blue"), "should preserve variant Blue");
+    }
+
+    #[test]
+    fn format_binary_operators_have_spaces() {
+        let src = r#"module ops {
+    meta { purpose: "operators" }
+
+    fn calc(a: Int, b: Int) -> Int {
+        let x: Int = a + b
+        let y: Int = a * b
+        return x - y
+    }
+}"#;
+        let formatted = roundtrip(src);
+        assert!(formatted.contains("a + b"), "should have spaces around +");
+        assert!(formatted.contains("a * b"), "should have spaces around *");
+        assert!(formatted.contains("x - y"), "should have spaces around -");
+    }
+
+    #[test]
+    fn format_uses_four_space_indent() {
+        let src = r#"module indent {
+    meta { purpose: "indent" }
+
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let formatted = roundtrip(src);
+        // Functions inside module should be indented 4 spaces
+        assert!(
+            formatted.contains("    fn main"),
+            "should use 4-space indent for functions"
+        );
+        // Statements inside function should be indented 8 spaces
+        assert!(
+            formatted.contains("        return"),
+            "should use 8-space indent for statements"
+        );
+    }
+}
