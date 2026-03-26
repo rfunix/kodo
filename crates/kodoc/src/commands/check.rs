@@ -6,13 +6,14 @@
 use std::path::PathBuf;
 
 use super::common::{compile_imported_module, parse_contract_mode, resolve_import_path};
-use crate::{certificate, diagnostics};
+use crate::diagnostics::DiagnosticsFormat;
+use crate::{certificate, diagnostics, sarif};
 
 /// Type-checks and verifies contracts without generating code.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn run_check(
     file: &PathBuf,
-    json_errors: bool,
+    diag_format: DiagnosticsFormat,
     contracts_mode_str: &str,
     emit_cert: bool,
     repair_plan: bool,
@@ -32,10 +33,18 @@ pub(crate) fn run_check(
     let module = match kodo_parser::parse(&source) {
         Ok(m) => m,
         Err(e) => {
-            if json_errors {
-                diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
-            } else {
-                diagnostics::render_parse_error(&source, &filename, &e);
+            match diag_format {
+                DiagnosticsFormat::Json => {
+                    diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
+                }
+                DiagnosticsFormat::Sarif => {
+                    let diags: Vec<&dyn kodo_ast::Diagnostic> =
+                        vec![&e as &dyn kodo_ast::Diagnostic];
+                    sarif::print_sarif(&source, &filename, &diags);
+                }
+                DiagnosticsFormat::Text => {
+                    diagnostics::render_parse_error(&source, &filename, &e);
+                }
             }
             return 1;
         }
@@ -95,11 +104,23 @@ pub(crate) fn run_check(
     if !type_errors.is_empty() {
         if repair_plan {
             emit_repair_plans(&type_errors);
-        } else if json_errors {
-            diagnostics::render_type_errors_json(&source, &filename, &type_errors);
         } else {
-            for e in &type_errors {
-                diagnostics::render_type_error(&source, &filename, e);
+            match diag_format {
+                DiagnosticsFormat::Json => {
+                    diagnostics::render_type_errors_json(&source, &filename, &type_errors);
+                }
+                DiagnosticsFormat::Sarif => {
+                    let diags: Vec<&dyn kodo_ast::Diagnostic> = type_errors
+                        .iter()
+                        .map(|e| e as &dyn kodo_ast::Diagnostic)
+                        .collect();
+                    sarif::print_sarif(&source, &filename, &diags);
+                }
+                DiagnosticsFormat::Text => {
+                    for e in &type_errors {
+                        diagnostics::render_type_error(&source, &filename, e);
+                    }
+                }
             }
         }
         return 1;
@@ -154,15 +175,21 @@ pub(crate) fn run_check(
         }
     }
 
-    if json_errors {
-        diagnostics::render_success_json(&module);
-    } else {
-        println!("Check passed for module `{}`", module.name);
-        if total_static > 0 || total_runtime > 0 {
-            println!(
-                "  contracts: {} statically verified, {} runtime checks",
-                total_static, total_runtime
-            );
+    match diag_format {
+        DiagnosticsFormat::Json => {
+            diagnostics::render_success_json(&module);
+        }
+        DiagnosticsFormat::Sarif => {
+            sarif::print_sarif_success();
+        }
+        DiagnosticsFormat::Text => {
+            println!("Check passed for module `{}`", module.name);
+            if total_static > 0 || total_runtime > 0 {
+                println!(
+                    "  contracts: {} statically verified, {} runtime checks",
+                    total_static, total_runtime
+                );
+            }
         }
     }
 

@@ -17,7 +17,8 @@ use super::common::{
     rewrite_self_method_calls_in_block, rewrite_set_for_in, substitute_type_expr_ast,
     topological_sort, type_to_type_expr,
 };
-use crate::{certificate, diagnostics};
+use crate::diagnostics::DiagnosticsFormat;
+use crate::{certificate, diagnostics, sarif};
 
 /// Compiles a Kodo source file or directory to a native executable.
 ///
@@ -28,7 +29,7 @@ use crate::{certificate, diagnostics};
 pub(crate) fn run_build(
     file: &PathBuf,
     output: Option<&std::path::Path>,
-    json_errors: bool,
+    diag_format: DiagnosticsFormat,
     contracts_mode_str: &str,
     emit_mir: bool,
     green_threads: bool,
@@ -41,7 +42,7 @@ pub(crate) fn run_build(
         return run_build_dir(
             file,
             output,
-            json_errors,
+            diag_format,
             contracts_mode_str,
             emit_mir,
             green_threads,
@@ -65,10 +66,18 @@ pub(crate) fn run_build(
     let module = match kodo_parser::parse(&source) {
         Ok(m) => m,
         Err(e) => {
-            if json_errors {
-                diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
-            } else {
-                diagnostics::render_parse_error(&source, &filename, &e);
+            match diag_format {
+                DiagnosticsFormat::Json => {
+                    diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
+                }
+                DiagnosticsFormat::Sarif => {
+                    let diags: Vec<&dyn kodo_ast::Diagnostic> =
+                        vec![&e as &dyn kodo_ast::Diagnostic];
+                    sarif::print_sarif(&source, &filename, &diags);
+                }
+                DiagnosticsFormat::Text => {
+                    diagnostics::render_parse_error(&source, &filename, &e);
+                }
             }
             return 1;
         }
@@ -150,11 +159,21 @@ pub(crate) fn run_build(
     }
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
-        if json_errors {
-            diagnostics::render_type_errors_json(&source, &filename, &type_errors);
-        } else {
-            for e in &type_errors {
-                diagnostics::render_type_error(&source, &filename, e);
+        match diag_format {
+            DiagnosticsFormat::Json => {
+                diagnostics::render_type_errors_json(&source, &filename, &type_errors);
+            }
+            DiagnosticsFormat::Sarif => {
+                let diags: Vec<&dyn kodo_ast::Diagnostic> = type_errors
+                    .iter()
+                    .map(|e| e as &dyn kodo_ast::Diagnostic)
+                    .collect();
+                sarif::print_sarif(&source, &filename, &diags);
+            }
+            DiagnosticsFormat::Text => {
+                for e in &type_errors {
+                    diagnostics::render_type_error(&source, &filename, e);
+                }
             }
         }
         return 1;
@@ -635,7 +654,7 @@ fn resolve_import_with_deps(
 fn run_build_dir(
     dir: &std::path::Path,
     output: Option<&std::path::Path>,
-    json_errors: bool,
+    diag_format: DiagnosticsFormat,
     contracts_mode_str: &str,
     emit_mir: bool,
     green_threads: bool,
@@ -686,7 +705,7 @@ fn run_build_dir(
     run_build(
         &entry,
         Some(&output_path),
-        json_errors,
+        diag_format,
         contracts_mode_str,
         emit_mir,
         green_threads,

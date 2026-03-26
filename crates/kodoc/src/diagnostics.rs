@@ -12,6 +12,24 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use kodo_ast::Diagnostic;
 use serde::Serialize;
 
+/// Supported diagnostic output formats.
+///
+/// Controls how compiler diagnostics are rendered:
+/// - **Text**: Human-readable output via ariadne with coloured spans (default).
+/// - **Json**: Machine-parseable JSON envelope for AI agent consumption.
+/// - **Sarif**: [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/) for CI/CD integration
+///   (GitHub Code Scanning, VS Code SARIF Viewer, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiagnosticsFormat {
+    /// Human-readable terminal output (ariadne).
+    #[default]
+    Text,
+    /// JSON envelope format (`{"errors": [...], "count": N}`).
+    Json,
+    /// SARIF 2.1.0 static analysis interchange format.
+    Sarif,
+}
+
 /// Renders any diagnostic using ariadne.
 ///
 /// Accepts any type implementing [`kodo_ast::Diagnostic`] and renders it

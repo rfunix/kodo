@@ -16,6 +16,7 @@ mod formatter;
 mod lockfile;
 mod manifest;
 mod repl;
+mod sarif;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -42,9 +43,13 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Emit errors as JSON (for AI agent consumption).
+        /// Emit errors as JSON (for AI agent consumption). Alias for `--diagnostics-format=json`.
         #[arg(long, default_value_t = false)]
         json_errors: bool,
+
+        /// Diagnostics output format: text (default), json, or sarif.
+        #[arg(long)]
+        diagnostics_format: Option<String>,
 
         /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
@@ -90,9 +95,13 @@ enum Command {
         #[arg()]
         file: PathBuf,
 
-        /// Emit errors as JSON.
+        /// Emit errors as JSON. Alias for `--diagnostics-format=json`.
         #[arg(long, default_value_t = false)]
         json_errors: bool,
+
+        /// Diagnostics output format: text (default), json, or sarif.
+        #[arg(long)]
+        diagnostics_format: Option<String>,
 
         /// Contract checking mode: static, runtime, both, none, recoverable.
         #[arg(long, default_value = "runtime")]
@@ -302,6 +311,31 @@ enum Command {
     },
 }
 
+/// Resolves the effective diagnostics format from CLI flags.
+///
+/// `--diagnostics-format` takes priority over `--json-errors`.
+/// When neither is specified, defaults to `Text`.
+fn resolve_diagnostics_format(
+    json_errors: bool,
+    diagnostics_format: Option<&str>,
+) -> diagnostics::DiagnosticsFormat {
+    if let Some(fmt) = diagnostics_format {
+        match fmt.to_lowercase().as_str() {
+            "json" => diagnostics::DiagnosticsFormat::Json,
+            "sarif" => diagnostics::DiagnosticsFormat::Sarif,
+            "text" => diagnostics::DiagnosticsFormat::Text,
+            other => {
+                eprintln!("warning: unknown diagnostics format `{other}`, falling back to text");
+                diagnostics::DiagnosticsFormat::Text
+            }
+        }
+    } else if json_errors {
+        diagnostics::DiagnosticsFormat::Json
+    } else {
+        diagnostics::DiagnosticsFormat::Text
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -317,6 +351,7 @@ fn main() {
             file,
             output,
             json_errors,
+            diagnostics_format,
             contracts,
             emit_mir,
             threads,
@@ -331,10 +366,11 @@ fn main() {
             }
             // --release is an alias for --backend=llvm.
             let effective_backend = if release { "llvm" } else { &backend };
+            let diag_fmt = resolve_diagnostics_format(json_errors, diagnostics_format.as_deref());
             commands::build::run_build(
                 &file,
                 output.as_deref(),
-                json_errors,
+                diag_fmt,
                 &contracts,
                 emit_mir,
                 !no_green_threads,
@@ -347,10 +383,14 @@ fn main() {
         Command::Check {
             file,
             json_errors,
+            diagnostics_format,
             contracts,
             emit_cert,
             repair_plan,
-        } => commands::check::run_check(&file, json_errors, &contracts, emit_cert, repair_plan),
+        } => {
+            let diag_fmt = resolve_diagnostics_format(json_errors, diagnostics_format.as_deref());
+            commands::check::run_check(&file, diag_fmt, &contracts, emit_cert, repair_plan)
+        }
         Command::Lex { file } => commands::misc::run_lex(&file),
         Command::Parse { file } => commands::misc::run_parse(&file),
         Command::Explain { code, json } => commands::misc::run_explain(&code, json),
