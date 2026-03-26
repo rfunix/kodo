@@ -1,0 +1,21 @@
+//@ check-pass
+module refinement_types_test {
+    meta {
+        purpose: "UI test: refinement types with requires constraints",
+        version: "0.1.0"
+    }
+
+    type Port = Int requires { self > 0 && self < 65535 }
+    type Percentage = Int requires { self >= 0 && self <= 100 }
+    type Age = Int requires { self >= 0 }
+    type Name = String
+
+    fn main() -> Int {
+        let port: Port = 8080
+        let pct: Percentage = 75
+        let age: Age = 30
+        let name: Name = "Kodo"
+
+        return 0
+    }
+}

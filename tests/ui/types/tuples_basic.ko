@@ -1,0 +1,25 @@
+//@ check-pass
+module tuples_basic {
+    meta {
+        purpose: "UI test: tuple literals, indexing, destructuring",
+        version: "0.1.0"
+    }
+
+    fn make_pair(a: Int, b: Int) -> (Int, Int) {
+        return (a, b)
+    }
+
+    fn main() -> Int {
+        let pair: (Int, Int) = (42, 99)
+        let first: Int = pair.0
+        let second: Int = pair.1
+
+        let triple: (Int, Int, Int) = (1, 2, 3)
+        let (a, b, c) = triple
+
+        let result: (Int, Int) = make_pair(10, 20)
+        let x: Int = result.0
+
+        return 0
+    }
+}
