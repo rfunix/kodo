@@ -13,6 +13,7 @@ use crate::{certificate, diagnostics};
 pub(crate) fn run_check(
     file: &PathBuf,
     json_errors: bool,
+    sarif: bool,
     contracts_mode_str: &str,
     emit_cert: bool,
     repair_plan: bool,
@@ -32,7 +33,10 @@ pub(crate) fn run_check(
     let module = match kodo_parser::parse(&source) {
         Ok(m) => m,
         Err(e) => {
-            if json_errors {
+            if sarif {
+                let diag: &dyn kodo_ast::Diagnostic = &e;
+                crate::sarif::render_sarif(&source, &filename, &[diag]);
+            } else if json_errors {
                 diagnostics::render_parse_error_json_envelope(&source, &filename, &e);
             } else {
                 diagnostics::render_parse_error(&source, &filename, &e);
@@ -93,7 +97,13 @@ pub(crate) fn run_check(
     // Type check -- collect all errors for multi-error reporting.
     let type_errors = checker.check_module_collecting(&module);
     if !type_errors.is_empty() {
-        if repair_plan {
+        if sarif {
+            let diags: Vec<&dyn kodo_ast::Diagnostic> = type_errors
+                .iter()
+                .map(|e| e as &dyn kodo_ast::Diagnostic)
+                .collect();
+            crate::sarif::render_sarif(&source, &filename, &diags);
+        } else if repair_plan {
             emit_repair_plans(&type_errors);
         } else if json_errors {
             diagnostics::render_type_errors_json(&source, &filename, &type_errors);

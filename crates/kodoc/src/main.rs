@@ -16,6 +16,7 @@ mod formatter;
 mod lockfile;
 mod manifest;
 mod repl;
+pub mod sarif;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -101,6 +102,10 @@ enum Command {
         /// Emit a compilation certificate (`<file>.cert.json`) after a successful check.
         #[arg(long, default_value_t = false)]
         emit_cert: bool,
+
+        /// Emit diagnostics in SARIF v2.1.0 format (for GitHub Code Scanning, IDE integration).
+        #[arg(long, default_value_t = false)]
+        sarif: bool,
 
         /// Emit repair plans as JSON for each error (for AI agent consumption).
         #[arg(long, default_value_t = false)]
@@ -348,9 +353,17 @@ fn main() {
             file,
             json_errors,
             contracts,
+            sarif,
             emit_cert,
             repair_plan,
-        } => commands::check::run_check(&file, json_errors, &contracts, emit_cert, repair_plan),
+        } => commands::check::run_check(
+            &file,
+            json_errors,
+            sarif,
+            &contracts,
+            emit_cert,
+            repair_plan,
+        ),
         Command::Lex { file } => commands::misc::run_lex(&file),
         Command::Parse { file } => commands::misc::run_parse(&file),
         Command::Explain { code, json } => commands::misc::run_explain(&code, json),
