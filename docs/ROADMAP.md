@@ -1,16 +1,36 @@
 # Kōdo Roadmap
 
-> v1.0.0 achieved! All 10 milestones complete. Next: bootstrap compiler.
+> v1.8.0 — All 10 original milestones complete + formatter, annotate, SARIF. Next: Channel Select → Bootstrap.
 
-## Status atual (v1.0.0) ✅
+## Status atual (v1.8.0) ✅
 
-- 98.000+ linhas de Rust, 17 crates, 2.400+ testes, 56 UI tests
+- 100.000+ linhas de Rust, 17 crates, 2.500+ testes, 76 UI tests
 - Green threads M:N com work-stealing, async/await, generic channels
 - Testing framework com property-based testing e generate-tests
-- LLVM backend, package manager, self-hosted lexer + parser
+- LLVM backend (inkwell), package manager, self-hosted lexer + parser
 - Error fix patches com 98% de cobertura
-- LSP com hover, completions, goto-definition
+- LSP com hover, completions, goto-definition, auto-format
 - Z3-verified contracts, linear ownership, agent traceability
+- `kodoc fmt` + LSP textDocument/formatting
+- `kodoc annotate` — heuristic contract inference (5 heurísticas)
+- `kodoc check --sarif` — SARIF v2.1.0 diagnostic output
+- Neovim plugin + tree-sitter grammar
+
+## Completed Milestones (v0.1.0 → v1.8.0)
+
+- [x] Milestone 1: Async String Return
+- [x] Milestone 2: Custom Error Types
+- [x] Milestone 3: Module System (basic imports, qualified paths)
+- [x] Milestone 4: ~~Channel Select~~ — channels work, select not yet
+- [x] Milestone 5: ~~Growable Stacks~~ — fixed 64KB stacks
+- [x] Milestone 6: Package Manager (kodo.toml, init, add, lock)
+- [x] Milestone 7: LLVM Backend (inkwell, --backend=llvm, --release)
+- [x] Milestone 8: Stdlib Expansion (collections, JSON, File I/O)
+- [x] Milestone 9: Self-Hosting Lexer
+- [x] Milestone 10: Self-Hosting Parser
+- [x] v1.8.0: Formatter, Annotate, SARIF, Neovim/tree-sitter
+
+## Next Milestones
 
 ## Roadmap
 
