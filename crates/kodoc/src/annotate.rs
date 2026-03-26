@@ -153,7 +153,28 @@ fn analyze_function(func: &Function, source: &str) -> Vec<Suggestion> {
         }
     }
 
-    // ── Heuristic 4: direct return of parameter ──────────────
+    // ── Heuristic 4: recursive function with base case guard ──
+    // Pattern: `if n <= K { return ... } return f(n-1)...`
+    // Suggests: requires { n >= 0 }
+    if is_recursive(&func.body, &func.name) {
+        for param in &param_names {
+            if has_base_case_guard(&func.body, param) {
+                let expr_str = format!("{param} >= 0");
+                if !existing_req_strings.iter().any(|e| e.contains(param)) {
+                    suggestions.push(Suggestion {
+                        function: func.name.clone(),
+                        line,
+                        kind: ContractKind::Requires,
+                        expression: expr_str,
+                        reason: format!("recursive function with base case guard on `{param}`"),
+                        verified: true,
+                    });
+                }
+            }
+        }
+    }
+
+    // ── Heuristic 5: direct return of parameter ──────────────
     if let Some(param) = find_direct_return_param(&func.body, &param_names) {
         if func.ensures.is_empty() {
             suggestions.push(Suggestion {
@@ -237,6 +258,72 @@ fn find_zero_guarded_params(block: &Block, params: &[&str]) -> Vec<(String, Stri
         }
     });
     result
+}
+
+/// Check if the function body contains a recursive call to `func_name`.
+fn is_recursive(block: &Block, func_name: &str) -> bool {
+    let mut found = false;
+    visit_exprs_in_block(block, &mut |expr| {
+        if let Expr::Call { callee, .. } = expr {
+            if let Expr::Ident(name, _) = callee.as_ref() {
+                if name == func_name {
+                    found = true;
+                }
+            }
+        }
+    });
+    found
+}
+
+/// Check if the block has a base case guard like `if param <= K { return ... }`.
+fn has_base_case_guard(block: &Block, param: &str) -> bool {
+    for stmt in &block.stmts {
+        if let Stmt::Expr(Expr::If { condition, .. }) = stmt {
+            if expr_guards_param(condition, param) {
+                return true;
+            }
+        }
+        // Also check bare if statements in the block (returned as Expr(If {...}))
+    }
+    // Check if-as-first-expression pattern
+    for stmt in &block.stmts {
+        if let Stmt::Return { .. } = stmt {
+            continue;
+        }
+        if let Stmt::Let {
+            value: Expr::If { condition, .. },
+            ..
+        } = stmt
+        {
+            if expr_guards_param(condition, param) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if an expression is a comparison of `param` with a small literal.
+fn expr_guards_param(expr: &Expr, param: &str) -> bool {
+    match expr {
+        Expr::BinaryOp {
+            op: BinOp::Le | BinOp::Lt | BinOp::Eq,
+            left,
+            right,
+            ..
+        } => {
+            // param <= K or param < K or param == K
+            if let Expr::Ident(name, _) = left.as_ref() {
+                if name == param {
+                    if let Expr::IntLit(_, _) = right.as_ref() {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Find if the function body directly returns a parameter unchanged.
@@ -615,6 +702,16 @@ mod tests {
         assert!(
             result.suggestions.is_empty(),
             "addition should not trigger any suggestions"
+        );
+    }
+
+    #[test]
+    fn detects_recursive_base_case() {
+        let src = "module test {\n    meta { purpose: \"test\" }\n    fn fib(n: Int) -> Int {\n        if n <= 1 {\n            return n\n        }\n        return fib(n - 1) + fib(n - 2)\n    }\n}";
+        let result = parse_and_annotate(src);
+        assert!(
+            result.suggestions.iter().any(|s| s.expression == "n >= 0"),
+            "should suggest n >= 0 for recursive function with base case"
         );
     }
 }
