@@ -1,0 +1,26 @@
+//@ check-pass
+module visibility_test {
+    meta {
+        purpose: "UI test: pub/private visibility on functions and structs",
+        version: "0.1.0"
+    }
+
+    pub struct Point {
+        x: Int,
+        y: Int
+    }
+
+    pub fn make_point(x: Int, y: Int) -> Point {
+        return Point { x: x, y: y }
+    }
+
+    fn private_helper() -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        let p: Point = make_point(3, 4)
+        let val: Int = private_helper()
+        return 0
+    }
+}
