@@ -1,0 +1,75 @@
+// Demonstrates `kodoc annotate` — the heuristic contract suggestion engine.
+//
+// This module intentionally lacks contracts. Run:
+//   kodoc annotate examples/annotate_demo.ko
+//
+// The engine will suggest contracts based on static analysis:
+//   - Division by parameter → requires { divisor != 0 }
+//   - List index access → requires { index >= 0 }
+//   - Zero-guard pattern → requires { param > 0 }
+//   - Recursive base case → requires { n >= 0 }
+//   - Direct return of parameter → ensures { result == param }
+//
+// For JSON output (AI agent consumption):
+//   kodoc annotate examples/annotate_demo.ko --json
+
+module annotate_demo {
+    meta {
+        purpose: "Showcase kodoc annotate contract inference",
+        version: "0.1.0",
+        author: "Kōdo Team"
+    }
+
+    // Heuristic: division by parameter → requires { b != 0 }
+    fn safe_divide(a: Int, b: Int) -> Int {
+        return a / b
+    }
+
+    // Heuristic: modulo by parameter → requires { divisor != 0 }
+    fn remainder(value: Int, divisor: Int) -> Int {
+        return value % divisor
+    }
+
+    // Heuristic: list index → requires { idx >= 0 }
+    fn get_element(items: List<Int>, idx: Int) -> Int {
+        return list_get(items, idx)
+    }
+
+    // Heuristic: zero-guard pattern → requires { amount > 0 }
+    fn process_payment(amount: Int) -> String {
+        if amount > 0 {
+            return "approved"
+        }
+        return "rejected"
+    }
+
+    // Heuristic: recursive base case → requires { n >= 0 }
+    fn factorial(n: Int) -> Int {
+        if n <= 1 {
+            return 1
+        }
+        return n * factorial(n - 1)
+    }
+
+    // Heuristic: direct return → ensures { result == x }
+    fn identity(x: Int) -> Int {
+        return x
+    }
+
+    // Already annotated — kodoc annotate will skip this
+    fn validated_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() -> Int {
+        let x: Int = safe_divide(10, 3)
+        let r: Int = remainder(10, 3)
+        print_int(x)
+        print_int(r)
+        print_int(factorial(5))
+        print_int(identity(42))
+        return 0
+    }
+}
