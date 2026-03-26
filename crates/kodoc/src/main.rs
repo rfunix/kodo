@@ -4,6 +4,7 @@
 //! Designed to be used both by AI agents (with `--emit json-errors`) and
 //! humans (with beautiful terminal error messages via ariadne).
 
+mod annotate;
 mod audit;
 mod certificate;
 mod commands;
@@ -261,6 +262,20 @@ enum Command {
         #[arg()]
         name: Option<String>,
     },
+    /// Suggest missing contracts for functions using heuristic analysis.
+    Annotate {
+        /// The source file to analyze.
+        #[arg()]
+        file: PathBuf,
+
+        /// Apply suggested contracts to the source file.
+        #[arg(long, default_value_t = false)]
+        apply: bool,
+
+        /// Output as JSON (for AI agent consumption).
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Generate a consolidated audit report (confidence + contracts + annotations).
     Audit {
         /// The source file to audit.
@@ -387,6 +402,43 @@ fn main() {
         }
         Command::Remove { name } => commands::deps::run_remove(&name),
         Command::Update { name } => commands::deps::run_update(name.as_deref()),
+        Command::Annotate { file, apply, json } => {
+            let source = match std::fs::read_to_string(&file) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: could not read {}: {e}", file.display());
+                    std::process::exit(1);
+                }
+            };
+            let module = match kodo_parser::parse(&source) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("error: parse failed: {e:?}");
+                    std::process::exit(1);
+                }
+            };
+            let result = annotate::annotate_module(&module, &source);
+            if json {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(j) => println!("{j}"),
+                    Err(e) => {
+                        eprintln!("error: JSON serialization failed: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                print!(
+                    "{}",
+                    annotate::format_human(&result, &file.display().to_string())
+                );
+            }
+            if apply && !result.suggestions.is_empty() {
+                eprintln!(
+                    "note: --apply is not yet implemented. Use the suggestions above to manually add contracts."
+                );
+            }
+            0
+        }
         Command::Audit {
             file,
             json,
