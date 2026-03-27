@@ -115,6 +115,10 @@ extern "C" fn sigsegv_handler(
     _ctx: *mut libc::c_void,
 ) {
     // SAFETY: info is valid when SA_SIGINFO is set.
+    // On Linux, si_addr() is a method; on macOS, si_addr is a field.
+    #[cfg(target_os = "linux")]
+    let fault_addr = unsafe { (*info).si_addr() as usize };
+    #[cfg(not(target_os = "linux"))]
     let fault_addr = unsafe { (*info).si_addr as usize };
     let ps = super::green::page_size();
     let fault_page = fault_addr & !(ps - 1);
