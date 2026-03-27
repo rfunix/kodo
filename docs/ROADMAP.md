@@ -1,11 +1,12 @@
 # Kōdo Roadmap
 
-> v1.8.0 — All 10 original milestones complete + formatter, annotate, SARIF. Next: Channel Select → Bootstrap.
+> v1.9.0 — 112k LOC, 30 releases, channel select, kodo-bench in progress. Next: Growable Stacks → Bootstrap.
 
-## Status atual (v1.8.0) ✅
+## Status atual (v1.9.0) ✅
 
-- 100.000+ linhas de Rust, 17 crates, 2.500+ testes, 76 UI tests
+- 112.000+ linhas de Rust, 17 crates, 2.500+ testes, 77 UI tests
 - Green threads M:N com work-stealing, async/await, generic channels
+- `select {}` statement para channel multiplexing (v1.9.0)
 - Testing framework com property-based testing e generate-tests
 - LLVM backend (inkwell), package manager, self-hosted lexer + parser
 - Error fix patches com 98% de cobertura
@@ -15,22 +16,36 @@
 - `kodoc annotate` — heuristic contract inference (5 heurísticas)
 - `kodoc check --sarif` — SARIF v2.1.0 diagnostic output
 - Neovim plugin + tree-sitter grammar
+- kodo-bench — agent coding benchmark suite (in progress)
 
-## Completed Milestones (v0.1.0 → v1.8.0)
+## Completed Milestones (v0.1.0 → v1.9.0)
 
 - [x] Milestone 1: Async String Return
 - [x] Milestone 2: Custom Error Types
 - [x] Milestone 3: Module System (basic imports, qualified paths)
-- [x] Milestone 4: ~~Channel Select~~ — channels work, select not yet
-- [x] Milestone 5: ~~Growable Stacks~~ — fixed 64KB stacks
+- [x] Milestone 4: Channel Select (`select {}` statement) ✓ v1.9.0
+- [x] Milestone 5: ~~Growable Stacks~~ — fixed 64KB stacks (design doc ready)
 - [x] Milestone 6: Package Manager (kodo.toml, init, add, lock)
 - [x] Milestone 7: LLVM Backend (inkwell, --backend=llvm, --release)
 - [x] Milestone 8: Stdlib Expansion (collections, JSON, File I/O)
 - [x] Milestone 9: Self-Hosting Lexer
 - [x] Milestone 10: Self-Hosting Parser
 - [x] v1.8.0: Formatter, Annotate, SARIF, Neovim/tree-sitter
+- [x] v1.9.0: Channel Select, kodo-bench scaffold, concurrency showcase
 
 ## Next Milestones
+
+### kodo-bench — Agent Benchmark Suite
+**Status**: In progress (PR #33) | **Impacto**: MÁXIMO — proof of value
+
+### Growable Stacks (v1.10.0)
+**Status**: Design doc ready (`docs/design/growable-stacks.md`) | **Esforço**: 7-10 dias
+
+### Module Build Graph (v1.11.0)
+**Status**: Not started | **Esforço**: 5-7 dias
+
+### Bootstrap Compiler (v2.0.0)
+**Status**: Not started | **Esforço**: 4-8 semanas
 
 ## Roadmap
 
