@@ -1,0 +1,83 @@
+// Formatter Demo — showcasing `kodoc fmt` canonical formatting.
+//
+// The `kodoc fmt` command parses a .ko file and re-emits it in
+// canonical form:
+//   - 4-space indentation
+//   - Spaces around operators
+//   - Meta block first after module declaration
+//   - Structs and enums before functions
+//   - Contracts (`requires`/`ensures`) on their own indented lines
+//   - Limitation: comments are not preserved by the formatter
+//
+// Usage:
+//   kodoc fmt examples/formatter_demo.ko            # format in-place
+//   kodoc fmt examples/formatter_demo.ko --check    # check without modifying
+//
+// Compile and run:
+//   kodoc build examples/formatter_demo.ko -o formatter_demo
+//   ./formatter_demo
+
+module formatter_demo {
+    meta {
+        purpose: "Demonstrate kodoc fmt canonical formatting",
+        version: "0.1.0",
+        author: "Kodo Team"
+    }
+
+    struct Point {
+        x: Int
+        y: Int
+    }
+
+    enum Direction {
+        North
+        South
+        East
+        West
+    }
+
+    fn safe_add(a: Int, b: Int) -> Int
+        requires { a >= 0 }
+        requires { b >= 0 }
+        ensures { result > 0 } {
+        return a + b
+    }
+
+    fn describe_direction(d: Direction) -> String {
+        let label: String = match d {
+            Direction::North => "Going north",
+            Direction::South => "Going south",
+            Direction::East => "Going east",
+            Direction::West => "Going west",
+        }
+        return label
+    }
+
+    fn compute(x: Int, y: Int) -> Int {
+        let sum: Int = x + y
+        let product: Int = x * y
+        let check: Bool = sum > 0 && product >= 0
+        if check {
+            return sum + product
+        } else {
+            return 0
+        }
+    }
+
+    fn main() {
+        let result: Int = safe_add(3, 7)
+        println("safe_add(3, 7) =")
+        print_int(result)
+        let p: Point = Point { x: 10, y: 20 }
+        println("Point x =")
+        print_int(p.x)
+        println("Point y =")
+        print_int(p.y)
+        let dir: Direction = Direction::North
+        let desc: String = describe_direction(dir)
+        println(desc)
+        let comp: Int = compute(5, 3)
+        println("compute(5, 3) =")
+        print_int(comp)
+    }
+}
