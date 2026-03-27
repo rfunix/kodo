@@ -1,0 +1,30 @@
+module parallel_three_spawns {
+    meta {
+        purpose: "Demonstrate parallel block with three spawn tasks",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch, 1)
+            }
+            spawn {
+                channel_send(ch, 2)
+            }
+            spawn {
+                channel_send(ch, 3)
+            }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                let c: Int = channel_recv(ch)
+                let total: Int = a + b + c
+                print_int(total)
+            }
+        }
+        return 0
+    }
+}

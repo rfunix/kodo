@@ -1,0 +1,13 @@
+{
+  "id": "004-enum-match",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Enum and pattern matching",
+  "prompt": "Write a Kodo module with a Shape enum (Circle(Int), Rectangle(Int, Int)). Create a Circle(42), match on it and print the radius.",
+  "template": "templates/004.ko",
+  "solution": "solutions/004.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n"
+  }
+}

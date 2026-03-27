@@ -1,0 +1,22 @@
+module for_in_loop {
+    meta {
+        purpose: "Demonstrate for-in loop over a list",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        let mut total: Int = 0
+        for x in nums {
+            total = total + x
+        }
+        print_int(total)
+        return 0
+    }
+}

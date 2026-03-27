@@ -1,0 +1,13 @@
+{
+  "id": "015-contract-division-chain",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Chained contract functions",
+  "prompt": "Write a Kodo module with two contracted functions: safe_divide (requires b != 0) and safe_modulo (requires b != 0). Call both and print results.",
+  "template": "templates/015.ko",
+  "solution": "solutions/015.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "3\n1\n"
+  }
+}

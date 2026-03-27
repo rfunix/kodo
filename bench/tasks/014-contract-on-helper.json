@@ -1,0 +1,13 @@
+{
+  "id": "014-contract-on-helper",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Contract on helper function",
+  "prompt": "Write a Kodo module with a safe_index function that requires index >= 0 and index < size. Use it inside a main function to safely access elements.",
+  "template": "templates/014.ko",
+  "solution": "solutions/014.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "20\n"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "029-generic-identity",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Generic identity function",
+  "prompt": "Write a Kodo module with a generic identity<T> function and call it with different Int values.",
+  "template": "templates/029.ko",
+  "solution": "solutions/029.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n99\n"
+  }
+}

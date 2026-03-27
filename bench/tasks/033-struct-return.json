@@ -1,0 +1,13 @@
+{
+  "id": "033-struct-return",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Function returning struct",
+  "prompt": "Write a Kodo module with a function that creates and returns a struct, then access its fields.",
+  "template": "templates/033.ko",
+  "solution": "solutions/033.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "10\n30\n"
+  }
+}

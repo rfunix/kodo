@@ -1,0 +1,15 @@
+module tuple_destructure {
+    meta {
+        purpose: "Demonstrate tuple destructuring",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let triple = (1, 2, 3)
+        let (a, b, c) = triple
+        print_int(a)
+        print_int(b)
+        print_int(c)
+        return 0
+    }
+}

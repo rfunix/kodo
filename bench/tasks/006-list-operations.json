@@ -1,0 +1,13 @@
+{
+  "id": "006-list-operations",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "List push and length",
+  "prompt": "Write a Kodo module that creates a List<Int>, pushes 10, 20, 30 and prints the length.",
+  "template": "templates/006.ko",
+  "solution": "solutions/006.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "3\n"
+  }
+}

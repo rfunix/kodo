@@ -1,0 +1,13 @@
+{
+  "id": "017-contract-range-check",
+  "category": "contracts",
+  "difficulty": "hard",
+  "title": "Range validation contract",
+  "prompt": "Write a Kodo module with a function that checks if a value is within a valid percentage range (0-100) using contracts.",
+  "template": "templates/017.ko",
+  "solution": "solutions/017.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "75\n1\n"
+  }
+}

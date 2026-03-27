@@ -1,0 +1,26 @@
+module channel_multiple_values {
+    meta {
+        purpose: "Demonstrate sending multiple values through a channel",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch, 10)
+                channel_send(ch, 20)
+                channel_send(ch, 30)
+            }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                let c: Int = channel_recv(ch)
+                let sum: Int = a + b + c
+                print_int(sum)
+            }
+        }
+        return 0
+    }
+}

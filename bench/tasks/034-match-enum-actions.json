@@ -1,0 +1,13 @@
+{
+  "id": "034-match-enum-actions",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Match enum with side effects",
+  "prompt": "Write a Kodo module with a Command enum (Start, Stop, Set(Int)). Match on each variant and print different messages or values.",
+  "template": "templates/034.ko",
+  "solution": "solutions/034.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n"
+  }
+}

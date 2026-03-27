@@ -1,0 +1,13 @@
+{
+  "id": "001-hello-world",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Hello World",
+  "prompt": "Write a Kodo module that prints 'Hello, World!' to stdout.",
+  "template": "templates/001.ko",
+  "solution": "solutions/001.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "Hello, World!\n"
+  }
+}

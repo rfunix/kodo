@@ -1,0 +1,18 @@
+module generic_identity {
+    meta {
+        purpose: "Demonstrate generic identity function",
+        version: "0.1.0"
+    }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn main() -> Int {
+        let a: Int = identity(42)
+        let b: Int = identity(99)
+        print_int(a)
+        print_int(b)
+        return 0
+    }
+}

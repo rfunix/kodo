@@ -1,0 +1,13 @@
+{
+  "id": "038-higher-order-filter",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Higher-order filter on list",
+  "prompt": "Write a Kodo module that uses .filter() on a List<Int> to keep only even numbers, then prints the count.",
+  "template": "templates/038.ko",
+  "solution": "solutions/038.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "2\n"
+  }
+}

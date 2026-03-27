@@ -1,0 +1,13 @@
+{
+  "id": "046-parallel-three-spawns",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Parallel block with three spawns",
+  "prompt": "Write a Kodo module with three producer spawns and one collector spawn that sums the values they send via a channel.",
+  "template": "templates/046.ko",
+  "solution": "solutions/046.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "6\n"
+  }
+}

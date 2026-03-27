@@ -1,0 +1,13 @@
+{
+  "id": "011-contract-multiple-requires",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Multiple requires conditions",
+  "prompt": "Write a Kodo module with a clamp function that has requires { min <= max } and clamps a value between min and max. Test with clamp(150, 0, 100) and clamp(42, 0, 100), printing both results.",
+  "template": "templates/011.ko",
+  "solution": "solutions/011.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "100\n42\n"
+  }
+}

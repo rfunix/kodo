@@ -1,0 +1,21 @@
+module enum_match {
+    meta {
+        purpose: "Demonstrate enum and pattern matching",
+        version: "0.1.0"
+    }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int)
+    }
+
+    fn main() -> Int {
+        let c: Shape = Shape::Circle(42)
+        let result: Int = match c {
+            Shape::Circle(r) => r,
+            Shape::Rectangle(w, h) => w
+        }
+        print_int(result)
+        return 0
+    }
+}

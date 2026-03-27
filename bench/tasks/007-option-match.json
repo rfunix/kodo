@@ -1,0 +1,13 @@
+{
+  "id": "007-option-match",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Option type matching",
+  "prompt": "Write a Kodo module that creates Option::Some(42) and Option::None, matches on both, and prints the extracted or default value.",
+  "template": "templates/007.ko",
+  "solution": "solutions/007.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n99\n"
+  }
+}

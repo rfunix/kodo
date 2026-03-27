@@ -1,0 +1,13 @@
+{
+  "id": "022-result-short-match",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result short form match",
+  "prompt": "Write a Kodo module that matches on Result using short form (Ok/Err without prefix) and long form (Result::Ok/Result::Err).",
+  "template": "templates/022.ko",
+  "solution": "solutions/022.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "10\n20\n"
+  }
+}

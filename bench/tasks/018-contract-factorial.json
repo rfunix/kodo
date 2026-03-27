@@ -1,0 +1,13 @@
+{
+  "id": "018-contract-factorial",
+  "category": "contracts",
+  "difficulty": "hard",
+  "title": "Factorial with contracts",
+  "prompt": "Write a Kodo module with a factorial function that requires n >= 0 and ensures result >= 1. Compute factorial(5) and factorial(0).",
+  "template": "templates/018.ko",
+  "solution": "solutions/018.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "120\n1\n"
+  }
+}

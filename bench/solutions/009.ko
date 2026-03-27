@@ -1,0 +1,13 @@
+module closure_basic {
+    meta {
+        purpose: "Demonstrate basic closure usage",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let double: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        let result: Int = double(21)
+        print_int(result)
+        return 0
+    }
+}

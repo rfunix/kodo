@@ -1,0 +1,18 @@
+module struct_basics {
+    meta {
+        purpose: "Demonstrate struct field access",
+        version: "0.1.0"
+    }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 10, y: 20 }
+        print_int(p.x)
+        print_int(p.y)
+        return 0
+    }
+}

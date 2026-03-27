@@ -1,0 +1,13 @@
+{
+  "id": "009-closure-basic",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Basic closure",
+  "prompt": "Write a Kodo module that defines a closure that doubles an integer, calls it with 21, and prints the result.",
+  "template": "templates/009.ko",
+  "solution": "solutions/009.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n"
+  }
+}

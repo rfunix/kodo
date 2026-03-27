@@ -1,0 +1,18 @@
+module simple_contract {
+    meta {
+        purpose: "Demonstrate simple requires contract",
+        version: "0.1.0"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() -> Int {
+        let result: Int = safe_divide(10, 2)
+        print_int(result)
+        return 0
+    }
+}

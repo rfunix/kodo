@@ -97,3 +97,4 @@ tests/fixtures/valid/result_option
 .claude/worktrees/
 examples/task_manager/task_manager
 examples/task_manager/task_manager.ko.cert.json
+bench/results/

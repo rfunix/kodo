@@ -1,0 +1,13 @@
+{
+  "id": "031-set-operations",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Set add and contains",
+  "prompt": "Write a Kodo module that creates a Set<Int>, adds elements including duplicates, and prints the length showing deduplication.",
+  "template": "templates/031.ko",
+  "solution": "solutions/031.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "3\n"
+  }
+}

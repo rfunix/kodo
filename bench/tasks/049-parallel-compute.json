@@ -1,0 +1,13 @@
+{
+  "id": "049-parallel-compute",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Parallel computation with channel",
+  "prompt": "Write a Kodo module where two spawns each compute a partial sum and send it through a channel. A third spawn collects both and prints the total.",
+  "template": "templates/049.ko",
+  "solution": "solutions/049.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "210\n"
+  }
+}

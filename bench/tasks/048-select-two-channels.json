@@ -1,0 +1,13 @@
+{
+  "id": "048-select-two-channels",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Select on two channels",
+  "prompt": "Write a Kodo module that creates two channels, sends a value on one, and uses select to receive from whichever is ready.",
+  "template": "templates/048.ko",
+  "solution": "solutions/048.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "99\n"
+  }
+}

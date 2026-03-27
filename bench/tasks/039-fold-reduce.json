@@ -1,0 +1,13 @@
+{
+  "id": "039-fold-reduce",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Fold and reduce on list",
+  "prompt": "Write a Kodo module that uses fold to sum a list and reduce to compute a product.",
+  "template": "templates/039.ko",
+  "solution": "solutions/039.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "15\n120\n"
+  }
+}

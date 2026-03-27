@@ -1,0 +1,18 @@
+module parallel_two_tasks {
+    meta {
+        purpose: "Demonstrate parallel block with two spawn tasks",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        parallel {
+            spawn {
+                println("task 1")
+            }
+            spawn {
+                println("task 2")
+            }
+        }
+        return 0
+    }
+}

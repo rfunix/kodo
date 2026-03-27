@@ -1,0 +1,13 @@
+{
+  "id": "024-result-is-ok-err",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result is_ok and is_err checks",
+  "prompt": "Write a Kodo module that uses is_ok() and is_err() methods on Result values to check status.",
+  "template": "templates/024.ko",
+  "solution": "solutions/024.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1\n0\n0\n1\n"
+  }
+}

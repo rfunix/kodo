@@ -1,0 +1,13 @@
+{
+  "id": "045-channel-multiple-values",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Channel with multiple values",
+  "prompt": "Write a Kodo module that sends three values through a channel and receives them, computing their sum.",
+  "template": "templates/045.ko",
+  "solution": "solutions/045.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "60\n"
+  }
+}

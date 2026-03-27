@@ -1,0 +1,13 @@
+{
+  "id": "008-simple-contract",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Simple requires contract",
+  "prompt": "Write a Kodo module with a safe_divide function that has a requires { b != 0 } contract. Call it with valid args and print the result.",
+  "template": "templates/008.ko",
+  "solution": "solutions/008.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5\n"
+  }
+}

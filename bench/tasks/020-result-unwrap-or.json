@@ -1,0 +1,13 @@
+{
+  "id": "020-result-unwrap-or",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result unwrap_or default",
+  "prompt": "Write a Kodo module that creates Result::Ok and Result::Err values, uses unwrap_or to provide defaults, and prints the results.",
+  "template": "templates/020.ko",
+  "solution": "solutions/020.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n999\n"
+  }
+}

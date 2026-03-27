@@ -1,0 +1,13 @@
+{
+  "id": "012-contract-ensures-result",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Ensures contract on return value",
+  "prompt": "Write a Kodo module with an absolute_value function that has ensures { result >= 0 }. Test with both positive and negative inputs.",
+  "template": "templates/012.ko",
+  "solution": "solutions/012.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5\n7\n"
+  }
+}

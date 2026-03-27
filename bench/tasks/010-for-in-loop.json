@@ -1,0 +1,13 @@
+{
+  "id": "010-for-in-loop",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "For-in loop over list",
+  "prompt": "Write a Kodo module that creates a list of integers 1-5, sums them with a for-in loop, and prints the total.",
+  "template": "templates/010.ko",
+  "solution": "solutions/010.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "15\n"
+  }
+}

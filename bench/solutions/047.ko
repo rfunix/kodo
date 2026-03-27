@@ -1,0 +1,30 @@
+module fan_out_collect {
+    meta {
+        purpose: "Demonstrate fan-out pattern with channel collector",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let results: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(results, 10)
+            }
+            spawn {
+                channel_send(results, 20)
+            }
+            spawn {
+                channel_send(results, 30)
+            }
+            spawn {
+                let a: Int = channel_recv(results)
+                let b: Int = channel_recv(results)
+                let c: Int = channel_recv(results)
+                let total: Int = a + b + c
+                print_int(total)
+            }
+        }
+        return 0
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "003-struct-basics",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Struct field access",
+  "prompt": "Write a Kodo module with a Point struct (x: Int, y: Int). Create a point with x=10, y=20 and print both fields.",
+  "template": "templates/003.ko",
+  "solution": "solutions/003.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "10\n20\n"
+  }
+}

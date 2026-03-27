@@ -1,0 +1,18 @@
+module result_unwrap_or {
+    meta {
+        purpose: "Demonstrate Result unwrap_or with defaults",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ok_val: Result<Int, String> = Result::Ok(42)
+        let err_val: Result<Int, String> = Result::Err("error")
+
+        let a: Int = ok_val.unwrap_or(0)
+        let b: Int = err_val.unwrap_or(999)
+
+        print_int(a)
+        print_int(b)
+        return 0
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "050-parallel-pipeline",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Two-stage channel pipeline",
+  "prompt": "Write a Kodo module with a two-stage pipeline: stage 1 sends a value, stage 2 receives it, doubles it, and sends through a second channel, stage 3 receives and prints the final value.",
+  "template": "templates/050.ko",
+  "solution": "solutions/050.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "100\n"
+  }
+}

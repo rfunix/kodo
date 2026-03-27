@@ -1,0 +1,13 @@
+{
+  "id": "023-option-is-some-none",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Option is_some and is_none checks",
+  "prompt": "Write a Kodo module that uses is_some() and is_none() methods on Option values and prints 1 or 0 based on the results.",
+  "template": "templates/023.ko",
+  "solution": "solutions/023.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1\n0\n0\n1\n"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "043-parallel-two-tasks",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Parallel block with two spawns",
+  "prompt": "Write a Kodo module with a parallel block containing two spawn blocks that each print a message.",
+  "template": "templates/043.ko",
+  "solution": "solutions/043.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "task 1\ntask 2\n"
+  }
+}

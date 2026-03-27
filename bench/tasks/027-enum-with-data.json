@@ -1,0 +1,13 @@
+{
+  "id": "027-enum-with-data",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Enum variants with data",
+  "prompt": "Write a Kodo module with a Color enum having Red, Green(Int), Blue(Int, Int) variants. Match on each and extract data.",
+  "template": "templates/027.ko",
+  "solution": "solutions/027.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1\n128\n300\n"
+  }
+}

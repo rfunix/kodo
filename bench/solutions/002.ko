@@ -1,0 +1,19 @@
+module fibonacci {
+    meta {
+        purpose: "Compute fibonacci numbers recursively",
+        version: "0.1.0"
+    }
+
+    fn fib(n: Int) -> Int {
+        if n <= 1 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    fn main() -> Int {
+        let result: Int = fib(10)
+        print_int(result)
+        return 0
+    }
+}

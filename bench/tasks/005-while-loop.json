@@ -1,0 +1,13 @@
+{
+  "id": "005-while-loop",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "While loop countdown",
+  "prompt": "Write a Kodo module that counts down from 5 to 1 using a while loop, printing each number with print_int.",
+  "template": "templates/005.ko",
+  "solution": "solutions/005.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5\n4\n3\n2\n1\n"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "028-trait-impl",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Trait implementation",
+  "prompt": "Write a Kodo module with a Summarizable trait (fn summary(self) -> Int) and implement it for a Stats struct.",
+  "template": "templates/028.ko",
+  "solution": "solutions/028.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30\n"
+  }
+}

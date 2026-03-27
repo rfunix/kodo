@@ -1,0 +1,13 @@
+{
+  "id": "021-option-unwrap-or",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Option unwrap_or default",
+  "prompt": "Write a Kodo module that uses Option::Some and Option::None with unwrap_or to provide default values.",
+  "template": "templates/021.ko",
+  "solution": "solutions/021.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n0\n"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "036-closure-capture",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Closure capturing variables",
+  "prompt": "Write a Kodo module with a closure that captures a variable from the enclosing scope and adds it to the parameter.",
+  "template": "templates/036.ko",
+  "solution": "solutions/036.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "142\n"
+  }
+}

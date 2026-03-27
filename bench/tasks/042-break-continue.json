@@ -1,0 +1,13 @@
+{
+  "id": "042-break-continue",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Break and continue in loops",
+  "prompt": "Write a Kodo module that uses break to find a value and continue to skip values in a while loop.",
+  "template": "templates/042.ko",
+  "solution": "solutions/042.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n25\n"
+  }
+}

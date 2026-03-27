@@ -1,0 +1,36 @@
+module break_continue {
+    meta {
+        purpose: "Demonstrate break and continue in loops",
+        version: "0.1.0"
+    }
+
+    fn find_target(limit: Int) -> Int {
+        let mut i: Int = 0
+        while i < limit {
+            if i == 42 {
+                break
+            }
+            i = i + 1
+        }
+        return i
+    }
+
+    fn sum_odds(limit: Int) -> Int {
+        let mut total: Int = 0
+        let mut i: Int = 0
+        while i < limit {
+            i = i + 1
+            if i % 2 == 0 {
+                continue
+            }
+            total = total + i
+        }
+        return total
+    }
+
+    fn main() -> Int {
+        print_int(find_target(100))
+        print_int(sum_odds(10))
+        return 0
+    }
+}

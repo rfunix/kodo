@@ -1,0 +1,13 @@
+{
+  "id": "047-fan-out-collect",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Fan-out pattern with collector",
+  "prompt": "Write a Kodo module with three producer spawns sending values through a channel and one collector spawn that receives and sums them.",
+  "template": "templates/047.ko",
+  "solution": "solutions/047.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "60\n"
+  }
+}

@@ -1,0 +1,25 @@
+module for_in_sum_list {
+    meta {
+        purpose: "Demonstrate for-in with accumulator for sum of squares",
+        version: "0.1.0"
+    }
+
+    fn sum_of_squares(items: List<Int>) -> Int {
+        let mut total: Int = 0
+        for x in items {
+            total = total + x * x
+        }
+        return total
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+        print_int(sum_of_squares(nums))
+        return 0
+    }
+}

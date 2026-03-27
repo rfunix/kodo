@@ -1,0 +1,28 @@
+module struct_methods {
+    meta {
+        purpose: "Demonstrate struct with impl methods",
+        version: "0.1.0"
+    }
+
+    struct Rectangle {
+        width: Int,
+        height: Int
+    }
+
+    impl Rectangle {
+        fn area(self) -> Int {
+            return self.width * self.height
+        }
+
+        fn perimeter(self) -> Int {
+            return 2 * (self.width + self.height)
+        }
+    }
+
+    fn main() -> Int {
+        let r: Rectangle = Rectangle { width: 5, height: 10 }
+        print_int(r.area())
+        print_int(r.perimeter())
+        return 0
+    }
+}

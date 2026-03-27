@@ -1,0 +1,23 @@
+module result_short_match {
+    meta {
+        purpose: "Demonstrate short and long form Result matching",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let r1: Result<Int, String> = Result::Ok(10)
+        let v1: Int = match r1 {
+            Ok(v) => v,
+            Err(e) => 0
+        }
+        print_int(v1)
+
+        let r2: Result<Int, String> = Result::Ok(20)
+        let v2: Int = match r2 {
+            Result::Ok(v) => v,
+            Result::Err(e) => 0
+        }
+        print_int(v2)
+        return 0
+    }
+}

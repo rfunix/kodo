@@ -1,0 +1,13 @@
+{
+  "id": "041-string-interpolation",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "String interpolation with f-strings",
+  "prompt": "Write a Kodo module that uses f-string interpolation to format messages with variables.",
+  "template": "templates/041.ko",
+  "solution": "solutions/041.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "Hello, World!Point(3, 4)"
+  }
+}

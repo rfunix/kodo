@@ -1,0 +1,13 @@
+{
+  "id": "037-higher-order-map",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Higher-order map on list",
+  "prompt": "Write a Kodo module that uses .map() on a List<Int> to double each element, then sums the result.",
+  "template": "templates/037.ko",
+  "solution": "solutions/037.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30\n"
+  }
+}

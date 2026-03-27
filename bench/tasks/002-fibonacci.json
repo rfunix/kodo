@@ -1,0 +1,13 @@
+{
+  "id": "002-fibonacci",
+  "category": "basics",
+  "difficulty": "easy",
+  "title": "Fibonacci number",
+  "prompt": "Write a Kodo module with a recursive fibonacci function that computes fib(10) and prints the result using print_int.",
+  "template": "templates/002.ko",
+  "solution": "solutions/002.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "55\n"
+  }
+}

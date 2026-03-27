@@ -1,0 +1,13 @@
+{
+  "id": "030-map-insert-get",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Map insert and get",
+  "prompt": "Write a Kodo module that creates a Map<Int, Int>, inserts 3 key-value pairs, and retrieves two values by key.",
+  "template": "templates/030.ko",
+  "solution": "solutions/030.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "100\n300\n"
+  }
+}

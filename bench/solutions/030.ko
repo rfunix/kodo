@@ -1,0 +1,19 @@
+module map_insert_get {
+    meta {
+        purpose: "Demonstrate Map insert and get operations",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let m: Map<Int, Int> = map_new()
+        map_insert(m, 1, 100)
+        map_insert(m, 2, 200)
+        map_insert(m, 3, 300)
+
+        let v1: Int = map_get(m, 1)
+        let v3: Int = map_get(m, 3)
+        print_int(v1)
+        print_int(v3)
+        return 0
+    }
+}

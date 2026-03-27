@@ -1,0 +1,25 @@
+module option_match {
+    meta {
+        purpose: "Demonstrate Option type matching",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let some_val: Option<Int> = Option::Some(42)
+        let none_val: Option<Int> = Option::None
+
+        let x: Int = match some_val {
+            Option::Some(v) => v,
+            Option::None => 0
+        }
+
+        let y: Int = match none_val {
+            Option::Some(v) => v,
+            Option::None => 99
+        }
+
+        print_int(x)
+        print_int(y)
+        return 0
+    }
+}

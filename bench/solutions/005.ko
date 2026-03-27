@@ -1,0 +1,15 @@
+module while_countdown {
+    meta {
+        purpose: "Count down from 5 using a while loop",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let mut i: Int = 5
+        while i > 0 {
+            print_int(i)
+            i = i - 1
+        }
+        return 0
+    }
+}

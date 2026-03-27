@@ -1,0 +1,28 @@
+module match_enum_actions {
+    meta {
+        purpose: "Demonstrate match on enum with side effects",
+        version: "0.1.0"
+    }
+
+    enum Command {
+        Start,
+        Stop,
+        Set(Int)
+    }
+
+    fn execute(cmd: Command) -> Int {
+        let val: Int = match cmd {
+            Command::Start => 0,
+            Command::Stop => -1,
+            Command::Set(v) => v
+        }
+        return val
+    }
+
+    fn main() -> Int {
+        let cmd: Command = Command::Set(42)
+        let result: Int = execute(cmd)
+        print_int(result)
+        return 0
+    }
+}

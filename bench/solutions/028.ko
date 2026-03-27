@@ -1,0 +1,27 @@
+module trait_impl {
+    meta {
+        purpose: "Demonstrate trait implementation",
+        version: "0.1.0"
+    }
+
+    struct Stats {
+        x: Int,
+        y: Int
+    }
+
+    trait Summarizable {
+        fn summary(self) -> Int
+    }
+
+    impl Summarizable for Stats {
+        fn summary(self) -> Int {
+            return self.x + self.y
+        }
+    }
+
+    fn main() -> Int {
+        let s: Stats = Stats { x: 10, y: 20 }
+        print_int(s.summary())
+        return 0
+    }
+}

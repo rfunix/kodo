@@ -1,0 +1,13 @@
+{
+  "id": "016-contract-bounded-add",
+  "category": "contracts",
+  "difficulty": "hard",
+  "title": "Bounded addition with ensures",
+  "prompt": "Write a Kodo module with a bounded_add function that ensures the result does not exceed a maximum. Requires both inputs >= 0.",
+  "template": "templates/016.ko",
+  "solution": "solutions/016.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30\n100\n"
+  }
+}

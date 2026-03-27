@@ -1,0 +1,28 @@
+module select_two_channels {
+    meta {
+        purpose: "Demonstrate select on two channels",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch1: Channel<Int> = channel_new()
+        let ch2: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch2, 99)
+            }
+            spawn {
+                select {
+                    ch1 => |val: Int| {
+                        print_int(val)
+                    }
+                    ch2 => |val: Int| {
+                        print_int(val)
+                    }
+                }
+            }
+        }
+        return 0
+    }
+}

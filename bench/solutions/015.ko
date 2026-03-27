@@ -1,0 +1,24 @@
+module contract_division_chain {
+    meta {
+        purpose: "Demonstrate chained contract functions",
+        version: "0.1.0"
+    }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn safe_modulo(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a % b
+    }
+
+    fn main() -> Int {
+        print_int(safe_divide(10, 3))
+        print_int(safe_modulo(10, 3))
+        return 0
+    }
+}

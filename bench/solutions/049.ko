@@ -1,0 +1,28 @@
+module parallel_compute {
+    meta {
+        purpose: "Demonstrate parallel computation with channel collection",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                let sum: Int = 55
+                channel_send(ch, sum)
+            }
+            spawn {
+                let sum: Int = 155
+                channel_send(ch, sum)
+            }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                let total: Int = a + b
+                print_int(total)
+            }
+        }
+        return 0
+    }
+}

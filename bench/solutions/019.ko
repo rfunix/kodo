@@ -1,0 +1,31 @@
+module result_ok_err {
+    meta {
+        purpose: "Demonstrate Result Ok and Err matching",
+        version: "0.1.0"
+    }
+
+    fn validate(n: Int) -> Result<Int, String> {
+        if n > 0 {
+            return Result::Ok(n)
+        } else {
+            return Result::Err("not positive")
+        }
+    }
+
+    fn main() -> Int {
+        let r1: Result<Int, String> = validate(5)
+        let v1: Int = match r1 {
+            Result::Ok(v) => v,
+            Result::Err(e) => -1
+        }
+        print_int(v1)
+
+        let r2: Result<Int, String> = validate(-3)
+        let v2: Int = match r2 {
+            Result::Ok(v) => v,
+            Result::Err(e) => -1
+        }
+        print_int(v2)
+        return 0
+    }
+}

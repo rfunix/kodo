@@ -1,0 +1,21 @@
+module channel_send_recv {
+    meta {
+        purpose: "Demonstrate channel send and receive",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch, 42)
+            }
+            spawn {
+                let val: Int = channel_recv(ch)
+                print_int(val)
+            }
+        }
+        return 0
+    }
+}

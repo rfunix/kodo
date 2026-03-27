@@ -1,0 +1,24 @@
+module contract_bounded_add {
+    meta {
+        purpose: "Demonstrate bounded addition with ensures",
+        version: "0.1.0"
+    }
+
+    fn bounded_add(a: Int, b: Int, max: Int) -> Int
+        requires { a >= 0 }
+        requires { b >= 0 }
+        ensures { result <= max }
+    {
+        let sum: Int = a + b
+        if sum > max {
+            return max
+        }
+        return sum
+    }
+
+    fn main() -> Int {
+        print_int(bounded_add(10, 20, 100))
+        print_int(bounded_add(60, 80, 100))
+        return 0
+    }
+}

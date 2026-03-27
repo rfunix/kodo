@@ -1,0 +1,13 @@
+{
+  "id": "025-result-validate-chain",
+  "category": "error-handling",
+  "difficulty": "hard",
+  "title": "Result validation chain",
+  "prompt": "Write a Kodo module with two validation functions returning Result. Chain them by matching the first result and calling the second only on Ok.",
+  "template": "templates/025.ko",
+  "solution": "solutions/025.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "50\n-1\n"
+  }
+}

@@ -1,0 +1,18 @@
+module option_unwrap_or {
+    meta {
+        purpose: "Demonstrate Option unwrap_or with defaults",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let some_val: Option<Int> = Option::Some(42)
+        let none_val: Option<Int> = Option::None
+
+        let a: Int = some_val.unwrap_or(0)
+        let b: Int = none_val.unwrap_or(0)
+
+        print_int(a)
+        print_int(b)
+        return 0
+    }
+}

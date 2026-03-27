@@ -1,0 +1,13 @@
+{
+  "id": "019-result-ok-err",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result Ok and Err matching",
+  "prompt": "Write a Kodo module with a validate function returning Result<Int, String>. Match on Ok and Err cases, printing the value or a default.",
+  "template": "templates/019.ko",
+  "solution": "solutions/019.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5\n-1\n"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "040-for-in-sum-list",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "For-in with accumulator",
+  "prompt": "Write a Kodo module with a function that uses for-in to compute the sum of squares of a list of integers.",
+  "template": "templates/040.ko",
+  "solution": "solutions/040.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "55\n"
+  }
+}

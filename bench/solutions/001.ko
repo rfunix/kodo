@@ -1,0 +1,11 @@
+module hello_world {
+    meta {
+        purpose: "Print hello world",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        println("Hello, World!")
+        return 0
+    }
+}

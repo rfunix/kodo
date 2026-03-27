@@ -1,0 +1,16 @@
+module list_ops {
+    meta {
+        purpose: "Demonstrate list push and length",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 10)
+        list_push(nums, 20)
+        list_push(nums, 30)
+        let len: Int = list_length(nums)
+        print_int(len)
+        return 0
+    }
+}

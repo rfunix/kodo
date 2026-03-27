@@ -1,0 +1,13 @@
+{
+  "id": "013-contract-requires-ensures",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Combined requires and ensures",
+  "prompt": "Write a Kodo module with a safe_sqrt_approx function that requires n >= 0 and ensures result >= 0. Use Newton's method approximation with 10 iterations.",
+  "template": "templates/013.ko",
+  "solution": "solutions/013.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "3\n10\n"
+  }
+}

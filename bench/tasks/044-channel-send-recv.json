@@ -1,0 +1,13 @@
+{
+  "id": "044-channel-send-recv",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Channel send and receive",
+  "prompt": "Write a Kodo module that creates a channel, sends a value in one spawn and receives it in another spawn within a parallel block.",
+  "template": "templates/044.ko",
+  "solution": "solutions/044.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42\n"
+  }
+}
