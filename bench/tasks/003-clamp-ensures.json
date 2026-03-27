@@ -1,0 +1,14 @@
+{
+  "id": "003-clamp-ensures",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Clamp with requires and ensures",
+  "prompt": "Write a module `math` with a function `clamp(value: Int, min: Int, max: Int) -> Int` that clamps value to the range [min, max]. Add contracts: `requires { min <= max }` and `ensures { result >= min }` and `ensures { result <= max }`. Include a main function that prints clamp(150, 0, 100).",
+  "template": "templates/003.ko",
+  "solution": "solutions/003.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": ["requires", "ensures"],
+    "output_matches": "100"
+  }
+}

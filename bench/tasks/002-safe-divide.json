@@ -1,0 +1,14 @@
+{
+  "id": "002-safe-divide",
+  "category": "contracts",
+  "difficulty": "easy",
+  "title": "Safe division with contracts",
+  "prompt": "Write a module `math` with a function `safe_divide(a: Int, b: Int) -> Int` that divides a by b. Add a `requires` contract ensuring b != 0. Include a main function that prints safe_divide(100, 5).",
+  "template": "templates/002.ko",
+  "solution": "solutions/002.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": ["requires"],
+    "output_matches": "20"
+  }
+}

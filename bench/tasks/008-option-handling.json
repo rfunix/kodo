@@ -1,0 +1,13 @@
+{
+  "id": "008-option-handling",
+  "category": "ownership",
+  "difficulty": "medium",
+  "title": "Option type handling with match",
+  "prompt": "Write a module `search` with a function `find_positive(items: List<Int>) -> Option<Int>` that returns Option::Some(x) for the first positive number in the list, or Option::None if none found. Use a while loop with list_get. Include a main function that searches [(-3), (-1), 5, 8] and prints the result using match.",
+  "template": "templates/008.ko",
+  "solution": "solutions/008.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "010-channel-producer-consumer",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Producer-consumer with channels",
+  "prompt": "Write a module `pipeline` that uses parallel/spawn to implement a producer-consumer pattern. The producer sends numbers 1 through 5 on a Channel<Int>. The consumer receives all 5 and prints their sum (should be 15). Use `parallel { spawn { ... } spawn { ... } }` for structured concurrency.",
+  "template": "templates/010.ko",
+  "solution": "solutions/010.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "15"
+  }
+}

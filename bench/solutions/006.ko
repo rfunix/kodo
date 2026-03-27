@@ -1,0 +1,18 @@
+module fix_me {
+    meta { purpose: "Fix match", version: "0.1.0" }
+
+    enum Color { Red, Green, Blue }
+
+    fn color_name(c: Color) -> String {
+        match c {
+            Color::Red => { return "red" }
+            Color::Green => { return "green" }
+            Color::Blue => { return "blue" }
+        }
+    }
+
+    fn main() -> Int {
+        println(color_name(Color::Blue))
+        return 0
+    }
+}

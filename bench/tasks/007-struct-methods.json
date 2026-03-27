@@ -1,0 +1,13 @@
+{
+  "id": "007-struct-methods",
+  "category": "ownership",
+  "difficulty": "medium",
+  "title": "Struct with methods and ownership",
+  "prompt": "Write a module `geometry` with a struct `Point { x: Int, y: Int }` and a method `distance_from_origin(self) -> Int` that returns x*x + y*y (squared distance). Include a main function that creates Point { x: 3, y: 4 } and prints the distance (should be 25).",
+  "template": "templates/007.ko",
+  "solution": "solutions/007.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "25"
+  }
+}

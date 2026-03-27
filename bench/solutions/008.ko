@@ -1,0 +1,34 @@
+module search {
+    meta { purpose: "Option handling with match", version: "0.1.0" }
+
+    fn find_positive(items: List<Int>) -> Option<Int> {
+        let i: Int = 0
+        while i < list_length(items) {
+            let val: Int = list_get(items, i)
+            if val > 0 {
+                return Option::Some(val)
+            }
+            i = i + 1
+        }
+        return Option::None
+    }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, -3)
+        list_push(nums, -1)
+        list_push(nums, 5)
+        list_push(nums, 8)
+
+        match find_positive(nums) {
+            Option::Some(v) => {
+                print_int(v)
+                println("")
+            }
+            Option::None => {
+                println("none")
+            }
+        }
+        return 0
+    }
+}

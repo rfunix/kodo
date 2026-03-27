@@ -1,0 +1,13 @@
+{
+  "id": "005-fix-missing-return",
+  "category": "error-fix",
+  "difficulty": "easy",
+  "title": "Fix missing return type",
+  "prompt": "The following code fails to compile because `add` is missing a return type annotation and return statement. Fix it.\n\n```\nmodule fix_me {\n    meta { purpose: \"Fix missing return\", version: \"0.1.0\" }\n\n    fn add(a: Int, b: Int) {\n        a + b\n    }\n\n    fn main() -> Int {\n        print_int(add(3, 4))\n        println(\"\")\n        return 0\n    }\n}\n```",
+  "template": "templates/005.ko",
+  "solution": "solutions/005.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "7"
+  }
+}

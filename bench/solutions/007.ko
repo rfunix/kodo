@@ -1,0 +1,21 @@
+module geometry {
+    meta { purpose: "Geometry with struct methods", version: "0.1.0" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    impl Point {
+        fn distance_from_origin(self) -> Int {
+            return self.x * self.x + self.y * self.y
+        }
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 3, y: 4 }
+        print_int(p.distance_from_origin())
+        println("")
+        return 0
+    }
+}

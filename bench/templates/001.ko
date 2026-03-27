@@ -1,0 +1,13 @@
+module fibonacci {
+    meta {
+        purpose: "Compute Fibonacci numbers with contracts",
+        version: "0.1.0"
+    }
+
+    // TODO: Implement fib(n: Int) -> Int with requires { n >= 0 }
+
+    fn main() -> Int {
+        // TODO: Print fib(10)
+        return 0
+    }
+}

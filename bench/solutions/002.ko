@@ -1,0 +1,15 @@
+module math {
+    meta { purpose: "Safe arithmetic with contracts", version: "0.1.0" }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn main() -> Int {
+        print_int(safe_divide(100, 5))
+        println("")
+        return 0
+    }
+}

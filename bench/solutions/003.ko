@@ -1,0 +1,23 @@
+module math {
+    meta { purpose: "Clamping with full contracts", version: "0.1.0" }
+
+    fn clamp(value: Int, min: Int, max: Int) -> Int
+        requires { min <= max }
+        ensures { result >= min }
+        ensures { result <= max }
+    {
+        if value < min {
+            return min
+        }
+        if value > max {
+            return max
+        }
+        return value
+    }
+
+    fn main() -> Int {
+        print_int(clamp(150, 0, 100))
+        println("")
+        return 0
+    }
+}

@@ -1,0 +1,13 @@
+module fix_me {
+    meta { purpose: "Fix the type error", version: "0.1.0" }
+
+    fn get_value() -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        print_int(get_value())
+        println("")
+        return 0
+    }
+}

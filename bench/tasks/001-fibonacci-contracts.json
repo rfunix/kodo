@@ -1,0 +1,14 @@
+{
+  "id": "001-fibonacci-contracts",
+  "category": "contracts",
+  "difficulty": "easy",
+  "title": "Fibonacci with contracts",
+  "prompt": "Write a module `fibonacci` with a function `fib(n: Int) -> Int` that computes the nth Fibonacci number recursively. Add a `requires` contract ensuring n >= 0. The function should return 0 for n=0, 1 for n=1, and fib(n-1) + fib(n-2) otherwise. Include a main function that prints fib(10).",
+  "template": "templates/001.ko",
+  "solution": "solutions/001.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": ["requires"],
+    "output_matches": "55"
+  }
+}

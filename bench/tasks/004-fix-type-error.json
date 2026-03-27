@@ -1,0 +1,13 @@
+{
+  "id": "004-fix-type-error",
+  "category": "error-fix",
+  "difficulty": "easy",
+  "title": "Fix a type mismatch error",
+  "prompt": "The following code has a type error. Fix it so it compiles and prints 42. The error is: returning a String where Int is expected.\n\n```\nmodule fix_me {\n    meta { purpose: \"Fix the type error\", version: \"0.1.0\" }\n\n    fn get_value() -> Int {\n        return \"42\"\n    }\n\n    fn main() -> Int {\n        print_int(get_value())\n        println(\"\")\n        return 0\n    }\n}\n```",
+  "template": "templates/004.ko",
+  "solution": "solutions/004.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42"
+  }
+}

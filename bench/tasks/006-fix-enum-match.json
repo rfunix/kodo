@@ -1,0 +1,13 @@
+{
+  "id": "006-fix-enum-match",
+  "category": "error-fix",
+  "difficulty": "medium",
+  "title": "Fix non-exhaustive match",
+  "prompt": "The following code has a non-exhaustive match — it's missing the `Blue` variant. Fix it so all variants are handled and it prints the correct color name.\n\n```\nmodule fix_me {\n    meta { purpose: \"Fix match\", version: \"0.1.0\" }\n\n    enum Color { Red, Green, Blue }\n\n    fn color_name(c: Color) -> String {\n        match c {\n            Color::Red => { return \"red\" }\n            Color::Green => { return \"green\" }\n        }\n    }\n\n    fn main() -> Int {\n        println(color_name(Color::Blue))\n        return 0\n    }\n}\n```",
+  "template": "templates/006.ko",
+  "solution": "solutions/006.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "blue"
+  }
+}

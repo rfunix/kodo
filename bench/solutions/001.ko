@@ -1,0 +1,21 @@
+module fibonacci {
+    meta {
+        purpose: "Compute Fibonacci numbers with contracts",
+        version: "0.1.0"
+    }
+
+    fn fib(n: Int) -> Int
+        requires { n >= 0 }
+    {
+        if n <= 1 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    fn main() -> Int {
+        print_int(fib(10))
+        println("")
+        return 0
+    }
+}

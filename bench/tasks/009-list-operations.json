@@ -1,0 +1,13 @@
+{
+  "id": "009-list-operations",
+  "category": "collections",
+  "difficulty": "easy",
+  "title": "List operations — sum and reverse",
+  "prompt": "Write a module `collections` with two functions: `sum_list(items: List<Int>) -> Int` that sums all elements, and a main function that creates a list [1, 2, 3, 4, 5], computes the sum, and prints it (should be 15).",
+  "template": "templates/009.ko",
+  "solution": "solutions/009.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "15"
+  }
+}
