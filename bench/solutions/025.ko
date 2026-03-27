@@ -1,0 +1,34 @@
+module validation_chain {
+    meta { purpose: "Result validation chaining", version: "0.1.0" }
+
+    fn check_positive(n: Int) -> Result<Int, String> {
+        if n > 0 { return Result::Ok(n) }
+        return Result::Err("not positive")
+    }
+
+    fn check_under_limit(n: Int) -> Result<Int, String> {
+        if n <= 100 { return Result::Ok(n) }
+        return Result::Err("exceeds limit")
+    }
+
+    fn validate(n: Int) -> Int {
+        let r1: Result<Int, String> = check_positive(n)
+        let step1: Int = match r1 {
+            Result::Ok(v) => v,
+            Result::Err(e) => -1
+        }
+        if step1 == -1 { return -1 }
+        let r2: Result<Int, String> = check_under_limit(step1)
+        let step2: Int = match r2 {
+            Result::Ok(v) => v,
+            Result::Err(e) => -1
+        }
+        return step2
+    }
+
+    fn main() -> Int {
+        print_int(validate(50))
+        print_int(validate(-5))
+        return 0
+    }
+}

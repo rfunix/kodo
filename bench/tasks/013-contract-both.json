@@ -1,0 +1,17 @@
+{
+  "id": "013-contract-both",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Combined requires and ensures",
+  "prompt": "Write int_sqrt with requires n >= 0 and ensures result >= 0.",
+  "template": "templates/013.ko",
+  "solution": "solutions/013.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires",
+      "ensures"
+    ],
+    "output_matches": "310"
+  }
+}

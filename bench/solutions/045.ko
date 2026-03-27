@@ -1,0 +1,21 @@
+module chan_multi {
+    meta { purpose: "Multiple values through channel", version: "0.1.0" }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+        parallel {
+            spawn {
+                channel_send(ch, 10)
+                channel_send(ch, 20)
+                channel_send(ch, 30)
+            }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                let c: Int = channel_recv(ch)
+                print_int(a + b + c)
+            }
+        }
+        return 0
+    }
+}

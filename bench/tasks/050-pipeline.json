@@ -1,0 +1,13 @@
+{
+  "id": "050-pipeline",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Two-stage channel pipeline",
+  "prompt": "Stage 1 sends, stage 2 doubles, stage 3 prints.",
+  "template": "templates/050.ko",
+  "solution": "solutions/050.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "100"
+  }
+}

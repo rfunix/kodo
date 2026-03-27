@@ -1,0 +1,20 @@
+module pipeline2 {
+    meta { purpose: "Two-stage channel pipeline", version: "0.1.0" }
+
+    fn main() -> Int {
+        let s1: Channel<Int> = channel_new()
+        let s2: Channel<Int> = channel_new()
+        parallel {
+            spawn { channel_send(s1, 50) }
+            spawn {
+                let val: Int = channel_recv(s1)
+                channel_send(s2, val * 2)
+            }
+            spawn {
+                let result: Int = channel_recv(s2)
+                print_int(result)
+            }
+        }
+        return 0
+    }
+}

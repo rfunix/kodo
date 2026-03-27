@@ -1,0 +1,19 @@
+module factorial {
+    meta { purpose: "Factorial with contracts", version: "0.1.0" }
+
+    fn factorial(n: Int) -> Int
+        requires { n >= 0 }
+        ensures { result >= 1 }
+    {
+        if n <= 1 {
+            return 1
+        }
+        return n * factorial(n - 1)
+    }
+
+    fn main() -> Int {
+        print_int(factorial(5))
+        print_int(factorial(0))
+        return 0
+    }
+}

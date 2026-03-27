@@ -1,0 +1,13 @@
+{
+  "id": "041-fstrings",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "F-string interpolation",
+  "prompt": "Use f-strings for greeting and point formatting.",
+  "template": "templates/041.ko",
+  "solution": "solutions/041.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "Hello, World!Point(3, 4)"
+  }
+}

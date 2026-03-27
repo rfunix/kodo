@@ -1,0 +1,13 @@
+{
+  "id": "035-tuples",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Tuple destructuring",
+  "prompt": "Create tuple, destructure, print values.",
+  "template": "templates/035.ko",
+  "solution": "solutions/035.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "123"
+  }
+}

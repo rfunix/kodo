@@ -1,0 +1,13 @@
+{
+  "id": "039-fold-reduce",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Fold and reduce",
+  "prompt": "Use fold to sum and reduce to multiply.",
+  "template": "templates/039.ko",
+  "solution": "solutions/039.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "15120"
+  }
+}

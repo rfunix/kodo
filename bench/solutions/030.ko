@@ -1,0 +1,13 @@
+module map_ops {
+    meta { purpose: "Map insert and get", version: "0.1.0" }
+
+    fn main() -> Int {
+        let m: Map<Int, Int> = map_new()
+        map_insert(m, 1, 100)
+        map_insert(m, 2, 200)
+        map_insert(m, 3, 300)
+        print_int(map_get(m, 1))
+        print_int(map_get(m, 3))
+        return 0
+    }
+}

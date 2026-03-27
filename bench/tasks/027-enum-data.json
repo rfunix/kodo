@@ -1,0 +1,13 @@
+{
+  "id": "027-enum-data",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Enum variants with data",
+  "prompt": "Write Color enum with Red, Green(Int), Blue(Int, Int). Match and extract.",
+  "template": "templates/027.ko",
+  "solution": "solutions/027.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1128300"
+  }
+}

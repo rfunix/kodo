@@ -1,0 +1,13 @@
+{
+  "id": "020-result-unwrap-or",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result unwrap_or",
+  "prompt": "Use unwrap_or on Result::Ok and Result::Err.",
+  "template": "templates/020.ko",
+  "solution": "solutions/020.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42999"
+  }
+}

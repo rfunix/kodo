@@ -1,0 +1,13 @@
+{
+  "id": "042-break-continue",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Break and continue",
+  "prompt": "Use break to find 42, continue to skip evens when summing odds.",
+  "template": "templates/042.ko",
+  "solution": "solutions/042.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "4225"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "046-three-producers",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Three producers one collector",
+  "prompt": "Three producer spawns, one collector summing via channel.",
+  "template": "templates/046.ko",
+  "solution": "solutions/046.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "6"
+  }
+}

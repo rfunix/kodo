@@ -1,0 +1,13 @@
+{
+  "id": "037-list-map",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "List map combinator",
+  "prompt": "Use .map() to double list elements, sum with for-in.",
+  "template": "templates/037.ko",
+  "solution": "solutions/037.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30"
+  }
+}

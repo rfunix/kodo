@@ -1,0 +1,15 @@
+module list_filter {
+    meta { purpose: "List filter combinator", version: "0.1.0" }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+        let evens: List<Int> = nums.filter(|x: Int| -> Bool { x % 2 == 0 })
+        print_int(list_length(evens))
+        return 0
+    }
+}

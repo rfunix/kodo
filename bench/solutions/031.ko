@@ -1,0 +1,14 @@
+module set_dedup {
+    meta { purpose: "Set deduplication", version: "0.1.0" }
+
+    fn main() -> Int {
+        let s: Set<Int> = set_new()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        s.add(2)
+        s.add(1)
+        print_int(s.length())
+        return 0
+    }
+}

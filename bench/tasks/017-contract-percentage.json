@@ -1,0 +1,17 @@
+{
+  "id": "017-contract-percentage",
+  "category": "contracts",
+  "difficulty": "hard",
+  "title": "Percentage range contracts",
+  "prompt": "Write to_percentage requiring 0-100 range and ensuring same on result.",
+  "template": "templates/017.ko",
+  "solution": "solutions/017.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires",
+      "ensures"
+    ],
+    "output_matches": "75"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "011-contract-clamp",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Clamp with requires contract",
+  "prompt": "Write a module with a clamp function that requires min <= max. Test with clamp(150, 0, 100) and clamp(42, 0, 100).",
+  "template": "templates/011.ko",
+  "solution": "solutions/011.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires"
+    ],
+    "output_matches": "10042"
+  }
+}

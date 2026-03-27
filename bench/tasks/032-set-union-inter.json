@@ -1,0 +1,13 @@
+{
+  "id": "032-set-union-inter",
+  "category": "data-structures",
+  "difficulty": "hard",
+  "title": "Set union and intersection",
+  "prompt": "Create two sets, compute union and intersection lengths.",
+  "template": "templates/032.ko",
+  "solution": "solutions/032.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42"
+  }
+}

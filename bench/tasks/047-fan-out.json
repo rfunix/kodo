@@ -1,0 +1,13 @@
+{
+  "id": "047-fan-out",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Fan-out pattern with collector",
+  "prompt": "Three workers compute partial sums, collector totals.",
+  "template": "templates/047.ko",
+  "solution": "solutions/047.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "465"
+  }
+}

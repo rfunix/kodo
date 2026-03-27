@@ -1,0 +1,13 @@
+{
+  "id": "034-enum-extract",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Match enum and extract data",
+  "prompt": "Write Command enum, match variants, return extracted values.",
+  "template": "templates/034.ko",
+  "solution": "solutions/034.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42"
+  }
+}

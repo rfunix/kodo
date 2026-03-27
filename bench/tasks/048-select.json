@@ -1,0 +1,13 @@
+{
+  "id": "048-select",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Select on two channels",
+  "prompt": "Use select to receive from whichever channel is ready.",
+  "template": "templates/048.ko",
+  "solution": "solutions/048.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "99"
+  }
+}

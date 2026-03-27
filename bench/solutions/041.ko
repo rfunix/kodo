@@ -1,0 +1,12 @@
+module fstrings {
+    meta { purpose: "F-string interpolation", version: "0.1.0" }
+
+    fn greet(name: String) -> String { return f"Hello, {name}!" }
+    fn format_point(x: Int, y: Int) -> String { return f"Point({x}, {y})" }
+
+    fn main() -> Int {
+        print(greet("World"))
+        print(format_point(3, 4))
+        return 0
+    }
+}

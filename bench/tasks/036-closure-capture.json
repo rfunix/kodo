@@ -1,0 +1,13 @@
+{
+  "id": "036-closure-capture",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "Closure variable capture",
+  "prompt": "Closure captures offset variable, adds to parameter.",
+  "template": "templates/036.ko",
+  "solution": "solutions/036.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "142"
+  }
+}

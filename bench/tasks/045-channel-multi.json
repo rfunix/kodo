@@ -1,0 +1,13 @@
+{
+  "id": "045-channel-multi",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Multiple values through channel",
+  "prompt": "Send three values, receive and sum.",
+  "template": "templates/045.ko",
+  "solution": "solutions/045.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "60"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "014-contract-safe-index",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Safe indexing with contracts",
+  "prompt": "Write safe_get requiring index >= 0 and index < size.",
+  "template": "templates/014.ko",
+  "solution": "solutions/014.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires"
+    ],
+    "output_matches": "20"
+  }
+}

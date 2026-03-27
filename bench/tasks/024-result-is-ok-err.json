@@ -1,0 +1,13 @@
+{
+  "id": "024-result-is-ok-err",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Result is_ok and is_err",
+  "prompt": "Use is_ok() and is_err() on Result values.",
+  "template": "templates/024.ko",
+  "solution": "solutions/024.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1001"
+  }
+}

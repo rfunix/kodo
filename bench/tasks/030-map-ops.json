@@ -1,0 +1,13 @@
+{
+  "id": "030-map-ops",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Map insert and get",
+  "prompt": "Create Map<Int, Int>, insert pairs, retrieve values.",
+  "template": "templates/030.ko",
+  "solution": "solutions/030.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "100300"
+  }
+}

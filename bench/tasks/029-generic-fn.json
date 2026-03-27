@@ -1,0 +1,13 @@
+{
+  "id": "029-generic-fn",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Generic identity function",
+  "prompt": "Write generic identity<T> function.",
+  "template": "templates/029.ko",
+  "solution": "solutions/029.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "4299"
+  }
+}

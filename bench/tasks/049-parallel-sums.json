@@ -1,0 +1,13 @@
+{
+  "id": "049-parallel-sums",
+  "category": "concurrency",
+  "difficulty": "hard",
+  "title": "Parallel partial sums",
+  "prompt": "Two spawns send partial sums, third receives and totals.",
+  "template": "templates/049.ko",
+  "solution": "solutions/049.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "210"
+  }
+}

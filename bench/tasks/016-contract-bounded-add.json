@@ -1,0 +1,17 @@
+{
+  "id": "016-contract-bounded-add",
+  "category": "contracts",
+  "difficulty": "hard",
+  "title": "Bounded addition with ensures",
+  "prompt": "Write bounded_add requiring inputs >= 0, ensures result <= max.",
+  "template": "templates/016.ko",
+  "solution": "solutions/016.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires",
+      "ensures"
+    ],
+    "output_matches": "30100"
+  }
+}

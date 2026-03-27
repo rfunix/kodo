@@ -1,0 +1,13 @@
+{
+  "id": "021-option-unwrap-or",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Option unwrap_or",
+  "prompt": "Use unwrap_or on Some and None.",
+  "template": "templates/021.ko",
+  "solution": "solutions/021.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "420"
+  }
+}

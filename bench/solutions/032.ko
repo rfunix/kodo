@@ -1,0 +1,21 @@
+module set_ops {
+    meta { purpose: "Set union and intersection", version: "0.1.0" }
+
+    fn main() -> Int {
+        let s1: Set<Int> = set_new()
+        s1.add(1)
+        s1.add(2)
+        s1.add(3)
+
+        let s2: Set<Int> = set_new()
+        s2.add(2)
+        s2.add(3)
+        s2.add(4)
+
+        let u: Set<Int> = s1.union(s2)
+        let inter: Set<Int> = s1.intersection(s2)
+        print_int(u.length())
+        print_int(inter.length())
+        return 0
+    }
+}

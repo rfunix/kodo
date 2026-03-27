@@ -1,0 +1,13 @@
+{
+  "id": "022-result-short-match",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Short form Result match",
+  "prompt": "Match Result with Ok/Err (short) and Result::Ok/Result::Err (long).",
+  "template": "templates/022.ko",
+  "solution": "solutions/022.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1020"
+  }
+}

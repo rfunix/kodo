@@ -1,0 +1,19 @@
+module fan_out {
+    meta { purpose: "Fan-out pattern", version: "0.1.0" }
+
+    fn main() -> Int {
+        let results: Channel<Int> = channel_new()
+        parallel {
+            spawn { channel_send(results, 55) }
+            spawn { channel_send(results, 155) }
+            spawn { channel_send(results, 255) }
+            spawn {
+                let a: Int = channel_recv(results)
+                let b: Int = channel_recv(results)
+                let c: Int = channel_recv(results)
+                print_int(a + b + c)
+            }
+        }
+        return 0
+    }
+}

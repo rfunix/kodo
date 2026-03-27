@@ -1,0 +1,13 @@
+{
+  "id": "038-list-filter",
+  "category": "patterns",
+  "difficulty": "medium",
+  "title": "List filter combinator",
+  "prompt": "Use .filter() to keep even numbers, print count.",
+  "template": "templates/038.ko",
+  "solution": "solutions/038.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "2"
+  }
+}

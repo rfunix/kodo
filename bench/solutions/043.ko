@@ -1,0 +1,17 @@
+module par_sum {
+    meta { purpose: "Parallel channel sum", version: "0.1.0" }
+
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+        parallel {
+            spawn { channel_send(ch, 10) }
+            spawn { channel_send(ch, 20) }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                print_int(a + b)
+            }
+        }
+        return 0
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "025-result-chain",
+  "category": "error-handling",
+  "difficulty": "hard",
+  "title": "Result validation chain",
+  "prompt": "Chain two validation functions returning Result.",
+  "template": "templates/025.ko",
+  "solution": "solutions/025.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "50-1"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "023-option-is-some-none",
+  "category": "error-handling",
+  "difficulty": "medium",
+  "title": "Option is_some and is_none",
+  "prompt": "Use is_some() and is_none() on Option values.",
+  "template": "templates/023.ko",
+  "solution": "solutions/023.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1001"
+  }
+}

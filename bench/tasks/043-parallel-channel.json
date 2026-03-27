@@ -1,0 +1,13 @@
+{
+  "id": "043-parallel-channel",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Parallel channel sum",
+  "prompt": "Two producers send via channel, collector sums.",
+  "template": "templates/043.ko",
+  "solution": "solutions/043.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30"
+  }
+}

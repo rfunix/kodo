@@ -1,0 +1,13 @@
+{
+  "id": "044-channel-basic",
+  "category": "concurrency",
+  "difficulty": "medium",
+  "title": "Channel send and receive",
+  "prompt": "Send 42 on channel in one spawn, receive in another.",
+  "template": "templates/044.ko",
+  "solution": "solutions/044.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "42"
+  }
+}

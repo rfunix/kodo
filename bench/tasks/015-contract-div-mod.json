@@ -1,0 +1,16 @@
+{
+  "id": "015-contract-div-mod",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Division and modulo contracts",
+  "prompt": "Write safe_divide and safe_modulo both requiring b != 0.",
+  "template": "templates/015.ko",
+  "solution": "solutions/015.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "requires"
+    ],
+    "output_matches": "31"
+  }
+}

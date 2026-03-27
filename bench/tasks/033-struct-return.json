@@ -1,0 +1,13 @@
+{
+  "id": "033-struct-return",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Function returning struct",
+  "prompt": "Write function that returns a struct, access fields and method.",
+  "template": "templates/033.ko",
+  "solution": "solutions/033.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "1030"
+  }
+}

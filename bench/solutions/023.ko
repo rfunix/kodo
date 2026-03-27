@@ -1,0 +1,18 @@
+module option_checks {
+    meta { purpose: "Option is_some and is_none checks", version: "0.1.0" }
+
+    fn bool_to_int(b: Bool) -> Int {
+        if b { return 1 }
+        return 0
+    }
+
+    fn main() -> Int {
+        let some_val: Option<Int> = Option::Some(42)
+        let none_val: Option<Int> = Option::None
+        print_int(bool_to_int(some_val.is_some()))
+        print_int(bool_to_int(some_val.is_none()))
+        print_int(bool_to_int(none_val.is_some()))
+        print_int(bool_to_int(none_val.is_none()))
+        return 0
+    }
+}

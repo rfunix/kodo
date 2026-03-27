@@ -1,0 +1,16 @@
+{
+  "id": "012-contract-ensures",
+  "category": "contracts",
+  "difficulty": "medium",
+  "title": "Ensures on return value",
+  "prompt": "Write absolute_value with ensures { result >= 0 }. Test with 5 and -7.",
+  "template": "templates/012.ko",
+  "solution": "solutions/012.ko",
+  "checks": {
+    "compiles": true,
+    "contracts_present": [
+      "ensures"
+    ],
+    "output_matches": "57"
+  }
+}

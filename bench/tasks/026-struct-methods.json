@@ -1,0 +1,13 @@
+{
+  "id": "026-struct-methods",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Struct with impl methods",
+  "prompt": "Write Rectangle with area() and perimeter() methods.",
+  "template": "templates/026.ko",
+  "solution": "solutions/026.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "5030"
+  }
+}

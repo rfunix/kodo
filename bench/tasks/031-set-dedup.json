@@ -1,0 +1,13 @@
+{
+  "id": "031-set-dedup",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Set deduplication",
+  "prompt": "Create Set, add duplicates, verify length shows dedup.",
+  "template": "templates/031.ko",
+  "solution": "solutions/031.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "3"
+  }
+}

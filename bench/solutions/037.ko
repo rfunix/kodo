@@ -1,0 +1,20 @@
+module list_map {
+    meta { purpose: "List map combinator", version: "0.1.0" }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 1)
+        list_push(nums, 2)
+        list_push(nums, 3)
+        list_push(nums, 4)
+        list_push(nums, 5)
+
+        let doubled: List<Int> = nums.map(|x: Int| -> Int { x * 2 })
+        let mut total: Int = 0
+        for v in doubled {
+            total = total + v
+        }
+        print_int(total)
+        return 0
+    }
+}

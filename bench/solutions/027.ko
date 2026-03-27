@@ -1,0 +1,21 @@
+module color_enum {
+    meta { purpose: "Enum variants with data", version: "0.1.0" }
+
+    enum Color { Red, Green(Int), Blue(Int, Int) }
+
+    fn color_value(c: Color) -> Int {
+        let val: Int = match c {
+            Color::Red => 1,
+            Color::Green(g) => g,
+            Color::Blue(b1, b2) => b1 + b2
+        }
+        return val
+    }
+
+    fn main() -> Int {
+        print_int(color_value(Color::Red))
+        print_int(color_value(Color::Green(128)))
+        print_int(color_value(Color::Blue(100, 200)))
+        return 0
+    }
+}

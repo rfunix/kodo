@@ -1,0 +1,19 @@
+module command_match {
+    meta { purpose: "Match on enum variants", version: "0.1.0" }
+
+    enum Command { Start, Stop, Set(Int) }
+
+    fn execute(cmd: Command) -> Int {
+        let val: Int = match cmd {
+            Command::Start => 0,
+            Command::Stop => -1,
+            Command::Set(v) => v
+        }
+        return val
+    }
+
+    fn main() -> Int {
+        print_int(execute(Command::Set(42)))
+        return 0
+    }
+}

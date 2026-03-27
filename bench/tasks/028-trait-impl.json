@@ -1,0 +1,13 @@
+{
+  "id": "028-trait-impl",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "title": "Trait implementation",
+  "prompt": "Write Summarizable trait and implement for Stats struct.",
+  "template": "templates/028.ko",
+  "solution": "solutions/028.ko",
+  "checks": {
+    "compiles": true,
+    "output_matches": "30"
+  }
+}

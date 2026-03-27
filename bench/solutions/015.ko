@@ -1,0 +1,21 @@
+module div_mod {
+    meta { purpose: "Division and modulo with contracts", version: "0.1.0" }
+
+    fn safe_divide(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a / b
+    }
+
+    fn safe_modulo(a: Int, b: Int) -> Int
+        requires { b != 0 }
+    {
+        return a % b
+    }
+
+    fn main() -> Int {
+        print_int(safe_divide(10, 3))
+        print_int(safe_modulo(10, 3))
+        return 0
+    }
+}

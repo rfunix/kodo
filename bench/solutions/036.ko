@@ -1,0 +1,10 @@
+module closure_cap {
+    meta { purpose: "Closure variable capture", version: "0.1.0" }
+
+    fn main() -> Int {
+        let offset: Int = 100
+        let add_offset: (Int) -> Int = |x: Int| -> Int { x + offset }
+        print_int(add_offset(42))
+        return 0
+    }
+}
