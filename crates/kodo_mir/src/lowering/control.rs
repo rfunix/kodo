@@ -185,6 +185,14 @@ impl MirBuilder {
                     Self::collect_free_vars_in_stmt(s, params, free, seen);
                 }
             }
+            Stmt::Select { arms, .. } => {
+                for arm in arms {
+                    Self::collect_free_vars(&arm.channel, params, free, seen);
+                    for s in &arm.body.stmts {
+                        Self::collect_free_vars_in_stmt(s, params, free, seen);
+                    }
+                }
+            }
             // Break and Continue have no free variables.
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
         }

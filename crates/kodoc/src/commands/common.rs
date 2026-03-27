@@ -1462,6 +1462,20 @@ pub(crate) fn rewrite_method_calls_in_block(
             }
             // Break and Continue have no expressions to rewrite.
             kodo_ast::Stmt::Break { .. } | kodo_ast::Stmt::Continue { .. } => {}
+            // Select arms: rewrite channel exprs and body blocks.
+            kodo_ast::Stmt::Select { arms, .. } => {
+                for arm in arms {
+                    arm.channel = rewrite_method_calls_in_expr(
+                        std::mem::replace(
+                            &mut arm.channel,
+                            kodo_ast::Expr::IntLit(0, kodo_ast::Span::new(0, 0)),
+                        ),
+                        resolutions,
+                        static_calls,
+                    );
+                    rewrite_method_calls_in_block(&mut arm.body, resolutions, static_calls);
+                }
+            }
             // ForAll body is recursively rewritten.
             kodo_ast::Stmt::ForAll { body, .. } => {
                 rewrite_method_calls_in_block(body, resolutions, static_calls);

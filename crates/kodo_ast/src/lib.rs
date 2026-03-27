@@ -477,6 +477,22 @@ pub struct MatchArm {
     pub span: Span,
 }
 
+/// An arm in a `select` statement.
+///
+/// Each arm binds the received value from a channel to a parameter
+/// and executes the body when that channel has data.
+#[derive(Debug, Clone)]
+pub struct SelectArm {
+    /// The channel expression (e.g., `ch1`).
+    pub channel: Expr,
+    /// The parameter to bind the received value (e.g., `val: Int`).
+    pub param: ClosureParam,
+    /// The handler body.
+    pub body: Block,
+    /// Source span.
+    pub span: Span,
+}
+
 /// A pattern in a match expression.
 #[derive(Debug, Clone)]
 pub enum Pattern {
@@ -772,6 +788,23 @@ pub enum Stmt {
         span: Span,
         /// The body containing spawn statements.
         body: Vec<Stmt>,
+    },
+    /// A `select` statement for channel multiplexing.
+    ///
+    /// Waits on multiple channels simultaneously and executes the arm
+    /// corresponding to the first channel that has data available.
+    ///
+    /// ```text
+    /// select {
+    ///     ch1 => |val: Int| { print_int(val) }
+    ///     ch2 => |msg: String| { println(msg) }
+    /// }
+    /// ```
+    Select {
+        /// Source span.
+        span: Span,
+        /// The select arms (channel expressions with handlers).
+        arms: Vec<SelectArm>,
     },
     /// A `forall` statement in property-based tests.
     ///

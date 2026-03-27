@@ -147,6 +147,9 @@ pub enum TokenKind {
     /// The `parallel` keyword.
     #[token("parallel")]
     Parallel,
+    /// The `select` keyword (for channel multiplexing).
+    #[token("select")]
+    Select,
     /// The `actor` keyword.
     #[token("actor")]
     Actor,
