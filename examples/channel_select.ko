@@ -1,23 +1,39 @@
+// Channel Select — demonstrates the `select {}` statement (v1.9.0).
+//
+// `select` waits on multiple channels and executes the arm for the
+// first channel that has data available. This is Kōdo's equivalent
+// of Go's `select` statement.
+//
+// Compile and run:
+//   kodoc build examples/channel_select.ko -o channel_select
+//   ./channel_select
+
 module channel_select {
     meta {
-        purpose: "Demonstrates channel_select_2 for multiplexing channels"
-        version: "0.1.0"
+        purpose: "Demonstrate select {} for channel multiplexing",
+        version: "1.9.0"
     }
 
     fn main() -> Int {
         let ch1: Channel<Int> = channel_new()
         let ch2: Channel<Int> = channel_new()
 
-        spawn { channel_send(ch2, 99) }
-
-        let idx: Int = channel_select_2(ch1, ch2)
-        if idx == 0 {
-            let v: Int = channel_recv(ch1)
-            print_int(v)
-        } else {
-            let v: Int = channel_recv(ch2)
-            print_int(v)
+        parallel {
+            spawn {
+                channel_send(ch2, 99)
+            }
+            spawn {
+                select {
+                    ch1 => |val: Int| {
+                        print_int(val)
+                    }
+                    ch2 => |val: Int| {
+                        print_int(val)
+                    }
+                }
+            }
         }
+
         return 0
     }
 }
