@@ -44,6 +44,7 @@ impl Parser {
             Some(TokenKind::Continue) => self.parse_continue_stmt(),
             Some(TokenKind::Spawn) => self.parse_spawn_stmt(),
             Some(TokenKind::Parallel) => self.parse_parallel_stmt(),
+            Some(TokenKind::Select) => self.parse_select_stmt(),
             Some(TokenKind::Forall) => self.parse_forall_stmt(),
             _ => self.parse_expr_or_assign_stmt(),
         }
@@ -316,6 +317,60 @@ impl Parser {
     }
 
     /// Parses a parallel block: `parallel { spawn { ... } spawn { ... } }`.
+    /// Parses a `select` statement for channel multiplexing:
+    ///
+    /// ```text
+    /// select {
+    ///     ch1 => |val: Int| { body }
+    ///     ch2 => |msg: String| { body }
+    /// }
+    /// ```
+    fn parse_select_stmt(&mut self) -> Result<Stmt> {
+        let start = self.expect(&TokenKind::Select)?.span;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.check(&TokenKind::RBrace) {
+            let arm_start = self.prev_span();
+
+            // Parse channel expression (e.g., `ch1`)
+            let channel = self.parse_expr()?;
+
+            // Expect `=>`
+            self.expect(&TokenKind::FatArrow)?;
+
+            // Parse `|param: Type|`
+            let pipe_start = self.expect(&TokenKind::Pipe)?.span;
+            let param_name = self.parse_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let param_ty = self.parse_type()?;
+            let pipe_end = self.expect(&TokenKind::Pipe)?.span;
+
+            let param = kodo_ast::ClosureParam {
+                name: param_name,
+                ty: Some(param_ty),
+                span: pipe_start.merge(pipe_end),
+            };
+
+            // Parse body block `{ ... }`
+            let body = self.parse_block()?;
+            let arm_end = body.span;
+
+            arms.push(kodo_ast::SelectArm {
+                channel,
+                param,
+                body,
+                span: arm_start.merge(arm_end),
+            });
+        }
+
+        let end = self.expect(&TokenKind::RBrace)?.span;
+        Ok(Stmt::Select {
+            span: start.merge(end),
+            arms,
+        })
+    }
+
     fn parse_parallel_stmt(&mut self) -> Result<Stmt> {
         let start = self.expect(&TokenKind::Parallel)?.span;
         self.expect(&TokenKind::LBrace)?;

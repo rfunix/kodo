@@ -399,6 +399,12 @@ fn visit_exprs_in_stmt(stmt: &Stmt, f: &mut dyn FnMut(&Expr)) {
             }
         }
         Stmt::ForAll { body, .. } => visit_exprs_in_block(body, f),
+        Stmt::Select { arms, .. } => {
+            for arm in arms {
+                visit_expr(&arm.channel, f);
+                visit_exprs_in_block(&arm.body, f);
+            }
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } => {}
     }
 }

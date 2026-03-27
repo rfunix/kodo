@@ -667,6 +667,25 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str("}\n");
         }
+        Stmt::Select { arms, .. } => {
+            indent(out, level);
+            out.push_str("select {\n");
+            for arm in arms {
+                indent(out, level + 1);
+                out.push_str(&format_expr(&arm.channel));
+                out.push_str(" => |");
+                out.push_str(&arm.param.name);
+                if let Some(ty) = &arm.param.ty {
+                    out.push_str(&format!(": {}", format_type_expr(ty)));
+                }
+                out.push_str("| {\n");
+                format_block_inner(out, &arm.body, level + 2);
+                indent(out, level + 1);
+                out.push_str("}\n");
+            }
+            indent(out, level);
+            out.push_str("}\n");
+        }
         Stmt::Break { .. } => {
             indent(out, level);
             out.push_str("break\n");

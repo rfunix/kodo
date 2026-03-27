@@ -1,0 +1,27 @@
+//@ check-pass
+module select_test {
+    meta {
+        purpose: "UI test: select statement for channel multiplexing",
+        version: "0.1.0"
+    }
+
+    fn main() -> Int {
+        let ch1: Channel<Int> = channel_new()
+        let ch2: Channel<Int> = channel_new()
+
+        spawn {
+            channel_send(ch2, 42)
+        }
+
+        select {
+            ch1 => |val: Int| {
+                print_int(val)
+            }
+            ch2 => |val: Int| {
+                print_int(val)
+            }
+        }
+
+        return 0
+    }
+}

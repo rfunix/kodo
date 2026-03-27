@@ -203,6 +203,14 @@ fn collect_free_vars_block(
                 }
             }
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
+            Stmt::Select { arms, .. } => {
+                for arm in arms {
+                    collect_free_vars_inner(&arm.channel, &local_bound, free, seen);
+                    let mut arm_bound = local_bound.clone();
+                    arm_bound.insert(arm.param.name.clone());
+                    collect_free_vars_block(&arm.body, &arm_bound, free, seen);
+                }
+            }
             Stmt::ForAll { bindings, body, .. } => {
                 let mut for_all_bound = local_bound.clone();
                 for (name, _) in bindings {
@@ -1006,8 +1014,8 @@ impl TypeChecker {
                 Stmt::Break { .. } | Stmt::Continue { .. } => {
                     last_ty = Type::Unit;
                 }
-                // ForAll is handled by the property-test runtime.
-                Stmt::ForAll { .. } => {
+                // Select and ForAll delegate to check_stmt.
+                Stmt::Select { .. } | Stmt::ForAll { .. } => {
                     self.check_stmt(stmt)?;
                     last_ty = Type::Unit;
                 }

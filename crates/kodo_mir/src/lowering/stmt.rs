@@ -59,6 +59,49 @@ impl MirBuilder {
             Stmt::ForIn { .. } | Stmt::IfLet { .. } | Stmt::ForAll { .. } => Ok(Value::Unit),
             Stmt::Spawn { body, .. } => self.lower_spawn_stmt(body),
             Stmt::Parallel { body, .. } => self.lower_parallel_stmt(body),
+            // Select is desugared to channel_select_N() + if-else chain.
+            Stmt::Select { arms, .. } => {
+                // Lower each channel expression
+                let mut ch_vals = Vec::new();
+                for arm in arms {
+                    let ch = self.lower_expr(&arm.channel)?;
+                    ch_vals.push(ch);
+                }
+
+                // For 1 channel, just recv directly
+                if arms.len() == 1 {
+                    let recv_dest = self.alloc_local(Type::Int, false);
+                    self.emit(Instruction::Call {
+                        dest: recv_dest,
+                        callee: "channel_recv".to_string(),
+                        args: vec![ch_vals[0].clone()],
+                    });
+                    self.name_map.insert(arms[0].param.name.clone(), recv_dest);
+                    self.lower_block(&arms[0].body)?;
+                    return Ok(Value::Unit);
+                }
+
+                // Call channel_select_N to get the ready index
+                let select_fn = if ch_vals.len() == 3 {
+                    "channel_select_3"
+                } else {
+                    "channel_select_2"
+                };
+
+                let idx_dest = self.alloc_local(Type::Int, false);
+                self.emit(Instruction::Call {
+                    dest: idx_dest,
+                    callee: select_fn.to_string(),
+                    args: ch_vals.clone(),
+                });
+
+                // Build if-else chain: if idx == 0 { arm0 } else { arm1 }
+                // For 2 channels, this is a simple if-else.
+                // For 3, it's if-else-if-else.
+                self.lower_select_arms(arms, &ch_vals, idx_dest, 0)?;
+
+                Ok(Value::Unit)
+            }
         }
     }
 
@@ -578,6 +621,74 @@ impl MirBuilder {
                 Value::IntConst(env_size),
             ],
         });
+
+        Ok(())
+    }
+
+    /// Recursively lowers select arms as an if-else chain.
+    ///
+    /// For each arm `i`: `if idx == i { recv(ch_i); body_i } else { next arm }`
+    fn lower_select_arms(
+        &mut self,
+        arms: &[kodo_ast::SelectArm],
+        ch_vals: &[Value],
+        idx_local: LocalId,
+        current: usize,
+    ) -> Result<()> {
+        if current >= arms.len() {
+            return Ok(());
+        }
+
+        let arm = &arms[current];
+
+        if current == arms.len() - 1 {
+            // Last arm — no condition needed, just recv and execute
+            let recv_dest = self.alloc_local(Type::Int, false);
+            self.emit(Instruction::Call {
+                dest: recv_dest,
+                callee: "channel_recv".to_string(),
+                args: vec![ch_vals[current].clone()],
+            });
+            self.name_map.insert(arm.param.name.clone(), recv_dest);
+            self.lower_block(&arm.body)?;
+            return Ok(());
+        }
+
+        // Condition: idx == current
+        #[allow(clippy::cast_possible_wrap)]
+        let cond = Value::BinOp(
+            kodo_ast::BinOp::Eq,
+            Box::new(Value::Local(idx_local)),
+            Box::new(Value::IntConst(current as i64)),
+        );
+
+        let then_block = self.new_block();
+        let else_block = self.new_block();
+        let merge_block = self.new_block();
+
+        self.seal_block(
+            Terminator::Branch {
+                condition: cond,
+                true_block: then_block,
+                false_block: else_block,
+            },
+            then_block,
+        );
+
+        // Then: recv from ch[current], bind param, execute body
+        let recv_dest = self.alloc_local(Type::Int, false);
+        self.emit(Instruction::Call {
+            dest: recv_dest,
+            callee: "channel_recv".to_string(),
+            args: vec![ch_vals[current].clone()],
+        });
+        self.name_map.insert(arm.param.name.clone(), recv_dest);
+        self.lower_block(&arm.body)?;
+        self.seal_block(Terminator::Goto(merge_block), else_block);
+
+        // Else: try next arm
+        self.lower_select_arms(arms, ch_vals, idx_local, current + 1)?;
+        self.seal_block(Terminator::Goto(merge_block), merge_block);
 
         Ok(())
     }

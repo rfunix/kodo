@@ -104,6 +104,12 @@ pub(crate) fn desugar_block(block: &mut Block) {
             Stmt::Continue { span } => {
                 new_stmts.push(Stmt::Continue { span });
             }
+            Stmt::Select { span, mut arms } => {
+                for arm in &mut arms {
+                    desugar_block(&mut arm.body);
+                }
+                new_stmts.push(Stmt::Select { span, arms });
+            }
             Stmt::ForAll {
                 span,
                 bindings,

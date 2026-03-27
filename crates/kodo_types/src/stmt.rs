@@ -20,6 +20,7 @@ impl TypeChecker {
     /// # Errors
     ///
     /// Returns a [`TypeError`] on type mismatches or undefined variables.
+    #[allow(clippy::too_many_lines)]
     pub fn check_stmt(&mut self, stmt: &Stmt) -> crate::Result<()> {
         match stmt {
             Stmt::Let {
@@ -107,6 +108,21 @@ impl TypeChecker {
             Stmt::Parallel { body, .. } => {
                 for stmt in body {
                     self.check_stmt(stmt)?;
+                }
+                Ok(())
+            }
+            Stmt::Select { arms, .. } => {
+                // Type-check each select arm: infer channel type, check body.
+                for arm in arms {
+                    self.infer_expr(&arm.channel)?;
+                    let scope = self.env.scope_level();
+                    // Bind the parameter in the arm's body scope.
+                    if let Some(ty_expr) = &arm.param.ty {
+                        let ty = self.resolve_type_mono(ty_expr, arm.param.span)?;
+                        self.env.insert(arm.param.name.clone(), ty);
+                    }
+                    self.check_block(&arm.body)?;
+                    self.env.truncate(scope);
                 }
                 Ok(())
             }
