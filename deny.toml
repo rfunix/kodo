@@ -1,6 +1,9 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+# Transitive via z3 → reqwest → rustls → rustls-webpki.
+# We don't control this dependency chain; ignore until z3 updates.
+ignore = ["RUSTSEC-2026-0049"]
 
 [licenses]
 allow = [
