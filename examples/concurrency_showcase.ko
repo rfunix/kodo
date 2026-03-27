@@ -1,0 +1,112 @@
+// Concurrency Showcase — demonstrates all concurrency features in Kōdo.
+//
+// Features covered:
+//   - parallel {} — structured concurrency
+//   - spawn {} — green threads inside parallel blocks
+//   - Channel<Int> — typed channel communication
+//   - select {} — Go-style channel multiplexing (NEW in v1.9.0)
+//
+// Compile and run:
+//   kodoc build examples/concurrency_showcase.ko -o showcase
+//   ./showcase
+
+module concurrency_showcase {
+    meta {
+        purpose: "Demonstrate all concurrency primitives",
+        version: "1.9.0",
+        author: "Kōdo Team"
+    }
+
+    fn main() -> Int {
+        println("Kōdo Concurrency Showcase v1.9.0")
+        println("================================")
+
+        // ─── 1. Channel communication via parallel/spawn ─────
+
+        println("")
+        println("1. Channel communication")
+        let ch: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch, 10)
+                channel_send(ch, 20)
+                channel_send(ch, 30)
+            }
+            spawn {
+                let a: Int = channel_recv(ch)
+                let b: Int = channel_recv(ch)
+                let c: Int = channel_recv(ch)
+                let sum: Int = a + b + c
+                print("   Sum: ")
+                print_int(sum)
+                println("")
+            }
+        }
+
+        // ─── 2. Fan-out: multiple producers ──────────────────
+
+        println("")
+        println("2. Fan-out (3 producers)")
+        let results: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                // Worker 1: sum 1..10
+                let s: Int = 55
+                channel_send(results, s)
+            }
+            spawn {
+                // Worker 2: sum 11..20
+                let s: Int = 155
+                channel_send(results, s)
+            }
+            spawn {
+                // Worker 3: sum 21..30
+                let s: Int = 255
+                channel_send(results, s)
+            }
+            spawn {
+                // Collector
+                let a: Int = channel_recv(results)
+                let b: Int = channel_recv(results)
+                let c: Int = channel_recv(results)
+                let total: Int = a + b + c
+                print("   Total (1..30): ")
+                print_int(total)
+                println("")
+            }
+        }
+
+        // ─── 3. Select — channel multiplexing ────────────────
+
+        println("")
+        println("3. Select (channel multiplexing)")
+        let fast: Channel<Int> = channel_new()
+        let slow: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(fast, 42)
+            }
+            spawn {
+                select {
+                    fast => |val: Int| {
+                        print("   Selected: ")
+                        print_int(val)
+                        println("")
+                    }
+                    slow => |val: Int| {
+                        print("   Selected: ")
+                        print_int(val)
+                        println("")
+                    }
+                }
+            }
+        }
+
+        println("")
+        println("All demos completed!")
+        return 0
+    }
+}
