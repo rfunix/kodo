@@ -16,13 +16,13 @@ This document lists the known limitations of the current alpha release. These ar
 - **Impact**: `async fn` works but doesn't provide true concurrency yet. `spawn {}` does run on green threads.
 - **Recommendation**: Use `spawn {}` for fire-and-forget concurrency. Use `parallel {}` for structured parallelism.
 
-**No channel select**: Cannot wait on multiple channels simultaneously.
+**Channel select** (v1.9.0): `select {}` statement for Go-style channel multiplexing. Supports 2-3 channels.
 
-- **Plan**: Go-style `select` statement in a future release.
+- **Resolved** in v1.9.0.
 
-**Fixed green thread stack**: Each green thread gets 64KB. Deep recursion may overflow.
+**Growable green thread stacks** (v1.10.0): Each green thread starts with 1MB and grows automatically up to 8MB via SIGSEGV signal handler. Configurable via `KODO_STACK_SIZE` environment variable.
 
-- **Plan**: Growable stacks in a future release.
+- **Resolved** in v1.10.0.
 
 ## Error Handling
 

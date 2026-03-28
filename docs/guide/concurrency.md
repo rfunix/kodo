@@ -4,7 +4,7 @@ Kōdo uses green threads for lightweight concurrency. You express concurrency wi
 
 ## Green Threads
 
-Kōdo's concurrency model is based on **green threads** — lightweight threads managed by the runtime, not the OS. Each green thread has a 64KB stack and is multiplexed onto a pool of OS worker threads (M:N scheduling).
+Kōdo's concurrency model is based on **green threads** — lightweight threads managed by the runtime, not the OS. Each green thread starts with a 1MB stack that grows automatically up to 8MB, and is multiplexed onto a pool of OS worker threads (M:N scheduling).
 
 Key properties:
 - **Lightweight**: thousands of green threads can run on a few OS threads
@@ -142,7 +142,7 @@ At each yield point, the runtime checks if the current green thread should yield
 
 - **Async execution**: In v1, `async fn` calls execute synchronously and return their result directly. The runtime infrastructure for true futures exists but is not yet wired end-to-end.
 - **No `select`**: Cannot wait on multiple channels simultaneously (planned for v2).
-- **Fixed stack size**: Each green thread gets 64KB. Deep recursion may overflow.
+- **Growable stacks**: Each green thread starts with 1MB and grows automatically up to 8MB. Configurable via `KODO_STACK_SIZE` and `KODO_MAX_STACK_SIZE` environment variables.
 - **No preemption**: A green thread in a tight loop without yield points (e.g., inline assembly) will not yield. Use `--no-green-threads` if this is a problem.
 
 ## Examples
