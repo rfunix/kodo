@@ -247,7 +247,7 @@ kodoc fmt my_program.ko
 
 ### `kodoc annotate`
 
-Suggest missing contracts for functions using heuristic-based static analysis. Analyzes function bodies to infer `requires`/`ensures` clauses, then validates suggestions.
+Suggest missing contracts for functions using heuristic-based static analysis and optional AI (LLM) assistance. Analyzes function bodies to infer `requires`/`ensures` clauses, then validates suggestions.
 
 ```bash
 kodoc annotate <file> [options]
@@ -259,6 +259,7 @@ kodoc annotate <file> [options]
 |------|-------------|---------|
 | `--json` | Output as JSON (for AI agent consumption) | `false` |
 | `--apply` | Apply suggested contracts to the source file (future) | `false` |
+| `--ai` | Use LLM (Claude) to suggest contracts beyond heuristics. Requires `ANTHROPIC_API_KEY` | `false` |
 
 **Heuristics (v1):**
 
@@ -268,6 +269,12 @@ kodoc annotate <file> [options]
 | List index by parameter | `requires { param >= 0 }` |
 | Parameter compared with 0 in guard | `requires { param > 0 }` |
 | Direct return of parameter | `ensures { result == param }` |
+
+**AI mode (`--ai`):**
+
+When `--ai` is passed, functions that heuristics couldn't annotate are sent to Claude (Anthropic API) for contract inference. The LLM analyzes the function body and suggests provably correct `requires`/`ensures` clauses. Each AI suggestion is prefixed with "AI:" in the reason field for traceability.
+
+Requires the `ANTHROPIC_API_KEY` environment variable. Falls back to heuristics-only if the key is missing.
 
 **Examples:**
 
@@ -281,6 +288,10 @@ kodoc annotate payment.ko
 
 kodoc annotate payment.ko --json
 # Output: JSON with suggestions array, verified_count, total_count
+
+# AI-assisted annotation (requires ANTHROPIC_API_KEY)
+kodoc annotate payment.ko --ai
+# Also suggests contracts for functions that heuristics missed
 ```
 
 ### `kodoc confidence-report`
