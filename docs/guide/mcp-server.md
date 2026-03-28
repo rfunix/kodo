@@ -30,7 +30,7 @@ Add `kodo-mcp` to your AI agent's MCP configuration. For example, in Claude Desk
 
 ## Available Tools
 
-The server exposes 6 tools:
+The server exposes 7 tools:
 
 ### `kodo.check`
 
@@ -170,6 +170,56 @@ Explain a compiler error code with description, common causes, and fix suggestio
 |------|------|----------|-------------|
 | `code` | string | yes | Error code (e.g. `E0200`) |
 
+### `kodo.annotate`
+
+Analyze a module and suggest missing contracts. Returns heuristic suggestions and lists functions without contracts (with their source code), so the agent can reason about them and suggest additional contracts. Verify suggestions by calling `kodo.check`.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `source` | string | yes | Kōdo source code to analyze for missing contracts |
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "module": "payment",
+  "heuristic_suggestions": [
+    {
+      "function": "divide",
+      "line": 5,
+      "kind": "requires",
+      "expression": "b != 0",
+      "reason": "parameter `b` used as divisor"
+    }
+  ],
+  "uncovered_functions": [
+    {
+      "name": "process",
+      "line": 10,
+      "params": [{ "name": "amount", "type": "Int" }],
+      "return_type": "Int",
+      "source": "fn process(amount: Int) -> Int {\n    return amount * 2\n}"
+    }
+  ],
+  "summary": {
+    "total_functions": 3,
+    "already_annotated": 1,
+    "heuristic_covered": 1,
+    "needs_agent_review": 1
+  }
+}
+```
+
+**Agent workflow:**
+
+1. Call `kodo.annotate` to get uncovered functions with source
+2. Analyze each function and suggest `requires`/`ensures` contracts
+3. Insert the contract into the source and call `kodo.check` to verify with Z3
+4. Iterate until all contracts pass verification
+
 ### `kodo.confidence_report`
 
 Generate a confidence report for all functions in a module, based on `@confidence` and `@reviewed_by` annotations.
@@ -187,7 +237,7 @@ Generate a confidence report for all functions in a module, based on `@confidenc
 | Method | Description |
 |--------|-------------|
 | `initialize` | Handshake — returns server info and capabilities |
-| `tools/list` | Returns all 6 tool definitions with JSON Schema |
+| `tools/list` | Returns all 7 tool definitions with JSON Schema |
 | `tools/call` | Invokes a tool by name with arguments |
 
 ### Error Codes
@@ -225,3 +275,12 @@ The recommended agent workflow with Kōdo MCP:
 6. **Repeat** until `status: "ok"`
 
 For complex errors, `repair_plans` provide multi-step sequences. Each step has an `id` and patches should be applied in order.
+
+### Contract Inference Workflow
+
+For adding contracts to existing code:
+
+1. **Annotate** — call `kodo.annotate` to find functions without contracts
+2. **Reason** — for each uncovered function, analyze the source and suggest contracts
+3. **Verify** — insert the contract and call `kodo.check` to verify with Z3
+4. **Iterate** — if verification fails, adjust the contract and try again
