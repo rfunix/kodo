@@ -489,4 +489,59 @@ mod tests {
         let stmts = &module.functions[0].body.stmts;
         assert!(matches!(&stmts[0], Stmt::Spawn { .. }));
     }
+
+    #[test]
+    fn parse_select_two_arms() {
+        let source = r#"module test {
+            fn main() {
+                select {
+                    ch1 => |val: Int| { print_int(val) }
+                    ch2 => |msg: Int| { print_int(msg) }
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert!(
+            matches!(&stmts[0], Stmt::Select { arms, .. } if arms.len() == 2),
+            "expected Select with 2 arms"
+        );
+    }
+
+    #[test]
+    fn parse_select_arm_has_param() {
+        let source = r#"module test {
+            fn main() {
+                select {
+                    ch => |x: Int| { print_int(x) }
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        if let Stmt::Select { arms, .. } = &module.functions[0].body.stmts[0] {
+            assert_eq!(arms[0].param.name, "x");
+            assert!(arms[0].param.ty.is_some());
+        } else {
+            panic!("expected Select statement");
+        }
+    }
+
+    #[test]
+    fn parse_select_three_arms() {
+        let source = r#"module test {
+            fn main() {
+                select {
+                    a => |v: Int| { print_int(v) }
+                    b => |v: Int| { print_int(v) }
+                    c => |v: Int| { print_int(v) }
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        assert!(
+            matches!(&stmts[0], Stmt::Select { arms, .. } if arms.len() == 3),
+            "expected Select with 3 arms"
+        );
+    }
 }
