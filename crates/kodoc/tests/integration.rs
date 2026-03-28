@@ -1004,3 +1004,97 @@ fn smt_runtime_mode_accepts_unprovable_contract() {
         "expected runtime checks report: {stdout}"
     );
 }
+
+// ── Self-hosted flag tests ───────────────────────────────────────────────────
+
+/// Verifies that `kodoc build --self-hosted` exits with code 1 and prints
+/// a structured diagnostic when the bootstrap binaries are not present.
+#[test]
+fn self_hosted_build_reports_missing_binaries() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/hello.ko");
+
+    // Run from a temp dir so no bootstrap/ directory exists on the PATH.
+    let tmp = std::env::temp_dir().join("kodoc_self_hosted_test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["build", "--self-hosted", fixture.to_str().unwrap()])
+        .current_dir(&tmp)
+        .output()
+        .expect("failed to spawn kodoc");
+
+    // Must fail (exit code != 0).
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when bootstrap binaries are missing"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Must include the error code and the build instructions.
+    assert!(
+        stderr.contains("E0700"),
+        "expected error code E0700 in stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("self_hosted_lexer"),
+        "expected mention of self_hosted_lexer in stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("kodoc build examples/self_hosted_lexer"),
+        "expected build instructions in stderr: {stderr}"
+    );
+}
+
+/// Verifies that `kodoc lex --self-hosted` exits with code 1 and prints
+/// a structured diagnostic when the bootstrap binaries are not present.
+#[test]
+fn self_hosted_lex_reports_missing_binaries() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/hello.ko");
+
+    let tmp = std::env::temp_dir().join("kodoc_self_hosted_lex_test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["lex", "--self-hosted", fixture.to_str().unwrap()])
+        .current_dir(&tmp)
+        .output()
+        .expect("failed to spawn kodoc");
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when bootstrap binaries are missing"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("E0700"),
+        "expected error code E0700 in stderr: {stderr}"
+    );
+}
+
+/// Verifies that `kodoc lex` (without --self-hosted) still works normally.
+#[test]
+fn lex_without_self_hosted_flag_is_unaffected() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("could not find workspace root");
+    let fixture = workspace_root.join("examples/hello.ko");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_kodoc"))
+        .args(["lex", fixture.to_str().unwrap()])
+        .output()
+        .expect("failed to spawn kodoc");
+
+    assert!(
+        output.status.success(),
+        "lex without --self-hosted should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

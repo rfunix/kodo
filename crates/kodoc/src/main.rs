@@ -18,6 +18,7 @@ mod lockfile;
 mod manifest;
 mod repl;
 pub mod sarif;
+mod self_hosted;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -75,6 +76,12 @@ enum Command {
         /// Build in release mode (alias for --backend=llvm).
         #[arg(long, default_value_t = false)]
         release: bool,
+
+        /// [EXPERIMENTAL] Use the self-hosted (Kōdo-written) lexer/parser instead of the
+        /// Rust implementation.  Requires pre-compiled bootstrap binaries; see
+        /// `docs/guide/self-hosted.md` for setup instructions.
+        #[arg(long, default_value_t = false)]
+        self_hosted: bool,
     },
     /// Lower a source file to MIR and print it without generating code.
     Mir {
@@ -117,12 +124,20 @@ enum Command {
         /// The source file to tokenize.
         #[arg()]
         file: PathBuf,
+
+        /// [EXPERIMENTAL] Route through the self-hosted Kōdo-written lexer.
+        #[arg(long, default_value_t = false)]
+        self_hosted: bool,
     },
     /// Parse a source file and print the AST.
     Parse {
         /// The source file to parse.
         #[arg()]
         file: PathBuf,
+
+        /// [EXPERIMENTAL] Route through the self-hosted Kōdo-written parser.
+        #[arg(long, default_value_t = false)]
+        self_hosted: bool,
     },
     /// Explain an error code in detail with examples.
     Explain {
@@ -334,7 +349,29 @@ fn main() {
             backend,
             emit_llvm,
             release,
+            self_hosted,
         } => {
+            // When --self-hosted is requested, check for bootstrap binaries first.
+            if self_hosted {
+                let status = self_hosted::detect_bootstrap();
+                if !status.is_ready() {
+                    let code = self_hosted::report_bootstrap_unavailable(&status);
+                    std::process::exit(code);
+                }
+                eprintln!(
+                    "info: --self-hosted activated (experimental) — using Kōdo-written lex/parse stage"
+                );
+                // Invoke the self-hosted lexer as a liveness validation step.
+                if let Some(ref lex_bin) = status.lexer_bin {
+                    if let Err(e) = self_hosted::run_self_hosted_lex(lex_bin, &file) {
+                        eprintln!("error: self-hosted lexer failed: {e}");
+                        std::process::exit(1);
+                    }
+                }
+                eprintln!(
+                    "info: self-hosted lex stage completed; continuing with Rust type-checker/codegen pipeline"
+                );
+            }
             // Set KODO_THREADS so the runtime picks up the requested thread count.
             if threads > 0 {
                 std::env::set_var("KODO_THREADS", threads.to_string());
@@ -369,8 +406,38 @@ fn main() {
             emit_cert,
             repair_plan,
         ),
-        Command::Lex { file } => commands::misc::run_lex(&file),
-        Command::Parse { file } => commands::misc::run_parse(&file),
+        Command::Lex { file, self_hosted } => {
+            if self_hosted {
+                let status = self_hosted::detect_bootstrap();
+                if !status.is_ready() {
+                    let code = self_hosted::report_bootstrap_unavailable(&status);
+                    std::process::exit(code);
+                }
+                if let Some(ref lex_bin) = status.lexer_bin {
+                    if let Err(e) = self_hosted::run_self_hosted_lex(lex_bin, &file) {
+                        eprintln!("error: self-hosted lexer failed: {e}");
+                        std::process::exit(1);
+                    }
+                }
+                0
+            } else {
+                commands::misc::run_lex(&file)
+            }
+        }
+        Command::Parse { file, self_hosted } => {
+            if self_hosted {
+                let status = self_hosted::detect_bootstrap();
+                if !status.is_ready() {
+                    let code = self_hosted::report_bootstrap_unavailable(&status);
+                    std::process::exit(code);
+                }
+                eprintln!(
+                    "info: --self-hosted parse stage requires integration of the parser binary output format."
+                );
+                eprintln!("      Falling back to Rust parser for AST display.");
+            }
+            commands::misc::run_parse(&file)
+        }
         Command::Explain { code, json } => commands::misc::run_explain(&code, json),
         Command::Fmt { file, check } => commands::misc::run_fmt(&file, check),
         Command::IntentExplain { file, json } => commands::misc::run_intent_explain(&file, json),
