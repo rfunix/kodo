@@ -1,0 +1,35 @@
+// Real async/await concurrency demo — async fn spawns on a green thread,
+// await blocks until done and returns the result.
+
+module async_real_demo {
+    meta {
+        purpose: "Demonstrates real async/await concurrency in Kodo"
+        version: "1.0.0"
+        author: "Kodo Team"
+    }
+
+    // An async function runs on a green thread when called.
+    // Its result is stored in a future that the caller can await.
+    async fn fetch(n: Int) -> Int {
+        return n * 2
+    }
+
+    async fn triple(n: Int) -> Int {
+        return n * 3
+    }
+
+    async fn main() -> Int {
+        // Calling an async fn returns a Future<Int> handle immediately.
+        // The function body has already been dispatched to a green thread.
+        let f1: Future<Int> = fetch(21)
+        let f2: Future<Int> = triple(14)
+
+        // await blocks until the green thread completes and returns T.
+        let a: Int = f1.await
+        let b: Int = f2.await
+
+        print_int(a)
+        print_int(b)
+        return 0
+    }
+}

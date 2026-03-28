@@ -1,0 +1,22 @@
+//@ run-pass
+// Verifies that `async fn` + `await` work end-to-end on green threads:
+// the spawned function runs concurrently and the caller blocks until
+// the result is available.
+
+module async_await_real {
+    meta {
+        purpose: "End-to-end async/await with real green-thread concurrency"
+        version: "1.0.0"
+    }
+
+    async fn fetch(n: Int) -> Int {
+        return n * 2
+    }
+
+    async fn main() -> Int {
+        let handle: Future<Int> = fetch(21)
+        let result: Int = handle.await
+        print_int(result)
+        return 0
+    }
+}

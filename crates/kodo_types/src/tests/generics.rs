@@ -1215,7 +1215,11 @@ fn check_inherent_and_trait_impl_same_type() {
 }
 
 #[test]
-fn await_outside_async_is_error() {
+fn await_in_non_async_fn_is_allowed() {
+    // Since async/await is now wired to real green threads, `await` is valid
+    // in both `async fn` and regular `fn`. When called from a non-async
+    // context the runtime drains the green-thread scheduler until the future
+    // completes, so no compile-time restriction is necessary.
     let module = make_module(vec![Function {
         id: NodeId(0),
         span: Span::new(0, 10),
@@ -1241,9 +1245,10 @@ fn await_outside_async_is_error() {
     }]);
     let mut checker = TypeChecker::new();
     let result = checker.check_module(&module);
-    assert!(result.is_err(), "await outside async should be an error");
-    let err = result.unwrap_err();
-    assert_eq!(err.code(), "E0250");
+    assert!(
+        result.is_ok(),
+        "await in non-async fn should be allowed: {result:?}"
+    );
 }
 
 #[test]

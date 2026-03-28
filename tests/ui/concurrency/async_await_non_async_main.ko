@@ -1,0 +1,22 @@
+//@ run-pass
+// Verifies that `await` works in a non-async `fn main()`:
+// the green thread scheduler is drained synchronously when `await`
+// is called outside a green-thread context.
+
+module async_await_non_async_main {
+    meta {
+        purpose: "await in non-async fn main via scheduler drain"
+        version: "1.0.0"
+    }
+
+    async fn double(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        let handle: Future<Int> = double(21)
+        let result: Int = handle.await
+        print_int(result)
+        return 0
+    }
+}

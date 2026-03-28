@@ -465,7 +465,8 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 
 | File | What it demonstrates |
 |------|---------------------|
-| [`async_demo.ko`](examples/async_demo.ko) | Async syntax preview (compiles synchronously) |
+| [`async_demo.ko`](examples/async_demo.ko) | `async fn` / `await` — real green-thread concurrency |
+| [`async_real_demo.ko`](examples/async_real_demo.ko) | Two concurrent async tasks, both awaited |
 | [`async_real.ko`](examples/async_real.ko) | Cooperative `spawn` syntax preview |
 | [`async_tasks.ko`](examples/async_tasks.ko) | Spawn with captured variables |
 | [`concurrency_demo.ko`](examples/concurrency_demo.ko) | Concurrency patterns |
