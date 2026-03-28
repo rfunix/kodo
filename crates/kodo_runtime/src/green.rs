@@ -73,7 +73,8 @@ pub fn get_stack_size() -> usize {
 }
 
 /// Returns the OS page size (typically 4096 on most platforms).
-fn page_size() -> usize {
+#[must_use]
+pub fn page_size() -> usize {
     // SAFETY: _SC_PAGESIZE is a valid sysconf parameter on all POSIX systems.
     let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     if ps <= 0 {
@@ -174,7 +175,12 @@ unsafe fn alloc_stack(size: usize) -> *mut u8 {
         "mprotect failed to set guard page on green thread stack"
     );
 
-    ptr.cast::<u8>()
+    let base = ptr.cast::<u8>();
+
+    // Register the guard page for growable stack support.
+    crate::signal::register_guard(base as usize, base as usize, size);
+
+    base
 }
 
 /// Frees a stack previously allocated by [`alloc_stack`].
@@ -184,6 +190,8 @@ unsafe fn alloc_stack(size: usize) -> *mut u8 {
 /// `ptr` must be the exact pointer returned by [`alloc_stack`] for the same
 /// `size`.  After this call the memory is unmapped and must not be accessed.
 unsafe fn free_stack(ptr: *mut u8, size: usize) {
+    // Unregister the guard page before freeing.
+    crate::signal::unregister_guard(ptr as usize);
     // SAFETY: ptr was obtained from mmap with the same size; munmap is safe
     // when the arguments match the original mapping.
     unsafe {
@@ -577,6 +585,9 @@ pub unsafe extern "C" fn kodo_green_init(num_threads: i64) {
     } else {
         num_threads as usize
     };
+
+    // Install SIGSEGV handler for growable stacks (idempotent).
+    crate::signal::install_signal_handler();
 
     // OnceLock ensures this only runs once.
     let _ = SCHEDULER.get_or_init(|| Scheduler::new(n));

@@ -23,6 +23,7 @@
 //! - [`prop_ops`] — Property testing engine (generators and shrinking)
 //! - [`context`] — CPU context switch primitives for green threads
 //! - [`green`] — Green thread data structures and stack allocation
+//! - [`signal`] — SIGSEGV handler for growable green thread stacks
 //! - [`enum_ops`] — Option/Result runtime helpers for LLVM backend
 //! - [`closure_ops`] — Closure environment pack/load for LLVM backend
 //! - `helpers` — Internal helper functions
@@ -46,6 +47,7 @@ pub mod memory;
 pub mod prop_ops;
 pub mod scheduler;
 pub mod server;
+pub mod signal;
 pub mod string_ops;
 pub mod test_ops;
 
