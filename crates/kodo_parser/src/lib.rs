@@ -99,6 +99,11 @@ impl Parser {
         self.peek().map(|t| &t.kind)
     }
 
+    /// Returns the kind of the token `n` positions ahead, if any.
+    pub(crate) fn peek_nth_kind(&self, n: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.pos + n).map(|t| &t.kind)
+    }
+
     /// Advances the parser and returns the consumed token.
     pub(crate) fn advance(&mut self) -> Option<&Token> {
         let token = self.tokens.get(self.pos);

@@ -170,7 +170,13 @@ Module {
                                         ),
                                         variant: "Full",
                                         bindings: [
-                                            "v",
+                                            Binding(
+                                                "v",
+                                                Span {
+                                                    start: 339,
+                                                    end: 340,
+                                                },
+                                            ),
                                         ],
                                         span: Span {
                                             start: 329,

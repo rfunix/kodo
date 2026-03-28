@@ -11,8 +11,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/version-v1.7.0-blue" alt="Version: v1.7.0">
-  <img src="https://img.shields.io/badge/tests-2700%2B%20passing-brightgreen" alt="Tests: 2700+ passing">
+  <img src="https://img.shields.io/badge/version-v1.11.0-blue" alt="Version: v1.11.0">
+  <img src="https://img.shields.io/badge/tests-2800%2B%20passing-brightgreen" alt="Tests: 2800+ passing">
   <img src="https://img.shields.io/badge/self--hosted-lexer%20%2B%20parser-purple" alt="Self-hosted: lexer + parser">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
 </p>

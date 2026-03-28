@@ -73,7 +73,13 @@ Module {
                                         ),
                                         variant: "Some",
                                         bindings: [
-                                            "v",
+                                            Binding(
+                                                "v",
+                                                Span {
+                                                    start: 110,
+                                                    end: 111,
+                                                },
+                                            ),
                                         ],
                                         span: Span {
                                             start: 97,

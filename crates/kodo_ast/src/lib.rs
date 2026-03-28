@@ -502,11 +502,17 @@ pub enum Pattern {
         enum_name: Option<String>,
         /// The variant name.
         variant: String,
-        /// Bound variable names.
-        bindings: Vec<String>,
+        /// Sub-patterns for each payload field.
+        ///
+        /// Each element is either a `Pattern::Binding` (simple variable name)
+        /// or a nested `Pattern::Variant` (nested enum destructuring such as
+        /// `Err(AppError::NotFound)`).
+        bindings: Vec<Pattern>,
         /// Source span.
         span: Span,
     },
+    /// A simple variable binding inside a variant pattern: `Ok(v)` → `v`.
+    Binding(String, Span),
     /// A wildcard pattern: `_`.
     Wildcard(Span),
     /// A literal pattern.

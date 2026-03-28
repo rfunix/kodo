@@ -873,7 +873,7 @@ impl TypeChecker {
                     });
                     if let Some(field_types) = field_types_opt {
                         for (binding, ty) in bindings.iter().zip(&field_types) {
-                            self.env.insert(binding.clone(), ty.clone());
+                            self.introduce_binding_in_pattern(binding, ty);
                         }
                         covered_variants.push(variant.clone());
                     }
@@ -887,6 +887,12 @@ impl TypeChecker {
                 Pattern::Tuple(pats, _) => {
                     self.introduce_pattern_bindings(&arm.pattern, &matched_ty);
                     let _ = pats;
+                }
+                // A bare `Binding` at the top level of a match arm acts like a
+                // catch-all that binds the whole matched value to a name.
+                Pattern::Binding(name, _) => {
+                    self.env.insert(name.clone(), matched_ty.clone());
+                    has_wildcard = true;
                 }
             }
 
@@ -1071,9 +1077,50 @@ impl TypeChecker {
             });
             if let Some(field_types) = field_types_opt {
                 for (binding, ty) in bindings.iter().zip(&field_types) {
-                    self.env.insert(binding.clone(), ty.clone());
+                    self.introduce_binding_in_pattern(binding, ty);
                 }
             }
+        }
+    }
+
+    /// Introduces variable bindings from a single pattern sub-element.
+    ///
+    /// `Pattern::Binding(name)` inserts the name directly into the environment.
+    /// `Pattern::Variant` (nested enum destructuring like `AppError::NotFound`)
+    /// recurses into the inner variant's fields and binds those variables
+    /// instead, enabling patterns such as `Err(AppError::InvalidInput(msg))`.
+    fn introduce_binding_in_pattern(&mut self, binding: &kodo_ast::Pattern, outer_ty: &Type) {
+        use kodo_ast::Pattern;
+        match binding {
+            Pattern::Binding(name, _) => {
+                self.env.insert(name.clone(), outer_ty.clone());
+            }
+            Pattern::Variant {
+                enum_name,
+                variant: inner_variant,
+                bindings: inner_bindings,
+                ..
+            } => {
+                // Resolve the inner enum name from the pattern or from `outer_ty`.
+                let enum_type_name = enum_name.as_deref().or(if let Type::Enum(n) = outer_ty {
+                    Some(n.as_str())
+                } else {
+                    None
+                });
+                if let Some(ename) = enum_type_name {
+                    let inner_field_types = self
+                        .enum_registry
+                        .get(ename)
+                        .and_then(|vs| vs.iter().find(|(n, _)| n == inner_variant))
+                        .map(|(_, ft)| ft.clone())
+                        .unwrap_or_default();
+                    for (ib, it) in inner_bindings.iter().zip(&inner_field_types) {
+                        self.introduce_binding_in_pattern(ib, it);
+                    }
+                }
+            }
+            // Wildcard, Literal, and Tuple in binding position are not supported in payloads.
+            Pattern::Wildcard(_) | Pattern::Literal(_) | Pattern::Tuple(_, _) => {}
         }
     }
 
@@ -1313,6 +1360,61 @@ impl TypeChecker {
                     });
                 }
                 return Ok(Type::Unit);
+            }
+        }
+
+        // Polymorphic channel operations — resolved based on the channel's
+        // element type T rather than through the fixed builtin signature.
+        // This allows `channel_send(ch, val)` and `channel_recv(ch)` to work
+        // for any `Channel<T>`, not just `Channel<Int>`.
+        if let Expr::Ident(name, _) = callee {
+            match name.as_str() {
+                "channel_send" => {
+                    if args.len() != 2 {
+                        return Err(TypeError::ArityMismatch {
+                            expected: 2,
+                            found: args.len(),
+                            span,
+                        });
+                    }
+                    let ch_ty = self.infer_expr(&args[0])?;
+                    let val_ty = self.infer_expr(&args[1])?;
+                    // Only intercept when the first arg is a typed Channel<T>.
+                    // If it is a plain Int handle, fall through to check_direct_call
+                    // which uses the declared signature.
+                    if let Type::Generic(ref n, ref params) = ch_ty {
+                        if n == "Channel" {
+                            let inner = params.first().cloned().unwrap_or(Type::Unknown);
+                            // Unknown inner type (universal channel) accepts anything.
+                            if inner != Type::Unknown && inner != val_ty {
+                                return Err(TypeError::Mismatch {
+                                    expected: inner.to_string(),
+                                    found: val_ty.to_string(),
+                                    span: expr_span(&args[1]),
+                                });
+                            }
+                            return Ok(Type::Unit);
+                        }
+                    }
+                }
+                "channel_recv" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::ArityMismatch {
+                            expected: 1,
+                            found: args.len(),
+                            span,
+                        });
+                    }
+                    let ch_ty = self.infer_expr(&args[0])?;
+                    // Intercept when the arg is a typed Channel<T>.
+                    if let Type::Generic(ref n, ref params) = ch_ty {
+                        if n == "Channel" {
+                            let inner = params.first().cloned().unwrap_or(Type::Unknown);
+                            return Ok(inner);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 

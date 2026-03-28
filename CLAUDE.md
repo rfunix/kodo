@@ -292,8 +292,8 @@ For agents operating via IDE/editor integration, LSP quality directly impacts pr
 
 When implementing features, be honest about current limitations in error messages and docs:
 - **Concurrency**: `spawn`/`async`/`await` compile but execute sequentially in v1
-- **Channels**: only `Int`, `Bool`, `String` — not generic
-- **Result<T, E>**: `E` is always `String` in practice — custom error enums don't work end-to-end yet
+- **Channels**: ✅ Generic as of v1.12.0 — `channel_new()` infers T from context; `channel_send`/`channel_recv` work for `Channel<Int>`, `Channel<Bool>`, `Channel<String>`
+- **Result<T, E>**: ✅ Custom error enums work end-to-end as of v1.12.0 — `E` can be any enum, and nested patterns like `Err(AppError::NotFound)` are fully supported
 - **String**: `substring` is byte-based, not Unicode-aware
 - **Contract violation**: calls `abort()` by default — use `--contracts=recoverable` for graceful handling
 

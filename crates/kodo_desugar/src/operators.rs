@@ -18,7 +18,7 @@ pub(crate) fn desugar_null_coalesce(left: Expr, right: Expr, span: Span) -> Expr
                 pattern: Pattern::Variant {
                     enum_name: Some("Option".to_string()),
                     variant: "Some".to_string(),
-                    bindings: vec!["__coalesce_val".to_string()],
+                    bindings: vec![Pattern::Binding("__coalesce_val".to_string(), span)],
                     span,
                 },
                 body: Expr::Ident("__coalesce_val".to_string(), span),
@@ -61,7 +61,7 @@ pub(crate) fn desugar_try(operand: Expr, span: Span) -> Expr {
                 pattern: Pattern::Variant {
                     enum_name: Some("Result".to_string()),
                     variant: "Ok".to_string(),
-                    bindings: vec!["__try_val".to_string()],
+                    bindings: vec![Pattern::Binding("__try_val".to_string(), span)],
                     span,
                 },
                 body: Expr::Ident("__try_val".to_string(), span),
@@ -71,7 +71,7 @@ pub(crate) fn desugar_try(operand: Expr, span: Span) -> Expr {
                 pattern: Pattern::Variant {
                     enum_name: Some("Result".to_string()),
                     variant: "Err".to_string(),
-                    bindings: vec!["__try_err".to_string()],
+                    bindings: vec![Pattern::Binding("__try_err".to_string(), span)],
                     span,
                 },
                 body: return_err,
@@ -92,7 +92,7 @@ pub(crate) fn desugar_optional_chain(object: Expr, field: String, span: Span) ->
                 pattern: Pattern::Variant {
                     enum_name: Some("Option".to_string()),
                     variant: "Some".to_string(),
-                    bindings: vec!["__chain_val".to_string()],
+                    bindings: vec![Pattern::Binding("__chain_val".to_string(), span)],
                     span,
                 },
                 body: Expr::EnumVariantExpr {
@@ -196,7 +196,7 @@ mod tests {
                 assert_eq!(enum_name.as_deref(), Some("Option"));
                 assert_eq!(variant, "Some");
                 assert_eq!(bindings.len(), 1);
-                assert_eq!(bindings[0], "__coalesce_val");
+                assert!(matches!(&bindings[0], Pattern::Binding(n, _) if n == "__coalesce_val"));
             } else {
                 panic!("expected Variant pattern in Some arm");
             }
@@ -305,7 +305,8 @@ mod tests {
         let result = desugar_try(Expr::Ident("res".to_string(), s()), s());
         if let Expr::Match { arms, .. } = &result {
             if let Pattern::Variant { bindings, .. } = &arms[0].pattern {
-                assert_eq!(bindings, &["__try_val"]);
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(&bindings[0], Pattern::Binding(n, _) if n == "__try_val"));
             }
             assert!(matches!(
                 &arms[0].body,

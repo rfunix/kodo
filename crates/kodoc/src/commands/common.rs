@@ -460,54 +460,56 @@ pub(crate) fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
 
     // Helper: build a match-based bool-returning method for an enum.
     // `positive_variant` is the variant for which the method returns `true`.
-    let make_bool_method =
-        |name: &str, enum_name: &str, positive_variant: &str, _negative_variant: &str| {
-            kodo_ast::Function {
-                id: kodo_ast::NodeId(0),
-                name: name.to_string(),
-                visibility: kodo_ast::Visibility::Private,
-                params: vec![kodo_ast::Param {
-                    name: "self".to_string(),
-                    ty: kodo_ast::TypeExpr::Named(enum_name.to_string()),
-                    span: s,
-                    ownership: kodo_ast::Ownership::Owned,
-                }],
-                return_type: kodo_ast::TypeExpr::Named("Bool".to_string()),
-                body: kodo_ast::Block {
-                    span: s,
-                    stmts: vec![kodo_ast::Stmt::Return {
-                        span: s,
-                        value: Some(kodo_ast::Expr::Match {
-                            span: s,
-                            expr: Box::new(kodo_ast::Expr::Ident("self".to_string(), s)),
-                            arms: vec![
-                                kodo_ast::MatchArm {
-                                    pattern: kodo_ast::Pattern::Variant {
-                                        enum_name: Some(enum_name.to_string()),
-                                        variant: positive_variant.to_string(),
-                                        bindings: vec!["_v".to_string()],
-                                        span: s,
-                                    },
-                                    body: kodo_ast::Expr::BoolLit(true, s),
-                                    span: s,
-                                },
-                                kodo_ast::MatchArm {
-                                    pattern: kodo_ast::Pattern::Wildcard(s),
-                                    body: kodo_ast::Expr::BoolLit(false, s),
-                                    span: s,
-                                },
-                            ],
-                        }),
-                    }],
-                },
+    let make_bool_method = |name: &str,
+                            enum_name: &str,
+                            positive_variant: &str,
+                            _negative_variant: &str| {
+        kodo_ast::Function {
+            id: kodo_ast::NodeId(0),
+            name: name.to_string(),
+            visibility: kodo_ast::Visibility::Private,
+            params: vec![kodo_ast::Param {
+                name: "self".to_string(),
+                ty: kodo_ast::TypeExpr::Named(enum_name.to_string()),
                 span: s,
-                is_async: false,
-                annotations: Vec::new(),
-                generic_params: Vec::new(),
-                requires: Vec::new(),
-                ensures: Vec::new(),
-            }
-        };
+                ownership: kodo_ast::Ownership::Owned,
+            }],
+            return_type: kodo_ast::TypeExpr::Named("Bool".to_string()),
+            body: kodo_ast::Block {
+                span: s,
+                stmts: vec![kodo_ast::Stmt::Return {
+                    span: s,
+                    value: Some(kodo_ast::Expr::Match {
+                        span: s,
+                        expr: Box::new(kodo_ast::Expr::Ident("self".to_string(), s)),
+                        arms: vec![
+                            kodo_ast::MatchArm {
+                                pattern: kodo_ast::Pattern::Variant {
+                                    enum_name: Some(enum_name.to_string()),
+                                    variant: positive_variant.to_string(),
+                                    bindings: vec![kodo_ast::Pattern::Binding("_v".to_string(), s)],
+                                    span: s,
+                                },
+                                body: kodo_ast::Expr::BoolLit(true, s),
+                                span: s,
+                            },
+                            kodo_ast::MatchArm {
+                                pattern: kodo_ast::Pattern::Wildcard(s),
+                                body: kodo_ast::Expr::BoolLit(false, s),
+                                span: s,
+                            },
+                        ],
+                    }),
+                }],
+            },
+            span: s,
+            is_async: false,
+            annotations: Vec::new(),
+            generic_params: Vec::new(),
+            requires: Vec::new(),
+            ensures: Vec::new(),
+        }
+    };
 
     // Helper: build unwrap_or method that returns the payload or a default.
     let make_unwrap_or = |name: &str, enum_name: &str, success_variant: &str| kodo_ast::Function {
@@ -541,7 +543,7 @@ pub(crate) fn inject_stdlib_method_functions(module: &mut kodo_ast::Module) {
                             pattern: kodo_ast::Pattern::Variant {
                                 enum_name: Some(enum_name.to_string()),
                                 variant: success_variant.to_string(),
-                                bindings: vec!["_v".to_string()],
+                                bindings: vec![kodo_ast::Pattern::Binding("_v".to_string(), s)],
                                 span: s,
                             },
                             body: kodo_ast::Expr::Ident("_v".to_string(), s),
