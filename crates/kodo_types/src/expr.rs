@@ -347,10 +347,20 @@ impl TypeChecker {
                 Ok(Type::Bool)
             }
 
-            Expr::Await { operand, span } => {
-                if !self.in_async_fn {
-                    return Err(TypeError::AwaitOutsideAsync { span: *span });
-                }
+            Expr::Await { operand, span: _ } => {
+                // `await` is valid in both `async fn` and regular `fn`.
+                //
+                // In an `async fn` context the current green thread is
+                // suspended until the future completes (cooperative
+                // scheduling via `kodo_future_await`).
+                //
+                // In a regular `fn` context (e.g. `fn main()`) the
+                // runtime detects that execution is on the main OS thread
+                // rather than a green thread and calls `kodo_green_run()`
+                // to drain the scheduler until the future is ready,
+                // then returns the result.  Both paths use the same
+                // `kodo_future_await` / `kodo_future_await_bytes` ABI,
+                // so no additional codegen is required here.
                 let operand_ty = self.infer_expr(operand)?;
                 match operand_ty {
                     Type::Future(inner) => Ok(*inner),

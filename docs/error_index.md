@@ -246,16 +246,14 @@ error[E0227]: closure parameter `x` is missing a type annotation
    = help: Kōdo v1 requires explicit types on closure parameters
 ```
 
-### E0250: Await Outside Async
-An `.await` expression was used outside of an `async fn`. The `.await` syntax is only valid inside async functions.
+### E0250: Await Outside Async (deprecated — no longer emitted)
 
-```rust
-error[E0250]: `.await` can only be used inside an `async fn`
-  --> src/main.ko:5:30
-   |
- 5 | let val: Int = compute().await
-   |                          ^^^^^ move this expression into an `async fn`
-```
+> **Note (v1.12.0):** This error is no longer emitted. `await` is now valid in both
+> `async fn` and regular `fn`. In a regular function the green-thread scheduler is
+> drained until the future completes before returning the result.
+
+Previously reported when `.await` was used outside an `async fn`. Retained for
+backward compatibility with tooling that may reference this error code.
 
 ### E0251: Spawn Captures Mutable Reference
 A `spawn` block captures a mutable reference, which is not allowed in structured concurrency (reserved for future use).

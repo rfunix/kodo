@@ -190,7 +190,7 @@ fn modify(data: mut Buffer) {
 
 ### Concurrency
 
-> **V1 Status:** `spawn` with captured variables and `actor` with state/message passing are fully working in v1. `async`/`await` compiles to synchronous code. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are planned for v2.
+> **V1 Status:** `spawn` with captured variables and `actor` with state/message passing are fully working in v1. `async`/`await` is fully wired to real green threads as of v1.12.0 — `async fn` spawns a green thread and returns a `Future<T>` handle; `await` blocks until the result is ready. Channels (`Channel<T>`), `parallel` blocks, and structured concurrency are planned for v2.
 
 ```rust
 // Structured concurrency — no raw threads, no unstructured spawns
@@ -403,7 +403,7 @@ kodo::ffi         — C FFI for interop (planned)
 - [x] Spawn with captured variables
 - [x] Actor runtime with state and message passing
 - [x] HTTP client and JSON stdlib (`http_get`, `http_post`, `json_parse`, `json_get_string`, `json_get_int`, `json_free`)
-- [ ] Full async/await runtime (v1 async/await is syntax-only)
+- [x] Full async/await runtime — `async fn` spawns green thread, `await` blocks until done (v1.12.0)
 - [ ] Channels and parallel execution
 - [ ] Cross-compilation targets
 - [ ] Package registry

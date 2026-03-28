@@ -11,10 +11,13 @@ This document lists the known limitations of the current alpha release. These ar
 
 ## Concurrency
 
-**Async execution**: In v1, `async fn` calls execute synchronously and return their result directly. The runtime infrastructure for true futures (create Future, spawn green thread, await later) exists but is not yet wired end-to-end in the MIR lowering.
+**Async execution**: As of v1.12.0, `async fn` / `await` is fully wired to real green threads end-to-end.
 
-- **Impact**: `async fn` works but doesn't provide true concurrency yet. `spawn {}` does run on green threads.
-- **Recommendation**: Use `spawn {}` for fire-and-forget concurrency. Use `parallel {}` for structured parallelism.
+- Calling an `async fn` immediately spawns a green thread and returns a `Future<T>` handle.
+- `await` blocks the caller (suspending the current green thread, or draining the scheduler if called from a non-async `fn main()`) until the future is complete, then returns `T`.
+- `await` is now valid in both `async fn` and regular `fn` — no compile-time restriction.
+- **Remaining gap**: Concurrent `spawn {}` blocks and `async fn` can interleave non-deterministically; ordering of output may vary across runs.
+- **Recommendation**: Use `async fn` + `await` for task parallelism with result synchronization. Use `spawn {}` for fire-and-forget side effects. Use `parallel {}` for structured fork-join parallelism.
 
 **Channel select** (v1.9.0): `select {}` statement for Go-style channel multiplexing. Supports 2-3 channels.
 
