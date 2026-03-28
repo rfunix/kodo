@@ -4,6 +4,7 @@
 //! Designed to be used both by AI agents (with `--emit json-errors`) and
 //! humans (with beautiful terminal error messages via ariadne).
 
+mod ai_annotate;
 mod annotate;
 mod audit;
 mod certificate;
@@ -280,6 +281,10 @@ enum Command {
         /// Output as JSON (for AI agent consumption).
         #[arg(long, default_value_t = false)]
         json: bool,
+
+        /// Use AI (LLM) to suggest contracts beyond heuristics. Requires ANTHROPIC_API_KEY.
+        #[arg(long, default_value_t = false)]
+        ai: bool,
     },
     /// Generate a consolidated audit report (confidence + contracts + annotations).
     Audit {
@@ -415,7 +420,12 @@ fn main() {
         }
         Command::Remove { name } => commands::deps::run_remove(&name),
         Command::Update { name } => commands::deps::run_update(name.as_deref()),
-        Command::Annotate { file, apply, json } => {
+        Command::Annotate {
+            file,
+            apply,
+            json,
+            ai,
+        } => {
             let source = match std::fs::read_to_string(&file) {
                 Ok(s) => s,
                 Err(e) => {
@@ -430,7 +440,11 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            let result = annotate::annotate_module(&module, &source);
+            let mut result = annotate::annotate_module(&module, &source);
+            if ai {
+                ai_annotate::enhance_with_ai(&module, &source, &mut result);
+            }
+            let result = result;
             if json {
                 match serde_json::to_string_pretty(&result) {
                     Ok(j) => println!("{j}"),
