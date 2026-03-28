@@ -96,9 +96,12 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
         .or_insert(Type::Int);
 
     // Channel builtins.
-    fn_return_types
-        .entry("channel_new".to_string())
-        .or_insert(Type::Int);
+    // All channel_new variants return Int (opaque handle — same runtime function).
+    for name in &["channel_new", "channel_new_bool", "channel_new_string"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Int);
+    }
     fn_return_types
         .entry("channel_recv".to_string())
         .or_insert(Type::Int);
@@ -108,6 +111,12 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
     fn_return_types
         .entry("channel_recv_string".to_string())
         .or_insert(Type::String);
+    // channel_send variants return Unit.
+    for name in &["channel_send", "channel_send_bool", "channel_send_string"] {
+        fn_return_types
+            .entry((*name).to_string())
+            .or_insert(Type::Unit);
+    }
     fn_return_types
         .entry("channel_select_2".to_string())
         .or_insert(Type::Int);

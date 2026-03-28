@@ -1,0 +1,28 @@
+//@ run-pass
+module channel_generic {
+    meta { purpose: "Generic Channel<T> with unified send/recv API" }
+
+    fn main() -> Int {
+        let ch_int: Channel<Int> = channel_new()
+        channel_send(ch_int, 7)
+        let v: Int = channel_recv(ch_int)
+        print_int(v)
+
+        let ch_bool: Channel<Bool> = channel_new()
+        channel_send(ch_bool, true)
+        let b: Bool = channel_recv(ch_bool)
+        if b {
+            println("ok")
+        }
+
+        let ch_str: Channel<String> = channel_new()
+        channel_send(ch_str, "works")
+        let s: String = channel_recv(ch_str)
+        println(s)
+
+        channel_free(ch_int)
+        channel_free(ch_bool)
+        channel_free(ch_str)
+        return 0
+    }
+}

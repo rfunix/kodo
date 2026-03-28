@@ -1,0 +1,32 @@
+module channel_generic {
+    meta {
+        purpose: "Generic Channel<T> — unified send/recv for any element type"
+        version: "1.12.0"
+    }
+
+    fn main() -> Int {
+        // channel_new() infers T from the type annotation
+        let ch_int: Channel<Int> = channel_new()
+        channel_send(ch_int, 42)
+        let v: Int = channel_recv(ch_int)
+        print_int(v)
+
+        let ch_bool: Channel<Bool> = channel_new()
+        channel_send(ch_bool, true)
+        let b: Bool = channel_recv(ch_bool)
+        if b {
+            println("bool channel works")
+        }
+
+        let ch_str: Channel<String> = channel_new()
+        channel_send(ch_str, "hello from generic channel")
+        let s: String = channel_recv(ch_str)
+        println(s)
+
+        channel_free(ch_int)
+        channel_free(ch_bool)
+        channel_free(ch_str)
+
+        return 0
+    }
+}

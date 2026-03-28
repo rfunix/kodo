@@ -76,6 +76,12 @@ impl TypeEnv {
         if Self::is_channel_int_compatible(expected, found) {
             return Ok(());
         }
+        // Channel<Unknown> is the universal channel type returned by channel_new().
+        // It is assignment-compatible with any Channel<T> so that the type annotation
+        // on the let binding resolves the element type without a spurious mismatch.
+        if Self::is_channel_unknown_compat(expected, found) {
+            return Ok(());
+        }
         // dyn Trait accepts any concrete type — trait bound validation
         // is done separately by the type checker with access to trait_impl_set.
         if matches!(expected, Type::DynTrait(_)) {
@@ -96,6 +102,18 @@ impl TypeEnv {
             (Type::Int, Type::Generic(name, _)) | (Type::Generic(name, _), Type::Int)
             if name == "Channel"
         )
+    }
+
+    /// Returns `true` when one side is `Channel<Unknown>` and the other is any
+    /// `Channel<T>`.  `channel_new()` returns `Channel<Unknown>` so it can be
+    /// assigned to `Channel<Bool>`, `Channel<String>`, etc. without a type error.
+    fn is_channel_unknown_compat(a: &Type, b: &Type) -> bool {
+        let is_channel_unknown = |t: &Type| {
+            matches!(t, Type::Generic(n, p) if n == "Channel"
+                && p.first().is_some_and(|inner| matches!(inner, Type::Unknown)))
+        };
+        let is_any_channel = |t: &Type| matches!(t, Type::Generic(n, _) if n == "Channel");
+        (is_channel_unknown(a) && is_any_channel(b)) || (is_any_channel(a) && is_channel_unknown(b))
     }
 }
 
