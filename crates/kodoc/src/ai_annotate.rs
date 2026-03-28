@@ -6,10 +6,23 @@
 //! Requires the `ANTHROPIC_API_KEY` environment variable to be set.
 //!
 //! The LLM receives the function source and a prompt asking for contracts.
-//! Each suggestion is validated by parsing it as a Kōdo expression.
+//! Each suggestion is filtered for quality (tautologies, complexity) and
+//! marked as `verified: false` since they are not Z3-verified.
 
 use crate::annotate::{AnnotationResult, ContractKind, Suggestion};
 use kodo_ast::Function;
+
+/// Maximum allowed length for an AI-suggested contract expression.
+/// Expressions longer than this are rejected as too complex.
+const MAX_EXPRESSION_LENGTH: usize = 80;
+
+/// Patterns that are always true and thus useless as contracts.
+const TAUTOLOGY_PATTERNS: &[&str] = &[
+    ".length() >= 0",
+    ".length() > -1",
+    ".size() >= 0",
+    ">= 0 && ", // catch `x >= 0 && x <= max_uint` style tautologies on unsigned-like values
+];
 
 /// Enhance annotation results with LLM-suggested contracts.
 ///
@@ -50,19 +63,60 @@ pub fn enhance_with_ai(
         if let Some(suggestions) = ask_llm_for_contracts(func, source, &api_key) {
             let line = line_of(source, func.span.start);
             for (kind, expr, reason) in suggestions {
+                // Filter out tautologies and overly complex expressions
+                if is_tautology(&expr) {
+                    continue;
+                }
+                if expr.len() > MAX_EXPRESSION_LENGTH {
+                    continue;
+                }
                 heuristic_result.suggestions.push(Suggestion {
                     function: func.name.clone(),
                     line,
                     kind,
                     expression: expr,
                     reason,
-                    verified: true, // LLM suggestions are pre-filtered
+                    verified: false, // AI suggestions are NOT Z3-verified
                 });
                 heuristic_result.total_count += 1;
-                heuristic_result.verified_count += 1;
+                // Do NOT increment verified_count — these are unverified
             }
         }
     }
+}
+
+/// Check if a contract expression is a tautology (always true).
+///
+/// Filters out expressions like `source.length() >= 0` or `len >= 0` when
+/// the value is inherently non-negative.
+fn is_tautology(expr: &str) -> bool {
+    let normalized = expr.replace(' ', "");
+
+    // Check known tautology patterns
+    for pattern in TAUTOLOGY_PATTERNS {
+        let norm_pattern = pattern.replace(' ', "");
+        if normalized.contains(&norm_pattern) {
+            return true;
+        }
+    }
+
+    // `x.length() >= 0` or `x.length() > -1` — length is always non-negative
+    if normalized.contains(".length()>=0") || normalized.contains(".size()>=0") {
+        return true;
+    }
+
+    // Standalone `param >= 0` where param name suggests non-negative semantics
+    // (len, length, size, count, index, pos, offset)
+    let non_negative_names = [
+        "len", "length", "size", "count", "pos", "offset", "idx", "index",
+    ];
+    for name in &non_negative_names {
+        if normalized == format!("{name}>=0") || normalized == format!("{name}>-1") {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Compute 1-based line number from byte offset.
@@ -98,7 +152,12 @@ fn ask_llm_for_contracts(
          - Use Kōdo syntax: `param > 0`, `result >= 0`, `param != 0`\n\
          - `result` refers to the return value in ensures clauses\n\
          - If no contracts are needed, return an empty array []\n\
-         - Maximum 3 suggestions per function"
+         - Maximum 3 suggestions per function\n\
+         - Keep expressions SHORT and SIMPLE (under 80 chars)\n\
+         - Do NOT suggest tautologies (things that are always true, e.g. `.length() >= 0`)\n\
+         - Do NOT enumerate every possible return value — use range constraints instead\n\
+         - Prefer meaningful bounds (e.g. `result >= 1 && result <= 30`) over exhaustive lists\n\
+         - Do NOT suggest `requires {{ param >= 0 }}` for lengths or sizes — they are always non-negative"
     );
 
     let body = serde_json::json!({
@@ -204,5 +263,41 @@ mod tests {
         enhance_with_ai(&module, source, &mut result);
         // Should remain empty (no API key)
         assert!(result.suggestions.is_empty());
+    }
+
+    #[test]
+    fn tautology_length_gte_zero() {
+        assert!(is_tautology("source.length() >= 0"));
+        assert!(is_tautology("s.length() >= 0"));
+        assert!(is_tautology("items.size() >= 0"));
+    }
+
+    #[test]
+    fn tautology_non_negative_names() {
+        assert!(is_tautology("len >= 0"));
+        assert!(is_tautology("length >= 0"));
+        assert!(is_tautology("size >= 0"));
+        assert!(is_tautology("count >= 0"));
+        assert!(is_tautology("pos >= 0"));
+        assert!(is_tautology("offset >= 0"));
+        assert!(is_tautology("idx >= 0"));
+        assert!(is_tautology("index >= 0"));
+    }
+
+    #[test]
+    fn non_tautology_passes() {
+        assert!(!is_tautology("x > 0"));
+        assert!(!is_tautology("amount >= 1"));
+        assert!(!is_tautology("b != 0"));
+        assert!(!is_tautology("pos < len"));
+        assert!(!is_tautology("result >= 0"));
+    }
+
+    #[test]
+    fn max_expression_length_filter() {
+        let short = "x > 0";
+        let long = "result == 1 || result == 2 || result == 3 || result == 4 || result == 5 || result == 6 || result == 7";
+        assert!(short.len() <= MAX_EXPRESSION_LENGTH);
+        assert!(long.len() > MAX_EXPRESSION_LENGTH);
     }
 }
