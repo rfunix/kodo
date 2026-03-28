@@ -522,6 +522,316 @@ pub fn handle_fix(id: &serde_json::Value, args: &serde_json::Value) -> JsonRpcRe
     }
 }
 
+/// Handles `kodo.annotate` — suggest missing contracts and list unannotated functions.
+///
+/// Returns heuristic suggestions plus a list of uncovered functions with their source
+/// code, so the agent can reason about them and suggest contracts. The agent should
+/// verify suggestions by inserting them into the source and calling `kodo.check`.
+#[must_use]
+pub fn handle_annotate(id: &serde_json::Value, args: &serde_json::Value) -> JsonRpcResponse {
+    let Some(source) = args.get("source").and_then(|v| v.as_str()) else {
+        return missing_param_error(id, "source");
+    };
+
+    let module = match kodo_parser::parse(source) {
+        Ok(m) => m,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: id.clone(),
+                result: Some(serde_json::json!({
+                    "status": "failed",
+                    "phase": "parse",
+                    "errors": [{"message": e.to_string()}],
+                })),
+                error: None,
+            };
+        }
+    };
+
+    let mut heuristic_suggestions: Vec<serde_json::Value> = Vec::new();
+    let mut covered_functions: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for func in &module.functions {
+        if func.name == "main" {
+            continue;
+        }
+        // Already annotated
+        if !func.requires.is_empty() || !func.ensures.is_empty() {
+            covered_functions.insert(func.name.clone());
+            continue;
+        }
+        // Run heuristics
+        let suggestions = annotate_heuristics(func, source);
+        if !suggestions.is_empty() {
+            covered_functions.insert(func.name.clone());
+            for s in suggestions {
+                heuristic_suggestions.push(s);
+            }
+        }
+    }
+
+    // Functions the agent should review
+    let mut uncovered: Vec<serde_json::Value> = Vec::new();
+    for func in &module.functions {
+        if func.name == "main" || covered_functions.contains(&func.name) {
+            continue;
+        }
+        let start = func.span.start as usize;
+        let end = func.span.end as usize;
+        let func_source = &source[start.min(source.len())..end.min(source.len())];
+
+        let params: Vec<serde_json::Value> = func
+            .params
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "type": format!("{:?}", p.ty),
+                })
+            })
+            .collect();
+
+        uncovered.push(serde_json::json!({
+            "name": func.name,
+            "line": annotate_line_of(source, func.span.start),
+            "params": params,
+            "return_type": format!("{:?}", func.return_type),
+            "source": func_source,
+        }));
+    }
+
+    let total_non_main = module.functions.iter().filter(|f| f.name != "main").count();
+    let already_annotated = module
+        .functions
+        .iter()
+        .filter(|f| f.name != "main" && (!f.requires.is_empty() || !f.ensures.is_empty()))
+        .count();
+
+    JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id: id.clone(),
+        result: Some(serde_json::json!({
+            "status": "ok",
+            "module": module.name,
+            "heuristic_suggestions": heuristic_suggestions,
+            "uncovered_functions": uncovered,
+            "summary": {
+                "total_functions": total_non_main,
+                "already_annotated": already_annotated,
+                "heuristic_covered": heuristic_suggestions.len(),
+                "needs_agent_review": uncovered.len(),
+            },
+            "hint": "For each uncovered function, analyze the source and suggest requires/ensures contracts. Verify each by adding the contract to the source and calling kodo.check.",
+        })),
+        error: None,
+    }
+}
+
+/// Compute 1-based line number from byte offset (for annotate tool).
+fn annotate_line_of(source: &str, byte_offset: u32) -> usize {
+    source[..byte_offset as usize]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1
+}
+
+/// Run heuristic analysis on a function — division by param, list index by param.
+fn annotate_heuristics(func: &kodo_ast::Function, source: &str) -> Vec<serde_json::Value> {
+    let mut suggestions = Vec::new();
+    let line = annotate_line_of(source, func.span.start);
+    let param_names: Vec<&str> = func.params.iter().map(|p| p.name.as_str()).collect();
+    let mut seen = std::collections::HashSet::new();
+
+    annotate_visit_block(&func.body, &mut |expr| {
+        // Division/modulo by parameter
+        if let kodo_ast::Expr::BinaryOp {
+            op: kodo_ast::BinOp::Div | kodo_ast::BinOp::Mod,
+            right,
+            ..
+        } = expr
+        {
+            if let kodo_ast::Expr::Ident(name, _) = right.as_ref() {
+                if param_names.contains(&name.as_str()) && seen.insert(format!("{name} != 0")) {
+                    suggestions.push(serde_json::json!({
+                        "function": func.name,
+                        "line": line,
+                        "kind": "requires",
+                        "expression": format!("{name} != 0"),
+                        "reason": format!("parameter `{name}` used as divisor"),
+                    }));
+                }
+            }
+        }
+        // List index by parameter
+        if let kodo_ast::Expr::Call { callee, args, .. } = expr {
+            if let kodo_ast::Expr::Ident(name, _) = callee.as_ref() {
+                if matches!(name.as_str(), "list_get" | "list_set" | "list_remove") {
+                    if let Some(kodo_ast::Expr::Ident(idx, _)) = args.get(1) {
+                        if param_names.contains(&idx.as_str()) && seen.insert(format!("{idx} >= 0"))
+                        {
+                            suggestions.push(serde_json::json!({
+                                "function": func.name,
+                                "line": line,
+                                "kind": "requires",
+                                "expression": format!("{idx} >= 0"),
+                                "reason": format!("parameter `{idx}` used as list index"),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    suggestions
+}
+
+/// Walk all expressions in a block (for annotate heuristics).
+fn annotate_visit_block(block: &kodo_ast::Block, f: &mut dyn FnMut(&kodo_ast::Expr)) {
+    for stmt in &block.stmts {
+        annotate_visit_stmt(stmt, f);
+    }
+}
+
+/// Walk all expressions in a statement (for annotate heuristics).
+#[allow(clippy::too_many_lines)]
+fn annotate_visit_stmt(stmt: &kodo_ast::Stmt, f: &mut dyn FnMut(&kodo_ast::Expr)) {
+    match stmt {
+        kodo_ast::Stmt::Let { value, .. } | kodo_ast::Stmt::LetPattern { value, .. } => {
+            annotate_visit_expr(value, f);
+        }
+        kodo_ast::Stmt::Expr(expr) => annotate_visit_expr(expr, f),
+        kodo_ast::Stmt::Return { value, .. } => {
+            if let Some(v) = value {
+                annotate_visit_expr(v, f);
+            }
+        }
+        kodo_ast::Stmt::Assign { value, .. } => annotate_visit_expr(value, f),
+        kodo_ast::Stmt::While {
+            condition, body, ..
+        } => {
+            annotate_visit_expr(condition, f);
+            annotate_visit_block(body, f);
+        }
+        kodo_ast::Stmt::For {
+            start, end, body, ..
+        } => {
+            annotate_visit_expr(start, f);
+            annotate_visit_expr(end, f);
+            annotate_visit_block(body, f);
+        }
+        kodo_ast::Stmt::ForIn { iterable, body, .. } => {
+            annotate_visit_expr(iterable, f);
+            annotate_visit_block(body, f);
+        }
+        kodo_ast::Stmt::IfLet {
+            value,
+            body,
+            else_body,
+            ..
+        } => {
+            annotate_visit_expr(value, f);
+            annotate_visit_block(body, f);
+            if let Some(eb) = else_body {
+                annotate_visit_block(eb, f);
+            }
+        }
+        kodo_ast::Stmt::Spawn { body, .. } | kodo_ast::Stmt::ForAll { body, .. } => {
+            annotate_visit_block(body, f);
+        }
+        kodo_ast::Stmt::Parallel { body, .. } => {
+            for s in body {
+                annotate_visit_stmt(s, f);
+            }
+        }
+        kodo_ast::Stmt::Select { arms, .. } => {
+            for arm in arms {
+                annotate_visit_expr(&arm.channel, f);
+                annotate_visit_block(&arm.body, f);
+            }
+        }
+        kodo_ast::Stmt::Break { .. } | kodo_ast::Stmt::Continue { .. } => {}
+    }
+}
+
+/// Walk all sub-expressions (for annotate heuristics).
+#[allow(clippy::too_many_lines)]
+fn annotate_visit_expr(expr: &kodo_ast::Expr, f: &mut dyn FnMut(&kodo_ast::Expr)) {
+    f(expr);
+    match expr {
+        kodo_ast::Expr::BinaryOp { left, right, .. }
+        | kodo_ast::Expr::NullCoalesce { left, right, .. }
+        | kodo_ast::Expr::Range {
+            start: left,
+            end: right,
+            ..
+        } => {
+            annotate_visit_expr(left, f);
+            annotate_visit_expr(right, f);
+        }
+        kodo_ast::Expr::UnaryOp { operand, .. }
+        | kodo_ast::Expr::Is { operand, .. }
+        | kodo_ast::Expr::Await { operand, .. }
+        | kodo_ast::Expr::Try { operand, .. } => annotate_visit_expr(operand, f),
+        kodo_ast::Expr::Call { callee, args, .. } => {
+            annotate_visit_expr(callee, f);
+            for arg in args {
+                annotate_visit_expr(arg, f);
+            }
+        }
+        kodo_ast::Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            annotate_visit_expr(condition, f);
+            annotate_visit_block(then_branch, f);
+            if let Some(eb) = else_branch {
+                annotate_visit_block(eb, f);
+            }
+        }
+        kodo_ast::Expr::Match {
+            expr: inner, arms, ..
+        } => {
+            annotate_visit_expr(inner, f);
+            for arm in arms {
+                annotate_visit_expr(&arm.body, f);
+            }
+        }
+        kodo_ast::Expr::Block(block) => annotate_visit_block(block, f),
+        kodo_ast::Expr::StructLit { fields, .. } => {
+            for fi in fields {
+                annotate_visit_expr(&fi.value, f);
+            }
+        }
+        kodo_ast::Expr::TupleLit(elems, _) => {
+            for e in elems {
+                annotate_visit_expr(e, f);
+            }
+        }
+        kodo_ast::Expr::Closure { body, .. } => annotate_visit_expr(body, f),
+        kodo_ast::Expr::FieldAccess { object, .. }
+        | kodo_ast::Expr::OptionalChain { object, .. }
+        | kodo_ast::Expr::TupleIndex { tuple: object, .. } => annotate_visit_expr(object, f),
+        kodo_ast::Expr::StringInterp { parts, .. } => {
+            for part in parts {
+                if let kodo_ast::StringPart::Expr(e) = part {
+                    annotate_visit_expr(e, f);
+                }
+            }
+        }
+        kodo_ast::Expr::IntLit(..)
+        | kodo_ast::Expr::FloatLit(..)
+        | kodo_ast::Expr::StringLit(..)
+        | kodo_ast::Expr::BoolLit(..)
+        | kodo_ast::Expr::Ident(..)
+        | kodo_ast::Expr::EnumVariantExpr { .. } => {}
+    }
+}
+
 /// Handles `kodo.confidence_report` — return confidence scores for all functions.
 #[must_use]
 pub fn handle_confidence_report(
@@ -861,6 +1171,119 @@ mod tests {
         );
         let error_count = result.get("error_count").and_then(|c| c.as_u64()).unwrap();
         assert!(error_count > 0, "should have at least one error");
+    }
+
+    // ── handle_annotate tests ────────────────────────────────────────
+
+    #[test]
+    fn annotate_missing_source() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({});
+        let resp = handle_annotate(&id, &args);
+        assert!(resp.error.is_some());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("source"));
+    }
+
+    #[test]
+    fn annotate_detects_division_heuristic() {
+        let source = "module test {\n    meta { purpose: \"test\" }\n    fn divide(a: Int, b: Int) -> Int {\n        return a / b\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_annotate(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(result.get("status").and_then(|s| s.as_str()), Some("ok"));
+        let suggestions = result
+            .get("heuristic_suggestions")
+            .and_then(|s| s.as_array())
+            .unwrap();
+        assert!(
+            suggestions
+                .iter()
+                .any(|s| s.get("expression").and_then(|e| e.as_str()) == Some("b != 0")),
+            "should suggest b != 0 for division"
+        );
+    }
+
+    #[test]
+    fn annotate_lists_uncovered_functions() {
+        let source = "module test {\n    meta { purpose: \"test\" }\n    fn add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n    fn mul(a: Int, b: Int) -> Int {\n        return a * b\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_annotate(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        let uncovered = result
+            .get("uncovered_functions")
+            .and_then(|u| u.as_array())
+            .unwrap();
+        assert_eq!(uncovered.len(), 2, "both functions should be uncovered");
+        // Each should have source code
+        for func in uncovered {
+            assert!(
+                func.get("source").and_then(|s| s.as_str()).is_some(),
+                "uncovered function should include source"
+            );
+            assert!(
+                func.get("params").and_then(|p| p.as_array()).is_some(),
+                "uncovered function should include params"
+            );
+        }
+    }
+
+    #[test]
+    fn annotate_skips_already_annotated() {
+        let source = "module test {\n    meta { purpose: \"test\" }\n    fn divide(a: Int, b: Int) -> Int\n        requires { b != 0 }\n    {\n        return a / b\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_annotate(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        let summary = result.get("summary").unwrap();
+        assert_eq!(
+            summary.get("already_annotated").and_then(|a| a.as_u64()),
+            Some(1)
+        );
+        assert_eq!(
+            summary.get("needs_agent_review").and_then(|a| a.as_u64()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn annotate_summary_counts() {
+        let source = "module test {\n    meta { purpose: \"test\" }\n    fn divide(a: Int, b: Int) -> Int {\n        return a / b\n    }\n    fn add(a: Int, b: Int) -> Int {\n        return a + b\n    }\n}\n";
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": source});
+        let resp = handle_annotate(&id, &args);
+        let result = resp.result.as_ref().unwrap();
+        let summary = result.get("summary").unwrap();
+        assert_eq!(
+            summary.get("total_functions").and_then(|t| t.as_u64()),
+            Some(2)
+        );
+        // divide should have heuristic, add should be uncovered
+        assert_eq!(
+            summary.get("needs_agent_review").and_then(|n| n.as_u64()),
+            Some(1),
+            "add() should need agent review"
+        );
+    }
+
+    #[test]
+    fn annotate_parse_error() {
+        let id = serde_json::json!(1);
+        let args = serde_json::json!({"source": "not valid kodo"});
+        let resp = handle_annotate(&id, &args);
+        assert!(resp.error.is_none());
+        let result = resp.result.as_ref().unwrap();
+        assert_eq!(
+            result.get("status").and_then(|s| s.as_str()),
+            Some("failed")
+        );
+        assert_eq!(result.get("phase").and_then(|s| s.as_str()), Some("parse"));
     }
 
     // ── handle_confidence_report tests ──────────────────────────────

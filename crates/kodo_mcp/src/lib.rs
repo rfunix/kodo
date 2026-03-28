@@ -10,6 +10,7 @@
 //! - `kodo.fix` — Collect auto-fix patches and repair plans for errors
 //! - `kodo.explain` — Explain an error code
 //! - `kodo.describe` — Return module metadata (functions, types, contracts)
+//! - `kodo.annotate` — Suggest missing contracts and list unannotated functions
 //! - `kodo.confidence_report` — Return confidence scores for all functions
 
 #![deny(missing_docs)]
@@ -141,6 +142,17 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "kodo.annotate".to_string(),
+            description: "Analyze a Kōdo module and suggest missing contracts. Returns heuristic suggestions and lists functions without contracts (with their source) so the agent can suggest additional contracts. Use kodo.check to verify suggested contracts.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Kōdo source code to analyze for missing contracts" }
+                },
+                "required": ["source"]
+            }),
+        },
+        ToolDefinition {
             name: "kodo.confidence_report".to_string(),
             description: "Generate a confidence report for all functions in a Kōdo module"
                 .to_string(),
@@ -197,6 +209,7 @@ pub fn handle_request(request: &JsonRpcRequest) -> JsonRpcResponse {
                 Some("kodo.fix") => tools::handle_fix(&request.id, &arguments),
                 Some("kodo.describe") => tools::handle_describe(&request.id, &arguments),
                 Some("kodo.explain") => tools::handle_explain(&request.id, &arguments),
+                Some("kodo.annotate") => tools::handle_annotate(&request.id, &arguments),
                 Some("kodo.confidence_report") => {
                     tools::handle_confidence_report(&request.id, &arguments)
                 }
@@ -242,13 +255,14 @@ mod tests {
     #[test]
     fn tool_definitions_are_valid() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         assert_eq!(tools[0].name, "kodo.check");
         assert_eq!(tools[1].name, "kodo.describe");
         assert_eq!(tools[2].name, "kodo.explain");
         assert_eq!(tools[3].name, "kodo.build");
         assert_eq!(tools[4].name, "kodo.fix");
-        assert_eq!(tools[5].name, "kodo.confidence_report");
+        assert_eq!(tools[5].name, "kodo.annotate");
+        assert_eq!(tools[6].name, "kodo.confidence_report");
     }
 
     #[test]
@@ -521,6 +535,7 @@ mod tests {
             "kodo.describe",
             "kodo.build",
             "kodo.fix",
+            "kodo.annotate",
             "kodo.confidence_report",
         ];
         for tool in &tools {
