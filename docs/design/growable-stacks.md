@@ -1,6 +1,6 @@
 # Design: Growable Stacks for Green Threads
 
-## Status: Draft
+## Status: Approved — Implementing
 
 ## Problem
 
