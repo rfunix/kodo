@@ -1,0 +1,33 @@
+//@ check-pass
+module select_parallel_test {
+    meta {
+        purpose: "UI test: select inside parallel block with two channels",
+        version: "1.9.0"
+    }
+
+    fn main() -> Int {
+        let ch1: Channel<Int> = channel_new()
+        let ch2: Channel<Int> = channel_new()
+
+        parallel {
+            spawn {
+                channel_send(ch1, 10)
+            }
+            spawn {
+                channel_send(ch2, 20)
+            }
+            spawn {
+                select {
+                    ch1 => |val: Int| {
+                        print_int(val)
+                    }
+                    ch2 => |val: Int| {
+                        print_int(val)
+                    }
+                }
+            }
+        }
+
+        return 0
+    }
+}
