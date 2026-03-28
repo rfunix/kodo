@@ -68,12 +68,13 @@ impl MirBuilder {
                     ch_vals.push(ch);
                 }
 
-                // For 1 channel, just recv directly
+                // For 1 channel, just recv directly.
                 if arms.len() == 1 {
-                    let recv_dest = self.alloc_local(Type::Int, false);
+                    let (recv_fn, recv_ty) = self.channel_recv_callee_and_type(&ch_vals[0]);
+                    let recv_dest = self.alloc_local(recv_ty, false);
                     self.emit(Instruction::Call {
                         dest: recv_dest,
-                        callee: "channel_recv".to_string(),
+                        callee: recv_fn.to_string(),
                         args: vec![ch_vals[0].clone()],
                     });
                     self.name_map.insert(arms[0].param.name.clone(), recv_dest);
@@ -150,18 +151,26 @@ impl MirBuilder {
             }
             kodo_ast::Pattern::Variant { bindings, .. } => {
                 for (i, binding) in bindings.iter().enumerate() {
-                    let bind_local = self.alloc_local(Type::Unknown, false);
-                    self.name_map.insert(binding.clone(), bind_local);
-                    #[allow(clippy::cast_possible_truncation)]
-                    let field_idx = i as u32;
-                    self.emit(Instruction::Assign(
-                        bind_local,
-                        Value::EnumPayload {
-                            value: Box::new(val.clone()),
-                            field_index: field_idx,
-                        },
-                    ));
+                    if let kodo_ast::Pattern::Binding(name, _) = binding {
+                        let bind_local = self.alloc_local(Type::Unknown, false);
+                        self.name_map.insert(name.clone(), bind_local);
+                        #[allow(clippy::cast_possible_truncation)]
+                        let field_idx = i as u32;
+                        self.emit(Instruction::Assign(
+                            bind_local,
+                            Value::EnumPayload {
+                                value: Box::new(val.clone()),
+                                field_index: field_idx,
+                            },
+                        ));
+                    }
                 }
+            }
+            kodo_ast::Pattern::Binding(name, _) => {
+                let bind_ty = self.infer_value_type(val);
+                let bind_local = self.alloc_local(bind_ty, false);
+                self.name_map.insert(name.clone(), bind_local);
+                self.emit(Instruction::Assign(bind_local, val.clone()));
             }
             kodo_ast::Pattern::Wildcard(_) | kodo_ast::Pattern::Literal(_) => {}
         }
@@ -628,6 +637,26 @@ impl MirBuilder {
     /// Recursively lowers select arms as an if-else chain.
     ///
     /// For each arm `i`: `if idx == i { recv(ch_i); body_i } else { next arm }`
+    /// Resolves the correct `channel_recv` callee and return type for a channel value.
+    ///
+    /// When the channel's element type `T` is known (e.g. `Channel<Bool>`), this
+    /// dispatches to the type-specific recv function so the runtime unpacks the
+    /// value correctly. Falls back to `channel_recv` (Int) when T is unknown.
+    fn channel_recv_callee_and_type(&self, ch_val: &Value) -> (&'static str, Type) {
+        let ch_local = match ch_val {
+            Value::Local(id) => *id,
+            _ => return ("channel_recv", Type::Int),
+        };
+        match self.local_types.get(&ch_local) {
+            Some(Type::Generic(n, params)) if n == "Channel" => match params.first() {
+                Some(Type::Bool) => ("channel_recv_bool", Type::Bool),
+                Some(Type::String) => ("channel_recv_string", Type::String),
+                _ => ("channel_recv", Type::Int),
+            },
+            _ => ("channel_recv", Type::Int),
+        }
+    }
+
     fn lower_select_arms(
         &mut self,
         arms: &[kodo_ast::SelectArm],
@@ -642,11 +671,12 @@ impl MirBuilder {
         let arm = &arms[current];
 
         if current == arms.len() - 1 {
-            // Last arm — no condition needed, just recv and execute
-            let recv_dest = self.alloc_local(Type::Int, false);
+            // Last arm — no condition needed, just recv and execute.
+            let (recv_fn, recv_ty) = self.channel_recv_callee_and_type(&ch_vals[current]);
+            let recv_dest = self.alloc_local(recv_ty, false);
             self.emit(Instruction::Call {
                 dest: recv_dest,
-                callee: "channel_recv".to_string(),
+                callee: recv_fn.to_string(),
                 args: vec![ch_vals[current].clone()],
             });
             self.name_map.insert(arm.param.name.clone(), recv_dest);
@@ -675,18 +705,19 @@ impl MirBuilder {
             then_block,
         );
 
-        // Then: recv from ch[current], bind param, execute body
-        let recv_dest = self.alloc_local(Type::Int, false);
+        // Then: recv from ch[current], bind param, execute body.
+        let (recv_fn, recv_ty) = self.channel_recv_callee_and_type(&ch_vals[current]);
+        let recv_dest = self.alloc_local(recv_ty, false);
         self.emit(Instruction::Call {
             dest: recv_dest,
-            callee: "channel_recv".to_string(),
+            callee: recv_fn.to_string(),
             args: vec![ch_vals[current].clone()],
         });
         self.name_map.insert(arm.param.name.clone(), recv_dest);
         self.lower_block(&arm.body)?;
         self.seal_block(Terminator::Goto(merge_block), else_block);
 
-        // Else: try next arm
+        // Else: try next arm.
         self.lower_select_arms(arms, ch_vals, idx_local, current + 1)?;
         self.seal_block(Terminator::Goto(merge_block), merge_block);
 

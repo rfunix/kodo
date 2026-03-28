@@ -94,6 +94,15 @@ impl MirBuilder {
                     self.emit(Instruction::Assign(ctx.result_local, arm_val));
                     self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
                 }
+                kodo_ast::Pattern::Binding(_, _) => {
+                    // A bare binding in match arm position is a catch-all:
+                    // treat it like a wildcard (the type checker already
+                    // inserted the binding into the environment).
+                    let arm_val = self.lower_expr(&arm.body)?;
+                    self.resolve_result_type(&ctx, &arm_val);
+                    self.emit(Instruction::Assign(ctx.result_local, arm_val));
+                    self.seal_block(Terminator::Goto(ctx.merge_block), ctx.merge_block);
+                }
             }
         }
 
@@ -247,7 +256,7 @@ impl MirBuilder {
         ctx: &MatchContext,
         enum_name: Option<&str>,
         variant: &str,
-        bindings: &[String],
+        bindings: &[kodo_ast::Pattern],
         body: &Expr,
         is_last: bool,
     ) -> Result<()> {
@@ -345,17 +354,14 @@ impl MirBuilder {
                 .get(idx)
                 .cloned()
                 .unwrap_or(Type::Unknown);
-            let bind_local = self.alloc_local(field_ty, false);
-            self.name_map.insert(binding.clone(), bind_local);
             #[allow(clippy::cast_possible_truncation)]
-            let field_idx = idx as u32;
-            self.emit(Instruction::Assign(
-                bind_local,
-                Value::EnumPayload {
-                    value: Box::new(Value::Local(ctx.matched_local)),
-                    field_index: field_idx,
-                },
-            ));
+            self.lower_payload_binding(
+                binding,
+                ctx.matched_local,
+                idx as u32,
+                field_ty,
+                next_block,
+            );
         }
 
         // Lower arm body and resolve result type if not yet known.
@@ -365,6 +371,121 @@ impl MirBuilder {
         self.seal_block(Terminator::Goto(ctx.merge_block), next_block);
 
         Ok(())
+    }
+
+    /// Lowers a single payload binding for a pattern variable in a variant arm.
+    ///
+    /// Handles both simple name bindings (`Pattern::Binding`) and nested enum
+    /// patterns (`Pattern::Variant`) such as `Err(AppError::NotFound)`.
+    ///
+    /// For a simple binding, extracts the payload field at `field_idx` from
+    /// `matched_local` and records the name→local mapping.
+    ///
+    /// For a nested variant pattern, extracts the payload, emits a discriminant
+    /// branch (falling to `next_block` on mismatch), and recursively binds
+    /// inner fields.
+    fn lower_payload_binding(
+        &mut self,
+        binding: &kodo_ast::Pattern,
+        matched_local: LocalId,
+        field_idx: u32,
+        field_ty: Type,
+        next_block: BlockId,
+    ) {
+        match binding {
+            kodo_ast::Pattern::Binding(name, _) => {
+                let local = self.alloc_local(field_ty, false);
+                self.emit(Instruction::Assign(
+                    local,
+                    Value::EnumPayload {
+                        value: Box::new(Value::Local(matched_local)),
+                        field_index: field_idx,
+                    },
+                ));
+                self.name_map.insert(name.clone(), local);
+            }
+            kodo_ast::Pattern::Variant {
+                enum_name,
+                variant,
+                bindings: inner_bindings,
+                ..
+            } => {
+                // Extract the payload field into an inner local so we can
+                // inspect its discriminant.
+                let inner_local = self.alloc_local(field_ty, false);
+                self.emit(Instruction::Assign(
+                    inner_local,
+                    Value::EnumPayload {
+                        value: Box::new(Value::Local(matched_local)),
+                        field_index: field_idx,
+                    },
+                ));
+
+                // Resolve the inner enum's discriminant and field types.
+                // Clone results immediately to release the immutable borrow.
+                let en = enum_name.as_deref().unwrap_or("");
+                let (inner_disc_idx, inner_field_types) = {
+                    let registry_key = if self.enum_registry.contains_key(en) {
+                        en.to_string()
+                    } else {
+                        let prefix = format!("{en}__");
+                        self.enum_registry
+                            .keys()
+                            .find(|k| k.starts_with(&prefix))
+                            .cloned()
+                            .unwrap_or_else(|| en.to_string())
+                    };
+                    let variants = self
+                        .enum_registry
+                        .get(&registry_key)
+                        .cloned()
+                        .unwrap_or_default();
+                    let di = variants.iter().position(|(n, _)| n == variant).unwrap_or(0);
+                    let ft = variants
+                        .iter()
+                        .find(|(n, _)| n == variant)
+                        .map(|(_, fields)| fields.clone())
+                        .unwrap_or_default();
+                    (di, ft)
+                };
+
+                // Branch: check inner discriminant, fall to next_block on mismatch.
+                let inner_arm_block = self.new_block();
+                #[allow(clippy::cast_possible_wrap)]
+                let inner_cond = Value::BinOp(
+                    kodo_ast::BinOp::Eq,
+                    Box::new(Value::EnumDiscriminant(Box::new(Value::Local(inner_local)))),
+                    Box::new(Value::IntConst(inner_disc_idx as i64)),
+                );
+                self.seal_block(
+                    Terminator::Branch {
+                        condition: inner_cond,
+                        true_block: inner_arm_block,
+                        false_block: next_block,
+                    },
+                    inner_arm_block,
+                );
+
+                // Recursively bind inner fields.
+                for (inner_idx, inner_binding) in inner_bindings.iter().enumerate() {
+                    let inner_field_ty = inner_field_types
+                        .get(inner_idx)
+                        .cloned()
+                        .unwrap_or(Type::Unknown);
+                    #[allow(clippy::cast_possible_truncation)]
+                    self.lower_payload_binding(
+                        inner_binding,
+                        inner_local,
+                        inner_idx as u32,
+                        inner_field_ty,
+                        next_block,
+                    );
+                }
+            }
+            // Wildcard, Literal, Tuple — not valid in payload binding position;
+            // silently ignore (type checker already validated these).
+            _ => {}
+        }
     }
 
     /// Lowers a single `Literal` pattern arm inside a match expression.

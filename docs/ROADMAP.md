@@ -1,51 +1,64 @@
 # Kōdo Roadmap
 
-> v1.9.0 — 112k LOC, 30 releases, channel select, kodo-bench in progress. Next: Growable Stacks → Bootstrap.
+> v1.11.0 — 114k LOC, 32 releases, annotate --ai, MCP kodo.annotate, growable stacks. Next: Result<T,E> custom enums → Bootstrap.
 
-## Status atual (v1.9.0) ✅
+## Status atual (v1.11.0) ✅
 
-- 112.000+ linhas de Rust, 17 crates, 2.500+ testes, 77 UI tests
-- Green threads M:N com work-stealing, async/await, generic channels
+- 114.000+ linhas de Rust, 17 crates, 2.800+ testes, 77 UI tests
+- Green threads M:N com work-stealing, async/await, channels (Int/Bool/String)
+- Growable stacks: 1MB por padrão, expande automaticamente até 8MB (v1.10.0)
 - `select {}` statement para channel multiplexing (v1.9.0)
 - Testing framework com property-based testing e generate-tests
 - LLVM backend (inkwell), package manager, self-hosted lexer + parser
-- Error fix patches com 98% de cobertura
+- Error fix patches com 98% de cobertura (42/43 error codes)
 - LSP com hover, completions, goto-definition, auto-format
 - Z3-verified contracts, linear ownership, agent traceability
 - `kodoc fmt` + LSP textDocument/formatting
 - `kodoc annotate` — heuristic contract inference (5 heurísticas)
+- `kodoc annotate --ai` — LLM-assisted contract inference via Anthropic API (v1.11.0)
+- MCP server com 7 tools: check, describe, explain, build, fix, annotate, confidence_report (v1.11.0)
 - `kodoc check --sarif` — SARIF v2.1.0 diagnostic output
 - Neovim plugin + tree-sitter grammar
-- kodo-bench — agent coding benchmark suite (in progress)
+- kodo-bench — agent coding benchmark suite (50 tasks, 8 categorias)
 
-## Completed Milestones (v0.1.0 → v1.9.0)
+## Completed Milestones (v0.1.0 → v1.11.0)
 
 - [x] Milestone 1: Async String Return
-- [x] Milestone 2: Custom Error Types
+- [x] Milestone 2: Custom Error Types (partial — E always String, full enums pending)
 - [x] Milestone 3: Module System (basic imports, qualified paths)
 - [x] Milestone 4: Channel Select (`select {}` statement) ✓ v1.9.0
-- [x] Milestone 5: ~~Growable Stacks~~ — fixed 64KB stacks (design doc ready)
+- [x] Milestone 5: Growable Stacks ✓ v1.10.0 (SIGSEGV handler, 1MB→8MB auto-expand)
 - [x] Milestone 6: Package Manager (kodo.toml, init, add, lock)
 - [x] Milestone 7: LLVM Backend (inkwell, --backend=llvm, --release)
 - [x] Milestone 8: Stdlib Expansion (collections, JSON, File I/O)
 - [x] Milestone 9: Self-Hosting Lexer
 - [x] Milestone 10: Self-Hosting Parser
-- [x] v1.8.0: Formatter, Annotate, SARIF, Neovim/tree-sitter
-- [x] v1.9.0: Channel Select, kodo-bench scaffold, concurrency showcase
+- [x] v1.8.0: Formatter, Annotate (heuristic), SARIF, Neovim/tree-sitter
+- [x] v1.9.0: Channel Select, kodo-bench scaffold (50 tasks), concurrency showcase
+- [x] v1.10.0: Growable stacks, concurrency guide updates
+- [x] v1.11.0: `kodoc annotate --ai` (LLM-assisted contracts), `kodo.annotate` MCP tool, AI annotation quality (tautology filter, complexity limit)
 
 ## Next Milestones
 
-### kodo-bench — Agent Benchmark Suite
-**Status**: In progress (PR #33) | **Impacto**: MÁXIMO — proof of value
+### Result<T, E> com Error Enums Customizados (v1.12.0)
+**Status**: Não iniciado | **Esforço**: 5-7 dias | **Impacto**: Expressividade crítica
+- Type checker: aceitar qualquer enum como `E` em `Result<T, E>`
+- Pattern matching: `Err(MyError::NotFound)` destructuring
+- Codegen: layout de enum discriminants em Result
+- `?` operator com error enums customizados
 
-### Growable Stacks (v1.10.0)
-**Status**: Design doc ready (`docs/design/growable-stacks.md`) | **Esforço**: 7-10 dias
+### Channel<T> Genérico (v1.13.0)
+**Status**: Não iniciado | **Esforço**: 7-10 dias | **Impacto**: Concorrência expressiva
+- Substituir builtins type-specialized por monomorphization real
+- Channel<T> para qualquer tipo Copy/Clone
 
-### Module Build Graph (v1.11.0)
-**Status**: Not started | **Esforço**: 5-7 dias
+### Module Build Graph (v1.14.0)
+**Status**: Não iniciado | **Esforço**: 5-7 dias
 
 ### Bootstrap Compiler (v2.0.0)
-**Status**: Not started | **Esforço**: 4-8 semanas
+**Status**: Não iniciado | **Esforço**: 4-8 semanas
+- Self-hosted lexer + parser já existem como exemplos em Kōdo (2.250 LOC)
+- Próximo: integrar como frontend real com `--self-hosted` flag
 
 ## Roadmap
 

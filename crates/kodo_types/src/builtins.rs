@@ -1618,10 +1618,12 @@ impl TypeChecker {
         let ch_bool = Type::Generic("Channel".to_string(), vec![Type::Bool]);
         let ch_string = Type::Generic("Channel".to_string(), vec![Type::String]);
 
-        // channel_new() -> Channel<Int>  (returns generic channel type)
+        // channel_new() -> Channel<Unknown>  (universal factory — element type
+        // is inferred from the let binding's type annotation at the call site)
+        let ch_unknown = Type::Generic("Channel".to_string(), vec![Type::Unknown]);
         self.env.insert(
             "channel_new".to_string(),
-            Type::Function(vec![], Box::new(ch_int.clone())),
+            Type::Function(vec![], Box::new(ch_unknown)),
         );
         // channel_new_bool() -> Channel<Bool>
         self.env.insert(

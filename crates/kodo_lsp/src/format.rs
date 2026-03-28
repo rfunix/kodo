@@ -918,9 +918,11 @@ fn format_pattern(pattern: &Pattern) -> String {
             if bindings.is_empty() {
                 format!("{prefix}{variant}")
             } else {
-                format!("{prefix}{variant}({})", bindings.join(", "))
+                let args: Vec<String> = bindings.iter().map(format_pattern).collect();
+                format!("{prefix}{variant}({})", args.join(", "))
             }
         }
+        Pattern::Binding(name, _) => name.clone(),
         Pattern::Wildcard(_) => "_".to_string(),
         Pattern::Literal(expr) => format_expr(expr),
         Pattern::Tuple(pats, _) => {

@@ -67,7 +67,7 @@ impl Parser {
                     if !bindings.is_empty() {
                         self.expect(&TokenKind::Comma)?;
                     }
-                    bindings.push(self.parse_ident()?);
+                    bindings.push(self.parse_binding_pattern()?);
                 }
                 self.expect(&TokenKind::RParen)?;
             }
@@ -88,7 +88,7 @@ impl Parser {
                     if !bindings.is_empty() {
                         self.expect(&TokenKind::Comma)?;
                     }
-                    bindings.push(self.parse_ident()?);
+                    bindings.push(self.parse_binding_pattern()?);
                 }
                 self.expect(&TokenKind::RParen)?;
             }
@@ -99,6 +99,32 @@ impl Parser {
                 bindings,
                 span: start_span.merge(end),
             })
+        }
+    }
+
+    /// Parses a single binding position inside a variant pattern's payload.
+    ///
+    /// This allows either a simple variable name (`Ok(v)`) or a nested
+    /// variant pattern (`Err(AppError::NotFound)`).  Wildcard (`_`) is
+    /// also accepted as a binding.
+    fn parse_binding_pattern(&mut self) -> Result<Pattern> {
+        // Peek ahead: if we see `Ident ::` it is a nested variant pattern.
+        if let Some(TokenKind::Ident(name)) = self.peek_kind().cloned() {
+            if name != "_" {
+                // Look two tokens ahead for `::`.
+                if self.peek_nth_kind(1) == Some(&TokenKind::ColonColon) {
+                    return self.parse_pattern();
+                }
+            }
+        }
+
+        // Otherwise parse as a simple binding or wildcard.
+        let span = self.peek().map_or(Span::new(0, 0), |t| t.span);
+        let name = self.parse_ident()?;
+        if name == "_" {
+            Ok(Pattern::Wildcard(span))
+        } else {
+            Ok(Pattern::Binding(name, span))
         }
     }
 }
@@ -145,24 +171,32 @@ mod tests {
             ..
         } = &stmts[0]
         {
-            assert!(matches!(
-                &arms[0].pattern,
-                Pattern::Variant {
-                    enum_name: None,
-                    variant,
-                    bindings,
-                    ..
-                } if variant == "Ok" && bindings.len() == 1 && bindings[0] == "v"
-            ));
-            assert!(matches!(
-                &arms[1].pattern,
-                Pattern::Variant {
-                    enum_name: None,
-                    variant,
-                    bindings,
-                    ..
-                } if variant == "Err" && bindings.len() == 1 && bindings[0] == "e"
-            ));
+            if let Pattern::Variant {
+                enum_name: None,
+                variant,
+                bindings,
+                ..
+            } = &arms[0].pattern
+            {
+                assert_eq!(variant, "Ok");
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(&bindings[0], Pattern::Binding(n, _) if n == "v"));
+            } else {
+                panic!("expected Ok variant pattern");
+            }
+            if let Pattern::Variant {
+                enum_name: None,
+                variant,
+                bindings,
+                ..
+            } = &arms[1].pattern
+            {
+                assert_eq!(variant, "Err");
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(&bindings[0], Pattern::Binding(n, _) if n == "e"));
+            } else {
+                panic!("expected Err variant pattern");
+            }
         } else {
             panic!("expected Let with Match");
         }
@@ -234,6 +268,96 @@ mod tests {
                     ..
                 } if name == "Option" && variant == "Some" && bindings.len() == 1
             ));
+        } else {
+            panic!("expected Let with Match");
+        }
+    }
+
+    #[test]
+    fn pattern_nested_variant_in_binding() {
+        let source = r#"module test {
+            fn main() {
+                let r = match x {
+                    Ok(v) => v,
+                    Err(AppError::NotFound) => 0
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let {
+            value: Expr::Match { arms, .. },
+            ..
+        } = &stmts[0]
+        {
+            // First arm: Ok(v) — simple binding
+            if let Pattern::Variant {
+                variant, bindings, ..
+            } = &arms[0].pattern
+            {
+                assert_eq!(variant, "Ok");
+                assert!(matches!(&bindings[0], Pattern::Binding(n, _) if n == "v"));
+            } else {
+                panic!("expected Ok arm");
+            }
+            // Second arm: Err(AppError::NotFound) — nested variant pattern
+            if let Pattern::Variant {
+                variant, bindings, ..
+            } = &arms[1].pattern
+            {
+                assert_eq!(variant, "Err");
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(
+                    &bindings[0],
+                    Pattern::Variant { enum_name: Some(en), variant: v, bindings: inner, .. }
+                    if en == "AppError" && v == "NotFound" && inner.is_empty()
+                ));
+            } else {
+                panic!("expected Err arm");
+            }
+        } else {
+            panic!("expected Let with Match");
+        }
+    }
+
+    #[test]
+    fn pattern_nested_variant_with_inner_binding() {
+        let source = r#"module test {
+            fn main() {
+                let r = match x {
+                    Err(AppError::InvalidInput(msg)) => msg,
+                    _ => 0
+                }
+            }
+        }"#;
+        let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let stmts = &module.functions[0].body.stmts;
+        if let Stmt::Let {
+            value: Expr::Match { arms, .. },
+            ..
+        } = &stmts[0]
+        {
+            if let Pattern::Variant {
+                variant, bindings, ..
+            } = &arms[0].pattern
+            {
+                assert_eq!(variant, "Err");
+                if let Pattern::Variant {
+                    enum_name: Some(en),
+                    variant: inner_v,
+                    bindings: inner_bindings,
+                    ..
+                } = &bindings[0]
+                {
+                    assert_eq!(en, "AppError");
+                    assert_eq!(inner_v, "InvalidInput");
+                    assert!(matches!(&inner_bindings[0], Pattern::Binding(n, _) if n == "msg"));
+                } else {
+                    panic!("expected nested AppError::InvalidInput pattern");
+                }
+            } else {
+                panic!("expected Err arm");
+            }
         } else {
             panic!("expected Let with Match");
         }

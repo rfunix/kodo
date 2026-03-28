@@ -118,7 +118,7 @@ Cada `kodoc build` emite um `.ko.cert.json` junto ao binário:
   "purpose": "Processa pagamentos via gateway externo",
   "version": "2.1.0",
   "compiled_at": "2026-03-09T14:22:00Z",
-  "compiler_version": "0.1.0",
+  "compiler_version": "1.11.0",
   "contracts": {
     "requires_count": 5,
     "ensures_count": 3,
@@ -246,7 +246,7 @@ Source (.ko)
 [kodo_runtime]   → Linked staticlib (entry point, builtins, --describe)
 ```
 
-**Workspace Rust com 13 crates** (incluindo `kodo_runtime`, `kodo_desugar`, `kodo_lsp`), sem dependências circulares. 692+ testes, zero clippy warnings.
+**Workspace Rust com 17 crates** (incluindo `kodo_runtime`, `kodo_desugar`, `kodo_lsp`, `kodo_codegen_llvm`, `kodo_mcp`, `kodo_playground`), sem dependências circulares. 2.800+ testes, zero clippy warnings.
 
 ---
 
@@ -396,9 +396,9 @@ module nome_do_modulo {
 
 ## 10. Métricas do Projeto
 
-- **692+ testes** (unit, snapshot, property-based, e2e)
+- **2.800+ testes** (unit, snapshot, property-based, e2e, UI tests)
 - **Zero clippy warnings** com pedantic mode
-- **13 crates** no workspace
+- **17 crates** no workspace
 - **50 exemplos** que compilam e executam
 - **Pipeline completo** source → token → AST → typed AST → contracts (Z3) → desugar → MIR → optimize → native binary
 - **LSP Server** com diagnostics, hover, goto-definition, completion, signature help
@@ -425,4 +425,4 @@ Use este documento como contexto e explore:
 
 ---
 
-*Documento atualizado em 2026-03-10. Reflete o estado real do compilador com 692+ testes passando.*
+*Documento atualizado em 2026-03-28. Reflete o estado real do compilador v1.11.0 com 2.800+ testes passando.*

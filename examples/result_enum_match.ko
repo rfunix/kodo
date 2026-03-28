@@ -1,0 +1,54 @@
+module custom_errors {
+    meta {
+        purpose: "Result<T, E> with custom error enums and nested pattern matching"
+        version: "1.12.0"
+    }
+
+    // Custom error enum — E in Result<T, E>
+    enum AppError {
+        NotFound,
+        Unauthorized,
+        BadRequest(String)
+    }
+
+    fn fetch_user(id: Int) -> Result<String, AppError> {
+        if id <= 0 {
+            return Result::Err(AppError::BadRequest("id must be positive"))
+        }
+        if id == 99 {
+            return Result::Err(AppError::Unauthorized)
+        }
+        if id > 100 {
+            return Result::Err(AppError::NotFound)
+        }
+        return Result::Ok("alice")
+    }
+
+    fn main() -> Int {
+        // Match Ok arm
+        let r1: Result<String, AppError> = fetch_user(1)
+        match r1 {
+            Ok(name) => println(name),
+            Err(e) => println("error")
+        }
+
+        // Match nested Err variant — Err(AppError::NotFound)
+        let r2: Result<String, AppError> = fetch_user(200)
+        match r2 {
+            Ok(name) => println(name),
+            Err(AppError::NotFound) => println("not found"),
+            Err(AppError::Unauthorized) => println("unauthorized"),
+            Err(e) => println("other error")
+        }
+
+        // Match Err with payload — Err(AppError::BadRequest(msg))
+        let r3: Result<String, AppError> = fetch_user(-1)
+        match r3 {
+            Ok(name) => println(name),
+            Err(AppError::BadRequest(msg)) => println(msg),
+            Err(e) => println("other error")
+        }
+
+        return 0
+    }
+}

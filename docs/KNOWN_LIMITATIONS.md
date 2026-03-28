@@ -1,4 +1,4 @@
-# Known Limitations — Kōdo v0.7.0
+# Known Limitations — Kōdo v1.11.0
 
 This document lists the known limitations of the current alpha release. These are deliberate trade-offs or features not yet fully implemented.
 
@@ -20,25 +20,22 @@ This document lists the known limitations of the current alpha release. These ar
 
 - **Resolved** in v1.9.0.
 
+**Generic Channel\<T\>** (v1.12.0): ✅ **Resolved in v1.12.0.** `channel_new()` is now a universal factory — the element type is inferred from the `let` binding's annotation. `channel_send(ch, val)` and `channel_recv(ch)` work for any `Channel<T>` (Int, Bool, String). The old type-specific variants (`channel_new_bool`, `channel_send_bool`, etc.) still work for backwards compatibility. See `examples/channel_generic.ko`.
+
 **Growable green thread stacks** (v1.10.0): Each green thread starts with 1MB and grows automatically up to 8MB via SIGSEGV signal handler. Configurable via `KODO_STACK_SIZE` environment variable.
 
 - **Resolved** in v1.10.0.
 
 ## Error Handling
 
-**Result\<T, E\> error type**: While `Result<T, E>` is fully supported syntactically, the error type `E` is always `String` in practice. Custom error enums do not work end-to-end through the type checker and codegen.
-
-- **Impact**: Error handling works, but you cannot define domain-specific error types.
-- **Recommendation**: Use `Result<T, String>` with descriptive error messages.
+**Result\<T, E\> error type**: ✅ **Resolved in v1.12.0.** Custom error enums work end-to-end through the type checker, MIR lowering, and codegen. You can write `Result<T, AppError>` where `AppError` is any enum you define.
 
 **Result\<T, E\> unwrap methods**: `unwrap()` and `unwrap_err()` are available and return the correct polymorphic type (e.g., `String` from `Result<String, String>`). On the wrong variant, the program traps (abnormal termination) without a descriptive error message.
 
 - **Impact**: Useful for prototyping, but production code should use `is_ok()`/`is_err()` checks.
 - **Recommendation**: Guard `unwrap()` calls with an `is_ok()` check, or use `unwrap_or()` for safe defaults.
 
-**Result pattern matching**: `match` on `Result` with `Ok(value)` / `Err(msg)` destructuring patterns is not yet supported. Use `is_ok()`/`is_err()` + `unwrap()`/`unwrap_err()` instead.
-
-- **Plan**: Full pattern matching on enum variants in a future release.
+**Result pattern matching**: ✅ **Resolved in v1.12.0.** `match` on `Result` with `Ok(v)` / `Err(e)` and nested enum variant patterns (`Err(AppError::NotFound)`, `Err(AppError::BadRequest(msg))`) is fully supported. See `examples/result_enum_match.ko`.
 
 ## Strings
 

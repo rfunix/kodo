@@ -350,7 +350,7 @@ mod tests {
             pattern: Pattern::Variant {
                 enum_name: Some("Option".to_string()),
                 variant: "Some".to_string(),
-                bindings: vec!["v".to_string()],
+                bindings: vec![Pattern::Binding("v".to_string(), span)],
                 span,
             },
             value: Expr::Ident("opt".to_string(), span),

@@ -395,6 +395,10 @@ impl MirBuilder {
         // Monomorphize map builtins: rename callee based on the map arg's type params.
         let callee_name = self.monomorphize_map_callee(callee_name, &arg_values);
 
+        // Monomorphize channel_send/channel_recv: dispatch to the type-specific
+        // runtime function based on the channel's element type T.
+        let callee_name = self.monomorphize_channel_callee(callee_name, &arg_values);
+
         // Resolve generic function calls: if callee_name is not in
         // fn_return_types, try to find the monomorphized version whose
         // parameter types match the inferred argument types.
@@ -622,6 +626,51 @@ impl MirBuilder {
             return callee_name;
         }
         format!("{callee_name}{suffix}")
+    }
+
+    /// Dispatches `channel_send` and `channel_recv` to their type-specific
+    /// runtime counterparts based on the element type `T` in `Channel<T>`.
+    ///
+    /// | Source call | Channel<T> | Emitted call |
+    /// |-------------|------------|--------------|
+    /// | `channel_send(ch, v)` | `Channel<Bool>` | `channel_send_bool` |
+    /// | `channel_send(ch, v)` | `Channel<String>` | `channel_send_string` |
+    /// | `channel_recv(ch)` | `Channel<Bool>` | `channel_recv_bool` |
+    /// | `channel_recv(ch)` | `Channel<String>` | `channel_recv_string` |
+    ///
+    /// Falls back to the original name for `Channel<Int>` (no suffix needed)
+    /// and when the channel type cannot be determined.
+    fn monomorphize_channel_callee(&self, callee_name: String, arg_values: &[Value]) -> String {
+        if callee_name != "channel_send" && callee_name != "channel_recv" {
+            return callee_name;
+        }
+        let Some(ch_val) = arg_values.first() else {
+            return callee_name;
+        };
+        let ch_local = match ch_val {
+            Value::Local(id) => *id,
+            _ => return callee_name,
+        };
+        let inner_ty = match self.local_types.get(&ch_local) {
+            Some(Type::Generic(n, params)) if n == "Channel" => {
+                params.first().cloned().unwrap_or(Type::Unknown)
+            }
+            _ => return callee_name,
+        };
+        if callee_name == "channel_send" {
+            match inner_ty {
+                Type::Bool => "channel_send_bool".to_string(),
+                Type::String => "channel_send_string".to_string(),
+                _ => callee_name,
+            }
+        } else {
+            // channel_recv
+            match inner_ty {
+                Type::Bool => "channel_recv_bool".to_string(),
+                Type::String => "channel_recv_string".to_string(),
+                _ => callee_name,
+            }
+        }
     }
 
     /// Infers the return type of `list_get` based on the list's element type.
