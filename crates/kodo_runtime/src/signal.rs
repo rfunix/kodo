@@ -76,7 +76,7 @@ pub fn install_signal_handler() {
 
 /// Registers a guard page for a green thread stack.
 ///
-/// Called by [`super::green::alloc_stack`] after setting up the guard page.
+/// Called by `alloc_stack` in the [`super::green`] module after setting up the guard page.
 pub fn register_guard(guard_addr: usize, stack_base: usize, stack_size: usize) {
     if let Ok(mut registry) = GUARD_REGISTRY.lock() {
         registry.insert(
@@ -91,7 +91,7 @@ pub fn register_guard(guard_addr: usize, stack_base: usize, stack_size: usize) {
 
 /// Unregisters a guard page when a green thread's stack is freed.
 ///
-/// Called by [`super::green::free_stack`].
+/// Called by `free_stack` in the [`super::green`] module.
 pub fn unregister_guard(stack_base: usize) {
     if let Ok(mut registry) = GUARD_REGISTRY.lock() {
         // Remove any entry whose stack_base matches (guard addr may have changed).
