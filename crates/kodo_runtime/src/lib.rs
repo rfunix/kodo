@@ -26,6 +26,7 @@
 //! - [`signal`] — SIGSEGV handler for growable green thread stacks
 //! - [`enum_ops`] — Option/Result runtime helpers for LLVM backend
 //! - [`closure_ops`] — Closure environment pack/load for LLVM backend
+//! - [`regex_ops`] — Regex builtins (`regex_match`, `regex_find`, `regex_replace`)
 //! - `helpers` — Internal helper functions
 
 #![deny(missing_docs)]
@@ -45,6 +46,7 @@ pub mod io_ops;
 pub mod math_ops;
 pub mod memory;
 pub mod prop_ops;
+pub mod regex_ops;
 pub mod scheduler;
 pub mod server;
 pub mod signal;

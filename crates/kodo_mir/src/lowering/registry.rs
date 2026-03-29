@@ -253,6 +253,7 @@ pub(super) fn register_builtin_return_types(fn_return_types: &mut HashMap<String
 
     register_sprint5_return_types(fn_return_types);
     register_test_return_types(fn_return_types);
+    register_regex_return_types(fn_return_types);
 }
 
 /// Registers return types for stdlib expansion builtins (Milestone 8).
@@ -491,6 +492,22 @@ pub(super) fn register_test_return_types(fn_return_types: &mut HashMap<String, T
         .or_insert(Type::Float64);
     fn_return_types
         .entry("kodo_prop_gen_string".to_string())
+        .or_insert(Type::String);
+}
+
+/// Registers return types for regex builtins.
+fn register_regex_return_types(fn_return_types: &mut HashMap<String, Type>) {
+    // regex_match — returns Bool
+    fn_return_types
+        .entry("regex_match".to_string())
+        .or_insert(Type::Bool);
+    // regex_find — returns Option<String>; encoded as Enum for the codegen pass.
+    fn_return_types
+        .entry("regex_find".to_string())
+        .or_insert(Type::Enum("Option__String".to_string()));
+    // regex_replace — returns String (via out-parameters)
+    fn_return_types
+        .entry("regex_replace".to_string())
         .or_insert(Type::String);
 }
 

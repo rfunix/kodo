@@ -118,6 +118,9 @@ pub(crate) fn is_special_builtin(callee: &str) -> bool {
             | "format_int"
             | "timestamp"
             | "sleep"
+            | "regex_match"
+            | "regex_find"
+            | "regex_replace"
     )
 }
 
@@ -159,6 +162,7 @@ pub(crate) fn is_string_returning_builtin(callee: &str) -> bool {
             | "char_from_code"
             | "format_int"
             | "string_builder_to_string"
+            | "regex_replace"
     )
 }
 
@@ -1684,6 +1688,11 @@ fn emit_string_builtin_call(
         return emit_file_io_call(callee, &arg_vals, dest, builder, module, builtins, var_map);
     }
 
+    // regex_find returns Option<String> via out-parameters (discriminant + string slot).
+    if callee == "regex_find" {
+        return emit_regex_find_call(&arg_vals, dest, builder, module, builtins, var_map);
+    }
+
     // Widen I8 args (Bool) to I64 to match runtime function signatures.
     for val in &mut arg_vals {
         if builder.func.dfg.value_type(*val) == types::I8 {
@@ -2054,6 +2063,64 @@ fn emit_file_io_call(
             .ins()
             .store(MemFlags::new(), discriminant, dest_addr, 0);
         // Store pointer to the (ptr, len) pair as payload.
+        let kodo_str_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), kodo_str_addr, dest_addr, 8);
+        let var = var_map.get(dest)?;
+        builder.def_var(var, dest_addr);
+    } else {
+        // Fallback: store discriminant as scalar.
+        var_map.def_var_with_cast(dest, discriminant, builder)?;
+    }
+    Ok(true)
+}
+
+/// Emits a `regex_find` call with `Option<String>` out-parameters.
+///
+/// The runtime function signature is:
+/// `kodo_regex_find(pattern_ptr, pattern_len, text_ptr, text_len, out_ptr, out_len) -> i64`
+/// where the return value is the discriminant: 0 = Some, 1 = None.
+/// The matched string (when Some) is stored via `(out_ptr, out_len)`.
+///
+/// The destination stack slot gets the same two-word layout used by all Kōdo enums:
+/// `[discriminant: i64, payload: i64 (pointer to the (ptr, len) string slot)]`.
+#[allow(clippy::too_many_arguments)]
+fn emit_regex_find_call(
+    arg_vals: &[cranelift_codegen::ir::Value],
+    dest: LocalId,
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    builtins: &HashMap<String, BuiltinInfo>,
+    var_map: &VarMap,
+) -> Result<bool> {
+    // Allocate a 16-byte out-slot for (ptr, len).
+    let out_slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+        16,
+        0,
+    ));
+    let out_ptr_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
+    let out_len_addr = builder.ins().stack_addr(types::I64, out_slot, 8);
+
+    let mut all_args = arg_vals.to_vec();
+    all_args.push(out_ptr_addr);
+    all_args.push(out_len_addr);
+
+    let builtin = builtins
+        .get("regex_find")
+        .ok_or_else(|| CodegenError::Unsupported("builtin regex_find".to_string()))?;
+    let func_ref = module.declare_func_in_func(builtin.func_id, builder.func);
+    let call = builder.ins().call(func_ref, &all_args);
+    let discriminant = builder.inst_results(call)[0]; // 0=Some, 1=None
+
+    // Store the Option<String> enum into the destination stack slot.
+    // Layout: [discriminant: i64][payload: i64 (pointer to the out_slot (ptr, len))]
+    if let Some((dest_slot, _)) = var_map.stack_slots.get(&dest) {
+        let dest_addr = builder.ins().stack_addr(types::I64, *dest_slot, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), discriminant, dest_addr, 0);
         let kodo_str_addr = builder.ins().stack_addr(types::I64, out_slot, 0);
         builder
             .ins()

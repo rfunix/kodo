@@ -1,0 +1,41 @@
+//@ run-pass
+module regex_ui_test {
+    meta {
+        purpose: "UI test for regex builtins: regex_match, regex_find, regex_replace"
+        version: "0.1.0"
+        author: "kodo"
+    }
+
+    fn main() -> Int {
+        // regex_match returns true when the pattern matches
+        let has_digits: Bool = regex_match("\\d+", "abc123")
+        if has_digits {
+            println("match ok")
+        }
+
+        // regex_match returns false when there is no match
+        let no_digits: Bool = regex_match("\\d+", "abcdef")
+        if no_digits {
+            println("unexpected")
+        }
+
+        // regex_find returns Some with the first matched substring
+        let first: Option<String> = regex_find("\\w+", "hello world")
+        if first.is_some() {
+            let word: String = first.unwrap()
+            println(word)
+        }
+
+        // regex_find returns None when there is no match
+        let empty: Option<String> = regex_find("\\d+", "no digits")
+        if empty.is_none() {
+            println("none ok")
+        }
+
+        // regex_replace substitutes all non-overlapping matches
+        let result: String = regex_replace("o", "foo bar", "0")
+        println(result)
+
+        return 0
+    }
+}
