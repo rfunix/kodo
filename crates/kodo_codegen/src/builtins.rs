@@ -78,6 +78,7 @@ pub(crate) fn declare_builtins(
     declare_db_builtins(module, call_conv, &mut builtins)?;
     declare_test_builtins(module, call_conv, &mut builtins)?;
     declare_stdlib_expansion_builtins(module, call_conv, &mut builtins)?;
+    declare_regex_builtins(module, call_conv, &mut builtins)?;
 
     Ok(builtins)
 }
@@ -1949,6 +1950,67 @@ fn declare_stdlib_expansion_builtins(
     decl_ret!("kodo_timestamp", "timestamp", [], types::I64);
     // sleep: (ms) -> void
     decl_void!("kodo_sleep", "sleep", types::I64);
+
+    Ok(())
+}
+
+/// Declares regex builtins.
+fn declare_regex_builtins(
+    module: &mut ObjectModule,
+    call_conv: CallConv,
+    builtins: &mut HashMap<String, BuiltinInfo>,
+) -> Result<()> {
+    macro_rules! decl_ret {
+        ($runtime_name:expr, $key:expr, [$($param:expr),*], $ret:expr) => {{
+            let sig = sig_ret(call_conv, &[$($param),*], $ret);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+    macro_rules! decl_void {
+        ($runtime_name:expr, $key:expr, $($param:expr),*) => {{
+            let sig = sig_void(call_conv, &[$($param),*]);
+            let func_id = declare_builtin(module, $runtime_name, &sig)?;
+            builtins.insert($key.to_string(), BuiltinInfo { func_id });
+        }};
+    }
+
+    // regex_match(pattern_ptr, pattern_len, text_ptr, text_len) -> i64 (0 or 1)
+    decl_ret!(
+        "kodo_regex_match",
+        "regex_match",
+        [types::I64, types::I64, types::I64, types::I64],
+        types::I64
+    );
+
+    // regex_find(pattern_ptr, pattern_len, text_ptr, text_len, out_ptr, out_len) -> i64 (0=Some, 1=None)
+    decl_ret!(
+        "kodo_regex_find",
+        "regex_find",
+        [
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64,
+            types::I64
+        ],
+        types::I64
+    );
+
+    // regex_replace(pattern_ptr, pattern_len, text_ptr, text_len, repl_ptr, repl_len, out_ptr, out_len) -> void
+    decl_void!(
+        "kodo_regex_replace",
+        "regex_replace",
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64,
+        types::I64
+    );
 
     Ok(())
 }

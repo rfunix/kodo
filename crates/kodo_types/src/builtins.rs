@@ -84,6 +84,7 @@ impl TypeChecker {
         self.register_char_functions();
         self.register_string_builder_functions();
         self.register_stdlib_extended_functions();
+        self.register_regex_functions();
 
         self.register_future_builtins();
         self.register_test_builtins();
@@ -2034,6 +2035,33 @@ impl TypeChecker {
         self.env.insert(
             "http_server_free".to_string(),
             Type::Function(vec![Type::Int], Box::new(Type::Unit)),
+        );
+    }
+
+    /// Registers regex builtins.
+    fn register_regex_functions(&mut self) {
+        // regex_match(pattern: String, text: String) -> Bool
+        self.env.insert(
+            "regex_match".to_string(),
+            Type::Function(vec![Type::String, Type::String], Box::new(Type::Bool)),
+        );
+        // regex_find(pattern: String, text: String) -> Option<String>
+        // Registered as the monomorphized Enum name so the type checker
+        // matches `let x: Option<String>` (resolved to `Option__String`).
+        self.env.insert(
+            "regex_find".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String],
+                Box::new(Type::Enum("Option__String".to_string())),
+            ),
+        );
+        // regex_replace(pattern: String, text: String, replacement: String) -> String
+        self.env.insert(
+            "regex_replace".to_string(),
+            Type::Function(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
         );
     }
 }

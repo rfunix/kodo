@@ -1,0 +1,38 @@
+module regex_demo {
+    meta {
+        purpose: "Demonstrate regex builtins: regex_match, regex_find, regex_replace"
+        version: "0.1.0"
+        author: "kodo"
+    }
+
+    fn main() -> Int {
+        // regex_match: returns Bool — true if the pattern matches anywhere in the text
+        let matched: Bool = regex_match("\\d+", "abc123")
+        if matched {
+            println("found digits")
+        }
+
+        let no_match: Bool = regex_match("\\d+", "abcdef")
+        if no_match {
+            println("unexpected match")
+        }
+
+        // regex_find: returns Option<String> — first occurrence, or None
+        let found: Option<String> = regex_find("\\w+", "hello world")
+        if found.is_some() {
+            let word: String = found.unwrap()
+            println(word)
+        }
+
+        let missing: Option<String> = regex_find("\\d+", "no digits here")
+        if missing.is_none() {
+            println("none found")
+        }
+
+        // regex_replace: replaces all non-overlapping matches
+        let replaced: String = regex_replace("o", "hello world", "0")
+        println(replaced)
+
+        return 0
+    }
+}
