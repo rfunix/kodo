@@ -26,7 +26,9 @@ fn workspace_root() -> std::path::PathBuf {
 /// Panics if compilation fails.
 fn compile_ko(source_path: &Path, output_name: &str) -> std::path::PathBuf {
     let kodoc = get_kodoc_path();
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir()
+        .join("kodo_e2e_tests")
+        .join(output_name);
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
     let output_path = output_dir.join(output_name);
 
@@ -66,7 +68,7 @@ fn run_binary(binary_path: &Path) -> (i32, String, String) {
 ///
 /// Panics if compilation fails.
 fn compile_source(source: &str, test_name: &str) -> std::path::PathBuf {
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests").join(test_name);
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
 
     let source_path = output_dir.join(format!("{test_name}.ko"));
@@ -720,7 +722,9 @@ fn test_mir_subcommand_prints_mir() {
 fn test_emit_mir_flag_in_build() {
     let kodoc = get_kodoc_path();
     let root = workspace_root();
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir()
+        .join("kodo_e2e_tests")
+        .join("test_emit_mir_build");
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
     let output_path = output_dir.join("test_emit_mir_build");
 
@@ -760,7 +764,7 @@ fn test_emit_mir_flag_in_build() {
 
 /// Helper: writes a `.ko` source to a temp file and runs `kodoc confidence-report`.
 fn run_confidence_report_cmd(source: &str, test_name: &str, extra_args: &[&str]) -> (i32, String) {
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests").join(test_name);
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
 
     let source_path = output_dir.join(format!("{test_name}.ko"));
@@ -1564,7 +1568,9 @@ macro_rules! e2e_example_test {
         fn $name() {
             let root = workspace_root();
             let kodoc = get_kodoc_path();
-            let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+            let output_dir = std::env::temp_dir()
+                .join("kodo_e2e_tests")
+                .join(concat!("e2e_ex_", stringify!($name)));
             std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
             let output_path = output_dir.join(concat!("e2e_ex_", stringify!($name)));
             let result = std::process::Command::new(&kodoc)
@@ -1940,7 +1946,9 @@ fn compile_ko_with_contracts(
     mode: &str,
 ) -> std::path::PathBuf {
     let kodoc = get_kodoc_path();
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir()
+        .join("kodo_e2e_tests")
+        .join(output_name);
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
     let output_path = output_dir.join(output_name);
 
@@ -1967,7 +1975,7 @@ fn compile_ko_with_contracts(
 
 /// Compiles a `.ko` source with the given contract mode and returns the binary path.
 fn compile_source_with_contracts(source: &str, test_name: &str, mode: &str) -> std::path::PathBuf {
-    let output_dir = std::env::temp_dir().join("kodo_e2e_tests");
+    let output_dir = std::env::temp_dir().join("kodo_e2e_tests").join(test_name);
     std::fs::create_dir_all(&output_dir).expect("could not create temp dir");
     let source_path = output_dir.join(format!("{test_name}.ko"));
     std::fs::write(&source_path, source).expect("could not write source file");
