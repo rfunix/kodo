@@ -77,7 +77,7 @@ enum Command {
         #[arg(long, default_value_t = false)]
         release: bool,
 
-        /// [EXPERIMENTAL] Use the self-hosted (Kōdo-written) lexer/parser instead of the
+        /// \[EXPERIMENTAL\] Use the self-hosted (Kōdo-written) lexer/parser instead of the
         /// Rust implementation.  Requires pre-compiled bootstrap binaries; see
         /// `docs/guide/self-hosted.md` for setup instructions.
         #[arg(long, default_value_t = false)]
@@ -125,7 +125,7 @@ enum Command {
         #[arg()]
         file: PathBuf,
 
-        /// [EXPERIMENTAL] Route through the self-hosted Kōdo-written lexer.
+        /// \[EXPERIMENTAL\] Route through the self-hosted Kōdo-written lexer.
         #[arg(long, default_value_t = false)]
         self_hosted: bool,
     },
@@ -135,7 +135,7 @@ enum Command {
         #[arg()]
         file: PathBuf,
 
-        /// [EXPERIMENTAL] Route through the self-hosted Kōdo-written parser.
+        /// \[EXPERIMENTAL\] Route through the self-hosted Kōdo-written parser.
         #[arg(long, default_value_t = false)]
         self_hosted: bool,
     },
