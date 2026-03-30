@@ -38,6 +38,7 @@ Welcome to the Kōdo documentation. Kōdo is a compiled programming language des
 ### Standard Library
 
 - [Standard Library Reference](guide/stdlib-reference.md) — complete reference for all built-in functions and methods
+- [Regex Builtins](guide/stdlib-regex.md) — `regex_match`, `regex_find`, `regex_replace`
 
 ### Tools
 

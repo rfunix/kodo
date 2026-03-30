@@ -1098,6 +1098,41 @@ let r: Result<Int, String> = Result::Err("oops")
 let val: Int = r.unwrap_or(0)  // 0
 ```
 
+## Regex
+
+### `regex_match(pattern: String, text: String) -> Bool`
+
+Returns `true` if `pattern` matches anywhere in `text`, `false` otherwise.
+An invalid pattern always returns `false`.
+
+```ko
+let matched: Bool = regex_match("\\d+", "abc123")
+// true
+```
+
+### `regex_find(pattern: String, text: String) -> Option<String>`
+
+Returns `Some(first_match)` with the first matched substring, or `None` when
+there is no match or the pattern is invalid.
+
+```ko
+let first: Option<String> = regex_find("\\w+", "hello world")
+// Some("hello")
+```
+
+### `regex_replace(pattern: String, text: String, replacement: String) -> String`
+
+Returns a new string with all non-overlapping matches of `pattern` in `text` replaced by
+`replacement`. Returns the original `text` unchanged if the pattern is invalid.
+Argument order: `(pattern, text, replacement)`.
+
+```ko
+let result: String = regex_replace("o", "hello world", "0")
+// "hell0 w0rld"
+```
+
+See [Regex Builtins](stdlib-regex.md) for the full guide.
+
 ## Test Assertions
 
 These functions are available inside `test` blocks.
