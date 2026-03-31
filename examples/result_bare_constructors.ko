@@ -1,0 +1,50 @@
+module result_bare_constructors {
+    meta {
+        purpose: "Result<T, E> with bare Ok/Err constructors and custom error enums"
+        version: "1.0.0"
+    }
+
+    enum AppError {
+        NotFound,
+        Unauthorized,
+        InvalidInput,
+    }
+
+    fn find_user(id: Int) -> Result<String, AppError>
+        requires { id > 0 }
+    {
+        if id == 1 {
+            return Ok("alice")
+        }
+        if id == 2 {
+            return Err(AppError::Unauthorized)
+        }
+        return Err(AppError::NotFound)
+    }
+
+    fn main() -> Int {
+        let r: Result<String, AppError> = find_user(1)
+        match r {
+            Ok(name) => println(name),
+            Err(AppError::NotFound) => println("not found"),
+            Err(_) => println("other error"),
+        }
+
+        let r2: Result<String, AppError> = find_user(2)
+        match r2 {
+            Ok(name) => println(name),
+            Err(AppError::Unauthorized) => println("unauthorized"),
+            Err(AppError::NotFound) => println("not found"),
+            Err(_) => println("other error"),
+        }
+
+        let r3: Result<String, AppError> = find_user(99)
+        match r3 {
+            Ok(name) => println(name),
+            Err(AppError::NotFound) => println("not found"),
+            Err(_) => println("other error"),
+        }
+
+        return 0
+    }
+}

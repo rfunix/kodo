@@ -1428,6 +1428,28 @@ impl TypeChecker {
             }
         }
 
+        // Bare `Ok(v)` and `Err(e)` constructors — sugar for `Result::Ok(v)` /
+        // `Result::Err(e)`.  We intercept them here and delegate to the generic
+        // enum variant checker so that type inference, monomorphisation, and
+        // ownership tracking are handled identically to the qualified form.
+        //
+        // This follows the same approach used by Robin Milner's type inference
+        // ([TAPL] Ch.22): unify the constructor's payload type against the
+        // expected type parameter of `Result<T, E>`.
+        if let Expr::Ident(name, _) = callee {
+            if matches!(name.as_str(), "Ok" | "Err") {
+                return self.check_enum_variant_expr("Result", name, args, span);
+            }
+            // Bare `Some(v)` and `None` constructors — sugar for `Option::Some(v)` /
+            // `Option::None`.
+            if name == "Some" {
+                return self.check_enum_variant_expr("Option", "Some", args, span);
+            }
+            if name == "None" && args.is_empty() {
+                return self.check_enum_variant_expr("Option", "None", args, span);
+            }
+        }
+
         // Check for generic function call.
         if let Expr::Ident(name, ident_span) = callee {
             if let Some(def) = self.generic_functions.get(name).cloned() {

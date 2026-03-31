@@ -350,6 +350,18 @@ impl MirBuilder {
         };
         let mut arg_values = Vec::with_capacity(args.len());
 
+        // Bare `Ok(v)` / `Err(e)` / `Some(v)` constructors — desugar into the
+        // generic enum variant representation used for `Result::Ok(v)` etc.
+        // The type checker has already validated the payload types; here we
+        // just need to emit the correct `EnumVariant` instruction so that
+        // codegen's discriminant-based layout is respected.
+        match callee_name.as_str() {
+            "Ok" => return self.lower_enum_variant("Result", "Ok", args),
+            "Err" => return self.lower_enum_variant("Result", "Err", args),
+            "Some" => return self.lower_enum_variant("Option", "Some", args),
+            _ => {}
+        }
+
         // Check if the callee is a closure — prepend captures.
         if let Some((closure_func, captures)) = self.closure_registry.get(&callee_name).cloned() {
             return self.lower_closure_call(&closure_func, &captures, args);
