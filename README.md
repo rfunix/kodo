@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
-  <img src="https://img.shields.io/badge/version-v1.11.0-blue" alt="Version: v1.11.0">
+  <img src="https://img.shields.io/badge/version-v1.13.0-blue" alt="Version: v1.13.0">
   <img src="https://img.shields.io/badge/tests-2800%2B%20passing-brightgreen" alt="Tests: 2800+ passing">
   <img src="https://img.shields.io/badge/self--hosted-lexer%20%2B%20parser-purple" alt="Self-hosted: lexer + parser">
   <img src="https://img.shields.io/badge/coverage-pending-lightgrey" alt="Coverage: pending">
@@ -219,6 +219,7 @@ Kōdo isn't just annotations on top of another language — it's a **full compil
 | **Agent traceability** | `@authored_by`, `@confidence`, `@reviewed_by`, transitive confidence propagation, `min_confidence` threshold |
 | **Error repair** | Machine-applicable `FixPatch` in JSON, multi-step `RepairPlan` for complex errors, `kodoc fix` for auto-correction, Levenshtein suggestions for typos |
 | **Error handling** | `Option<T>` and `Result<T, E>` in the prelude, `?` operator for Result propagation — no null, no exceptions |
+| **Bare constructors** | `Ok(v)`, `Err(e)`, `Some(v)`, and `None` work without `Result::`/`Option::` prefix — desugared by the type checker and MIR lowering into existing enum variant representation |
 | **String interpolation** | `f"Hello {name}!"` — f-strings desugar to concatenation with automatic `to_string` |
 | **Inherent impl blocks** | `impl Point { fn distance(self) ... }` — methods on structs without requiring a trait |
 | **Iterators & functional** | Iterator protocol for `List<T>`, `String`, `Map<K,V>`, `Set<T>`; functional combinators (`map`, `filter`, `fold`, `reduce`, `count`, `any`, `all`); functional pipelines |
@@ -352,6 +353,7 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 | [`generic_fn.ko`](examples/generic_fn.ko) | Generic functions with monomorphization |
 | [`option_demo.ko`](examples/option_demo.ko) | `Option<T>` — no null values |
 | [`result_demo.ko`](examples/result_demo.ko) | `Result<T, E>` — explicit error handling |
+| [`result_bare_constructors.ko`](examples/result_bare_constructors.ko) | Bare `Ok`/`Err`/`Some`/`None` constructors without `Result::`/`Option::` prefix |
 | [`try_operator.ko`](examples/try_operator.ko) | Result pattern matching for error handling |
 | [`flow_typing.ko`](examples/flow_typing.ko) | Flow-sensitive type narrowing |
 | [`traits.ko`](examples/traits.ko) | Trait definitions and static dispatch |
