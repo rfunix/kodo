@@ -256,6 +256,14 @@ impl MirBuilder {
     /// it is wrapped in a closure handle so that `IndirectCall` can uniformly
     /// extract `(func_ptr, env_ptr)` from any callable value.
     fn lower_ident(&mut self, name: &str) -> Result<Value> {
+        // Bare `None` identifier (no parentheses) is sugar for `Option::None`.
+        // The type checker rewrites it to `EnumVariantExpr` but the MIR may
+        // encounter the raw `Ident` node when lowering expressions that were
+        // not re-parsed after type-checking.  Intercept here so codegen
+        // always sees the correct `EnumVariant` instruction.
+        if name == "None" {
+            return self.lower_enum_variant("Option", "None", &[]);
+        }
         if let Some(local_id) = self.name_map.get(name).copied() {
             Ok(Value::Local(local_id))
         } else if self.fn_return_types.contains_key(name) {
@@ -349,6 +357,19 @@ impl MirBuilder {
             _ => return Err(MirError::NonIdentCallee),
         };
         let mut arg_values = Vec::with_capacity(args.len());
+
+        // Bare `Ok(v)` / `Err(e)` / `Some(v)` constructors — desugar into the
+        // generic enum variant representation used for `Result::Ok(v)` etc.
+        // The type checker has already validated the payload types; here we
+        // just need to emit the correct `EnumVariant` instruction so that
+        // codegen's discriminant-based layout is respected.
+        match callee_name.as_str() {
+            "Ok" => return self.lower_enum_variant("Result", "Ok", args),
+            "Err" => return self.lower_enum_variant("Result", "Err", args),
+            "Some" => return self.lower_enum_variant("Option", "Some", args),
+            "None" => return self.lower_enum_variant("Option", "None", &[]),
+            _ => {}
+        }
 
         // Check if the callee is a closure — prepend captures.
         if let Some((closure_func, captures)) = self.closure_registry.get(&callee_name).cloned() {

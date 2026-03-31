@@ -1,0 +1,25 @@
+//@ run-pass
+module option_none_bare {
+    meta { purpose: "None bare constructor as sugar for Option::None" }
+
+    fn maybe_value(flag: Bool) -> Option<Int> {
+        if flag {
+            return Some(42)
+        }
+        return None
+    }
+
+    fn main() -> Int {
+        let a: Option<Int> = maybe_value(true)
+        match a {
+            Some(v) => print_int(v),
+            None => println("none"),
+        }
+        let b: Option<Int> = maybe_value(false)
+        match b {
+            Some(v) => print_int(v),
+            None => println("none"),
+        }
+        return 0
+    }
+}
