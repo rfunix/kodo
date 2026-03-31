@@ -1377,5 +1377,26 @@ fn all_builtins() -> Vec<InkwellBuiltin> {
             params: &['i', 'i'],
             ret: 'i',
         },
+        // -- Regex --
+        // kodo_regex_match(pattern_ptr, pattern_len, text_ptr, text_len) -> i64
+        InkwellBuiltin {
+            name: "kodo_regex_match",
+            params: &['i', 'i', 'i', 'i'],
+            ret: 'i',
+        },
+        // kodo_regex_find(pattern_ptr, pattern_len, text_ptr, text_len, out_ptr, out_len) -> i64
+        // Returns 0 = Some, 1 = None; string result written through out_ptr/out_len.
+        InkwellBuiltin {
+            name: "kodo_regex_find",
+            params: &['i', 'i', 'i', 'i', 'i', 'i'],
+            ret: 'i',
+        },
+        // kodo_regex_replace(pattern_ptr, pattern_len, text_ptr, text_len,
+        //                    repl_ptr, repl_len, out_ptr, out_len) -> void
+        InkwellBuiltin {
+            name: "kodo_regex_replace",
+            params: &['i', 'i', 'i', 'i', 'i', 'i', 'i', 'i'],
+            ret: 'v',
+        },
     ]
 }

@@ -314,6 +314,9 @@ fn resolve_runtime_name(callee: &str) -> &str {
         "List_all" => "kodo_list_all",
         "List_count" => "kodo_list_count",
         "List_sort_by" => "kodo_list_sort_by",
+        "regex_match" => "kodo_regex_match",
+        "regex_find" => "kodo_regex_find",
+        "regex_replace" => "kodo_regex_replace",
         other => other,
     }
 }
@@ -346,6 +349,7 @@ fn is_string_returning_builtin(callee: &str) -> bool {
             | "char_from_code"
             | "format_int"
             | "string_builder_to_string"
+            | "regex_replace"
     )
 }
 
@@ -368,6 +372,14 @@ fn is_result_io_builtin(callee: &str) -> bool {
         callee,
         "file_read" | "file_write" | "file_append" | "http_get" | "http_post"
     )
+}
+
+/// Returns true if the builtin returns `Option<String>` via out-parameters.
+///
+/// These builtins return a discriminant (0 = Some, 1 = None) and write the
+/// string payload through out_ptr/out_len pointers passed as extra arguments.
+fn is_option_string_builtin(callee: &str) -> bool {
+    matches!(callee, "regex_find")
 }
 
 /// Translates a function call instruction.
@@ -420,6 +432,12 @@ fn translate_call<'ctx>(
     // Handle Result-returning I/O builtins (file_read, file_write, etc.).
     if !is_user_fn && is_result_io_builtin(callee) {
         translate_result_io_call(dest, callee, args, ctx);
+        return;
+    }
+
+    // Handle Option<String>-returning builtins (e.g., regex_find).
+    if !is_user_fn && is_option_string_builtin(callee) {
+        translate_option_string_call(dest, callee, args, ctx);
         return;
     }
 
@@ -1261,6 +1279,190 @@ fn translate_result_io_call<'ctx>(
     let e2 = ctx
         .builder
         .build_insert_value(e1, str_handle, 1, &unique_name(ctx.name_counter, "ioe2"))
+        .unwrap();
+
+    let result: BasicValueEnum<'ctx> = e2.into_struct_value().into();
+    if let Some(alloca) = ctx.local_allocas.get(&dest) {
+        ctx.builder.build_store(*alloca, result).unwrap();
+    }
+    ctx.ssa_cache.insert(dest, result);
+}
+
+/// Translates an `Option<String>`-returning builtin call (e.g., `regex_find`).
+///
+/// The C ABI is:
+/// ```text
+/// kodo_regex_find(pattern_ptr, pattern_len, text_ptr, text_len,
+///                out_ptr: *mut i64, out_len: *mut i64) -> i64
+/// ```
+/// Return value: discriminant (0 = Some, 1 = None).
+/// When Some, `out_ptr` and `out_len` point to the matched substring.
+///
+/// The Kōdo `Option<String>` is represented as `{ i64, i64 }` where field 0
+/// is the discriminant and field 1 is a heap-allocated string handle
+/// containing `(ptr, len)` packed into 16 bytes.
+fn translate_option_string_call<'ctx>(
+    dest: LocalId,
+    callee: &str,
+    args: &[Value],
+    ctx: &mut ValueCtx<'_, 'ctx>,
+) {
+    let runtime_name = resolve_runtime_name(callee);
+
+    // Emit regular arguments with string expansion.
+    let mut arg_vals: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+    for arg in args {
+        if let Some(val) = translate_value(arg, ctx) {
+            let arg_ty = super::value::infer_value_type_simple(arg, ctx.local_types);
+            if arg_ty == Type::String && val.is_struct_value() {
+                let sv = val.into_struct_value();
+                let ptr = ctx
+                    .builder
+                    .build_extract_value(sv, 0, &unique_name(ctx.name_counter, "rfosp"))
+                    .unwrap();
+                let len = ctx
+                    .builder
+                    .build_extract_value(sv, 1, &unique_name(ctx.name_counter, "rfosl"))
+                    .unwrap();
+                arg_vals.push(ptr.into());
+                arg_vals.push(len.into());
+            } else {
+                arg_vals.push(val.into());
+            }
+        }
+    }
+
+    // Allocate out-parameter slots for the matched string.
+    let out_ptr = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "rfop"),
+    );
+    let out_len = super::value::alloca_in_entry(
+        ctx.builder,
+        ctx.alloca_block,
+        ctx.context.i64_type().into(),
+        &unique_name(ctx.name_counter, "rfol"),
+    );
+
+    let ptr_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_ptr,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "rfopi"),
+        )
+        .unwrap();
+    let len_i64 = ctx
+        .builder
+        .build_ptr_to_int(
+            out_len,
+            ctx.context.i64_type(),
+            &unique_name(ctx.name_counter, "rfoli"),
+        )
+        .unwrap();
+
+    arg_vals.push(ptr_i64.into());
+    arg_vals.push(len_i64.into());
+
+    // Call the runtime function; discriminant is 0 = Some, 1 = None.
+    let disc = if let Some(fn_val) = ctx.module.get_function(runtime_name) {
+        let call_name = unique_name(ctx.name_counter, "rfc");
+        let call_result = ctx
+            .builder
+            .build_call(fn_val, &arg_vals, &call_name)
+            .unwrap();
+        call_result
+            .try_as_basic_value()
+            .basic()
+            .map(|v| v.into_int_value())
+    } else {
+        None
+    };
+
+    let disc_val = disc.unwrap_or_else(|| ctx.context.i64_type().const_int(1, false));
+
+    // Load the matched string and pack into a heap handle (ptr + len = 16 bytes).
+    let res_ptr = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_ptr,
+            &unique_name(ctx.name_counter, "rfr_p"),
+        )
+        .unwrap()
+        .into_int_value();
+    let res_len = ctx
+        .builder
+        .build_load(
+            ctx.context.i64_type(),
+            out_len,
+            &unique_name(ctx.name_counter, "rfr_l"),
+        )
+        .unwrap()
+        .into_int_value();
+
+    let alloc_fn = ctx.module.get_function("kodo_alloc");
+    let str_handle = if let Some(alloc) = alloc_fn {
+        let size = ctx.context.i64_type().const_int(16, false);
+        let alloc_call = ctx
+            .builder
+            .build_call(
+                alloc,
+                &[size.into()],
+                &unique_name(ctx.name_counter, "rfsha"),
+            )
+            .unwrap();
+        let handle = alloc_call
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+
+        let ptr_type = ctx.context.ptr_type(inkwell::AddressSpace::default());
+        let handle_ptr = ctx
+            .builder
+            .build_int_to_ptr(handle, ptr_type, &unique_name(ctx.name_counter, "rfshp"))
+            .unwrap();
+        ctx.builder.build_store(handle_ptr, res_ptr).unwrap();
+
+        let off8 = ctx
+            .builder
+            .build_int_add(
+                handle,
+                ctx.context.i64_type().const_int(8, false),
+                &unique_name(ctx.name_counter, "rfsho"),
+            )
+            .unwrap();
+        let len_dest = ctx
+            .builder
+            .build_int_to_ptr(off8, ptr_type, &unique_name(ctx.name_counter, "rfslp"))
+            .unwrap();
+        ctx.builder.build_store(len_dest, res_len).unwrap();
+
+        handle
+    } else {
+        res_ptr
+    };
+
+    // Build Option enum struct { discriminant, payload }.
+    let enum_ty = ctx.context.struct_type(
+        &[ctx.context.i64_type().into(), ctx.context.i64_type().into()],
+        false,
+    );
+    let e1 = ctx
+        .builder
+        .build_insert_value(
+            enum_ty.const_zero(),
+            disc_val,
+            0,
+            &unique_name(ctx.name_counter, "rfoe1"),
+        )
+        .unwrap();
+    let e2 = ctx
+        .builder
+        .build_insert_value(e1, str_handle, 1, &unique_name(ctx.name_counter, "rfoe2"))
         .unwrap();
 
     let result: BasicValueEnum<'ctx> = e2.into_struct_value().into();
