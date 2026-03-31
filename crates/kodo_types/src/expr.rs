@@ -272,6 +272,14 @@ impl TypeChecker {
 
             Expr::Ident(name, span) => {
                 self.check_not_moved(name, *span)?;
+                // Bare `None` without parentheses is sugar for `Option::None`.
+                // The parser emits `Expr::Ident("None", span)` when there are no
+                // following parentheses, so we intercept it here before the
+                // environment lookup (which would fail with "undefined type").
+                // This mirrors the `None`-in-call-position handling in `check_call`.
+                if name == "None" {
+                    return self.check_enum_variant_expr("Option", "None", &[], *span);
+                }
                 // Record identifier usage for find-references.
                 self.reference_spans
                     .entry(name.clone())

@@ -256,6 +256,14 @@ impl MirBuilder {
     /// it is wrapped in a closure handle so that `IndirectCall` can uniformly
     /// extract `(func_ptr, env_ptr)` from any callable value.
     fn lower_ident(&mut self, name: &str) -> Result<Value> {
+        // Bare `None` identifier (no parentheses) is sugar for `Option::None`.
+        // The type checker rewrites it to `EnumVariantExpr` but the MIR may
+        // encounter the raw `Ident` node when lowering expressions that were
+        // not re-parsed after type-checking.  Intercept here so codegen
+        // always sees the correct `EnumVariant` instruction.
+        if name == "None" {
+            return self.lower_enum_variant("Option", "None", &[]);
+        }
         if let Some(local_id) = self.name_map.get(name).copied() {
             Ok(Value::Local(local_id))
         } else if self.fn_return_types.contains_key(name) {
@@ -359,6 +367,7 @@ impl MirBuilder {
             "Ok" => return self.lower_enum_variant("Result", "Ok", args),
             "Err" => return self.lower_enum_variant("Result", "Err", args),
             "Some" => return self.lower_enum_variant("Option", "Some", args),
+            "None" => return self.lower_enum_variant("Option", "None", &[]),
             _ => {}
         }
 
