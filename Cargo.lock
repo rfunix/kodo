@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "ko"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "clap",
  "serde",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_ast"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1318,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_codegen"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_codegen_llvm"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "inkwell",
  "kodo_ast",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_contracts"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "kodo_types",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_desugar"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "proptest",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_lexer"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_lsp"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "insta",
  "kodo_ast",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_mcp"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "kodo_codegen",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_mir"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "insta",
  "kodo_ast",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_parser"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_playground"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "kodo_lexer",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_resolver"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "kodo_contracts",
@@ -1453,7 +1453,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_runtime"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "crossbeam-deque",
  "fastrand",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_std"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "kodo_ast",
  "kodo_lexer",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "kodo_types"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "kodoc"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "ariadne",
  "clap",
@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "kotest"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "clap",
  "serde",
