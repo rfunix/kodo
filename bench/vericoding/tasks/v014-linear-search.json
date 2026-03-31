@@ -1,0 +1,15 @@
+{
+  "id": "v014-linear-search",
+  "category": "search",
+  "difficulty": "medium",
+  "algveri_equiv": "linear_search",
+  "title": "Linear search returns valid index or -1",
+  "description": "find_first returns an index in [-1, lst.length-1].",
+  "prompt": "Write a Kodo module with a find_first(lst: List<Int>, target: Int) -> Int function that ensures result >= -1. Return index of first occurrence or -1 if not found. Print find_first([3,1,4,1,5], 1) and find_first([1,2,3], 9).",
+  "solution": "solutions/v014.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "1\n-1\n"
+  }
+}

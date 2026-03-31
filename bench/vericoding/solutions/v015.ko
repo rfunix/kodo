@@ -1,0 +1,35 @@
+module vericoding_count_positive {
+    meta {
+        purpose: "AlgoVeri v015: count positive elements with bounded postcondition",
+        version: "1.0.0"
+    }
+
+    fn count_positive(lst: List<Int>) -> Int
+        ensures { result >= 0 }
+    {
+        let mut count: Int = 0
+        for x in lst {
+            if x > 0 {
+                count = count + 1
+            }
+        }
+        return count
+    }
+
+    fn main() -> Int {
+        let a: List<Int> = list_new()
+        list_push(a, 0 - 1)
+        list_push(a, 2)
+        list_push(a, 0 - 3)
+        list_push(a, 4)
+        list_push(a, 5)
+        print_int(count_positive(a))
+
+        let b: List<Int> = list_new()
+        list_push(b, 0 - 1)
+        list_push(b, 0 - 2)
+        list_push(b, 0 - 3)
+        print_int(count_positive(b))
+        return 0
+    }
+}

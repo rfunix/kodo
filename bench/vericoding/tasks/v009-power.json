@@ -1,0 +1,16 @@
+{
+  "id": "v009-power",
+  "category": "mathematical",
+  "difficulty": "medium",
+  "algveri_equiv": "integer_power",
+  "title": "Integer power with non-negativity contract",
+  "description": "b^e >= 0 when b >= 0 and e >= 0.",
+  "prompt": "Write a Kodo module with a power(base: Int, exp: Int) -> Int function that requires base >= 0 && exp >= 0 and ensures result >= 0. Print power(2,10) and power(3,4).",
+  "solution": "solutions/v009.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "1024\n81\n"
+  }
+}

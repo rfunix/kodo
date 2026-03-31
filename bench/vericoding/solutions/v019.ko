@@ -1,0 +1,49 @@
+module vericoding_bubble_sort {
+    meta {
+        purpose: "AlgoVeri v019: bubble sort with length-preservation postcondition",
+        version: "1.0.0"
+    }
+
+    fn bubble_sort(lst: List<Int>) -> List<Int>
+        ensures { list_length(result) == list_length(lst) }
+    {
+        let n: Int = list_length(lst)
+        let mut i: Int = 0
+        while i < n {
+            let mut j: Int = 0
+            while j < n - i - 1 {
+                let a: Int = list_get(lst, j)
+                let b: Int = list_get(lst, j + 1)
+                if a > b {
+                    list_set(lst, j, b)
+                    list_set(lst, j + 1, a)
+                }
+                j = j + 1
+            }
+            i = i + 1
+        }
+        return lst
+    }
+
+    fn main() -> Int {
+        let a: List<Int> = list_new()
+        list_push(a, 5)
+        list_push(a, 3)
+        list_push(a, 8)
+        list_push(a, 1)
+        list_push(a, 9)
+        let sorted_a: List<Int> = bubble_sort(a)
+        for x in sorted_a {
+            print_int(x)
+        }
+
+        let b: List<Int> = list_new()
+        list_push(b, 2)
+        list_push(b, 1)
+        let sorted_b: List<Int> = bubble_sort(b)
+        for x in sorted_b {
+            print_int(x)
+        }
+        return 0
+    }
+}

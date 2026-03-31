@@ -1,0 +1,15 @@
+{
+  "id": "v011-sum-list",
+  "category": "search",
+  "difficulty": "easy",
+  "algveri_equiv": "sum_array",
+  "title": "Sum of list with length precondition",
+  "description": "sum_list over a non-empty list of positive ints.",
+  "prompt": "Write a Kodo module with a sum_list(lst: List<Int>) -> Int function that requires lst.length > 0. Print sum of [1,2,3,4,5] and [10,20,30].",
+  "solution": "solutions/v011.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "output_matches": "15\n60\n"
+  }
+}

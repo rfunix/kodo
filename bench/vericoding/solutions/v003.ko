@@ -1,0 +1,21 @@
+module vericoding_max_two {
+    meta {
+        purpose: "AlgoVeri v003: max with dominance postcondition",
+        version: "1.0.0"
+    }
+
+    fn max_two(a: Int, b: Int) -> Int
+        ensures { result >= a && result >= b }
+    {
+        if a >= b {
+            return a
+        }
+        return b
+    }
+
+    fn main() -> Int {
+        print_int(max_two(3, 7))
+        print_int(max_two(10, 4))
+        return 0
+    }
+}

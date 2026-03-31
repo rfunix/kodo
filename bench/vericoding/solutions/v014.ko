@@ -1,0 +1,36 @@
+module vericoding_linear_search {
+    meta {
+        purpose: "AlgoVeri v014: linear search returns valid index or -1",
+        version: "1.0.0"
+    }
+
+    fn find_first(lst: List<Int>, target: Int) -> Int
+        ensures { result >= -1 }
+    {
+        let mut i: Int = 0
+        while i < list_length(lst) {
+            if list_get(lst, i) == target {
+                return i
+            }
+            i = i + 1
+        }
+        return 0 - 1
+    }
+
+    fn main() -> Int {
+        let a: List<Int> = list_new()
+        list_push(a, 3)
+        list_push(a, 1)
+        list_push(a, 4)
+        list_push(a, 1)
+        list_push(a, 5)
+        print_int(find_first(a, 1))
+
+        let b: List<Int> = list_new()
+        list_push(b, 1)
+        list_push(b, 2)
+        list_push(b, 3)
+        print_int(find_first(b, 9))
+        return 0
+    }
+}

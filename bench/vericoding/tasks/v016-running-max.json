@@ -1,0 +1,15 @@
+{
+  "id": "v016-running-max",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "algveri_equiv": "prefix_max",
+  "title": "Running maximum with monotone invariant",
+  "description": "Each call to update_max can only increase the stored maximum.",
+  "prompt": "Write a Kodo module that tracks a running maximum. Implement update_max(current: Int, new_val: Int) -> Int that ensures result >= current. Print update_max(5,3), update_max(5,10), update_max(0,0).",
+  "solution": "solutions/v016.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "5\n10\n0\n"
+  }
+}

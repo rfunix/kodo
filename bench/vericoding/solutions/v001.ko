@@ -1,0 +1,21 @@
+module vericoding_abs_value {
+    meta {
+        purpose: "AlgoVeri v001: abs with ensures result >= 0",
+        version: "1.0.0"
+    }
+
+    fn abs_val(n: Int) -> Int
+        ensures { result >= 0 }
+    {
+        if n < 0 {
+            return 0 - n
+        }
+        return n
+    }
+
+    fn main() -> Int {
+        print_int(abs_val(0 - 5))
+        print_int(abs_val(7))
+        return 0
+    }
+}

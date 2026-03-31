@@ -1,0 +1,16 @@
+{
+  "id": "v006-factorial",
+  "category": "mathematical",
+  "difficulty": "medium",
+  "algveri_equiv": "factorial",
+  "title": "Factorial with non-negativity invariant",
+  "description": "n! is always >= 1 for n >= 0. Z3 can verify ensures result >= 1.",
+  "prompt": "Write a Kodo module with a factorial(n: Int) -> Int function that requires n >= 0 && n <= 12 and ensures result >= 1. Print factorial(0), factorial(5), factorial(10).",
+  "solution": "solutions/v006.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "1\n120\n3628800\n"
+  }
+}

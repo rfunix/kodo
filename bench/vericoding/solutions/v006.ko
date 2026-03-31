@@ -1,0 +1,23 @@
+module vericoding_factorial {
+    meta {
+        purpose: "AlgoVeri v006: factorial with non-negativity invariant",
+        version: "1.0.0"
+    }
+
+    fn factorial(n: Int) -> Int
+        requires { n >= 0 && n <= 12 }
+        ensures  { result >= 1 }
+    {
+        if n <= 1 {
+            return 1
+        }
+        return n * factorial(n - 1)
+    }
+
+    fn main() -> Int {
+        print_int(factorial(0))
+        print_int(factorial(5))
+        print_int(factorial(10))
+        return 0
+    }
+}

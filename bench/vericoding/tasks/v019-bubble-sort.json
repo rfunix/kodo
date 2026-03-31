@@ -1,0 +1,15 @@
+{
+  "id": "v019-bubble-sort",
+  "category": "sorting",
+  "difficulty": "hard",
+  "algveri_equiv": "bubble_sort",
+  "title": "Bubble sort with length-preservation postcondition",
+  "description": "bubble_sort preserves list length. Print sorted [5,3,8,1,9] and [2,1].",
+  "prompt": "Write a Kodo module with a bubble_sort(lst: List<Int>) -> List<Int> function that ensures result.length == lst.length. Print the sorted result of [5,3,8,1,9] and [2,1] (print each element on a new line).",
+  "solution": "solutions/v019.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "1\n3\n5\n8\n9\n1\n2\n"
+  }
+}

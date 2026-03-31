@@ -1,0 +1,32 @@
+module vericoding_isqrt {
+    meta {
+        purpose: "AlgoVeri v010: integer square root with floor postcondition",
+        version: "1.0.0"
+    }
+
+    fn isqrt(n: Int) -> Int
+        requires { n >= 0 }
+        ensures  { result >= 0 }
+    {
+        if n == 0 {
+            return 0
+        }
+        let mut guess: Int = n / 2
+        if guess == 0 {
+            return 1
+        }
+        let mut i: Int = 0
+        while i < 10 {
+            guess = (guess + n / guess) / 2
+            i = i + 1
+        }
+        return guess
+    }
+
+    fn main() -> Int {
+        print_int(isqrt(0))
+        print_int(isqrt(9))
+        print_int(isqrt(144))
+        return 0
+    }
+}

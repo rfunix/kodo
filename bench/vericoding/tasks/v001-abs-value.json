@@ -1,0 +1,15 @@
+{
+  "id": "v001-abs-value",
+  "category": "arithmetic",
+  "difficulty": "easy",
+  "algveri_equiv": "abs",
+  "title": "Absolute value with postcondition",
+  "description": "Classic vericoding task: implement abs(n) and prove via ensures that the result is always non-negative.",
+  "prompt": "Write a Kodo module with an abs_val function. It must have an ensures { result >= 0 } contract. Print abs_val(-5) and abs_val(7).",
+  "solution": "solutions/v001.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "5\n7\n"
+  }
+}
