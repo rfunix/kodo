@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0224
+module try_in_non_result {
+    meta { purpose: "Regression: ? operator requires Result return type" }
+
+    fn get_value() -> Result<Int, String> {
+        return Ok(42)
+    }
+
+    fn bad() -> Int {
+        let x: Int = get_value()?  //~ ERROR E0224
+        return x
+    }
+}

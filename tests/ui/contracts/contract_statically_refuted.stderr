@@ -1,0 +1,2 @@
+contract error: contract refuted at Span { start: 247, end: 252 }: counter-example: x -> 0
+

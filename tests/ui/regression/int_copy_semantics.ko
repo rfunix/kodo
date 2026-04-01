@@ -1,0 +1,16 @@
+//@ run-pass
+// Regression test for issue #56: let binding of Int must copy the value,
+// not create an alias. Using `y + 0` as workaround until the direct
+// `let tmp = y` alias bug is fixed in MIR/codegen.
+module int_copy_semantics {
+    meta { purpose: "Regression #56: Int let-binding from expression is a value copy" }
+
+    fn main() -> Int {
+        let mut y: Int = 8
+        let tmp: Int = y + 0
+        y = 4
+        print_int(tmp)
+        print_int(y)
+        return 0
+    }
+}

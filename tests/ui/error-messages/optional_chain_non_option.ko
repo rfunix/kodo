@@ -1,0 +1,11 @@
+//@ compile-fail
+//@ error-code: E0225
+module optional_chain_non_option {
+    meta { purpose: "Regression E0225: optional chain ?. requires Option type" }
+
+    fn main() -> Int {
+        let x: Int = 42
+        let _y: Int = x?.value  //~ ERROR E0225
+        return 0
+    }
+}

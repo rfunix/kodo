@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0244
+module continue_outside_loop {
+    meta { purpose: "Regression: continue outside loop is an error" }
+
+    fn bad() -> Int {
+        continue  //~ ERROR E0244
+        return 0
+    }
+}

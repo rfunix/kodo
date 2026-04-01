@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0203
+module not_callable {
+    meta { purpose: "Regression E0203: calling a non-function value is an error" }
+
+    fn main() -> Int {
+        let x: Int = 42
+        return x(1)  //~ ERROR E0203
+    }
+}
