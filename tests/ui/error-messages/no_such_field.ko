@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0217
+module no_such_field {
+    meta { purpose: "Type error E0217: accessing non-existent field on struct" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 10, y: 20 }
+        return p.z
+    }
+}

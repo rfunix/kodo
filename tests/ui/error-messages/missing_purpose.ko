@@ -1,0 +1,9 @@
+//@ compile-fail
+//@ error-code: E0212
+module missing_purpose {
+    meta { author: "agent" }
+
+    fn main() -> Int {
+        return 0
+    }
+}

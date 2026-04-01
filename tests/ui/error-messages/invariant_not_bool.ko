@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0310
+module invariant_not_bool {
+    meta { purpose: "E0310: invariant com valor Int em vez de Bool" }
+
+    invariant { 42 }
+
+    fn compute(x: Int) -> Int {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        return compute(5)
+    }
+}

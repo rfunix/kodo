@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0216
+module duplicate_struct_field {
+    meta { purpose: "Type error E0216: struct literal with duplicate field" }
+
+    struct Config {
+        host: String,
+        port: Int
+    }
+
+    fn main() -> Int {
+        let c: Config = Config { host: "localhost", port: 8080, host: "example.com" }
+        return c.port
+    }
+}

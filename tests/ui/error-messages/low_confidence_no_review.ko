@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0260
+module low_confidence_no_review {
+    meta { purpose: "E0260: confidence below 0.8 sem reviewed_by humano" }
+
+    @confidence(0.5)
+    fn risky() -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        return risky()
+    }
+}

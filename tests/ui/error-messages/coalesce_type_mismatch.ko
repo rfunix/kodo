@@ -1,0 +1,11 @@
+//@ compile-fail
+//@ error-code: E0226
+module coalesce_type_mismatch {
+    meta { purpose: "Type error E0226: null coalescing ?? on non-Option left side" }
+
+    fn main() -> Int {
+        let x: Int = 42
+        let v: Int = x ?? 0
+        return v
+    }
+}

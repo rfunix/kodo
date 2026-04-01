@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0215
+module extra_struct_field {
+    meta { purpose: "Type error E0215: struct literal with extra unknown field" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2, z: 3 }
+        return p.x
+    }
+}

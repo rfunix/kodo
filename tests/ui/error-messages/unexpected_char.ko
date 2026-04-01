@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0001
+module unexpected_char {
+    meta { purpose: "Lex error E0001: unexpected character in source" }
+
+    fn main() -> Int {
+        let x: Int = 42§
+        return x
+    }
+}
