@@ -1,0 +1,16 @@
+{
+  "id": "v008-gcd",
+  "category": "mathematical",
+  "difficulty": "medium",
+  "algveri_equiv": "gcd",
+  "title": "GCD (Euclidean) with positivity invariant",
+  "description": "gcd(a,b) > 0 when both inputs are positive.",
+  "prompt": "Write a Kodo module with a gcd(a: Int, b: Int) -> Int function using Euclidean algorithm. Requires a > 0 && b > 0, ensures result > 0. Print gcd(12,8) and gcd(100,75).",
+  "solution": "solutions/v008.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "4\n25\n"
+  }
+}

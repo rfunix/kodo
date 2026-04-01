@@ -1,0 +1,15 @@
+{
+  "id": "v012-min-list",
+  "category": "search",
+  "difficulty": "easy",
+  "algveri_equiv": "min_array",
+  "title": "Minimum of list with non-empty precondition",
+  "description": "min_list requires the list to be non-empty.",
+  "prompt": "Write a Kodo module with a min_list(lst: List<Int>) -> Int function that requires lst.length > 0. Print min of [5,3,8,1,9] and [42,7,13].",
+  "solution": "solutions/v012.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "output_matches": "1\n7\n"
+  }
+}

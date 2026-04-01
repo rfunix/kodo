@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0243
+module break_outside_loop {
+    meta { purpose: "Regression: break outside loop is an error" }
+
+    fn bad() -> Int {
+        break  //~ ERROR E0243
+        return 0
+    }
+}

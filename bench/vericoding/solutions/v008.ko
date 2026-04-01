@@ -1,0 +1,26 @@
+module vericoding_gcd {
+    meta {
+        purpose: "AlgoVeri v008: Euclidean GCD with positivity invariant",
+        version: "1.0.0"
+    }
+
+    fn gcd(a: Int, b: Int) -> Int
+        requires { a > 0 && b > 0 }
+        ensures  { result > 0 }
+    {
+        let mut x: Int = a
+        let mut y: Int = b
+        while y > 0 {
+            let r: Int = x - (x / y) * y
+            x = y
+            y = r
+        }
+        return x
+    }
+
+    fn main() -> Int {
+        print_int(gcd(12, 8))
+        print_int(gcd(100, 75))
+        return 0
+    }
+}

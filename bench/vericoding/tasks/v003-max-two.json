@@ -1,0 +1,15 @@
+{
+  "id": "v003-max-two",
+  "category": "arithmetic",
+  "difficulty": "easy",
+  "algveri_equiv": "max",
+  "title": "Maximum of two with dominance postcondition",
+  "description": "max(a,b) verified: result is >= both inputs.",
+  "prompt": "Write a Kodo module with a max_two(a: Int, b: Int) -> Int function that ensures result >= a && result >= b. Print max_two(3,7) and max_two(10,4).",
+  "solution": "solutions/v003.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "7\n10\n"
+  }
+}

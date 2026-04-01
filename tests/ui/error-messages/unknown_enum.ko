@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0218
+module unknown_enum {
+    meta { purpose: "Regression E0218: referencing undefined enum is an error" }
+
+    fn main() -> Int {
+        let _x: GhostEnum = GhostEnum::Foo  //~ ERROR E0218
+        return 0
+    }
+}

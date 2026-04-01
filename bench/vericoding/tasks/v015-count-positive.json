@@ -1,0 +1,15 @@
+{
+  "id": "v015-count-positive",
+  "category": "search",
+  "difficulty": "easy",
+  "algveri_equiv": "count_positive",
+  "title": "Count positive elements with bounded postcondition",
+  "description": "count_positive(lst) is always in [0, lst.length].",
+  "prompt": "Write a Kodo module with a count_positive(lst: List<Int>) -> Int function that ensures result >= 0. Print count_positive([-1,2,-3,4,5]) and count_positive([-1,-2,-3]).",
+  "solution": "solutions/v015.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "3\n0\n"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "v004-bounded-add",
+  "category": "arithmetic",
+  "difficulty": "easy",
+  "algveri_equiv": "bounded_add",
+  "title": "Bounded addition preserves sign",
+  "description": "If both inputs are non-negative, their sum is non-negative.",
+  "prompt": "Write a Kodo module with a bounded_add(a: Int, b: Int) -> Int function that requires a >= 0 && b >= 0 and ensures result >= 0 && result == a + b. Print bounded_add(3,4) and bounded_add(0,99).",
+  "solution": "solutions/v004.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "7\n99\n"
+  }
+}

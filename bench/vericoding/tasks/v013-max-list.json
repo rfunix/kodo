@@ -1,0 +1,15 @@
+{
+  "id": "v013-max-list",
+  "category": "search",
+  "difficulty": "easy",
+  "algveri_equiv": "max_array",
+  "title": "Maximum of list with non-empty precondition",
+  "description": "max_list requires the list to be non-empty.",
+  "prompt": "Write a Kodo module with a max_list(lst: List<Int>) -> Int function that requires lst.length > 0. Print max of [5,3,8,1,9] and [42,7,13].",
+  "solution": "solutions/v013.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "output_matches": "9\n42\n"
+  }
+}

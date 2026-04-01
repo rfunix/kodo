@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ compile-flags: --contracts=static
+module contract_statically_refuted {
+    meta { purpose: "Regression: Z3 statically refutes call with provably-violated precondition" }
+
+    fn positive_only(x: Int) -> Int
+        requires { x > 0 }
+    {
+        return x * 2
+    }
+
+    fn main() -> Int {
+        return positive_only(0 - 5)
+    }
+}

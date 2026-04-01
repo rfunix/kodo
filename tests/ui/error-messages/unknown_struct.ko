@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0213
+module unknown_struct {
+    meta { purpose: "Regression E0213: instantiating undefined struct is an error" }
+
+    fn main() -> Int {
+        let _p: Phantom = Phantom { x: 1 }  //~ ERROR E0213
+        return 0
+    }
+}

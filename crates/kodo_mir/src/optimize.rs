@@ -652,16 +652,33 @@ fn collect_value_locals(value: &Value, used: &mut HashSet<LocalId>) {
 /// Propagates simple copies (`_x = _y`) by substituting the source local.
 ///
 /// Only propagates assignments of the form `Assign(dest, Local(src))` where
-/// the dest local has exactly one definition. Uses cycle detection to avoid
-/// infinite loops in chains.
+/// both `dest` and `src` have exactly one definition across the entire
+/// function (counting both `Assign` and `Call` instructions as definitions).
+/// Requiring the source to have at most one definition ensures that mutable
+/// variables (e.g. `let mut x`) whose value may change after the copy point
+/// are never substituted — which would turn a value copy into an alias,
+/// breaking copy semantics for primitive types such as `Int`, `Bool`, and
+/// `Float`. Uses cycle detection to avoid infinite loops in chains.
 fn copy_propagate(func: &mut MirFunction) {
     let mut copies: HashMap<LocalId, LocalId> = HashMap::new();
+    // Count every instruction that writes to a local: both `Assign` and
+    // `Call`/`IndirectCall`/`VirtualCall` (which write their return value
+    // into `dest`).  This is necessary so that locals produced by calls
+    // (which have `def_count == 0` under an `Assign`-only scan) are still
+    // treated as having exactly one definition and therefore remain eligible
+    // as copy-propagation sources.
     let mut def_count: HashMap<LocalId, usize> = HashMap::new();
 
     for block in &func.blocks {
         for instr in &block.instructions {
-            if let Instruction::Assign(dest, _) = instr {
-                *def_count.entry(*dest).or_insert(0) += 1;
+            match instr {
+                Instruction::Assign(dest, _)
+                | Instruction::Call { dest, .. }
+                | Instruction::IndirectCall { dest, .. }
+                | Instruction::VirtualCall { dest, .. } => {
+                    *def_count.entry(*dest).or_insert(0) += 1;
+                }
+                Instruction::IncRef(_) | Instruction::DecRef(_) | Instruction::Yield => {}
             }
         }
     }
@@ -669,7 +686,14 @@ fn copy_propagate(func: &mut MirFunction) {
     for block in &func.blocks {
         for instr in &block.instructions {
             if let Instruction::Assign(dest, Value::Local(src)) = instr {
-                if def_count.get(dest).copied().unwrap_or(0) == 1 {
+                let dest_defs = def_count.get(dest).copied().unwrap_or(0);
+                let src_defs = def_count.get(src).copied().unwrap_or(0);
+                // Only propagate when both sides are defined exactly once.
+                // If the source is defined more than once (i.e. it is a mutable
+                // variable that is reassigned later), propagating would replace
+                // the destination with an alias to the source, breaking copy
+                // semantics for primitive types such as Int, Bool, and Float.
+                if dest_defs == 1 && src_defs == 1 {
                     copies.insert(*dest, *src);
                 }
             }
@@ -1006,6 +1030,36 @@ mod tests {
         assert_eq!(
             func.blocks[0].terminator,
             Terminator::Return(Value::Local(LocalId(0)))
+        );
+    }
+
+    /// Regression test for issue #56: copy propagation must NOT substitute a
+    /// destination that copies from a mutable source (one with multiple
+    /// definitions). Doing so would turn a value copy into an alias, causing
+    /// `let tmp: Int = x; x = 8` to make `tmp` reflect the new value of `x`.
+    #[test]
+    fn copy_propagation_does_not_alias_mutable_src() {
+        // Mirrors: let mut x = 4; let tmp = x; x = 8; print(tmp); print(x)
+        // MIR:
+        //   Assign(0, IntConst(4))      -- x = 4
+        //   Assign(1, Local(0))         -- tmp = x  (should stay, src has 2 defs)
+        //   Assign(0, IntConst(8))      -- x = 8
+        // Return(Local(1))              -- return tmp  (must still be Local(1), not Local(0))
+        let mut func = make_function(
+            vec![
+                Instruction::Assign(LocalId(0), Value::IntConst(4)),
+                Instruction::Assign(LocalId(1), Value::Local(LocalId(0))),
+                Instruction::Assign(LocalId(0), Value::IntConst(8)),
+            ],
+            Terminator::Return(Value::Local(LocalId(1))),
+        );
+        copy_propagate(&mut func);
+        // LocalId(0) has 2 definitions, so the copy `tmp = x` must NOT be
+        // propagated. The terminator must still reference LocalId(1) (tmp).
+        assert_eq!(
+            func.blocks[0].terminator,
+            Terminator::Return(Value::Local(LocalId(1))),
+            "copy propagation must not alias a mutable source variable"
         );
     }
 

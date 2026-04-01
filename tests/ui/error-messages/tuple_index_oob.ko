@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0253
+module tuple_index_oob {
+    meta { purpose: "Regression: tuple index out of bounds is caught statically" }
+
+    fn main() -> Int {
+        let pair: (Int, Int) = (10, 20)
+        return pair.5  //~ ERROR E0253
+    }
+}

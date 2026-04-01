@@ -1,0 +1,15 @@
+{
+  "id": "v005-safe-divide",
+  "category": "arithmetic",
+  "difficulty": "easy",
+  "algveri_equiv": "safe_div",
+  "title": "Safe integer division (no zero denominator)",
+  "description": "Precondition prevents division-by-zero statically.",
+  "prompt": "Write a Kodo module with a safe_div(a: Int, b: Int) -> Int function that requires b != 0. Print safe_div(20,4) and safe_div(7,2).",
+  "solution": "solutions/v005.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "output_matches": "5\n3\n"
+  }
+}

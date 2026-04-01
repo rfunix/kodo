@@ -1,0 +1,19 @@
+module vericoding_bounded_add {
+    meta {
+        purpose: "AlgoVeri v004: bounded addition preserves sign",
+        version: "1.0.0"
+    }
+
+    fn bounded_add(a: Int, b: Int) -> Int
+        requires { a >= 0 && b >= 0 }
+        ensures  { result >= 0 && result == a + b }
+    {
+        return a + b
+    }
+
+    fn main() -> Int {
+        print_int(bounded_add(3, 4))
+        print_int(bounded_add(0, 99))
+        return 0
+    }
+}

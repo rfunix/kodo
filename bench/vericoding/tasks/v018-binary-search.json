@@ -1,0 +1,15 @@
+{
+  "id": "v018-binary-search",
+  "category": "sorting",
+  "difficulty": "hard",
+  "algveri_equiv": "binary_search",
+  "title": "Binary search with index bounds postcondition",
+  "description": "binary_search on a sorted list returns -1 or a valid index.",
+  "prompt": "Write a Kodo module with a binary_search(lst: List<Int>, target: Int) -> Int function that ensures result >= -1. The list is assumed sorted. Print binary_search([1,3,5,7,9], 5) and binary_search([1,3,5,7,9], 4).",
+  "solution": "solutions/v018.ko",
+  "checks": {
+    "compiles": true,
+    "has_ensures": true,
+    "output_matches": "2\n-1\n"
+  }
+}

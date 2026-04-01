@@ -1,0 +1,25 @@
+//@ compile-fail
+//@ error-code: E0231
+module missing_trait_method {
+    meta { purpose: "Detect impl block missing a required trait method" }
+
+    trait Drawable {
+        fn draw(self) -> String
+        fn area(self) -> Int
+    }
+
+    struct Circle {
+        radius: Int,
+    }
+
+    impl Drawable for Circle {
+        fn draw(self) -> String {
+            return "circle"
+        }
+        // area is missing — should trigger E0231
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}

@@ -1,0 +1,22 @@
+module vericoding_power {
+    meta {
+        purpose: "AlgoVeri v009: integer power with non-negativity contract",
+        version: "1.0.0"
+    }
+
+    fn power(base: Int, exp: Int) -> Int
+        requires { base >= 0 && exp >= 0 }
+        ensures  { result >= 0 }
+    {
+        if exp == 0 {
+            return 1
+        }
+        return base * power(base, exp - 1)
+    }
+
+    fn main() -> Int {
+        print_int(power(2, 10))
+        print_int(power(3, 4))
+        return 0
+    }
+}

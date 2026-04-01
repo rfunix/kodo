@@ -1,0 +1,22 @@
+module vericoding_running_max {
+    meta {
+        purpose: "AlgoVeri v016: running maximum with monotone invariant",
+        version: "1.0.0"
+    }
+
+    fn update_max(current: Int, new_val: Int) -> Int
+        ensures { result >= current }
+    {
+        if new_val > current {
+            return new_val
+        }
+        return current
+    }
+
+    fn main() -> Int {
+        print_int(update_max(5, 3))
+        print_int(update_max(5, 10))
+        print_int(update_max(0, 0))
+        return 0
+    }
+}

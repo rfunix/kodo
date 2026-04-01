@@ -1,0 +1,16 @@
+{
+  "id": "v007-fibonacci",
+  "category": "mathematical",
+  "difficulty": "medium",
+  "algveri_equiv": "fibonacci",
+  "title": "Fibonacci with non-negativity postcondition",
+  "description": "fib(n) >= 0 for all n >= 0.",
+  "prompt": "Write a Kodo module with a fib(n: Int) -> Int function that requires n >= 0 and ensures result >= 0. Print fib(0), fib(1), fib(10).",
+  "solution": "solutions/v007.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "0\n1\n55\n"
+  }
+}

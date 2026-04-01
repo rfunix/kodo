@@ -948,3 +948,207 @@ fn format_type_expr(ty: &TypeExpr) -> String {
         TypeExpr::DynTrait(name) => format!("dyn {name}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::format_module;
+
+    /// Parse `source`, format it, re-parse — verifies the formatter produces valid code.
+    fn roundtrip(source: &str) -> String {
+        let module = kodo_parser::parse(source).expect("initial parse failed");
+        let formatted = format_module(&module);
+        kodo_parser::parse(&formatted).unwrap_or_else(|e| {
+            panic!("formatter produced invalid Kōdo:\n{e}\n---\n{formatted}");
+        });
+        formatted
+    }
+
+    #[test]
+    fn formats_simple_function() {
+        let src = r#"
+module hello {
+    meta { purpose: "test" }
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("fn add("));
+        assert!(out.contains("return a + b"));
+    }
+
+    #[test]
+    fn formats_struct_decl() {
+        let src = r#"
+module structs {
+    meta { purpose: "test" }
+    struct Point {
+        x: Int,
+        y: Int
+    }
+    fn make(x: Int, y: Int) -> Point {
+        return Point { x: x, y: y }
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("struct Point"));
+        assert!(out.contains("x: Int"));
+    }
+
+    #[test]
+    fn formats_enum_decl() {
+        let src = r#"
+module enums {
+    meta { purpose: "test" }
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("enum Color"));
+        assert!(out.contains("Red"));
+    }
+
+    #[test]
+    fn formats_contracts() {
+        let src = r#"
+module contracts {
+    meta { purpose: "test" }
+    fn safe_div(a: Int, b: Int) -> Int
+        requires { b != 0 }
+        ensures { result >= 0 }
+    {
+        return a / b
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("requires {"));
+        assert!(out.contains("ensures {"));
+    }
+
+    #[test]
+    fn formats_pub_visibility() {
+        let src = r#"
+module vis {
+    meta { purpose: "test" }
+    pub fn public_fn(x: Int) -> Int {
+        return x
+    }
+    fn private_fn(x: Int) -> Int {
+        return x
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("pub fn public_fn"));
+        // private fn should not have pub
+        assert!(out.contains("fn private_fn"));
+    }
+
+    #[test]
+    fn formats_if_else() {
+        let src = r#"
+module cond {
+    meta { purpose: "test" }
+    fn abs_val(n: Int) -> Int {
+        if n < 0 {
+            return 0 - n
+        } else {
+            return n
+        }
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("if "));
+        assert!(out.contains("} else {"));
+    }
+
+    #[test]
+    fn formats_while_loop() {
+        let src = r#"
+module loops {
+    meta { purpose: "test" }
+    fn sum_to(n: Int) -> Int {
+        let mut total: Int = 0
+        let mut i: Int = 0
+        while i < n {
+            total = total + i
+            i = i + 1
+        }
+        return total
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("while "));
+        assert!(out.contains("let mut total"));
+    }
+
+    #[test]
+    fn formats_match_expr() {
+        let src = r#"
+module matching {
+    meta { purpose: "test" }
+    enum Shape {
+        Circle(Int),
+        Point
+    }
+    fn area(s: Shape) -> Int {
+        let a: Int = match s {
+            Shape::Circle(r) => r * r,
+            Shape::Point => 0
+        }
+        return a
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("match "));
+    }
+
+    #[test]
+    fn formats_for_in_loop() {
+        let src = r#"
+module forin {
+    meta { purpose: "test" }
+    fn sum_list(lst: List<Int>) -> Int {
+        let mut total: Int = 0
+        for x in lst {
+            total = total + x
+        }
+        return total
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("for "));
+    }
+
+    #[test]
+    fn formats_let_bindings() {
+        let src = r#"
+module lets {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let x: Int = 42
+        let mut y: Int = 0
+        y = x + 1
+        return y
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("let x: Int"));
+        assert!(out.contains("let mut y: Int"));
+    }
+
+    #[test]
+    fn formats_generic_function() {
+        let src = r#"
+module generics {
+    meta { purpose: "test" }
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("identity<T>") || out.contains("identity<"));
+    }
+}

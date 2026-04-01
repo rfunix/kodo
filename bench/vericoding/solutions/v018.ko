@@ -1,0 +1,38 @@
+module vericoding_binary_search {
+    meta {
+        purpose: "AlgoVeri v018: binary search with valid index postcondition",
+        version: "1.0.0"
+    }
+
+    fn binary_search(lst: List<Int>, target: Int) -> Int
+        ensures { result >= -1 }
+    {
+        let mut lo: Int = 0
+        let mut hi: Int = list_length(lst) - 1
+        while lo <= hi {
+            let mid: Int = lo + (hi - lo) / 2
+            let val: Int = list_get(lst, mid)
+            if val == target {
+                return mid
+            }
+            if val < target {
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return 0 - 1
+    }
+
+    fn main() -> Int {
+        let lst: List<Int> = list_new()
+        list_push(lst, 1)
+        list_push(lst, 3)
+        list_push(lst, 5)
+        list_push(lst, 7)
+        list_push(lst, 9)
+        print_int(binary_search(lst, 5))
+        print_int(binary_search(lst, 4))
+        return 0
+    }
+}

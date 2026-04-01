@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0245
+module mut_borrow_while_ref {
+    meta { purpose: "Detect mut borrow while the same variable is already ref-borrowed" }
+
+    fn take_ref_then_mut(ref a: String, mut b: String) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let x: String = "hello"
+        // x passed as ref and then as mut in same call — E0245
+        return take_ref_then_mut(x, x)
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "v010-int-sqrt",
+  "category": "mathematical",
+  "difficulty": "medium",
+  "algveri_equiv": "isqrt",
+  "title": "Integer square root with floor postcondition",
+  "description": "isqrt(n) >= 0 for all n >= 0.",
+  "prompt": "Write a Kodo module with an isqrt(n: Int) -> Int function using Newton's method (10 iterations). Requires n >= 0, ensures result >= 0. Print isqrt(0), isqrt(9), isqrt(144).",
+  "solution": "solutions/v010.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "0\n3\n12\n"
+  }
+}

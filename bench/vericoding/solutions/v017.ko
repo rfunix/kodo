@@ -1,0 +1,23 @@
+module vericoding_safe_get {
+    meta {
+        purpose: "AlgoVeri v017: safe list access with bounds precondition",
+        version: "1.0.0"
+    }
+
+    fn safe_get(lst: List<Int>, idx: Int) -> Int
+        requires { idx >= 0 && idx < list_length(lst) }
+    {
+        return list_get(lst, idx)
+    }
+
+    fn main() -> Int {
+        let lst: List<Int> = list_new()
+        list_push(lst, 10)
+        list_push(lst, 20)
+        list_push(lst, 30)
+        list_push(lst, 40)
+        print_int(safe_get(lst, 0))
+        print_int(safe_get(lst, 3))
+        return 0
+    }
+}

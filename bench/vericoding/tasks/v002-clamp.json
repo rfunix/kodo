@@ -1,0 +1,16 @@
+{
+  "id": "v002-clamp",
+  "category": "arithmetic",
+  "difficulty": "easy",
+  "algveri_equiv": "clamp",
+  "title": "Clamp with range invariant",
+  "description": "Clamp a value to [lo, hi]. The postcondition proves the result is always within bounds.",
+  "prompt": "Write a Kodo module with a clamp function(val, lo, hi: Int) -> Int that requires lo <= hi and ensures result >= lo && result <= hi. Print clamp(3,1,10), clamp(-5,0,100), clamp(200,0,100).",
+  "solution": "solutions/v002.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "has_ensures": true,
+    "output_matches": "3\n0\n100\n"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "v017-safe-get",
+  "category": "data-structures",
+  "difficulty": "medium",
+  "algveri_equiv": "safe_index",
+  "title": "Safe list access with bounds precondition",
+  "description": "safe_get requires index to be in bounds, eliminating runtime panics.",
+  "prompt": "Write a Kodo module with a safe_get(lst: List<Int>, idx: Int) -> Int function that requires idx >= 0 && idx < lst.length. Print safe_get([10,20,30,40], 0) and safe_get([10,20,30,40], 3).",
+  "solution": "solutions/v017.ko",
+  "checks": {
+    "compiles": true,
+    "has_requires": true,
+    "output_matches": "10\n40\n"
+  }
+}

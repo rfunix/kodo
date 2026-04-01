@@ -1,0 +1,11 @@
+//@ compile-fail
+//@ error-code: E0235
+module method_not_found {
+    meta { purpose: "Detect method call on a type that does not have that method" }
+
+    fn main() -> Int {
+        let x: Int = 42
+        // Int has no method `nonexistent` — should trigger E0235
+        return x.nonexistent()
+    }
+}

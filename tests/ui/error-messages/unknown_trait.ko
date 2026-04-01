@@ -1,0 +1,19 @@
+//@ compile-fail
+//@ error-code: E0230
+module unknown_trait {
+    meta { purpose: "Detect use of a trait that was never defined" }
+
+    struct Point {
+        x: Int,
+    }
+
+    impl NonExistentTrait for Point {
+        fn display(self) -> String {
+            return "point"
+        }
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}

@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0248
+module assign_through_ref {
+    meta { purpose: "Detect assignment to a ref parameter inside the function body" }
+
+    fn bad(ref x: Int) -> Int {
+        // Assigning to ref parameter — should trigger E0248
+        x = 99
+        return x
+    }
+
+    fn main() -> Int {
+        let n: Int = 10
+        return bad(n)
+    }
+}

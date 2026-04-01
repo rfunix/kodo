@@ -1,0 +1,50 @@
+module vericoding_merge_sorted {
+    meta {
+        purpose: "AlgoVeri v020: merge two sorted lists with length-sum postcondition",
+        version: "1.0.0"
+    }
+
+    fn merge_sorted(a: List<Int>, b: List<Int>) -> List<Int>
+        ensures { list_length(result) == list_length(a) + list_length(b) }
+    {
+        let out: List<Int> = list_new()
+        let mut i: Int = 0
+        let mut j: Int = 0
+        while i < list_length(a) && j < list_length(b) {
+            if list_get(a, i) <= list_get(b, j) {
+                list_push(out, list_get(a, i))
+                i = i + 1
+            } else {
+                list_push(out, list_get(b, j))
+                j = j + 1
+            }
+        }
+        while i < list_length(a) {
+            list_push(out, list_get(a, i))
+            i = i + 1
+        }
+        while j < list_length(b) {
+            list_push(out, list_get(b, j))
+            j = j + 1
+        }
+        return out
+    }
+
+    fn main() -> Int {
+        let a: List<Int> = list_new()
+        list_push(a, 1)
+        list_push(a, 3)
+        list_push(a, 5)
+
+        let b: List<Int> = list_new()
+        list_push(b, 2)
+        list_push(b, 4)
+        list_push(b, 6)
+
+        let merged: List<Int> = merge_sorted(a, b)
+        for x in merged {
+            print_int(x)
+        }
+        return 0
+    }
+}
