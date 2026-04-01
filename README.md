@@ -325,7 +325,7 @@ kodoc repl
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 107 compilable programs:
+The [`examples/`](examples/) directory contains 150 compilable programs:
 
 ### Core Language
 
@@ -483,6 +483,19 @@ The [`examples/`](examples/) directory contains 107 compilable programs:
 | [`selective_imports.ko`](examples/selective_imports.ko) | Selective imports (`import { add } from math`) |
 | [`send_sync_demo.ko`](examples/send_sync_demo.ko) | `Send`/`Sync` bounds for thread safety |
 | [`multi_file/`](examples/multi_file/) | Multi-file compilation with imports |
+
+## Vericoding Benchmark
+
+The [`bench/vericoding/`](bench/vericoding/) directory contains 20 formally verified programs equivalent to the [AlgoVeri benchmark](https://arxiv.org/abs/2602.09464) (77 algorithms in Dafny/Verus/Lean). Each task has:
+- A JSON spec with description, signature, and expected output
+- A Kōdo solution with `requires`/`ensures` contracts verified by Z3
+
+```bash
+cd bench/vericoding && ./run.sh --verbose   # run all 20 tasks
+./run.sh --json                             # JSON output for CI
+```
+
+**Result**: 20/20 tasks passing (100% success rate).
 
 ---
 
