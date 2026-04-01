@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0247
+module double_mut_borrow {
+    meta { purpose: "Detect double mutable borrow of the same variable in a single call" }
+
+    fn take_two_muts(mut a: String, mut b: String) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let x: String = "hello"
+        // x passed as mut twice to the same call — E0247
+        return take_two_muts(x, x)
+    }
+}

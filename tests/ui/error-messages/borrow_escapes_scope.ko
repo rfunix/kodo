@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0241
+module borrow_escapes_scope {
+    meta { purpose: "Detect a ref borrow returned from a function, escaping its scope" }
+
+    fn get_ref(ref s: String) -> String {
+        // Returning the ref borrow — borrow escapes scope — should trigger E0241
+        return s
+    }
+
+    fn main() -> Int {
+        return 0
+    }
+}

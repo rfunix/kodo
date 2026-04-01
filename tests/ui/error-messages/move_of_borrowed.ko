@@ -1,0 +1,23 @@
+//@ compile-fail
+//@ error-code: E0242
+module move_of_borrowed {
+    meta { purpose: "Detect moving a value while it is actively borrowed" }
+
+    fn take_ref(ref s: String) -> Int {
+        return 0
+    }
+
+    fn consume(own s: String) -> Int {
+        return 0
+    }
+
+    fn two_args(ref a: String, b: String) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let x: String = "hello"
+        // Passing x as ref (borrow) and then by move in the same call — E0242
+        return two_args(x, x)
+    }
+}
