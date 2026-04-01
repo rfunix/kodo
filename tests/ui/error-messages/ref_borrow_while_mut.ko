@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0246
+module ref_borrow_while_mut {
+    meta { purpose: "Detect ref borrow while the same variable is already mut-borrowed" }
+
+    fn take_mut_then_ref(mut a: String, ref b: String) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let x: String = "hello"
+        // x passed as mut and then as ref in same call — E0246
+        return take_mut_then_ref(x, x)
+    }
+}

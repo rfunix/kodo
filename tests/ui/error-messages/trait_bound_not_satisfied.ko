@@ -1,0 +1,23 @@
+//@ compile-fail
+//@ error-code: E0232
+module trait_bound_not_satisfied {
+    meta { purpose: "Detect generic call where type does not implement required trait" }
+
+    trait Hashable {
+        fn hash(self) -> Int
+    }
+
+    struct Item {
+        value: Int,
+    }
+
+    fn lookup<T: Hashable>(key: T) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let item: Item = Item { value: 42 }
+        // Item does not implement Hashable — should trigger E0232
+        return lookup(item)
+    }
+}

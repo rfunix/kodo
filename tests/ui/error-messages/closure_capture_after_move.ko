@@ -1,0 +1,18 @@
+//@ compile-fail
+//@ error-code: E0281
+module closure_capture_after_move {
+    meta { purpose: "Detect closure capturing a variable that was already moved" }
+
+    fn consume(own s: String) -> Int {
+        return 0
+    }
+
+    fn main() -> Int {
+        let data: String = "hello"
+        // Move data to consume
+        let _r: Int = consume(data)
+        // Closure tries to capture already-moved data in its body — E0281
+        let _f = |x: Int| -> Int { consume(data) }
+        return 0
+    }
+}
