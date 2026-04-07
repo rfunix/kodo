@@ -76,14 +76,33 @@ pub(crate) enum Dependency {
     },
 }
 
+/// Minimal manifest used only for trust config extraction.
+///
+/// Unlike [`Manifest`], this struct does not require `module` or `version`,
+/// allowing a `kodo.toml` that contains only a `[trust]` section to parse
+/// successfully.
+#[derive(Debug, Deserialize, Default)]
+struct TrustOnlyManifest {
+    #[serde(default)]
+    trust: Option<TrustSection>,
+}
+
 /// Loads trust configuration for a source file by looking for `kodo.toml`.
 ///
 /// Searches only the immediate parent directory of `source_file`. Returns
 /// `TrustConfig::default()` (no validation) if no `kodo.toml` exists or
 /// if it has no `[trust]` section.
+///
+/// Accepts both a full project manifest (with `module`/`version`) and a
+/// minimal manifest containing only `[trust]`.
 pub(crate) fn load_trust_config(source_file: &Path) -> kodo_types::TrustConfig {
     let dir = source_file.parent().unwrap_or(Path::new("."));
-    read_manifest(dir)
+    let manifest_path = dir.join("kodo.toml");
+    let content = match std::fs::read_to_string(&manifest_path) {
+        Ok(c) => c,
+        Err(_) => return kodo_types::TrustConfig::default(),
+    };
+    toml::from_str::<TrustOnlyManifest>(&content)
         .ok()
         .and_then(|m| m.trust)
         .map(TrustSection::into_trust_config)
