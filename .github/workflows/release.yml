@@ -41,11 +41,13 @@ jobs:
 
   build-macos-x86_64:
     name: Build (macos-x86_64)
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
 
       - name: Install Z3
         run: brew install z3
@@ -55,12 +57,12 @@ jobs:
           key: release-macos-x86_64
 
       - name: Build kodoc
-        run: cargo build --release -p kodoc
+        run: cargo build --release -p kodoc --target x86_64-apple-darwin
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp target/release/kodoc dist/kodoc-macos-x86_64
+          cp target/x86_64-apple-darwin/release/kodoc dist/kodoc-macos-x86_64
           chmod +x dist/kodoc-macos-x86_64
 
       - name: Upload artifact
