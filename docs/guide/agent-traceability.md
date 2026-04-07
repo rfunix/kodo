@@ -123,3 +123,67 @@ For JSON output (suitable for AI agent consumption):
 ```bash
 kodoc confidence-report my_module.ko --json
 ```
+
+## Preventing Reviewer Forgery
+
+A fundamental challenge with AI-generated code: an LLM could write `@reviewed_by(human: "alice")` in source code, bypassing trust enforcement. Kōdo addresses this with **trust identity verification** via `kodo.toml`.
+
+### Configuring the `[trust]` Section
+
+Add a `[trust]` section to your project's `kodo.toml`:
+
+```toml
+[trust]
+# Names of known AI agents — never permitted as human reviewers.
+known_agents = ["claude", "gpt-4", "copilot", "gemini"]
+
+# Optional: allowlist of authorized human reviewers.
+# When set, only listed names are accepted in @reviewed_by(human: "...").
+human_reviewers = ["alice", "bob", "rfunix"]
+```
+
+Both fields are **opt-in**. A project without `[trust]` behaves exactly as before.
+
+### What Gets Rejected
+
+**E0263 — Agent claims human review**: If a function has `@reviewed_by(human: "claude")` and `"claude"` is in `known_agents`, the compiler rejects it:
+
+```
+error[E0263]: function `process_payment`: reviewer `claude` is a known AI agent
+              and cannot claim human review
+  --> src/main.ko:5:1
+```
+
+The auto-fix changes `human:` to `agent:`.
+
+**E0264 — Reviewer not in allowlist**: If `human_reviewers` is set and the reviewer is not listed:
+
+```
+error[E0264]: function `process_payment`: reviewer `unknown` is not in the
+              `human_reviewers` allowlist
+  --> src/main.ko:5:1
+```
+
+### Combining with `kodoc audit`
+
+Use `trust=verified` in the audit policy for CI/CD gating:
+
+```bash
+kodoc audit src/main.ko \
+  --policy "min_confidence=0.8,reviewed=all,trust=verified"
+```
+
+This exits with code 1 if any `@reviewed_by(human: "X")` annotation names a known agent (uses `known_agents` from `kodo.toml`).
+
+### Security Model
+
+Kōdo's trust config makes reviewer forgery **detectable and costly**, but it relies on a root of trust external to the compiler:
+
+| Mechanism | Protection | Limitation |
+|-----------|-----------|------------|
+| `known_agents` allowlist | Rejects obvious LLM identity strings | Gameable if agent uses an unlisted name |
+| `human_reviewers` allowlist | Restricts valid reviewer identities | Gameable if attacker controls `kodo.toml` |
+| CI git-blame check | Detects commits from bot accounts | Requires protected CI pipeline |
+| Cryptographic signatures (roadmap) | Cryptographically binds review to a GPG key | Requires key management |
+
+The recommended production setup: configure both lists in `kodo.toml`, protect the `kodo.toml` via branch protection rules, and add a CI step that `git blame`-verifies that `@reviewed_by` annotations were committed by a human account.

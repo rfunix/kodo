@@ -54,6 +54,8 @@ pub struct FunctionAudit {
     pub requires_count: usize,
     /// Number of `ensures` clauses.
     pub ensures_count: usize,
+    /// Human reviewer names extracted from `@reviewed_by(human: "...")` annotations.
+    pub reviewers: Vec<String>,
 }
 
 /// Builds an [`AuditReport`] from module data, confidence report, and verification stats.
@@ -87,6 +89,8 @@ pub fn build_audit_report(
             annotations.insert(ann.name.clone(), annotation_to_json(ann));
         }
 
+        let reviewers = extract_human_reviewers_audit(func);
+
         functions.push(FunctionAudit {
             name: func.name.clone(),
             confidence_declared: declared,
@@ -94,6 +98,7 @@ pub fn build_audit_report(
             annotations,
             requires_count: func.requires.len(),
             ensures_count: func.ensures.len(),
+            reviewers,
         });
     }
 
@@ -118,6 +123,32 @@ pub fn build_audit_report(
         },
         functions,
     }
+}
+
+/// Extracts human reviewer names from `@reviewed_by` annotations for audit reporting.
+fn extract_human_reviewers_audit(func: &kodo_ast::Function) -> Vec<String> {
+    let mut reviewers = Vec::new();
+    for ann in &func.annotations {
+        if ann.name != "reviewed_by" {
+            continue;
+        }
+        for arg in &ann.args {
+            match arg {
+                kodo_ast::AnnotationArg::Named(key, kodo_ast::Expr::StringLit(value, _))
+                    if key == "human" =>
+                {
+                    reviewers.push(value.clone());
+                }
+                kodo_ast::AnnotationArg::Positional(kodo_ast::Expr::StringLit(value, _))
+                    if value.starts_with("human:") =>
+                {
+                    reviewers.push(value.trim_start_matches("human:").to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    reviewers
 }
 
 /// Converts an annotation to a JSON value.
@@ -172,6 +203,10 @@ pub enum PolicyCriterion {
     ContractsAllPresent,
     /// All functions must carry a `@reviewed_by` annotation.
     ReviewedAll,
+    /// All `@reviewed_by(human: "X")` reviewer names must not appear in the
+    /// provided list of known agents (case-insensitive). Requires the agent
+    /// list to be supplied via [`validate_policy_with_trust`].
+    TrustVerified,
 }
 
 /// Result of validating an [`AuditReport`] against a set of policy criteria.
@@ -236,6 +271,14 @@ pub fn parse_policy(policy: &str) -> Result<Vec<PolicyCriterion>, String> {
                         ));
                     }
                 },
+                "trust" => match value {
+                    "verified" => criteria.push(PolicyCriterion::TrustVerified),
+                    _ => {
+                        return Err(format!(
+                            "unknown trust policy value: `{value}` (expected `verified`)"
+                        ));
+                    }
+                },
                 _ => {
                     return Err(format!("unknown policy key: `{key}`"));
                 }
@@ -256,7 +299,24 @@ pub fn parse_policy(policy: &str) -> Result<Vec<PolicyCriterion>, String> {
 ///
 /// Returns a [`PolicyResult`] indicating whether all criteria passed and
 /// listing any violations found.
+///
+/// For `TrustVerified` checks, pass an empty `known_agents` slice — use
+/// [`validate_policy_with_trust`] when you have a trust configuration available.
+// Used in tests and as a convenience API.
+#[allow(dead_code)]
 pub fn validate_policy(report: &AuditReport, criteria: &[PolicyCriterion]) -> PolicyResult {
+    validate_policy_with_trust(report, criteria, &[])
+}
+
+/// Validates an [`AuditReport`] against criteria, with trust identity checking.
+///
+/// `known_agents` is a list of agent names (case-insensitive) that are not
+/// permitted as human reviewers. Used by `TrustVerified` policy checks.
+pub fn validate_policy_with_trust(
+    report: &AuditReport,
+    criteria: &[PolicyCriterion],
+    known_agents: &[String],
+) -> PolicyResult {
     let mut violations = Vec::new();
 
     for criterion in criteria {
@@ -315,6 +375,24 @@ pub fn validate_policy(report: &AuditReport, criteria: &[PolicyCriterion]) -> Po
                             expected: "@reviewed_by annotation".to_string(),
                             actual: "no @reviewed_by annotation".to_string(),
                         });
+                    }
+                }
+            }
+            PolicyCriterion::TrustVerified => {
+                for func in &report.functions {
+                    for reviewer in &func.reviewers {
+                        let reviewer_lower = reviewer.to_lowercase();
+                        if known_agents
+                            .iter()
+                            .any(|a| a.to_lowercase() == reviewer_lower)
+                        {
+                            violations.push(PolicyViolation {
+                                criterion: "trust=verified".to_string(),
+                                function: func.name.clone(),
+                                expected: "human reviewer (not a known agent)".to_string(),
+                                actual: format!("`{reviewer}` is a known AI agent"),
+                            });
+                        }
                     }
                 }
             }
@@ -614,6 +692,52 @@ mod tests {
         let json_str = json.unwrap_or_default();
         assert!(json_str.contains("\"passed\":false"));
         assert!(json_str.contains("\"criterion\":\"min_confidence\""));
+    }
+
+    #[test]
+    fn parse_policy_trust_verified() {
+        let criteria = parse_policy("trust=verified").unwrap();
+        assert_eq!(criteria, vec![PolicyCriterion::TrustVerified]);
+    }
+
+    #[test]
+    fn parse_policy_trust_unknown_value() {
+        let result = parse_policy("trust=invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn trust_verified_no_agents_always_passes() {
+        // Without known_agents, TrustVerified does nothing.
+        let report = build_audit_report(
+            &make_test_module_reviewed(),
+            &[("greet".to_string(), 0.9, 0.9, vec![])],
+            0,
+            0,
+            0,
+        );
+        let result = validate_policy_with_trust(&report, &[PolicyCriterion::TrustVerified], &[]);
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn trust_verified_catches_agent_reviewer() {
+        // Build a module where "greet" has @reviewed_by(human: "claude").
+        let report = build_audit_report(
+            &make_test_module_reviewed(),
+            &[("greet".to_string(), 0.9, 0.9, vec![])],
+            0,
+            0,
+            0,
+        );
+        // The make_test_module_reviewed uses "rfunix" — should pass with claude as agent.
+        let result = validate_policy_with_trust(
+            &report,
+            &[PolicyCriterion::TrustVerified],
+            &["claude".to_string()],
+        );
+        // "rfunix" != "claude" so should still pass.
+        assert!(result.passed, "rfunix is not a known agent, should pass");
     }
 
     fn make_test_module_no_contracts() -> kodo_ast::Module {

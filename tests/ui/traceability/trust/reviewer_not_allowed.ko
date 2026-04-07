@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0264
+module reviewer_not_allowed {
+    meta { purpose: "Unlisted reviewer should be rejected when allowlist is configured" }
+
+    @confidence(0.5)
+    @reviewed_by(human: "unknown_person")
+    fn verified_fn(x: Int) -> Int {
+        return x
+    }
+
+    fn main() {
+        let result: Int = verified_fn(1)
+        print_int(result)
+    }
+}

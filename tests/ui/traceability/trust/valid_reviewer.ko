@@ -1,0 +1,15 @@
+//@ check-pass
+module valid_reviewer {
+    meta { purpose: "Authorized human reviewer should pass trust verification" }
+
+    @confidence(0.5)
+    @reviewed_by(human: "alice")
+    fn verified_fn(x: Int) -> Int {
+        return x
+    }
+
+    fn main() {
+        let result: Int = verified_fn(1)
+        print_int(result)
+    }
+}

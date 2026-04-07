@@ -356,6 +356,34 @@ pub enum TypeError {
         /// Source location of the function.
         span: Span,
     },
+    /// A `@reviewed_by(human: "X")` annotation names a known AI agent.
+    ///
+    /// This prevents LLM agents from forging human review annotations.
+    /// The reviewer name matched an entry in `[trust].known_agents` from `kodo.toml`.
+    /// Use `@reviewed_by(agent: "X")` to attribute the review to an agent instead.
+    #[error("function `{name}`: reviewer `{reviewer}` is a known AI agent and cannot claim human review at {span:?}")]
+    AgentClaimsHumanReview {
+        /// The function name.
+        name: String,
+        /// The reviewer name that matched a known agent.
+        reviewer: String,
+        /// Source location of the annotation.
+        span: Span,
+    },
+    /// A `@reviewed_by(human: "X")` annotation names a reviewer not in the allowlist.
+    ///
+    /// When `[trust].human_reviewers` is configured in `kodo.toml`, only listed
+    /// reviewers are accepted. This prevents unauthorized or unknown reviewers
+    /// from satisfying the review requirement.
+    #[error("function `{name}`: reviewer `{reviewer}` is not in the `human_reviewers` allowlist at {span:?}")]
+    ReviewerNotInAllowlist {
+        /// The function name.
+        name: String,
+        /// The reviewer name that was not found in the allowlist.
+        reviewer: String,
+        /// Source location of the annotation.
+        span: Span,
+    },
     /// A variable was used after its ownership was moved.
     ///
     /// Once a value is moved (e.g. passed to a function taking `own`),
@@ -548,6 +576,8 @@ impl TypeError {
             | Self::LowConfidenceWithoutReview { span, .. }
             | Self::ConfidenceThreshold { span, .. }
             | Self::SecuritySensitiveWithoutContract { span, .. }
+            | Self::AgentClaimsHumanReview { span, .. }
+            | Self::ReviewerNotInAllowlist { span, .. }
             | Self::UseAfterMove { span, .. }
             | Self::MutBorrowWhileRefBorrowed { span, .. }
             | Self::RefBorrowWhileMutBorrowed { span, .. }
@@ -607,6 +637,8 @@ impl TypeError {
             Self::LowConfidenceWithoutReview { .. } => "E0260",
             Self::ConfidenceThreshold { .. } => "E0261",
             Self::SecuritySensitiveWithoutContract { .. } => "E0262",
+            Self::AgentClaimsHumanReview { .. } => "E0263",
+            Self::ReviewerNotInAllowlist { .. } => "E0264",
             Self::UseAfterMove { .. } => "E0240",
             Self::BorrowEscapesScope { .. } => "E0241",
             Self::MoveWhileBorrowed { .. } => "E0242",
@@ -919,6 +951,15 @@ fn fix_patch_meta_and_policy(err: &TypeError) -> Option<kodo_ast::FixPatch> {
             start_offset: span.start as usize,
             end_offset: span.start as usize,
             replacement: format!("@confidence({threshold})\n    "),
+        }),
+        TypeError::AgentClaimsHumanReview { reviewer, span, .. } => Some(kodo_ast::FixPatch {
+            description: format!(
+                "replace @reviewed_by(human: \"{reviewer}\") with @reviewed_by(agent: \"{reviewer}\")"
+            ),
+            file: String::new(),
+            start_offset: span.start as usize,
+            end_offset: span.end as usize,
+            replacement: format!("@reviewed_by(agent: \"{reviewer}\")"),
         }),
         _ => None,
     }
@@ -1627,6 +1668,14 @@ fn suggestion_for_policy_error(err: &TypeError) -> Option<String> {
         )),
         TypeError::SecuritySensitiveWithoutContract { name, .. } => Some(format!(
             "add `requires {{ ... }}` or `ensures {{ ... }}` to function `{name}`"
+        )),
+        TypeError::AgentClaimsHumanReview { reviewer, .. } => Some(format!(
+            "change `@reviewed_by(human: \"{reviewer}\")` to `@reviewed_by(agent: \"{reviewer}\")`, \
+             or remove the annotation — AI agents cannot claim human review"
+        )),
+        TypeError::ReviewerNotInAllowlist { reviewer, .. } => Some(format!(
+            "add `\"{reviewer}\"` to `[trust].human_reviewers` in `kodo.toml`, \
+             or use a reviewer already in the allowlist"
         )),
         TypeError::InvariantNotBool { .. } => {
             Some("invariant conditions must evaluate to `Bool`".to_string())

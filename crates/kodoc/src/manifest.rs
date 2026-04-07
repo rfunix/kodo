@@ -8,6 +8,36 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Trust configuration section from `kodo.toml`.
+///
+/// Controls identity verification for `@reviewed_by` annotations,
+/// preventing LLM agents from forging human review claims.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub(crate) struct TrustSection {
+    /// Names of known AI agents (e.g., `"claude"`, `"gpt-4"`, `"copilot"`).
+    ///
+    /// Any `@reviewed_by(human: "X")` where X appears here (case-insensitive)
+    /// is rejected at compile time (E0263).
+    #[serde(default)]
+    pub known_agents: Vec<String>,
+    /// Allowlist of valid human reviewer identifiers.
+    ///
+    /// When non-empty, any `@reviewed_by(human: "X")` where X is not in this
+    /// list (case-insensitive) is rejected at compile time (E0264).
+    #[serde(default)]
+    pub human_reviewers: Vec<String>,
+}
+
+impl TrustSection {
+    /// Converts this manifest section into a `TrustConfig` for the type checker.
+    pub(crate) fn into_trust_config(self) -> kodo_types::TrustConfig {
+        kodo_types::TrustConfig {
+            known_agents: self.known_agents,
+            human_reviewers: self.human_reviewers,
+        }
+    }
+}
+
 /// Represents the contents of a `kodo.toml` manifest file.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Manifest {
@@ -18,6 +48,12 @@ pub(crate) struct Manifest {
     /// Dependencies, keyed by name.
     #[serde(default)]
     pub deps: HashMap<String, Dependency>,
+    /// Trust configuration for reviewer identity verification.
+    ///
+    /// When present, the compiler cross-checks `@reviewed_by(human: "X")` annotations
+    /// against known agents and optional allowlists to prevent LLM forgery.
+    #[serde(default)]
+    pub trust: Option<TrustSection>,
 }
 
 /// A single dependency specification.
@@ -38,6 +74,20 @@ pub(crate) enum Dependency {
         /// The filesystem path, relative to the manifest directory.
         path: String,
     },
+}
+
+/// Loads trust configuration for a source file by looking for `kodo.toml`.
+///
+/// Searches only the immediate parent directory of `source_file`. Returns
+/// `TrustConfig::default()` (no validation) if no `kodo.toml` exists or
+/// if it has no `[trust]` section.
+pub(crate) fn load_trust_config(source_file: &Path) -> kodo_types::TrustConfig {
+    let dir = source_file.parent().unwrap_or(Path::new("."));
+    read_manifest(dir)
+        .ok()
+        .and_then(|m| m.trust)
+        .map(TrustSection::into_trust_config)
+        .unwrap_or_default()
 }
 
 /// Reads and parses a `kodo.toml` manifest from the given directory.
@@ -123,6 +173,7 @@ version = "0.1.0"
                     path: "../utils".to_string(),
                 },
             )]),
+            trust: None,
         };
         let serialized = toml::to_string_pretty(&manifest).unwrap();
         let deserialized: Manifest = toml::from_str(&serialized).unwrap();
@@ -144,10 +195,69 @@ version = "0.1.0"
             module: "test-project".to_string(),
             version: "0.1.0".to_string(),
             deps: HashMap::new(),
+            trust: None,
         };
         write_manifest(&tmp, &manifest).unwrap();
         let read_back = read_manifest(&tmp).unwrap();
         assert_eq!(read_back.module, "test-project");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn parse_manifest_with_trust_section() {
+        let toml_str = r#"
+module = "secure-app"
+version = "1.0.0"
+
+[trust]
+known_agents = ["claude", "gpt-4", "copilot"]
+human_reviewers = ["alice", "bob"]
+"#;
+        let manifest: Manifest = toml::from_str(toml_str).unwrap();
+        let trust = manifest.trust.expect("trust section should be present");
+        assert_eq!(trust.known_agents, vec!["claude", "gpt-4", "copilot"]);
+        assert_eq!(trust.human_reviewers, vec!["alice", "bob"]);
+    }
+
+    #[test]
+    fn parse_manifest_without_trust_section_backward_compat() {
+        let toml_str = r#"
+module = "legacy-app"
+version = "0.1.0"
+"#;
+        let manifest: Manifest = toml::from_str(toml_str).unwrap();
+        assert!(
+            manifest.trust.is_none(),
+            "missing [trust] section should yield None"
+        );
+    }
+
+    #[test]
+    fn parse_manifest_with_partial_trust_only_agents() {
+        let toml_str = r#"
+module = "app"
+version = "0.1.0"
+
+[trust]
+known_agents = ["gemini"]
+"#;
+        let manifest: Manifest = toml::from_str(toml_str).unwrap();
+        let trust = manifest.trust.expect("trust section should be present");
+        assert_eq!(trust.known_agents, vec!["gemini"]);
+        assert!(
+            trust.human_reviewers.is_empty(),
+            "human_reviewers should default to empty"
+        );
+    }
+
+    #[test]
+    fn trust_section_into_trust_config() {
+        let section = TrustSection {
+            known_agents: vec!["claude".to_string()],
+            human_reviewers: vec!["rfunix".to_string()],
+        };
+        let config = section.into_trust_config();
+        assert_eq!(config.known_agents, vec!["claude"]);
+        assert_eq!(config.human_reviewers, vec!["rfunix"]);
     }
 }

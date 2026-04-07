@@ -1,0 +1,6 @@
+module = "trust-tests"
+version = "0.1.0"
+
+[trust]
+known_agents = ["claude", "gpt-4", "copilot", "gemini"]
+human_reviewers = ["rfunix", "alice", "bob"]

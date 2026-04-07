@@ -302,6 +302,7 @@ pub(crate) fn run_confidence_report(file: &PathBuf, json: bool, threshold: f64) 
 
     // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);
@@ -458,6 +459,7 @@ pub(crate) fn run_audit(
 
     // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);
@@ -516,9 +518,14 @@ pub(crate) fn run_audit(
         total_failures,
     );
 
+    // Load trust config for policy trust=verified checks.
+    let trust_config = crate::manifest::load_trust_config(file);
+
     // Validate policy if specified.
     let policy_result = policy.map(|p| match audit::parse_policy(p) {
-        Ok(criteria) => audit::validate_policy(&report, &criteria),
+        Ok(criteria) => {
+            audit::validate_policy_with_trust(&report, &criteria, &trust_config.known_agents)
+        }
         Err(e) => {
             eprintln!("policy parse error: {e}");
             // Return a failed result so we exit with code 1.
@@ -845,6 +852,7 @@ pub(crate) fn run_mir(file: &PathBuf, contracts_mode_str: &str) -> i32 {
 
     // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);

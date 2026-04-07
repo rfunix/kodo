@@ -46,6 +46,7 @@ mod stmt;
 mod types;
 
 pub use checker::TypeChecker;
+pub use confidence::TrustConfig;
 pub use errors::{Result, TypeError};
 pub use repair::{RepairPlan, RepairStep};
 pub use types::{resolve_type, resolve_type_with_enums, TypeEnv};
