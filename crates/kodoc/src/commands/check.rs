@@ -78,6 +78,7 @@ pub(crate) fn run_check(
 
     // Load stdlib prelude for type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);
@@ -255,6 +256,7 @@ pub(crate) fn run_fix(file: &PathBuf, dry_run: bool) -> i32 {
 
     // Try type checking.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for (_name, prelude_source) in kodo_std::prelude_sources() {
         if let Ok(prelude_mod) = kodo_parser::parse(prelude_source) {
             let _ = checker.check_module(&prelude_mod);

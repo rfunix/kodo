@@ -2,12 +2,33 @@
 //!
 //! Contains `compute_confidence`, `find_weakest_link`, `confidence_report`,
 //! `extract_confidence_value`, `has_human_review`, `check_annotation_policies`,
-//! and `validate_trust_policy`.
+//! `validate_trust_policy`, and `validate_reviewer_identity`.
 
 use crate::checker::TypeChecker;
 use crate::types::annotation_arg_expr;
 use crate::{Type, TypeError};
 use kodo_ast::{Annotation, AnnotationArg, Expr, Function, Module};
+
+/// Configuration for trust identity verification.
+///
+/// Loaded from the `[trust]` section of `kodo.toml` and threaded into
+/// the type checker to prevent LLM forgery of `@reviewed_by` annotations.
+///
+/// Both fields are opt-in: an empty `TrustConfig` (the default) performs no
+/// identity checks, preserving full backward compatibility.
+#[derive(Debug, Clone, Default)]
+pub struct TrustConfig {
+    /// Names of known AI agents (e.g., `"claude"`, `"gpt-4"`, `"copilot"`).
+    ///
+    /// If a `@reviewed_by(human: "X")` annotation names X that appears here
+    /// (case-insensitive), it is a hard error (E0263).
+    pub known_agents: Vec<String>,
+    /// Allowlist of valid human reviewer identifiers.
+    ///
+    /// When non-empty, any `@reviewed_by(human: "X")` where X is **not** in
+    /// this list (case-insensitive) produces a hard error (E0264).
+    pub human_reviewers: Vec<String>,
+}
 
 impl TypeChecker {
     /// Computes the transitive confidence for a function by following its call graph.
@@ -177,6 +198,85 @@ impl TypeChecker {
 
         Ok(())
     }
+
+    /// Validates `@reviewed_by` annotations against the trust configuration.
+    ///
+    /// Enforces two rules derived from `self.trust_config`:
+    /// 1. No reviewer name may match an entry in `known_agents` (E0263).
+    /// 2. If `human_reviewers` is non-empty, every reviewer must appear in it (E0264).
+    ///
+    /// When `trust_config` has empty lists (the default), this is a no-op —
+    /// backward compatibility is fully preserved.
+    pub(crate) fn validate_reviewer_identity(&self, func: &Function) -> crate::Result<()> {
+        let config = &self.trust_config;
+        if config.known_agents.is_empty() && config.human_reviewers.is_empty() {
+            return Ok(());
+        }
+
+        let reviewers = extract_human_reviewers(func);
+        for (reviewer, span) in &reviewers {
+            let reviewer_lower = reviewer.to_lowercase();
+
+            // Rule 1: reviewer must not be a known agent.
+            if config
+                .known_agents
+                .iter()
+                .any(|a| a.to_lowercase() == reviewer_lower)
+            {
+                return Err(TypeError::AgentClaimsHumanReview {
+                    name: func.name.clone(),
+                    reviewer: reviewer.clone(),
+                    span: *span,
+                });
+            }
+
+            // Rule 2: reviewer must be in the allowlist (when configured).
+            if !config.human_reviewers.is_empty()
+                && !config
+                    .human_reviewers
+                    .iter()
+                    .any(|h| h.to_lowercase() == reviewer_lower)
+            {
+                return Err(TypeError::ReviewerNotInAllowlist {
+                    name: func.name.clone(),
+                    reviewer: reviewer.clone(),
+                    span: *span,
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Extracts human reviewer names from `@reviewed_by` annotations on a function.
+///
+/// Returns a vec of `(reviewer_name, span)` pairs for all `@reviewed_by`
+/// annotations that specify a human reviewer, supporting both syntaxes:
+/// - `@reviewed_by(human: "alice")` — named argument
+/// - `@reviewed_by("human:alice")` — positional string with prefix
+fn extract_human_reviewers(func: &Function) -> Vec<(String, kodo_ast::Span)> {
+    let mut result = Vec::new();
+    for ann in &func.annotations {
+        if ann.name != "reviewed_by" {
+            continue;
+        }
+        for arg in &ann.args {
+            match arg {
+                AnnotationArg::Named(key, Expr::StringLit(value, _)) if key == "human" => {
+                    result.push((value.clone(), ann.span));
+                }
+                AnnotationArg::Positional(Expr::StringLit(value, _))
+                    if value.starts_with("human:") =>
+                {
+                    let reviewer = value.trim_start_matches("human:").to_string();
+                    result.push((reviewer, ann.span));
+                }
+                _ => {}
+            }
+        }
+    }
+    result
 }
 
 /// Validates trust policy constraints on a function's annotations.

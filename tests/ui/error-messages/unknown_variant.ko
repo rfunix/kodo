@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0219
+module unknown_variant {
+    meta { purpose: "Type error E0219: referencing variant that does not exist in enum" }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main() -> Int {
+        let c: Color = Color::Purple
+        return 0
+    }
+}

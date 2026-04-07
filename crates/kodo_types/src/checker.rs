@@ -144,6 +144,12 @@ pub struct TypeChecker {
     /// When calling an async function, the return type is automatically wrapped
     /// in `Future<T>` so that `await` can unwrap it.
     pub(crate) async_fn_names: std::collections::HashSet<String>,
+    /// Trust configuration for identity verification in `@reviewed_by` annotations.
+    ///
+    /// When populated from `kodo.toml`'s `[trust]` section, reviewer names are
+    /// cross-checked against known agents (E0263) and optional allowlists (E0264).
+    /// Defaults to empty lists, which disables identity checks entirely.
+    pub(crate) trust_config: crate::confidence::TrustConfig,
 }
 
 impl TypeChecker {
@@ -190,9 +196,19 @@ impl TypeChecker {
             map_for_in_spans: Vec::new(),
             set_for_in_spans: Vec::new(),
             async_fn_names: std::collections::HashSet::new(),
+            trust_config: crate::confidence::TrustConfig::default(),
         };
         checker.register_builtins();
         checker
+    }
+
+    /// Sets the trust configuration for annotation identity verification.
+    ///
+    /// Call this before `check_module` to enable forgery detection. The checker
+    /// will reject `@reviewed_by(human: "X")` if X appears in `known_agents`
+    /// (E0263) or is absent from `human_reviewers` when that list is non-empty (E0264).
+    pub fn set_trust_config(&mut self, config: crate::confidence::TrustConfig) {
+        self.trust_config = config;
     }
 
     /// Registers a module name as imported, enabling qualified calls like `mod.func()`.
@@ -799,6 +815,10 @@ impl TypeChecker {
             Self::check_annotation_policies(func)?;
         }
 
+        for func in &module.functions {
+            self.validate_reviewer_identity(func)?;
+        }
+
         let min_confidence = module
             .meta
             .as_ref()
@@ -1364,6 +1384,12 @@ impl TypeChecker {
 
         for func in &module.functions {
             if let Err(e) = Self::check_annotation_policies(func) {
+                errors.push(e);
+            }
+        }
+
+        for func in &module.functions {
+            if let Err(e) = self.validate_reviewer_identity(func) {
                 errors.push(e);
             }
         }

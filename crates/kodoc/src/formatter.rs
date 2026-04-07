@@ -1151,4 +1151,324 @@ module generics {
         let out = roundtrip(src);
         assert!(out.contains("identity<T>") || out.contains("identity<"));
     }
+
+    #[test]
+    fn formats_closure() {
+        let src = r#"
+module closures {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let mul: (Int) -> Int = |x: Int| -> Int { x * 2 }
+        return mul(5)
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("|x: Int|"));
+        assert!(out.contains("x * 2"));
+    }
+
+    #[test]
+    fn formats_actor_decl() {
+        let src = r#"
+module actors {
+    meta { purpose: "test" }
+    actor Counter {
+        count: Int
+        fn increment(self) -> Int {
+            return self.count + 1
+        }
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("actor Counter"));
+        assert!(out.contains("count: Int"));
+        assert!(out.contains("fn increment"));
+    }
+
+    #[test]
+    fn formats_trait_and_impl() {
+        let src = r#"
+module traits {
+    meta { purpose: "test" }
+    trait Greet {
+        fn greet(self) -> String
+    }
+    struct Person {
+        name: String
+    }
+    impl Greet for Person {
+        fn greet(self) -> String {
+            return "hi"
+        }
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("trait Greet"));
+        assert!(out.contains("impl Greet for Person"));
+        assert!(out.contains("fn greet"));
+    }
+
+    #[test]
+    fn formats_annotations() {
+        let src = r#"
+module annotations {
+    meta { purpose: "test" }
+    @confidence(0.9)
+    @authored_by(agent: "test")
+    fn compute(x: Int) -> Int {
+        return x * 2
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("@confidence(0.9)"));
+        assert!(out.contains("@authored_by("));
+        assert!(out.contains("fn compute"));
+    }
+
+    #[test]
+    fn formats_option_result_types() {
+        let src = r#"
+module optresult {
+    meta { purpose: "test" }
+    fn maybe_val(x: Int) -> Option<Int> {
+        if x > 0 {
+            return Option::Some(x)
+        }
+        return Option::None
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("Option<Int>"));
+        assert!(out.contains("Option::Some"));
+        assert!(out.contains("Option::None"));
+    }
+
+    #[test]
+    fn formats_tuple_type_and_access() {
+        let src = r#"
+module tuples {
+    meta { purpose: "test" }
+    fn swap(a: Int, b: Int) -> (Int, Int) {
+        return (b, a)
+    }
+    fn main() -> Int {
+        let pair: (Int, Int) = swap(1, 2)
+        let first: Int = pair.0
+        return first
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("(Int, Int)"));
+        assert!(out.contains("pair.0"));
+    }
+
+    #[test]
+    fn formats_break_continue() {
+        let src = r#"
+module breakcont {
+    meta { purpose: "test" }
+    fn find_first(n: Int) -> Int {
+        let mut i: Int = 0
+        while i < n {
+            if i == 5 {
+                break
+            }
+            if i == 3 {
+                i = i + 1
+                continue
+            }
+            i = i + 1
+        }
+        return i
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("break"));
+        assert!(out.contains("continue"));
+    }
+
+    #[test]
+    fn formats_spawn() {
+        let src = r#"
+module spawning {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        spawn {
+            print_int(42)
+        }
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("spawn {"));
+        assert!(out.contains("print_int(42)"));
+    }
+
+    #[test]
+    fn formats_channel_ops() {
+        let src = r#"
+module channels {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let ch: Channel<Int> = channel_new()
+        channel_send(ch, 42)
+        let v: Int = channel_recv(ch)
+        return v
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("Channel<Int>"));
+        assert!(out.contains("channel_new()"));
+        assert!(out.contains("channel_send("));
+        assert!(out.contains("channel_recv("));
+    }
+
+    #[test]
+    fn formats_select() {
+        let src = r#"
+module sel {
+    meta { purpose: "test" }
+    fn main() -> Int {
+        let ch1: Channel<Int> = channel_new()
+        let ch2: Channel<Int> = channel_new()
+        spawn {
+            channel_send(ch2, 99)
+        }
+        select {
+            ch1 => |val: Int| {
+                print_int(val)
+            }
+            ch2 => |val: Int| {
+                print_int(val)
+            }
+        }
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("select {"));
+        assert!(out.contains("ch1 =>") || out.contains("ch2 =>"));
+    }
+
+    #[test]
+    fn formats_intent_block() {
+        let src = r#"
+module intents {
+    meta { purpose: "test" }
+    intent fetch_data {
+        url: "https://api.example.com"
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("intent fetch_data"));
+        assert!(out.contains("url:"));
+    }
+
+    #[test]
+    fn formats_unary_ops() {
+        let src = r#"
+module unary {
+    meta { purpose: "test" }
+    fn negate(x: Int) -> Int {
+        return 0 - x
+    }
+    fn invert(b: Bool) -> Bool {
+        return !b
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("!b"));
+        assert!(out.contains("0 - x"));
+    }
+
+    #[test]
+    fn formats_binary_all_ops() {
+        let src = r#"
+module binops {
+    meta { purpose: "test" }
+    fn demo(a: Int, b: Int) -> Bool {
+        let sum: Int = a + b
+        let diff: Int = a - b
+        let prod: Int = a * b
+        let quot: Int = a / b
+        let rem: Int = a % b
+        let eq: Bool = a == b
+        let ne: Bool = a != b
+        let lt: Bool = a < b
+        let gt: Bool = a > b
+        let and_r: Bool = eq && ne
+        let or_r: Bool = lt || gt
+        return or_r
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("a + b"));
+        assert!(out.contains("a - b"));
+        assert!(out.contains("a * b"));
+        assert!(out.contains("a / b"));
+        assert!(out.contains("a % b"));
+        assert!(out.contains("a == b"));
+        assert!(out.contains("a != b"));
+        assert!(out.contains("&&"));
+        assert!(out.contains("||"));
+    }
+
+    #[test]
+    fn formats_nested_collections() {
+        let src = r#"
+module nested_cols {
+    meta { purpose: "test" }
+    fn make_nested() -> List<List<Int>> {
+        let inner: List<Int> = list_new()
+        let outer: List<List<Int>> = list_new()
+        return outer
+    }
+    fn main() -> Int {
+        return 0
+    }
+}"#;
+        let out = roundtrip(src);
+        assert!(out.contains("List<List<Int>>"));
+        assert!(out.contains("list_new()"));
+    }
+
+    #[test]
+    fn formats_idempotent() {
+        let src = r#"
+module idempotent {
+    meta { purpose: "test" }
+    fn add(a: Int, b: Int) -> Int {
+        return a + b
+    }
+}"#;
+        let module1 = kodo_parser::parse(src).expect("initial parse failed");
+        let out1 = format_module(&module1);
+        let module2 = kodo_parser::parse(&out1).expect("second parse failed");
+        let out2 = format_module(&module2);
+        assert_eq!(out1, out2, "formatter is not idempotent");
+    }
 }

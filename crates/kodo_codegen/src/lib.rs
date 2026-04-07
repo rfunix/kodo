@@ -1812,6 +1812,268 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // instruction.rs translation path tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn compile_add_two_ints() {
+        let func = MirFunction {
+            name: "add_ints".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Add,
+                    Box::new(Value::IntConst(10)),
+                    Box::new(Value::IntConst(20)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "add two ints failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_subtract_ints() {
+        let func = MirFunction {
+            name: "sub_ints".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Sub,
+                    Box::new(Value::IntConst(100)),
+                    Box::new(Value::IntConst(37)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "subtract ints failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_multiply_ints() {
+        let func = MirFunction {
+            name: "mul_ints".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Mul,
+                    Box::new(Value::IntConst(6)),
+                    Box::new(Value::IntConst(7)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "multiply ints failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_divide_ints() {
+        let func = MirFunction {
+            name: "div_ints".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Div,
+                    Box::new(Value::IntConst(84)),
+                    Box::new(Value::IntConst(2)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "divide ints failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_compare_ints_eq() {
+        let func = MirFunction {
+            name: "compare_eq".to_string(),
+            return_type: Type::Bool,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BinOp(
+                    kodo_ast::BinOp::Eq,
+                    Box::new(Value::IntConst(42)),
+                    Box::new(Value::IntConst(42)),
+                )),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "compare ints (Eq) with Bool return failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_string_const_local() {
+        let func = MirFunction {
+            name: "str_local".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::String,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(
+                    LocalId(0),
+                    Value::StringConst("hello".to_string()),
+                )],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "string const local assignment failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_function_call_in_body() {
+        let printer = MirFunction {
+            name: "print_int".to_string(),
+            return_type: Type::Unit,
+            param_count: 1,
+            locals: vec![
+                Local {
+                    id: LocalId(0),
+                    ty: Type::Int,
+                    mutable: false,
+                },
+                Local {
+                    id: LocalId(1),
+                    ty: Type::Unit,
+                    mutable: false,
+                },
+            ],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let caller = MirFunction {
+            name: "call_print_int".to_string(),
+            return_type: Type::Unit,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Unit,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Call {
+                    dest: LocalId(0),
+                    callee: "print_int".to_string(),
+                    args: vec![Value::IntConst(99)],
+                }],
+                terminator: Terminator::Return(Value::Unit),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[printer, caller], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "function call in body failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_multiple_blocks_with_jump() {
+        let func = MirFunction {
+            name: "two_blocks".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Goto(BlockId(1)),
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![],
+                    terminator: Terminator::Return(Value::IntConst(7)),
+                },
+            ],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(
+            result.is_ok(),
+            "multiple blocks with jump failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn compile_bool_const_return() {
+        let func = MirFunction {
+            name: "always_true".to_string(),
+            return_type: Type::Bool,
+            param_count: 0,
+            locals: vec![],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![],
+                terminator: Terminator::Return(Value::BoolConst(true)),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "bool const return failed: {result:?}");
+    }
+
+    #[test]
+    fn compile_local_assign_and_return() {
+        let func = MirFunction {
+            name: "pass_through".to_string(),
+            return_type: Type::Int,
+            param_count: 0,
+            locals: vec![Local {
+                id: LocalId(0),
+                ty: Type::Int,
+                mutable: false,
+            }],
+            blocks: vec![BasicBlock {
+                id: BlockId(0),
+                instructions: vec![Instruction::Assign(LocalId(0), Value::IntConst(55))],
+                terminator: Terminator::Return(Value::Local(LocalId(0))),
+            }],
+            entry: BlockId(0),
+        };
+        let result = compile_module(&[func], &CodegenOptions::default(), None);
+        assert!(result.is_ok(), "local assign and return failed: {result:?}");
+    }
+
+    // ---------------------------------------------------------------
     // CodegenOptions tests
     // ---------------------------------------------------------------
 

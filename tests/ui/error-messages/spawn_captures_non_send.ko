@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0280
+module spawn_captures_non_send {
+    meta { purpose: "E0280: spawn captura ref borrow que nao e Send-safe" }
+
+    fn process(ref data: Int) {
+        spawn {
+            print_int(data)
+        }
+    }
+
+    fn main() {
+        let value: Int = 99
+        process(value)
+    }
+}

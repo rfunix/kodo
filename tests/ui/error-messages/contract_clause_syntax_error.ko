@@ -1,0 +1,15 @@
+//@ compile-fail
+//@ error-code: E0100
+module contract_clause_syntax_error {
+    meta { purpose: "Parse error in requires block: malformed expression causes compile fail" }
+
+    fn divide(a: Int, b: Int) -> Int
+        requires { if }
+    {
+        return a / b
+    }
+
+    fn main() -> Int {
+        return divide(10, 2)
+    }
+}

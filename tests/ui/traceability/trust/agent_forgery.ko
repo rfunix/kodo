@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0263
+module agent_forgery {
+    meta { purpose: "LLM forging human review should be rejected" }
+
+    @confidence(0.5)
+    @reviewed_by(human: "claude")
+    fn sensitive_fn(x: Int) -> Int {
+        return x
+    }
+
+    fn main() {
+        let result: Int = sensitive_fn(1)
+        print_int(result)
+    }
+}

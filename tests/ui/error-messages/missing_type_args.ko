@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0223
+module missing_type_args {
+    meta { purpose: "Type error E0223: generic type used without type arguments" }
+
+    struct Wrapper<T> {
+        value: T
+    }
+
+    fn main() -> Int {
+        let w: Wrapper = Wrapper { value: 42 }
+        return 0
+    }
+}

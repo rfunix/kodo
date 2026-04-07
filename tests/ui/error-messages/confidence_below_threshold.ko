@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0261
+module confidence_below_threshold {
+    meta {
+        purpose: "E0261: confidence da funcao abaixo do min_confidence declarado no meta"
+        min_confidence: "0.90"
+    }
+
+    @confidence(0.5)
+    @reviewed_by(human: "alice")
+    fn weak_function() -> Int {
+        return 1
+    }
+}

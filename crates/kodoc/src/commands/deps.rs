@@ -256,6 +256,7 @@ mod tests {
             module: "test-project".to_string(),
             version: "0.1.0".to_string(),
             deps: HashMap::new(),
+            trust: None,
         };
         manifest::write_manifest(&tmp, &man).unwrap();
 

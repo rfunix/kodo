@@ -1,0 +1,10 @@
+//@ compile-fail
+//@ error-code: E0227
+module closure_param_missing_type {
+    meta { purpose: "Type error E0227: closure parameter without type annotation" }
+
+    fn main() -> Int {
+        let f = |x| -> Int { x + 1 }
+        return 0
+    }
+}

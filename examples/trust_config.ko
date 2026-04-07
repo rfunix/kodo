@@ -1,0 +1,46 @@
+// Demonstrates Kōdo's trust identity verification via kodo.toml.
+//
+// The [trust] section in kodo.toml prevents AI agents from forging
+// @reviewed_by(human: "...") annotations. When configured:
+//   - known_agents: agent names cannot appear as human reviewers (E0263)
+//   - human_reviewers: only listed names are accepted as human reviewers (E0264)
+//
+// This example runs WITHOUT a kodo.toml [trust] section, so no identity
+// checks are performed. See examples/trust_config/kodo.toml for a
+// project with trust enforcement enabled.
+//
+// Compile and run:
+//   kodoc build examples/trust_config.ko -o trust_config
+//   ./trust_config
+
+module trust_config {
+    meta {
+        purpose: "Demonstrate trust identity verification for reviewer annotations",
+        version: "0.1.0"
+    }
+
+    // High-confidence function: no review needed.
+    @authored_by(agent: "claude")
+    @confidence(0.95)
+    fn compute_score(x: Int) -> Int {
+        return x * 10
+    }
+
+    // Low-confidence function reviewed by a human.
+    // With [trust].known_agents = ["claude"] in kodo.toml, writing
+    // @reviewed_by(human: "claude") here would be rejected as E0263.
+    @authored_by(agent: "claude")
+    @confidence(0.5)
+    @reviewed_by(human: "alice")
+    fn experimental_feature(x: Int) -> Int {
+        return x + 1
+    }
+
+    fn main() {
+        let score: Int = compute_score(7)
+        print_int(score)
+
+        let result: Int = experimental_feature(42)
+        print_int(result)
+    }
+}

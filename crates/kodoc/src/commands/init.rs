@@ -54,6 +54,7 @@ pub(crate) fn run_init(name: Option<&str>) -> i32 {
         module: module_name.clone(),
         version: "0.1.0".to_string(),
         deps: HashMap::new(),
+        trust: None,
     };
 
     if let Err(e) = write_manifest(&project_dir, &manifest) {

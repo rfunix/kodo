@@ -129,6 +129,7 @@ pub(crate) fn run_build(
 
     // Type check -- register prelude, imports, then user module.
     let mut checker = kodo_types::TypeChecker::new();
+    checker.set_trust_config(crate::manifest::load_trust_config(file));
     for prelude in &prelude_modules {
         if let Err(e) = checker.check_module(prelude) {
             eprintln!("stdlib type error: {e}");

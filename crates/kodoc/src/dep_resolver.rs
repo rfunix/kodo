@@ -326,6 +326,7 @@ mod tests {
                     path: "my-dep".to_string(),
                 },
             )]),
+            trust: None,
         };
 
         let (resolved, lockfile) = resolve_deps(&manifest, &tmp).unwrap();
@@ -350,6 +351,7 @@ mod tests {
                     path: "/absolutely/nonexistent/path".to_string(),
                 },
             )]),
+            trust: None,
         };
 
         let result = resolve_deps(&manifest, Path::new("/tmp"));
@@ -377,6 +379,7 @@ mod tests {
                     path: "my-dep".to_string(),
                 },
             )]),
+            trust: None,
         };
 
         let (resolved, _) = resolve_deps(&manifest, &tmp).unwrap();

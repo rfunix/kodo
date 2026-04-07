@@ -503,6 +503,44 @@ error[E0262]: function `process_input` is marked `@security_sensitive` but has n
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ add `requires { ... }` or `ensures { ... }` to function `process_input`
 ```
 
+### E0263: Agent Claims Human Review
+A `@reviewed_by(human: "X")` annotation names an AI agent that appears in `[trust].known_agents` in `kodo.toml`. AI agents cannot claim human review status — use `@reviewed_by(agent: "X")` instead.
+
+```
+error[E0263]: function `process_payment`: reviewer `claude` is a known AI agent and cannot claim human review
+  --> src/main.ko:5:1
+   |
+ 5 | @reviewed_by(human: "claude")
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ change to @reviewed_by(agent: "claude")
+```
+
+**Fix**: Change `@reviewed_by(human: "claude")` to `@reviewed_by(agent: "claude")` — or have an actual human review the function.
+
+**Configuration**: Add `known_agents` to `kodo.toml`:
+```toml
+[trust]
+known_agents = ["claude", "gpt-4", "copilot", "gemini"]
+```
+
+### E0264: Reviewer Not in Allowlist
+A `@reviewed_by(human: "X")` annotation names a reviewer not present in `[trust].human_reviewers` in `kodo.toml`. When an allowlist is configured, only listed reviewers are accepted.
+
+```
+error[E0264]: function `process_payment`: reviewer `unknown_person` is not in the `human_reviewers` allowlist
+  --> src/main.ko:5:1
+   |
+ 5 | @reviewed_by(human: "unknown_person")
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ add "unknown_person" to [trust].human_reviewers in kodo.toml
+```
+
+**Fix**: Add the reviewer to `kodo.toml`, or replace with an authorized reviewer.
+
+**Configuration**: Add `human_reviewers` to `kodo.toml`:
+```toml
+[trust]
+human_reviewers = ["rfunix", "alice", "bob"]
+```
+
 ### E0281: Closure Capture After Move
 A closure captures a variable that has already been moved. Once a variable is moved (e.g., into another closure or by assignment), it cannot be captured again.
 
@@ -681,7 +719,7 @@ Every type error variant (42 of 43) now includes a machine-applicable `fix_patch
 
 | Category | Variants | Coverage |
 |----------|----------|----------|
-| Meta & policy (E0210-E0212, E0260-E0262) | 6 | 6/6 (100%) |
+| Meta & policy (E0210-E0212, E0260-E0264) | 8 | 8/8 (100%) |
 | Name resolution with similar (E0201, E0215, E0217, E0219, E0235) | 5 | 5/5 (100%) |
 | Name resolution without similar | 5 | 5/5 (100%) |
 | Struct/enum/trait definitions (E0213, E0218, E0222, E0230, E0232) | 5 | 5/5 (100%) |
@@ -704,6 +742,8 @@ For complex errors requiring multiple steps, `repair_plan()` returns a sequence 
 - `E0231` (Missing trait method) — add method stub + implement body
 - `E0232` (Trait bound not satisfied) — add impl block + implement methods
 - `E0262` (Security-sensitive without contract) — add contract blocks + specify invariants
+- `E0263` (Agent claims human review) — change `human:` to `agent:` in the annotation
+- `E0264` (Reviewer not in allowlist) — add reviewer to `[trust].human_reviewers` in `kodo.toml`
 
 ## JSON Error Format
 

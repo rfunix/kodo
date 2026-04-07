@@ -350,3 +350,150 @@ fn confidence_threshold_violation() {
     let err = result.unwrap_err();
     assert_eq!(err.code(), "E0261");
 }
+
+// ===== Trust Identity Verification Tests (E0263, E0264) =====
+
+fn make_reviewed_by_fn(reviewer_key: &str, reviewer_value: &str) -> kodo_ast::Function {
+    make_function_with_annotations(
+        "reviewed_fn",
+        vec![Annotation {
+            name: "reviewed_by".to_string(),
+            args: vec![AnnotationArg::Named(
+                reviewer_key.to_string(),
+                Expr::StringLit(reviewer_value.to_string(), Span::new(0, 10)),
+            )],
+            span: Span::new(0, 40),
+        }],
+    )
+}
+
+#[test]
+fn empty_trust_config_passes_any_reviewer() {
+    let func = make_reviewed_by_fn("human", "claude");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    // No trust config set — should pass (backward compat).
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "empty trust config should allow any reviewer: {result:?}"
+    );
+}
+
+#[test]
+fn agent_claims_human_review_emits_e0263() {
+    let func = make_reviewed_by_fn("human", "claude");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec!["claude".to_string()],
+        human_reviewers: vec![],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "agent name in @reviewed_by(human: ...) should be rejected"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0263");
+}
+
+#[test]
+fn agent_claims_human_review_case_insensitive_e0263() {
+    let func = make_reviewed_by_fn("human", "Claude");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec!["claude".to_string()],
+        human_reviewers: vec![],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "case-insensitive agent name should still be rejected"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0263");
+}
+
+#[test]
+fn reviewer_not_in_allowlist_emits_e0264() {
+    let func = make_reviewed_by_fn("human", "bob");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec![],
+        human_reviewers: vec!["alice".to_string()],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "reviewer not in allowlist should be rejected"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0264");
+}
+
+#[test]
+fn reviewer_in_allowlist_passes() {
+    let func = make_reviewed_by_fn("human", "alice");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec!["claude".to_string(), "gpt-4".to_string()],
+        human_reviewers: vec!["alice".to_string(), "bob".to_string()],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_ok(),
+        "reviewer in allowlist should pass: {result:?}"
+    );
+}
+
+#[test]
+fn agent_match_takes_priority_over_allowlist_e0263() {
+    // "claude" is both in known_agents and human_reviewers — agent check fires first.
+    let func = make_reviewed_by_fn("human", "claude");
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec!["claude".to_string()],
+        human_reviewers: vec!["claude".to_string(), "alice".to_string()],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "agent name should be rejected even if in allowlist"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0263");
+}
+
+#[test]
+fn positional_human_prefix_syntax_detected_e0263() {
+    // @reviewed_by("human:claude") positional syntax.
+    let func = make_function_with_annotations(
+        "fn_pos",
+        vec![Annotation {
+            name: "reviewed_by".to_string(),
+            args: vec![AnnotationArg::Positional(Expr::StringLit(
+                "human:claude".to_string(),
+                Span::new(0, 10),
+            ))],
+            span: Span::new(0, 40),
+        }],
+    );
+    let module = make_module_with_policy(vec![func], None);
+    let mut checker = TypeChecker::new();
+    checker.set_trust_config(crate::TrustConfig {
+        known_agents: vec!["claude".to_string()],
+        human_reviewers: vec![],
+    });
+    let result = checker.check_module(&module);
+    assert!(
+        result.is_err(),
+        "positional human:X syntax should also be checked"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "E0263");
+}

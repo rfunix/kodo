@@ -442,6 +442,7 @@ The `--policy` flag accepts a comma-separated list of criteria:
 | `contracts=all_verified` | All contracts must be statically verified by Z3 |
 | `contracts=all_present` | Every function must have at least one contract |
 | `reviewed=all` | Every function must have a `@reviewed_by` annotation |
+| `trust=verified` | No `@reviewed_by(human: "X")` may name a known agent (from `[trust].known_agents` in `kodo.toml`) |
 
 **Example:**
 

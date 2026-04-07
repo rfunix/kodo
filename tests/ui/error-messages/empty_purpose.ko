@@ -1,0 +1,9 @@
+//@ compile-fail
+//@ error-code: E0211
+module empty_purpose {
+    meta { purpose: "" }
+
+    fn main() -> Int {
+        return 0
+    }
+}

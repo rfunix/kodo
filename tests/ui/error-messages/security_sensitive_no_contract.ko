@@ -1,0 +1,14 @@
+//@ compile-fail
+//@ error-code: E0262
+module security_sensitive_no_contract {
+    meta { purpose: "E0262: funcao security_sensitive sem requires/ensures" }
+
+    @security_sensitive
+    fn authenticate(password: String) -> Bool {
+        return true
+    }
+
+    fn main() -> Bool {
+        return authenticate("secret")
+    }
+}
