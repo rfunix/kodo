@@ -548,8 +548,9 @@ fn resolve_manifest_deps(project_dir: &std::path::Path) -> Vec<std::path::PathBu
 
     let manifest = match crate::manifest::read_manifest(project_dir) {
         Ok(m) => m,
-        Err(e) => {
-            eprintln!("warning: {e}");
+        Err(_) => {
+            // kodo.toml exists but may be a trust-only config (no module/version/deps).
+            // Silently skip dependency loading in that case.
             return Vec::new();
         }
     };
