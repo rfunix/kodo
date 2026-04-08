@@ -57,6 +57,11 @@ jobs:
           key: release-macos-x86_64
 
       - name: Build kodoc
+        env:
+          PKG_CONFIG_ALLOW_CROSS: 1
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+          Z3_LIBRARY_PATH_OVERRIDE: /opt/homebrew/lib
+          BINDGEN_EXTRA_CLANG_ARGS: "-I/opt/homebrew/include"
         run: cargo build --release -p kodoc --target x86_64-apple-darwin
 
       - name: Package binary
