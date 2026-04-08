@@ -67,3 +67,104 @@ impl ResolverStrategy for HttpServerStrategy {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn int_entry(key: &str, val: i64) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::IntLit(val, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn nested_list_entry(key: &str, rows: &[(&str, &str, &str)]) -> IntentConfigEntry {
+        let vals = rows
+            .iter()
+            .map(|(method, path, handler)| {
+                IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::StringLit(method.to_string(), dummy_span()),
+                        IntentConfigValue::StringLit(path.to_string(), dummy_span()),
+                        IntentConfigValue::StringLit(handler.to_string(), dummy_span()),
+                    ],
+                    dummy_span(),
+                )
+            })
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn http_server_resolves_with_no_routes() {
+        let intent = make_intent("http_server", vec![]);
+        let result = HttpServerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert!(resolved.description.contains("8080"));
+        assert!(resolved.description.contains("0 routes"));
+    }
+
+    #[test]
+    fn http_server_resolves_with_custom_port() {
+        let intent = make_intent("http_server", vec![int_entry("port", 3000)]);
+        let result = HttpServerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.description.contains("3000"));
+    }
+
+    #[test]
+    fn http_server_resolves_with_routes() {
+        let intent = make_intent(
+            "http_server",
+            vec![nested_list_entry(
+                "routes",
+                &[
+                    ("GET", "/health", "health_check"),
+                    ("POST", "/api/users", "create_user"),
+                ],
+            )],
+        );
+        let result = HttpServerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.description.contains("2 routes"));
+        assert!(resolved.description.contains("health_check"));
+        assert!(resolved.description.contains("create_user"));
+    }
+
+    #[test]
+    fn http_server_strategy_handles_http_server_intent() {
+        assert!(HttpServerStrategy.handles().contains(&"http_server"));
+    }
+
+    #[test]
+    fn http_server_strategy_valid_keys() {
+        let keys = HttpServerStrategy.valid_keys();
+        assert!(keys.contains(&"port"));
+        assert!(keys.contains(&"routes"));
+        assert!(keys.contains(&"not_found"));
+    }
+}

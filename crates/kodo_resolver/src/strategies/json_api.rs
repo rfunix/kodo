@@ -255,3 +255,125 @@ fn resolve_json_api_server(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn list_entry(key: &str, items: &[&str]) -> IntentConfigEntry {
+        let vals = items
+            .iter()
+            .map(|s| IntentConfigValue::StringLit(s.to_string(), dummy_span()))
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn route_to_handler_name_simple() {
+        assert_eq!(route_to_handler_name("/users"), "handle_users");
+    }
+
+    #[test]
+    fn route_to_handler_name_nested() {
+        assert_eq!(
+            route_to_handler_name("/api/v1/posts"),
+            "handle_api_v1_posts"
+        );
+    }
+
+    #[test]
+    fn route_to_handler_name_root() {
+        assert_eq!(route_to_handler_name("/"), "handle_root");
+    }
+
+    #[test]
+    fn route_to_handler_name_empty() {
+        assert_eq!(route_to_handler_name(""), "handle_root");
+    }
+
+    #[test]
+    fn api_handler_has_correct_name() {
+        let func = generate_api_handler("handle_users", "/users", dummy_span());
+        assert_eq!(func.name, "handle_users");
+    }
+
+    #[test]
+    fn api_handler_has_no_params() {
+        let func = generate_api_handler("handle_users", "/users", dummy_span());
+        assert_eq!(func.params.len(), 0);
+    }
+
+    #[test]
+    fn api_create_model_has_data_param_with_contract() {
+        let func = generate_api_create_model("user", dummy_span());
+        assert_eq!(func.name, "create_user");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "data");
+        assert_eq!(func.requires.len(), 1);
+    }
+
+    #[test]
+    fn api_get_model_has_id_param_with_contract() {
+        let func = generate_api_get_model("post", dummy_span());
+        assert_eq!(func.name, "get_post");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "id");
+        assert_eq!(func.requires.len(), 1);
+    }
+
+    #[test]
+    fn json_api_strategy_generates_route_and_model_functions() {
+        let intent = make_intent(
+            "json_api",
+            vec![
+                list_entry("routes", &["/users", "/posts"]),
+                list_entry("models", &["User"]),
+            ],
+        );
+        let result = JsonApiStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        // 2 route handlers + 2 model functions (create + get)
+        assert_eq!(resolved.generated_functions.len(), 4);
+    }
+
+    #[test]
+    fn json_api_strategy_empty_config() {
+        let intent = make_intent("json_api", vec![]);
+        let result = JsonApiStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 0);
+    }
+
+    #[test]
+    fn json_api_strategy_handles_json_api_intent() {
+        assert!(JsonApiStrategy.handles().contains(&"json_api"));
+    }
+
+    #[test]
+    fn json_api_strategy_valid_keys() {
+        let keys = JsonApiStrategy.valid_keys();
+        assert!(keys.contains(&"routes"));
+        assert!(keys.contains(&"models"));
+        assert!(keys.contains(&"endpoints"));
+    }
+}

@@ -124,3 +124,108 @@ fn generate_worker_main(
 
     make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn int_entry(key: &str, val: i64) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::IntLit(val, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn fnref_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::FnRef(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn worker_strategy_resolves_with_defaults() {
+        let intent = make_intent("worker", vec![]);
+        let result = WorkerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert!(resolved.description.contains("do_work"));
+        assert!(resolved.description.contains("10"));
+    }
+
+    #[test]
+    fn worker_strategy_custom_task_and_iterations() {
+        let intent = make_intent(
+            "worker",
+            vec![
+                fnref_entry("task", "my_task"),
+                int_entry("max_iterations", 50),
+            ],
+        );
+        let result = WorkerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.description.contains("my_task"));
+        assert!(resolved.description.contains("50"));
+    }
+
+    #[test]
+    fn worker_strategy_with_error_handler() {
+        let intent = make_intent(
+            "worker",
+            vec![
+                str_entry("task", "process_job"),
+                str_entry("on_error", "handle_error"),
+            ],
+        );
+        let result = WorkerStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.description.contains("handle_error"));
+    }
+
+    #[test]
+    fn worker_strategy_generates_kodo_main() {
+        let intent = make_intent("worker", vec![]);
+        let resolved = WorkerStrategy.resolve(&intent).unwrap();
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+    }
+
+    #[test]
+    fn worker_strategy_handles_worker_intent() {
+        assert!(WorkerStrategy.handles().contains(&"worker"));
+    }
+
+    #[test]
+    fn worker_strategy_valid_keys() {
+        let keys = WorkerStrategy.valid_keys();
+        assert!(keys.contains(&"task"));
+        assert!(keys.contains(&"max_iterations"));
+        assert!(keys.contains(&"on_error"));
+    }
+}

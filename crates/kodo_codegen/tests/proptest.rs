@@ -75,6 +75,161 @@ proptest! {
         let result = compile_function(&mir, &default_options());
         prop_assert!(result.is_ok());
     }
+
+    /// Codegen never panics with integer comparison operators.
+    #[test]
+    fn codegen_never_panics_int_comparison(
+        a in -1000i64..1000,
+        b in -1000i64..1000,
+        op in prop::sample::select(vec![
+            kodo_ast::BinOp::Eq,
+            kodo_ast::BinOp::Ne,
+            kodo_ast::BinOp::Lt,
+            kodo_ast::BinOp::Gt,
+            kodo_ast::BinOp::Le,
+            kodo_ast::BinOp::Ge,
+        ])
+    ) {
+        let ret_value = Value::BinOp(
+            op,
+            Box::new(Value::IntConst(a)),
+            Box::new(Value::IntConst(b)),
+        );
+        let mir = make_simple_mir("test_fn", Type::Bool, ret_value);
+        let result = compile_function(&mir, &default_options());
+        prop_assert!(result.is_ok());
+    }
+
+    /// Codegen never panics with boolean logic operators.
+    #[test]
+    fn codegen_never_panics_bool_logic(
+        a in prop::bool::ANY,
+        b in prop::bool::ANY,
+        op in prop::sample::select(vec![
+            kodo_ast::BinOp::And,
+            kodo_ast::BinOp::Or,
+        ])
+    ) {
+        let ret_value = Value::BinOp(
+            op,
+            Box::new(Value::BoolConst(a)),
+            Box::new(Value::BoolConst(b)),
+        );
+        let mir = make_simple_mir("test_fn", Type::Bool, ret_value);
+        let result = compile_function(&mir, &default_options());
+        prop_assert!(result.is_ok());
+    }
+
+    /// Codegen never panics with negation of arbitrary integers.
+    #[test]
+    fn codegen_never_panics_neg(n in i64::MIN..i64::MAX) {
+        let ret_value = Value::Neg(Box::new(Value::IntConst(n)));
+        let mir = make_simple_mir("test_fn", Type::Int, ret_value);
+        let result = compile_function(&mir, &default_options());
+        prop_assert!(result.is_ok());
+    }
+
+    /// Codegen never panics with logical NOT on booleans.
+    #[test]
+    fn codegen_never_panics_not(b in prop::bool::ANY) {
+        let ret_value = Value::Not(Box::new(Value::BoolConst(b)));
+        let mir = make_simple_mir("test_fn", Type::Bool, ret_value);
+        let result = compile_function(&mir, &default_options());
+        prop_assert!(result.is_ok());
+    }
+
+    /// Codegen produces non-empty object bytes for any safe integer constant.
+    #[test]
+    fn codegen_output_always_nonempty(n in i64::MIN..i64::MAX) {
+        let mir = make_simple_mir("test_fn", Type::Int, Value::IntConst(n));
+        let bytes = compile_function(&mir, &default_options()).unwrap();
+        prop_assert!(!bytes.is_empty());
+    }
+
+    /// Nested arithmetic expressions (a + b) * c never panic.
+    #[test]
+    fn codegen_nested_arithmetic(
+        a in -500i64..500,
+        b in -500i64..500,
+        c in -500i64..500,
+    ) {
+        let inner = Value::BinOp(
+            kodo_ast::BinOp::Add,
+            Box::new(Value::IntConst(a)),
+            Box::new(Value::IntConst(b)),
+        );
+        let outer = Value::BinOp(
+            kodo_ast::BinOp::Mul,
+            Box::new(inner),
+            Box::new(Value::IntConst(c)),
+        );
+        let mir = make_simple_mir("test_fn", Type::Int, outer);
+        prop_assert!(compile_function(&mir, &default_options()).is_ok());
+    }
+
+    /// Codegen never panics with double negation.
+    #[test]
+    fn codegen_double_negation(n in -10000i64..10000) {
+        let inner = Value::Neg(Box::new(Value::IntConst(n)));
+        let outer = Value::Neg(Box::new(inner));
+        let mir = make_simple_mir("test_fn", Type::Int, outer);
+        prop_assert!(compile_function(&mir, &default_options()).is_ok());
+    }
+
+    /// Codegen for chained boolean NOT never panics.
+    #[test]
+    fn codegen_double_not(b in prop::bool::ANY) {
+        let inner = Value::Not(Box::new(Value::BoolConst(b)));
+        let outer = Value::Not(Box::new(inner));
+        let mir = make_simple_mir("test_fn", Type::Bool, outer);
+        prop_assert!(compile_function(&mir, &default_options()).is_ok());
+    }
+
+    /// Comparison result can be negated (bool unary NOT on comparison).
+    #[test]
+    fn codegen_not_of_comparison(
+        a in -100i64..100,
+        b in -100i64..100,
+    ) {
+        let cmp = Value::BinOp(
+            kodo_ast::BinOp::Eq,
+            Box::new(Value::IntConst(a)),
+            Box::new(Value::IntConst(b)),
+        );
+        let negated = Value::Not(Box::new(cmp));
+        let mir = make_simple_mir("test_fn", Type::Bool, negated);
+        prop_assert!(compile_function(&mir, &default_options()).is_ok());
+    }
+
+    /// Module compilation with N identical functions never panics.
+    #[test]
+    fn codegen_module_multiple_functions(n in 1usize..20) {
+        let funcs: Vec<_> = (0..n)
+            .map(|i| make_simple_mir(&format!("fn_{i}"), Type::Int, Value::IntConst(i as i64)))
+            .collect();
+        prop_assert!(compile_module(&funcs, &default_options(), None).is_ok());
+    }
+
+    /// Float subtraction and division edge cases never panic.
+    #[test]
+    fn codegen_float_binop(
+        a in -1000.0f64..1000.0,
+        b in 1.0f64..1000.0, // avoid division by zero
+        op in prop::sample::select(vec![
+            kodo_ast::BinOp::Add,
+            kodo_ast::BinOp::Sub,
+            kodo_ast::BinOp::Mul,
+            kodo_ast::BinOp::Div,
+        ])
+    ) {
+        let val = Value::BinOp(
+            op,
+            Box::new(Value::FloatConst(a)),
+            Box::new(Value::FloatConst(b)),
+        );
+        let mir = make_simple_mir("test_fn", Type::Float64, val);
+        prop_assert!(compile_function(&mir, &default_options()).is_ok());
+    }
 }
 
 #[test]

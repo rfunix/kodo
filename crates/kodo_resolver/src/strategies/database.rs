@@ -176,3 +176,119 @@ pub(crate) fn generate_db_named_query(name: &str, span: Span) -> Function {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn list_entry(key: &str, items: &[&str]) -> IntentConfigEntry {
+        let vals = items
+            .iter()
+            .map(|s| IntentConfigValue::StringLit(s.to_string(), dummy_span()))
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn db_connect_has_driver_in_body() {
+        let func = generate_db_connect("postgres", dummy_span());
+        assert_eq!(func.name, "db_connect");
+        // body returns a string literal containing the driver name
+        if let kodo_ast::Stmt::Return {
+            value: Some(kodo_ast::Expr::StringLit(s, _)),
+            ..
+        } = &func.body.stmts[0]
+        {
+            assert!(s.contains("postgres"));
+        } else {
+            panic!("Expected return with string literal");
+        }
+    }
+
+    #[test]
+    fn db_table_query_has_correct_name_and_contract() {
+        let func = generate_db_table_query("users", dummy_span());
+        assert_eq!(func.name, "query_users");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "id");
+        assert_eq!(func.requires.len(), 1, "Should require id > 0");
+    }
+
+    #[test]
+    fn db_named_query_has_requires_clause() {
+        let func = generate_db_named_query("find_active_users", dummy_span());
+        assert_eq!(func.name, "find_active_users");
+        assert_eq!(func.requires.len(), 1);
+    }
+
+    #[test]
+    fn database_strategy_with_tables_and_queries() {
+        let intent = make_intent(
+            "database",
+            vec![
+                str_entry("driver", "sqlite"),
+                list_entry("tables", &["users", "posts"]),
+                list_entry("queries", &["find_admin"]),
+            ],
+        );
+        let result = DatabaseStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        // 1 connect + 2 table queries + 1 named query = 4
+        assert_eq!(resolved.generated_functions.len(), 4);
+        assert!(resolved.description.contains("sqlite"));
+        // generated_types should include Row types for each table
+        assert_eq!(resolved.generated_types.len(), 2);
+        assert!(resolved.generated_types.contains(&"usersRow".to_string()));
+    }
+
+    #[test]
+    fn database_strategy_defaults_to_sqlite() {
+        let intent = make_intent("database", vec![]);
+        let result = DatabaseStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        // just the connect function
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert!(resolved.description.contains("sqlite"));
+    }
+
+    #[test]
+    fn database_strategy_handles_database_intent() {
+        assert!(DatabaseStrategy.handles().contains(&"database"));
+    }
+
+    #[test]
+    fn database_strategy_valid_keys() {
+        let keys = DatabaseStrategy.valid_keys();
+        assert!(keys.contains(&"driver"));
+        assert!(keys.contains(&"tables"));
+        assert!(keys.contains(&"queries"));
+    }
+}

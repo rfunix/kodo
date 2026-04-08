@@ -124,3 +124,94 @@ fn generate_file_processor_main(
 
     make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn fnref_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::FnRef(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn file_processor_defaults_to_file_input_stdout_output() {
+        let intent = make_intent("file_processor", vec![]);
+        let result = FileProcessorStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 1);
+        assert!(resolved.description.contains("input=file"));
+        assert!(resolved.description.contains("output=stdout"));
+        assert!(resolved.description.contains("transform()"));
+    }
+
+    #[test]
+    fn file_processor_stdin_mode() {
+        let intent = make_intent("file_processor", vec![str_entry("input", "stdin")]);
+        let resolved = FileProcessorStrategy.resolve(&intent).unwrap();
+        assert!(resolved.description.contains("input=stdin"));
+    }
+
+    #[test]
+    fn file_processor_directory_mode() {
+        let intent = make_intent("file_processor", vec![str_entry("input", "directory")]);
+        let resolved = FileProcessorStrategy.resolve(&intent).unwrap();
+        assert!(resolved.description.contains("input=directory"));
+    }
+
+    #[test]
+    fn file_processor_custom_transform() {
+        let intent = make_intent(
+            "file_processor",
+            vec![fnref_entry("transform", "my_transform")],
+        );
+        let resolved = FileProcessorStrategy.resolve(&intent).unwrap();
+        assert!(resolved.description.contains("my_transform()"));
+    }
+
+    #[test]
+    fn file_processor_generates_kodo_main() {
+        let intent = make_intent("file_processor", vec![]);
+        let resolved = FileProcessorStrategy.resolve(&intent).unwrap();
+        assert_eq!(resolved.generated_functions[0].name, "kodo_main");
+    }
+
+    #[test]
+    fn file_processor_strategy_handles_correct_intent() {
+        assert!(FileProcessorStrategy.handles().contains(&"file_processor"));
+    }
+
+    #[test]
+    fn file_processor_strategy_valid_keys() {
+        let keys = FileProcessorStrategy.valid_keys();
+        assert!(keys.contains(&"input"));
+        assert!(keys.contains(&"output"));
+        assert!(keys.contains(&"transform"));
+    }
+}

@@ -120,3 +120,99 @@ pub(crate) fn generate_math_function(name: &str, span: Span) -> Option<Function>
         },
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn fnref_list_entry(key: &str, names: &[&str]) -> IntentConfigEntry {
+        let vals = names
+            .iter()
+            .map(|n| IntentConfigValue::FnRef(n.to_string(), dummy_span()))
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn generate_math_function_add() {
+        let func = generate_math_function("add", dummy_span());
+        assert!(func.is_some());
+        let f = func.unwrap();
+        assert_eq!(f.name, "add");
+        assert_eq!(f.params.len(), 2);
+        assert_eq!(f.requires.len(), 0);
+    }
+
+    #[test]
+    fn generate_math_function_safe_div_has_contract() {
+        let func = generate_math_function("safe_div", dummy_span()).unwrap();
+        assert_eq!(
+            func.requires.len(),
+            1,
+            "safe_div should have requires {{ b != 0 }}"
+        );
+    }
+
+    #[test]
+    fn generate_math_function_unknown_returns_none() {
+        let func = generate_math_function("unknown_op", dummy_span());
+        assert!(func.is_none());
+    }
+
+    #[test]
+    fn math_module_strategy_generates_named_functions() {
+        let intent = make_intent(
+            "math_module",
+            vec![fnref_list_entry("functions", &["add", "sub", "mul"])],
+        );
+        let result = MathModuleStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 3);
+        assert!(resolved.description.contains("add"));
+    }
+
+    #[test]
+    fn math_module_strategy_empty_config() {
+        let intent = make_intent("math_module", vec![]);
+        let result = MathModuleStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 0);
+        assert!(resolved.description.contains("No math"));
+    }
+
+    #[test]
+    fn math_module_strategy_skips_unknown_function_names() {
+        let intent = make_intent(
+            "math_module",
+            vec![fnref_list_entry("functions", &["add", "unknown_fn"])],
+        );
+        let resolved = MathModuleStrategy.resolve(&intent).unwrap();
+        // only "add" should be generated
+        assert_eq!(resolved.generated_functions.len(), 1);
+    }
+
+    #[test]
+    fn math_module_strategy_handles_math_module_intent() {
+        assert!(MathModuleStrategy.handles().contains(&"math_module"));
+    }
+}

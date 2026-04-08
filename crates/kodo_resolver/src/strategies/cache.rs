@@ -198,3 +198,126 @@ pub(crate) fn generate_cache_invalidate(span: Span) -> Function {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn int_entry(key: &str, val: i64) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::IntLit(val, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn cache_get_has_correct_name_and_params() {
+        let func = generate_cache_get(dummy_span());
+        assert_eq!(func.name, "cache_get");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "key");
+    }
+
+    #[test]
+    fn cache_get_has_requires_clause() {
+        let func = generate_cache_get(dummy_span());
+        assert_eq!(func.requires.len(), 1);
+    }
+
+    #[test]
+    fn cache_set_uses_custom_max_size() {
+        let func = generate_cache_set(512, dummy_span());
+        assert_eq!(func.name, "cache_set");
+        assert_eq!(func.params.len(), 2);
+        if let kodo_ast::Stmt::Expr(kodo_ast::Expr::Call { args, .. }) = &func.body.stmts[0] {
+            if let kodo_ast::Expr::StringLit(s, _) = &args[0] {
+                assert!(
+                    s.contains("512"),
+                    "Expected max_size 512 in message, got: {s}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cache_set_default_max_size() {
+        let func = generate_cache_set(DEFAULT_CACHE_MAX_SIZE, dummy_span());
+        if let kodo_ast::Stmt::Expr(kodo_ast::Expr::Call { args, .. }) = &func.body.stmts[0] {
+            if let kodo_ast::Expr::StringLit(s, _) = &args[0] {
+                assert!(s.contains("256"), "Expected 256 in message, got: {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn cache_invalidate_correct_name_and_return_type() {
+        let func = generate_cache_invalidate(dummy_span());
+        assert_eq!(func.name, "cache_invalidate");
+        assert!(matches!(func.return_type, kodo_ast::TypeExpr::Named(ref n) if n == "Bool"));
+    }
+
+    #[test]
+    fn cache_strategy_resolves_with_defaults() {
+        let intent = make_intent("cache", vec![]);
+        let result = CacheStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 3);
+        assert!(resolved.description.contains("lru"));
+        assert!(resolved.description.contains("256"));
+    }
+
+    #[test]
+    fn cache_strategy_resolves_with_custom_config() {
+        let intent = make_intent(
+            "cache",
+            vec![str_entry("strategy", "fifo"), int_entry("max_size", 1024)],
+        );
+        let result = CacheStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.description.contains("fifo"));
+        assert!(resolved.description.contains("1024"));
+    }
+
+    #[test]
+    fn cache_strategy_handles_cache_intent() {
+        assert!(CacheStrategy.handles().contains(&"cache"));
+    }
+
+    #[test]
+    fn cache_strategy_valid_keys_coverage() {
+        let keys = CacheStrategy.valid_keys();
+        assert!(keys.contains(&"strategy"));
+        assert!(keys.contains(&"max_size"));
+    }
+
+    #[test]
+    fn cache_get_return_type_is_string() {
+        let func = generate_cache_get(dummy_span());
+        assert!(matches!(func.return_type, kodo_ast::TypeExpr::Named(ref n) if n == "String"));
+    }
+}

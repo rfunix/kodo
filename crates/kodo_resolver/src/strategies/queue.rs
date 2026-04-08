@@ -140,3 +140,122 @@ pub(crate) fn generate_queue_consume(topic: &str, span: Span) -> Function {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn list_entry(key: &str, items: &[&str]) -> IntentConfigEntry {
+        let vals = items
+            .iter()
+            .map(|s| IntentConfigValue::StringLit(s.to_string(), dummy_span()))
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn produce_func_has_correct_name() {
+        let func = generate_queue_produce("orders", dummy_span());
+        assert_eq!(func.name, "produce_orders");
+    }
+
+    #[test]
+    fn produce_func_has_message_param() {
+        let func = generate_queue_produce("events", dummy_span());
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.params[0].name, "message");
+    }
+
+    #[test]
+    fn produce_func_has_requires_clause() {
+        let func = generate_queue_produce("jobs", dummy_span());
+        assert_eq!(
+            func.requires.len(),
+            1,
+            "produce should require non-empty message"
+        );
+    }
+
+    #[test]
+    fn consume_func_has_correct_name() {
+        let func = generate_queue_consume("orders", dummy_span());
+        assert_eq!(func.name, "consume_orders");
+    }
+
+    #[test]
+    fn consume_func_has_no_params() {
+        let func = generate_queue_consume("events", dummy_span());
+        assert_eq!(func.params.len(), 0);
+    }
+
+    #[test]
+    fn consume_func_returns_string() {
+        let func = generate_queue_consume("jobs", dummy_span());
+        assert!(matches!(func.return_type, kodo_ast::TypeExpr::Named(ref n) if n == "String"));
+    }
+
+    #[test]
+    fn queue_strategy_generates_produce_and_consume_per_topic() {
+        let intent = make_intent(
+            "queue",
+            vec![
+                str_entry("backend", "redis"),
+                list_entry("topics", &["orders", "events"]),
+            ],
+        );
+        let result = QueueStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        // 2 topics × 2 functions each = 4
+        assert_eq!(resolved.generated_functions.len(), 4);
+        assert!(resolved.description.contains("redis"));
+    }
+
+    #[test]
+    fn queue_strategy_empty_topics() {
+        let intent = make_intent("queue", vec![]);
+        let result = QueueStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.generated_functions.len(), 0);
+        assert!(resolved.description.contains("(no topics)"));
+    }
+
+    #[test]
+    fn queue_strategy_handles_queue_intent() {
+        assert!(QueueStrategy.handles().contains(&"queue"));
+    }
+
+    #[test]
+    fn queue_strategy_valid_keys() {
+        let keys = QueueStrategy.valid_keys();
+        assert!(keys.contains(&"backend"));
+        assert!(keys.contains(&"topics"));
+    }
+}
