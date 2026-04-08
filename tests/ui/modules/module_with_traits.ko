@@ -1,0 +1,35 @@
+//@ check-pass
+module module_with_traits {
+    meta { purpose: "Module with trait definitions, implementations, and usage" }
+
+    trait Comparable {
+        fn less_than(self, other: Self) -> Bool
+        fn equal_to(self, other: Self) -> Bool
+    }
+
+    struct Temperature {
+        celsius: Int
+    }
+
+    impl Comparable for Temperature {
+        fn less_than(self, other: Temperature) -> Bool {
+            return self.celsius < other.celsius
+        }
+        fn equal_to(self, other: Temperature) -> Bool {
+            return self.celsius == other.celsius
+        }
+    }
+
+    fn is_freezing(t: Temperature) -> Bool {
+        let zero: Temperature = Temperature { celsius: 0 }
+        return t.less_than(zero) || t.equal_to(zero)
+    }
+
+    fn main() {
+        let cold: Temperature = Temperature { celsius: -5 }
+        let warm: Temperature = Temperature { celsius: 25 }
+
+        if is_freezing(cold) { print_int(1) }
+        if is_freezing(warm) { print_int(0) }
+    }
+}

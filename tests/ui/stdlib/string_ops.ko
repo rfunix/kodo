@@ -1,0 +1,26 @@
+//@ run-pass
+module stdlib_string_ops {
+    meta { purpose: "Standard library string operations" }
+
+    fn main() -> Int {
+        let s: String = "Hello, World!"
+
+        let n: Int = s.length()
+        print_int(n)
+
+        let has_world: Bool = s.contains("World")
+        if has_world { print_int(1) }
+
+        let starts: Bool = s.starts_with("Hello")
+        if starts { print_int(1) }
+
+        let ends: Bool = s.ends_with("!")
+        if ends { print_int(1) }
+
+        let combined: String = "foo" + "bar"
+        let cn: Int = combined.length()
+        print_int(cn)
+
+        return 0
+    }
+}

@@ -1,0 +1,36 @@
+//@ run-pass
+//@ compile-flags: --contracts=runtime
+module contracts_codegen {
+    meta { purpose: "Functions with contracts through full codegen pipeline" }
+
+    fn safe_sqrt(x: Int) -> Int
+        requires { x >= 0 }
+        ensures { result >= 0 }
+    {
+        if x == 0 {
+            return 0
+        }
+        let r: Int = x / 2
+        return r
+    }
+
+    fn bounded(x: Int, lo: Int, hi: Int) -> Int
+        requires { lo <= hi }
+        ensures { result >= lo }
+        ensures { result <= hi }
+    {
+        if x < lo { return lo }
+        if x > hi { return hi }
+        return x
+    }
+
+    fn main() -> Int {
+        let r: Int = safe_sqrt(16)
+        print_int(r)
+
+        let b: Int = bounded(50, 0, 10)
+        print_int(b)
+
+        return 0
+    }
+}

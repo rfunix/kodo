@@ -1,0 +1,33 @@
+//@ run-pass
+module enum_codegen {
+    meta { purpose: "Enum creation, pattern matching, and variant access through codegen" }
+
+    enum Shape {
+        Circle(Int),
+        Rectangle(Int, Int),
+        Triangle
+    }
+
+    fn area(s: Shape) -> Int {
+        match s {
+            Shape::Circle(r) => { return r * r }
+            Shape::Rectangle(w, h) => { return w * h }
+            Shape::Triangle => { return 0 }
+        }
+    }
+
+    fn main() -> Int {
+        let c: Shape = Shape::Circle(5)
+        let r: Shape = Shape::Rectangle(3, 4)
+        let t: Shape = Shape::Triangle
+
+        let a1: Int = area(c)
+        let a2: Int = area(r)
+        let a3: Int = area(t)
+
+        print_int(a1)
+        print_int(a2)
+        print_int(a3)
+        return 0
+    }
+}

@@ -1,0 +1,26 @@
+//@ compile-fail
+//@ error-code: E0233
+module missing_assoc_type {
+    meta { purpose: "E0233: impl block missing required associated type" }
+
+    trait Container {
+        type Item
+
+        fn size(self) -> Int
+    }
+
+    struct Box {
+        value: Int
+    }
+
+    impl Container for Box {  //~ ERROR E0233
+        // Missing: type Item = Int  —  should trigger E0233
+        fn size(self) -> Int {
+            return self.value
+        }
+    }
+
+    fn main() {
+        let b: Box = Box { value: 42 }
+    }
+}

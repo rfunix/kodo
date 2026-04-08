@@ -1,0 +1,24 @@
+//@ check-pass
+module private_struct_fields {
+    meta { purpose: "Public structs and functions with visibility modifiers" }
+
+    pub struct Account {
+        balance: Int,
+        owner: String
+    }
+
+    pub fn create_account(owner: String, initial: Int) -> Account {
+        return Account { owner: owner, balance: initial }
+    }
+
+    pub fn deposit(acc: Account, amount: Int) -> Int {
+        return acc.balance + amount
+    }
+
+    fn main() -> Int {
+        let acc: Account = create_account("alice", 100)
+        let new_balance: Int = deposit(acc, 50)
+        print_int(new_balance)
+        return 0
+    }
+}

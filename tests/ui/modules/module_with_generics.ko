@@ -1,0 +1,29 @@
+//@ check-pass
+module module_with_generics {
+    meta { purpose: "Module with generic functions" }
+
+    fn identity<T>(x: T) -> T {
+        return x
+    }
+
+    fn first_of_two<T>(a: T, b: T) -> T {
+        return a
+    }
+
+    fn pair_sum(a: Int, b: Int) -> Int {
+        return a + b
+    }
+
+    fn main() -> Int {
+        let n: Int = identity(42)
+        let s: String = identity("hello")
+        let x: Int = first_of_two(10, 20)
+        let sum: Int = pair_sum(3, 4)
+
+        print_int(n)
+        println(s)
+        print_int(x)
+        print_int(sum)
+        return 0
+    }
+}

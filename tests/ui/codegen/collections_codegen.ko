@@ -1,0 +1,32 @@
+//@ run-pass
+module collections_codegen {
+    meta { purpose: "List and Map operations through codegen" }
+
+    fn main() -> Int {
+        let nums: List<Int> = list_new()
+        list_push(nums, 10)
+        list_push(nums, 20)
+        list_push(nums, 30)
+
+        let n: Int = list_length(nums)
+        print_int(n)
+
+        let first: Int = list_get(nums, 0)
+        print_int(first)
+
+        let has_twenty: Bool = list_contains(nums, 20)
+        if has_twenty { print_int(1) }
+
+        let m: Map<String, Int> = map_new()
+        map_insert(m, "a", 1)
+        map_insert(m, "b", 2)
+
+        let has_a: Bool = map_contains_key(m, "a")
+        if has_a { print_int(1) }
+
+        let sz: Int = map_length(m)
+        print_int(sz)
+
+        return 0
+    }
+}

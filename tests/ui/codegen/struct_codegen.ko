@@ -1,0 +1,38 @@
+//@ run-pass
+module struct_codegen {
+    meta { purpose: "Struct construction, field access, and nested structs through codegen" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    struct Rectangle {
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int
+    }
+
+    fn area(w: Int, h: Int) -> Int {
+        return w * h
+    }
+
+    fn perimeter(w: Int, h: Int) -> Int {
+        return 2 * (w + h)
+    }
+
+    fn main() -> Int {
+        let origin: Point = Point { x: 0, y: 0 }
+        print_int(origin.x)
+
+        let rect: Rectangle = Rectangle { x: 0, y: 0, width: 10, height: 5 }
+
+        let a: Int = area(rect.width, rect.height)
+        let p: Int = perimeter(rect.width, rect.height)
+
+        print_int(a)
+        print_int(p)
+        return 0
+    }
+}

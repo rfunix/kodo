@@ -1,0 +1,39 @@
+//@ run-pass
+module stdlib_collections_ops {
+    meta { purpose: "Standard library collection operations: List and Map" }
+
+    fn main() -> Int {
+        // List operations
+        let nums: List<Int> = list_new()
+        list_push(nums, 3)
+        list_push(nums, 1)
+        list_push(nums, 4)
+        list_push(nums, 1)
+        list_push(nums, 5)
+
+        let n: Int = list_length(nums)
+        print_int(n)
+
+        let first: Int = list_get(nums, 0)
+        print_int(first)
+
+        let has_four: Bool = list_contains(nums, 4)
+        if has_four { print_int(1) }
+
+        // Map operations
+        let scores: Map<String, Int> = map_new()
+        map_insert(scores, "alice", 95)
+        map_insert(scores, "bob", 87)
+
+        let alice_score: Int = map_get(scores, "alice")
+        print_int(alice_score)
+
+        let has_bob: Bool = map_contains_key(scores, "bob")
+        if has_bob { print_int(1) }
+
+        let sz: Int = map_length(scores)
+        print_int(sz)
+
+        return 0
+    }
+}

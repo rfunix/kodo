@@ -1,0 +1,31 @@
+//@ run-pass
+module stdlib_math_ops {
+    meta { purpose: "Standard library math and integer operations" }
+
+    fn abs(x: Int) -> Int {
+        if x < 0 { return 0 - x }
+        return x
+    }
+
+    fn max(a: Int, b: Int) -> Int {
+        if a > b { return a }
+        return b
+    }
+
+    fn min(a: Int, b: Int) -> Int {
+        if a < b { return a }
+        return b
+    }
+
+    fn main() -> Int {
+        print_int(abs(-42))
+        print_int(max(10, 20))
+        print_int(min(10, 20))
+
+        let i: Int = 5
+        let s: Int = i * i
+        print_int(s)
+
+        return 0
+    }
+}

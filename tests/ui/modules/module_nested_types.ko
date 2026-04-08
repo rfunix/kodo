@@ -1,0 +1,36 @@
+//@ check-pass
+module module_nested_types {
+    meta { purpose: "Module with nested structs and enums" }
+
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    struct Pixel {
+        x: Int,
+        y: Int
+    }
+
+    fn color_code(c: Color) -> Int {
+        match c {
+            Color::Red => { return 0 }
+            Color::Green => { return 1 }
+            Color::Blue => { return 2 }
+        }
+    }
+
+    fn make_pixel(x: Int, y: Int) -> Pixel {
+        return Pixel { x: x, y: y }
+    }
+
+    fn main() {
+        let c: Int = color_code(Color::Red)
+        print_int(c)
+
+        let p: Pixel = make_pixel(10, 20)
+        print_int(p.x)
+        print_int(p.y)
+    }
+}

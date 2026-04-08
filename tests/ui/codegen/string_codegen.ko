@@ -1,0 +1,25 @@
+//@ run-pass
+module string_codegen {
+    meta { purpose: "String operations through codegen" }
+
+    fn main() -> Int {
+        let s: String = "hello"
+        let t: String = " world"
+        let u: String = s + t
+
+        let n: Int = u.length()
+        print_int(n)
+
+        let has_hello: Bool = u.contains("hello")
+        if has_hello {
+            print_int(1)
+        }
+
+        let starts: Bool = u.starts_with("hello")
+        if starts {
+            print_int(1)
+        }
+
+        return 0
+    }
+}

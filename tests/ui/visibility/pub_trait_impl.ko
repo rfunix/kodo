@@ -1,0 +1,29 @@
+//@ check-pass
+module pub_trait_impl {
+    meta { purpose: "Public trait implementations with pub modifier on methods" }
+
+    trait Describable {
+        fn describe(self) -> String
+    }
+
+    pub struct Dog {
+        name: String,
+        age: Int
+    }
+
+    impl Describable for Dog {
+        fn describe(self) -> String {
+            return self.name
+        }
+    }
+
+    pub fn print_description(d: Dog) {
+        let s: String = d.describe()
+        println(s)
+    }
+
+    fn main() {
+        let d: Dog = Dog { name: "Rex", age: 3 }
+        print_description(d)
+    }
+}
