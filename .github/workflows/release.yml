@@ -39,43 +39,6 @@ jobs:
           name: kodoc-macos-arm64
           path: dist/kodoc-macos-arm64
 
-  build-macos-x86_64:
-    name: Build (macos-x86_64)
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin
-
-      - name: Install Z3
-        run: brew install z3
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: release-macos-x86_64
-
-      - name: Build kodoc
-        env:
-          PKG_CONFIG_ALLOW_CROSS: 1
-          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
-          Z3_LIBRARY_PATH_OVERRIDE: /opt/homebrew/lib
-          BINDGEN_EXTRA_CLANG_ARGS: "-I/opt/homebrew/include"
-        run: cargo build --release -p kodoc --target x86_64-apple-darwin
-
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp target/x86_64-apple-darwin/release/kodoc dist/kodoc-macos-x86_64
-          chmod +x dist/kodoc-macos-x86_64
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kodoc-macos-x86_64
-          path: dist/kodoc-macos-x86_64
-
   build-linux-x86_64:
     name: Build (linux-x86_64)
     runs-on: ubuntu-22.04
@@ -108,7 +71,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-macos-arm64, build-macos-x86_64, build-linux-x86_64]
+    needs: [build-macos-arm64, build-linux-x86_64]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -124,10 +87,8 @@ jobs:
         run: |
           mkdir -p release_assets
           cp artifacts/kodoc-macos-arm64/kodoc-macos-arm64 release_assets/kodoc-macos-arm64
-          cp artifacts/kodoc-macos-x86_64/kodoc-macos-x86_64 release_assets/kodoc-macos-x86_64
           cp artifacts/kodoc-linux-x86_64/kodoc-linux-x86_64 release_assets/kodoc-linux-x86_64
           chmod +x release_assets/kodoc-macos-arm64
-          chmod +x release_assets/kodoc-macos-x86_64
           chmod +x release_assets/kodoc-linux-x86_64
 
       - name: Extract changelog for this version
@@ -153,5 +114,4 @@ jobs:
             --notes-file release_notes.md \
             $PRERELEASE \
             release_assets/kodoc-macos-arm64 \
-            release_assets/kodoc-macos-x86_64 \
             release_assets/kodoc-linux-x86_64
