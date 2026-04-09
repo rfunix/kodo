@@ -114,6 +114,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: coverage
+      - name: Build workspace (required for kodoc integration tests)
+        run: cargo build --workspace
       - name: Generate coverage report
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Coverage summary
