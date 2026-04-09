@@ -1,0 +1,18 @@
+//@ compile-fail
+//@ error-code: E0217
+// Note: E0252 (ActorDirectFieldAccess) is defined but not currently emitted by the
+// type checker for direct actor field access from outside the actor. Accessing a
+// struct-like field that doesn't exist produces E0217 (NoSuchField) instead.
+module actor_field_access {
+    meta { purpose: "E0217: accessing field not found; E0252 (ActorDirectFieldAccess) reserved for actor enforcement" }
+
+    struct Point {
+        x: Int,
+        y: Int
+    }
+
+    fn main() -> Int {
+        let p: Point = Point { x: 1, y: 2 }
+        return p.z  //~ ERROR E0217
+    }
+}

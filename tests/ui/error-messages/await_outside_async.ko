@@ -1,0 +1,17 @@
+//@ check-pass
+// Note: E0250 (AwaitOutsideAsync) is defined but not currently emitted by the type
+// checker. Using `.await` in a non-async function compiles without error because the
+// checker does not yet enforce the async context requirement. This test documents
+// the gap — when E0250 is implemented, this should become a compile-fail test.
+module await_outside_async {
+    meta { purpose: "E0250: AwaitOutsideAsync — defined but not yet enforced by the checker" }
+
+    async fn fetch_value() -> Int {
+        return 42
+    }
+
+    fn sync_caller() -> Int {
+        let result: Int = fetch_value().await
+        return result
+    }
+}

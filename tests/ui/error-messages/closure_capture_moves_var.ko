@@ -1,0 +1,18 @@
+//@ compile-fail
+//@ error-code: E0240
+// Note: E0282 (ClosureCaptureMovesVariable) is defined but not directly emitted by the
+// checker. When a closure captures a non-Copy variable by move and the outer scope then
+// uses it, the observable error is E0240 (UseAfterMove) — the move is recorded when
+// the closure is formed, and the subsequent use in the outer scope triggers E0240.
+module closure_capture_moves_var {
+    meta { purpose: "E0240: closure moves String var, outer use triggers UseAfterMove; E0282 reserved" }
+
+    fn main() -> Int {
+        let data: String = "hello"
+        // Closure captures `data` by move (String is non-Copy)
+        let _f = |x: Int| -> String { data }
+        // Using `data` after it was moved into the closure triggers E0240
+        let _ = data  //~ ERROR E0240
+        return 0
+    }
+}

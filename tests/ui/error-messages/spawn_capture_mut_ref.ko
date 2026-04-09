@@ -1,0 +1,20 @@
+//@ compile-fail
+//@ error-code: E0280
+// Note: E0251 (SpawnCaptureMutableRef) is defined but not currently emitted by the
+// checker. Capturing a `mut` reference in a spawn block currently triggers E0280
+// (SpawnCaptureNonSend) since both `ref` and `mut ref` are not Send-safe.
+module spawn_capture_mut_ref {
+    meta { purpose: "E0280: spawn captures mut-borrowed ref; E0251 (SpawnCaptureMutableRef) reserved" }
+
+    fn process(ref data: Int) {
+        spawn {
+            print_int(data)
+        }
+    }
+
+    fn main() -> Int {
+        let value: Int = 7
+        process(value)
+        return 0
+    }
+}

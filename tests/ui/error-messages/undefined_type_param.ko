@@ -1,0 +1,12 @@
+//@ compile-fail
+//@ error-code: E0201
+// Note: E0222 (UndefinedTypeParam) is defined but not currently emitted by the checker
+// when a generic function body references an undeclared type parameter name.
+// The closest observable error for an undefined name is E0201 (Undefined).
+module undefined_type_param {
+    meta { purpose: "E0201: undefined identifier; E0222 (UndefinedTypeParam) reserved for future use" }
+
+    fn apply() -> Int {
+        return unknown_func()  //~ ERROR E0201
+    }
+}

@@ -1,0 +1,11 @@
+//@ compile-fail
+//@ error-code: E0270
+module private_access {
+    import private_access_files.mylib
+
+    meta { purpose: "E0270: calling private function from imported module" }
+
+    fn main() -> Int {
+        return private_helper()
+    }
+}

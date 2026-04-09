@@ -1,0 +1,12 @@
+//@ check-pass
+module mylib {
+    meta { purpose: "Library with private and public functions" }
+
+    fn private_helper() -> Int {
+        return 99
+    }
+
+    pub fn public_api() -> Int {
+        return 1
+    }
+}

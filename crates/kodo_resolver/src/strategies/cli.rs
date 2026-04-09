@@ -154,3 +154,119 @@ fn generate_cli_main(commands: &[(String, String, String)], span: Span) -> kodo_
 
     make_function("kodo_main", TypeExpr::Named("Int".to_string()), stmts, span)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodo_ast::{IntentConfigEntry, IntentConfigValue, NodeId, Span};
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_intent(name: &str, config: Vec<IntentConfigEntry>) -> IntentDecl {
+        IntentDecl {
+            id: NodeId(0),
+            span: dummy_span(),
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    fn str_entry(key: &str, val: &str) -> IntentConfigEntry {
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::StringLit(val.to_string(), dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    fn nested_list_entry(key: &str, rows: &[(&str, &str, &str)]) -> IntentConfigEntry {
+        let vals = rows
+            .iter()
+            .map(|(cmd, handler, desc)| {
+                IntentConfigValue::List(
+                    vec![
+                        IntentConfigValue::StringLit(cmd.to_string(), dummy_span()),
+                        IntentConfigValue::StringLit(handler.to_string(), dummy_span()),
+                        IntentConfigValue::StringLit(desc.to_string(), dummy_span()),
+                    ],
+                    dummy_span(),
+                )
+            })
+            .collect();
+        IntentConfigEntry {
+            key: key.to_string(),
+            value: IntentConfigValue::List(vals, dummy_span()),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn cli_strategy_resolves_with_defaults() {
+        let intent = make_intent("cli", vec![]);
+        let result = CliStrategy.resolve(&intent);
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        // Always generates cli_help + kodo_main
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert!(resolved.description.contains("tool"));
+        assert!(resolved.description.contains("0.1.0"));
+    }
+
+    #[test]
+    fn cli_strategy_custom_name_and_version() {
+        let intent = make_intent(
+            "cli",
+            vec![str_entry("name", "mycli"), str_entry("version", "2.0.0")],
+        );
+        let resolved = CliStrategy.resolve(&intent).unwrap();
+        assert!(resolved.description.contains("mycli"));
+        assert!(resolved.description.contains("2.0.0"));
+    }
+
+    #[test]
+    fn cli_strategy_with_commands() {
+        let intent = make_intent(
+            "cli",
+            vec![nested_list_entry(
+                "commands",
+                &[
+                    ("build", "run_build", "Build the project"),
+                    ("test", "run_tests", "Run all tests"),
+                ],
+            )],
+        );
+        let resolved = CliStrategy.resolve(&intent).unwrap();
+        assert_eq!(resolved.generated_functions.len(), 2);
+        assert!(resolved.description.contains("build"));
+        assert!(resolved.description.contains("run_build"));
+        assert!(resolved.description.contains("test"));
+    }
+
+    #[test]
+    fn cli_strategy_generates_cli_help_and_main() {
+        let intent = make_intent("cli", vec![]);
+        let resolved = CliStrategy.resolve(&intent).unwrap();
+        let names: Vec<&str> = resolved
+            .generated_functions
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert!(names.contains(&"cli_help"));
+        assert!(names.contains(&"kodo_main"));
+    }
+
+    #[test]
+    fn cli_strategy_handles_cli_intent() {
+        assert!(CliStrategy.handles().contains(&"cli"));
+    }
+
+    #[test]
+    fn cli_strategy_valid_keys() {
+        let keys = CliStrategy.valid_keys();
+        assert!(keys.contains(&"name"));
+        assert!(keys.contains(&"version"));
+        assert!(keys.contains(&"commands"));
+    }
+}

@@ -1,0 +1,16 @@
+//@ compile-fail
+//@ error-code: E0350
+module policy_violation {
+    meta {
+        purpose: "E0350: trust_policy high_security rejeita funcoes sem @authored_by"
+        trust_policy: "high_security"
+    }
+
+    fn unattributed_fn() -> Int {
+        return 42
+    }
+
+    fn main() -> Int {
+        return unattributed_fn()
+    }
+}

@@ -1,0 +1,18 @@
+//@ compile-fail
+//@ error-code: E0281
+// Note: E0283 (ClosureDoubleCapture) is defined but not directly emitted by the
+// checker. When two closures both capture the same non-Copy variable, the second
+// closure triggers E0281 (ClosureCaptureAfterMove) because the first capture already
+// moved the variable out of scope.
+module closure_double_capture_move {
+    meta { purpose: "E0281: second closure captures already-moved var; E0283 (ClosureDoubleCapture) reserved" }
+
+    fn main() -> Int {
+        let msg: String = "hello"
+        // First closure takes ownership of `msg` by move
+        let _f = |x: Int| -> String { msg }
+        // Second closure attempts to capture already-moved `msg` — E0281
+        let _g = |x: Int| -> String { msg }  //~ ERROR E0281
+        return 0
+    }
+}
