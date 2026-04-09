@@ -1,4 +1,5 @@
 //@ compile-fail
+//@ error-code: E0214
 module missing_field_err {
     meta { purpose: "Error message for missing struct field" }
 

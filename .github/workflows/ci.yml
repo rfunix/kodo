@@ -115,9 +115,9 @@ jobs:
         with:
           key: coverage
       - name: Generate coverage report
-        run: cargo llvm-cov --workspace --exclude kodoc --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Coverage summary
-        run: cargo llvm-cov --workspace --exclude kodoc --summary-only
+        run: cargo llvm-cov --workspace --summary-only --fail-under-lines 60
 
   bench:
     name: Benchmarks Compile
